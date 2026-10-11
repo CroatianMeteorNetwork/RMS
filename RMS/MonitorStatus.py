@@ -131,6 +131,60 @@ def _codeVersion():
 
 
 
+def simulateQueues(nproc, cameras):
+    """ Predict when the waiting files of every camera will be done, by running the scheduling of the monitor
+        forward in time: every running file is done after its remaining time, and a free worker takes the next
+        waiting file of the camera with the fewest running files (the next camera in turn when they have as many),
+        as the monitor assigns them.
+
+    Arguments:
+        nproc: [int] Number of the worker processes of the monitor.
+        cameras: [list] (camera_id, remaining times of its running files, expected times of its waiting files in
+            their order) of every camera in the order of the monitor, all in minutes. A time which is not known
+            is None.
+
+    Return:
+        [dict] Minutes from now until every camera has no waiting or running files, by camera. None for a camera
+            whose times are not all known.
+    """
+
+    # Times which are not known (e.g. a camera without processed files yet) are taken as the median of the known
+    #   ones, so they still take a worker for the other cameras, but their own camera is not predicted
+    known = [t for _, running, waiting in cameras for t in list(running) + list(waiting) if t is not None]
+    fill = float(np.median(known)) if known else 0.0
+    unknown = set(cam_id for cam_id, running, waiting in cameras
+                  if any(t is None for t in list(running) + list(waiting)))
+
+    order = [cam_id for cam_id, _, _ in cameras]
+    pending = {cam_id: [fill if t is None else t for t in waiting] for cam_id, _, waiting in cameras}
+
+    # The running files, as (time when they are done, camera)
+    active = [(fill if t is None else t, cam_id) for cam_id, running, _ in cameras for t in running]
+    done = {cam_id: max([end for end, c in active if c == cam_id] + [0.0]) for cam_id in order}
+
+    t = 0.0
+    last_idx = len(order) - 1
+    while any(pending.values()):
+
+        # The next free worker: now if one is free, otherwise when the first running file is done
+        if len(active) >= nproc:
+            t = min(end for end, _ in active)
+        active = [(end, c) for end, c in active if end > t]
+
+        # The camera which gets it, as in the monitor: the fewest running files, then the next one in turn
+        candidates = [i for i, cam_id in enumerate(order) if pending[cam_id]]
+        candidates.sort(key=lambda i: (sum(1 for _, c in active if c == order[i]), (i - last_idx - 1)%len(order)))
+        last_idx = candidates[0]
+        cam_id = order[last_idx]
+
+        # Its next waiting file runs from now
+        end = t + pending[cam_id].pop(0)
+        active.append((end, cam_id))
+        done[cam_id] = max(done[cam_id], end)
+
+    return {cam_id: (None if cam_id in unknown else done[cam_id]) for cam_id in order}
+
+
 def fileDetections(results_path):
     """ The number of the detections of a processed file, from the header of its FTPdetectinfo (the detections
         of the normal detection, or of the matched filter when it replaces it).
@@ -306,6 +360,7 @@ class MonitorStatus(object):
         self.file_cache = {}
         self.conditions_cache = (None, [])
         self.size_cache = {}
+        self.night_cache = {}
 
         # The status is written right away the first time
         self.last_write = 0.0
@@ -406,6 +461,12 @@ class MonitorStatus(object):
                              and _parseTime(r['finished_utc']) >= oldest]
 
 
+    def due(self):
+        """ Check if the status is due to be written (every interval, or right after a file was processed). """
+
+        return self.dirty or (time.time() - self.last_write >= self.interval)
+
+
     def update(self, state, force=False):
         """ Write the status if it is due (every interval, right after a file was processed, or if forced). An
             error is only logged, as the status must never stop the processing.
@@ -421,13 +482,12 @@ class MonitorStatus(object):
         """
 
         # Write only when it is due
-        now = time.time()
-        if not (force or self.dirty or (now - self.last_write >= self.interval)):
+        if not (force or self.due()):
             return False
 
         try:
             _writeJSON(self.path, self.build(state))
-            self.last_write = now
+            self.last_write = time.time()
             self.dirty = False
             return True
 
@@ -453,6 +513,9 @@ class MonitorStatus(object):
                 - failed_files: [dict] The failed files of the camera (see loadFailedFiles).
                 - max_failures, max_kills: [int] Failures and kills after which a file is given up.
                 - reporter: [NightReporter] Night reporter of the camera, None if there is none.
+                - queue_empty_min: [float] Minutes until the files of the camera are done, predicted by the monitor
+                    for all its cameras together (see simulateQueues). Predicted for this camera alone if not
+                    given.
 
         Return:
             status: [dict] The status.
@@ -695,6 +758,46 @@ class MonitorStatus(object):
         return (lambda size_gb: rate*size_gb if size_gb else per_file), 'size'
 
 
+    def openWork(self, state):
+        """ The files of the camera which are being processed and which wait, as times for the prediction of the
+            queue (see simulateQueues).
+
+        Arguments:
+            state: [dict] State of the monitor for the camera, see build.
+
+        Return:
+            (running, waiting): [tuple] Remaining times of the running files and expected times of the waiting
+                files (min, None if not known). The waiting files of a camera which is paused for disk space can't
+                get a worker, so they are left out.
+        """
+
+        now = RmsDateTime.utcnow()
+        predict, _ = self._expectedMinutes(now)
+
+        # The remaining time of every running file: its expected time minus how long it has been running
+        running = []
+        for _, file_path, start in state.get('in_progress', []):
+            expected_min = predict(self._inputSize(file_path))
+            running.append(None if expected_min is None
+                           else max(expected_min - (now - start).total_seconds()/60.0, 0.0))
+
+        # The expected time of every waiting file
+        waiting = [] if state.get('paused_for_space') \
+            else [predict(self._inputSize(path)) for path, _ in state.get('queued', [])]
+
+        return running, waiting
+
+
+    def _nightOf(self, file_path, mtime):
+        """ The night of an input, from the time it was last written (read once per version of the input). """
+
+        key = (file_path, mtime)
+        if key not in self.night_cache:
+            self.night_cache[key] = nightInfo(self.config, UTCFromTimestamp.utcfromtimestamp(mtime))[0]
+
+        return self.night_cache[key]
+
+
     def _processing(self, state, now, files):
         """ Whether the processing keeps up: the files being processed and waiting, the progress of the night, when
             the waiting files will be done, the delay, and the processing times. """
@@ -744,39 +847,35 @@ class MonitorStatus(object):
 
         # The files waiting to be processed, in the order they will be processed
         queued = state.get('queued', [])
-        queued_expected = [predict(self._inputSize(path)) for path, _ in queued]
 
-        # Predict when the waiting files will be done: the workers which process the files of this camera finish
-        #   them first, then every waiting file goes to the next free worker. The workers are shared by the cameras
-        #   of the monitor, this camera gets a share by its number of files
-        queue_empty_min = None
-        workers = None
-        if not (in_progress or queued):
-            queue_empty_min = 0.0
-        elif basis is not None:
+        # Predict when the waiting files will be done. In multi-camera mode the monitor predicts it for all its
+        #   cameras together, as they share the workers (see simulateQueues), otherwise it is predicted here
+        if 'queue_empty_min' in state:
+            queue_empty_min = state['queue_empty_min']
+        elif basis is None:
+            queue_empty_min = None if (in_progress or queued) else 0.0
+        else:
+            running, waiting = self.openWork(state)
+            queue_empty_min = simulateQueues(self.nproc, [(self.camera_id, running, waiting)])[self.camera_id]
 
-            # The workers of this camera: its share of the workers by its number of files, at least the ones which
-            #   process its files now
-            n_files = len(in_progress) + len(queued)
-            other_files = state.get('other_cameras_files', 0)
-            workers = self.nproc*n_files/(n_files + other_files) if other_files else self.nproc
-            workers = max(int(round(workers)), len(in_progress), 1)
-
-            # When every worker is free: after the rest of its running file, or now. Every waiting file goes to the
-            #   worker which is free first, and the queue is empty when the last worker is done
-            free = [entry['remaining_min'] or 0.0 for entry in in_progress] \
-                + [0.0]*(workers - len(in_progress))
-            for expected_min in queued_expected:
-                i = int(np.argmin(free))
-                free[i] += expected_min
-            queue_empty_min = max(free)
-
-        # The progress of the night: the files done, being processed, waiting, and still being written
+        # The progress of the night: the files of the night which are done, being processed, waiting, and still
+        #   being written. The files of other nights (e.g. a backlog) are counted apart
+        night_name = nightInfo(self.config, now)[0]
+        open_nights = []
+        for _, file_path, _ in state.get('in_progress', []):
+            try:
+                open_nights.append(('in_progress', self._nightOf(file_path, os.path.getmtime(file_path))))
+            except (OSError, TypeError):
+                open_nights.append(('in_progress', None))
+        open_nights += [('queued', self._nightOf(path, mtime)) for path, mtime in queued]
         n_done = len(files)
-        n_open = len(in_progress) + len(queued)
-        progress = {'done_tonight': n_done, 'in_progress': len(in_progress), 'queued': len(queued),
+        n_running = sum(1 for kind, night in open_nights if (kind == 'in_progress') and (night == night_name))
+        n_waiting = sum(1 for kind, night in open_nights if (kind == 'queued') and (night == night_name))
+        n_open = n_running + n_waiting
+        progress = {'done_tonight': n_done, 'in_progress': n_running, 'queued': n_waiting,
                     'being_written': len(state.get('settling', [])),
-                    'percent_done': _round(100.0*n_done/(n_done + n_open), 1) if (n_done + n_open) else None}
+                    'percent_done': _round(100.0*n_done/(n_done + n_open), 1) if (n_done + n_open) else None,
+                    'other_nights_open': len(open_nights) - n_open}
 
         # The delay: how long ago the oldest waiting or processed file was recorded (its last write), zero when
         #   nothing waits
@@ -818,7 +917,6 @@ class MonitorStatus(object):
             'queue_empty_utc': _timeString(now + datetime.timedelta(minutes=queue_empty_min))
                 if queue_empty_min is not None else None,
             'prediction_basis': basis,
-            'prediction_workers': workers,
             'file_length_min': _round(file_length_min),
             'waiting_recording_min': _round((len(queued) + len(in_progress))*file_length_min)
                 if file_length_min else None,

@@ -48,7 +48,7 @@ from RMS.Routines import Image
 from RMS.MonitorNightReport import exitWithMonitor, lockOutputDir, lockOwner, \
     MONITOR_LOCK_FILE_NAME, nightDirPath, nightInfo, NightReporter, readDoneFlag, readStateFile, ReportLock, \
     selectPlatepar, stopProcess, writeDoneFlag
-from RMS.MonitorStatus import MonitorStatus
+from RMS.MonitorStatus import MonitorStatus, simulateQueues
 from RMS.ExtractStarsFrameInterface import extractStarsFrameInterface
 from RMS.DetectStarsAndMeteors import (
     detectStarsAndMeteorsFrameInterface,
@@ -1480,7 +1480,7 @@ def recordFinished(status, unique_id, proc, file_path, file_type):
 
 
 def statusState(workers, queued, settling, failed_files, space_guard, reporter, input_readable, workers_busy,
-                other_cameras_files=0, stopped=False):
+                stopped=False):
     """ The state of the monitor for the status of a camera (see MonitorStatus.build).
 
     Arguments:
@@ -1494,8 +1494,6 @@ def statusState(workers, queued, settling, failed_files, space_guard, reporter, 
         workers_busy: [int] Busy workers of the whole monitor.
 
     Keyword arguments:
-        other_cameras_files: [int] Files of the other cameras being processed or waiting, which share the workers.
-            0 by default.
         stopped: [bool] The monitor has stopped. False by default.
 
     Return:
@@ -1512,7 +1510,7 @@ def statusState(workers, queued, settling, failed_files, space_guard, reporter, 
             'workers_busy': workers_busy, 'in_progress': in_progress,
             'queued': [(entry[0], entry[1]) for entry in queued], 'settling': list(settling),
             'failed_files': failed_files, 'max_failures': MAX_FAILURES, 'max_kills': MAX_KILLS,
-            'reporter': reporter, 'other_cameras_files': other_cameras_files}
+            'reporter': reporter}
 
 
 def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_dir, nproc=2,
@@ -2174,16 +2172,23 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
 
             queued = [entry for entry in waiting_per_cam[cam_id] if (cam_id, entry[2]) not in active_workers]
 
-            # The files of the other cameras which share the workers (the waiting files of a camera which is paused
-            #   for disk space don't get a worker)
-            other_files = sum(1 for c_id, _ in active_workers if c_id != cam_id) \
-                + sum(sum(1 for entry in entries if (c_id, entry[2]) not in active_workers)
-                      for c_id, entries in waiting_per_cam.items()
-                      if (c_id != cam_id) and not space_guards[c_id].paused)
-
             return statusState(workers, queued, stability_tracker[cam_id],
                                failed_files[cam_id], space_guards[cam_id], reporters[cam_id], input_readable[cam_id],
-                               len(active_workers), other_cameras_files=other_files, stopped=stopped)
+                               len(active_workers), stopped=stopped)
+
+        def updateStatuses():
+            """ Write the status of the cameras which are due. The queue is predicted for all cameras together, as
+                they share the workers. """
+
+            if not any(status.due() for status in statuses.values()):
+                return
+
+            states = {cam_id: cameraState(cam_id) for cam_id in statuses}
+            queue_empty = simulateQueues(nproc, [(cam_id,) + statuses[cam_id].openWork(states[cam_id])
+                                                 for cam_id in (cam['id'] for cam in cameras) if cam_id in statuses])
+            for cam_id, status in statuses.items():
+                states[cam_id]['queue_empty_min'] = queue_empty[cam_id]
+                status.update(states[cam_id])
 
         # Main monitoring loop
         while True:
@@ -2440,8 +2445,7 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
                     log.error(traceback.format_exc())
 
             # Update the status of every camera (every interval, and right after a file was processed)
-            for cam_id, status in statuses.items():
-                status.update(cameraState(cam_id))
+            updateStatuses()
 
             time.sleep(poll_interval)
 

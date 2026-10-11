@@ -682,10 +682,28 @@ def test_queue_prediction(tmp_path, now):
     assert (progress['done_tonight'], progress['in_progress'], progress['queued']) == (0, 1, 3)
     assert progress['percent_done'] == 0.0
 
-    # With the files of another camera waiting as well, this camera gets one of the two workers
+    # In multi-camera mode the monitor gives the prediction for all cameras together
     processing = status.build(_state(in_progress=[('run', run_path, start)], queued=queued,
-                                     other_cameras_files=4))['processing']
-    assert processing['queue_empty_in_min'] == 1.5 + 1 + 1 + 4
+                                     queue_empty_min=12.0))['processing']
+    assert processing['queue_empty_in_min'] == 12.0
+
+
+def test_simulate_queues():
+    """ The queues of the cameras are predicted as the monitor schedules them: the running files are done first,
+        and a free worker takes a file of the camera with the fewest running files, then the next camera in turn.
+    """
+
+    # Two workers run long files of camera A: the file of camera B waits for one of them
+    assert mst.simulateQueues(2, [('A', [60.0, 60.0], []), ('B', [], [5.0])]) == {'A': 60.0, 'B': 65.0}
+
+    # Both cameras get a worker, then camera A gets both
+    assert mst.simulateQueues(2, [('A', [], [10.0, 10.0, 10.0]), ('B', [], [10.0])]) == {'A': 20.0, 'B': 10.0}
+
+    # A camera whose times are not known is not predicted, its files still take a worker (the median time)
+    assert mst.simulateQueues(1, [('A', [], [None]), ('B', [], [4.0])]) == {'A': None, 'B': 8.0}
+
+    # Nothing to do
+    assert mst.simulateQueues(2, [('A', [], [])]) == {'A': 0.0}
 
 
 def test_queue_prediction_without_sizes_or_history(tmp_path, now):
@@ -1068,7 +1086,7 @@ def test_pointing_shift_on_clear_sky_only(tmp_path, now):
 
 def test_paused_camera_doesnt_share_the_workers(tmp_path, monkeypatch):
     """ The waiting files of a camera paused for disk space don't take workers from the prediction of another
-        camera.
+        camera, which gets its file done in its expected time.
     """
 
     cameras = []
@@ -1114,4 +1132,15 @@ def test_paused_camera_doesnt_share_the_workers(tmp_path, monkeypatch):
 
     with open(str(cameras[0][2]/mst.STATUS_FILE_NAME)) as f:
         status = json.load(f)
-    assert status['processing']['queued'] == 1 and status['processing']['prediction_workers'] == 4
+    assert status['processing']['queued'] == 1 and status['processing']['queue_empty_in_min'] == 5.0
+
+
+def test_progress_with_a_backlog_of_other_nights(tmp_path, now):
+    """ The waiting files of other nights are counted apart from the progress of the night. """
+
+    status, config = _status(tmp_path)
+    tonight, t1 = _inputFile(tmp_path, 'tonight.vid', 10)
+    old, t2 = _inputFile(tmp_path, 'old.vid', 60*24)
+
+    progress = status.build(_state(queued=[(old, t2), (tonight, t1)]))['processing']['progress']
+    assert (progress['queued'], progress['other_nights_open']) == (1, 1)

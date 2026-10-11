@@ -558,10 +558,10 @@ An example (shortened; the processing statistics and the calibration of the nigh
 | | `nproc`, `workers_busy`, `workers_this_camera` | Worker processes: all, busy, and busy with this camera. |
 | `recording` | `state` | `recording` (the newest input was written in the last 5 minutes), `not_recording` (at night, nothing written for 5 minutes), `daytime`, or `unknown` (the input can't be read). |
 | | `newest_file`, `newest_file_written_utc`, `newest_file_size_gb`, `minutes_since_last_write`, `files_tonight` | The newest input and the inputs written tonight, found as the monitor finds them for every input type (a FITS directory counts as one input, written when frames are added; its size is not given). |
-| `processing` | `progress` | The files of the night: `done_tonight`, `in_progress`, `queued`, `being_written`, and `percent_done` (done of done, in progress and queued). |
+| `processing` | `progress` | The files of the night: `done_tonight`, `in_progress`, `queued`, `being_written`, and `percent_done` (done of done, in progress and queued), and `other_nights_open`, the waiting and running files of other nights (e.g. a backlog). |
 | | `in_progress` | The files being processed: the ID (`file`), the input (`input`, the file name or the name of the FITS directory), `started_utc`, `running_min`, and the prediction `expected_min`, `remaining_min` and `expected_done_utc`. |
 | | `queued`, `queued_inputs`, `settling` | Files waiting to be processed (with their inputs, in the order they will be processed) and still being written. |
-| | `queue_empty_utc`, `queue_empty_in_min`, `prediction_basis`, `prediction_workers` | When the waiting files are predicted to be done (UTC, and in minutes from `written_utc`), and the workers the prediction gives this camera, see below. `null` before any file was processed. |
+| | `queue_empty_utc`, `queue_empty_in_min`, `prediction_basis` | When the waiting and running files (of all nights) are predicted to be done (UTC, and in minutes from `written_utc`), see below. `null` before any file was processed. |
 | | `delay_min` | How long ago the oldest waiting or processed file was recorded; 0 when nothing waits. |
 | | `file_length_min`, `waiting_recording_min` | Length of the input files (from the processed ones), and the recording time which waits. |
 | | `not_keeping_up` | The delay is more than three file lengths. |
@@ -609,10 +609,12 @@ An example (shortened; the processing statistics and the calibration of the nigh
 **Predicting the processing.** The processing time of a file is predicted from the processing time per GB of
 the input of the recent files (the last hour if it had at least 3 files, otherwise the last day), so short and
 long inputs are both predicted (`prediction_basis: size`; `file` uses the median time per file when the sizes
-are not known). A file being processed has its predicted time minus the time it has run left. The waiting files
-are then given to the workers in their order, every one to the next free worker; in multi-camera mode the
-workers are shared, and a camera gets a share by its number of waiting and running files (the waiting files of a
-camera which is paused for disk space don't count, as they can't get a worker). The prediction is for
+are not known). A file being processed has its predicted time minus the time it has run left. The scheduling of
+the monitor is then run forward: a free worker takes the next waiting file of the camera with the fewest running
+files (the next camera in turn when they have as many), so in multi-camera mode the prediction of every camera
+accounts for the workers busy with the other cameras. The waiting files of a camera which is paused for disk
+space can't get a worker and are left out; a camera without processed files yet is not predicted, its files are
+given the median time for the other cameras. The prediction is for
 the files known now: while the input is being recorded, new files keep coming. The start of a file comes from
 the monotonic clock of the monitor, so the times don't jump when the clock of the system is set.
 
