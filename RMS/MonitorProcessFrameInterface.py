@@ -395,7 +395,7 @@ def inputState(file_path, file_type):
 def scanInputs(input_dir, output_dir, config, file_type, recursive):
     """ The inputs in the input directory with the time of their last change and their size, for the status of
         the monitor (MonitorStatus). The inputs are found as by the monitor. For FITS directories only the time
-        of the directory is read (it changes when frames are added), as reading all frames would be slow.
+        of the directory is read (it changes when frames are added), as reading all frames would take long.
 
     Arguments:
         input_dir: [str] Input directory.
