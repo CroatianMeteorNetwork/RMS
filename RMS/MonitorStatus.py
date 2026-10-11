@@ -1048,11 +1048,11 @@ class MonitorStatus(object):
 
         # The files whose sky was measured, the files which were not searched, and the detections
         file_results = [(info.get('input_file'), file_result) for _, info, file_result, _ in files]
-        not_searched, removed, measured, chunk_seconds = nightSkyResults(file_results, self.config, night_start,
-                                                                        night_end)
+        not_searched, removed, measured, chunk_seconds, input_ends = nightSkyResults(file_results, self.config,
+                                                                                    night_start, night_end)
         # The conditions of the chunks of the measured files, and the time line of the states of the sky
         rows = self._conditionRows(measured, chunk_seconds, night_start, night_end)
-        timeline = nightTimeline(rows, not_searched=not_searched, chunk_seconds=chunk_seconds,
+        timeline = nightTimeline(rows, not_searched=not_searched, chunk_seconds=chunk_seconds, input_ends=input_ends,
                                  bounds=(night_start, night_end))
 
         # The night so far, the same numbers as on the plot of the sky conditions of the night report
@@ -1127,7 +1127,7 @@ class MonitorStatus(object):
                         'reliable_seen_percent': _round(100*row['reliable_seen'], 1)})
 
         # The last hour of the data
-        hour = nightTimeline(rows, not_searched=not_searched, chunk_seconds=chunk_seconds,
+        hour = nightTimeline(rows, not_searched=not_searched, chunk_seconds=chunk_seconds, input_ends=input_ends,
                              bounds=(latest_end - datetime.timedelta(hours=1), latest_end))['summary']
         hour_rows = [r for r in rows if r['time'] >= latest_end - datetime.timedelta(hours=1)]
         dimming = [r['transparency_mag'] for r in hour_rows
@@ -1142,7 +1142,7 @@ class MonitorStatus(object):
         # Observable: most of the time in the last minutes of the data had most of the image clear. The time is
         #   taken from the time line, so overlapping files count once, with the worse state (the files which were
         #   not searched count as not observable)
-        window = nightTimeline(rows, not_searched=not_searched, chunk_seconds=chunk_seconds,
+        window = nightTimeline(rows, not_searched=not_searched, chunk_seconds=chunk_seconds, input_ends=input_ends,
                                bounds=(latest_end - datetime.timedelta(minutes=OBSERVABLE_WINDOW_MIN), latest_end),
                                clear_level=OBSERVABLE_CLEAR_FRACTION)['summary']
         if window['observed_h']*60 >= OBSERVABLE_WINDOW_MIN/3:

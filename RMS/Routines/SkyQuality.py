@@ -511,15 +511,13 @@ class SkyQualityMap(object):
 
     def addMissingChunks(self, total_frames):
         """ Add empty chunks (no stars, so clouded) where chunks are missing: in the gaps between the chunks,
-            before the first chunk, and after the last one up to total_frames (whole chunks only, the frames after
-            the last whole chunk belong to it).
+            before the first chunk, and after the last one up to total_frames (also for a part of a chunk).
 
         Arguments:
             total_frames: [int] Number of frames of the input, or None.
         """
 
         cf = self.chunk_frames
-        self.trailing_frames = 0
         if len(self.chunk_first) == 0:
             return
 
@@ -544,9 +542,6 @@ class SkyQualityMap(object):
             while expected + cf <= total_frames:
                 firsts.append(int(expected))
                 expected += cf
-
-            # The number of frames after the last chunk, which are logged with its conditions
-            self.trailing_frames = int(total_frames - expected)
 
         # Nothing is missing
         if len(firsts) == len(self.chunk_first):
@@ -923,13 +918,6 @@ class SkyQualityMap(object):
                          'clear_fraction': '{:.3f}'.format(clear[i]),
                          'transparency_mag': '{:.3f}'.format(self.transparency[i]),
                          'reliable_seen': '{:.3f}'.format(self.reliable_seen[i])})
-
-        # The frames after the last chunk have its conditions. They are logged as a chunk which ends with the input
-        #   (from the time of the last chunk, also after a gap in the recording), so the time line of the night
-        #   covers the whole input and not more
-        if rows and (self.trailing_frames > 0):
-            end_time = self.chunk_times[-1] + datetime.timedelta(seconds=self.trailing_frames/self.fps)
-            rows.append(dict(rows[-1], chunk_utc=end_time.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]))
 
         return rows
 
@@ -1363,7 +1351,8 @@ def _legendPlace(fig, ax, handles):
         return 'upper right'
 
 
-def nightTimeline(rows, not_searched=(), chunk_seconds=None, bounds=None, clear_level=CLEAR_FRACTION_CLEAR):
+def nightTimeline(rows, not_searched=(), chunk_seconds=None, bounds=None, clear_level=CLEAR_FRACTION_CLEAR,
+                  input_ends=None):
     """ Build the time line of the state of the sky through a night. Every chunk is clear, partly clouded or
         clouded (see CLEAR_FRACTION_CLEAR) until the next chunk of its input, the inputs which were not searched
         (too few stars) fill their time, and where inputs overlap the worse state is taken (clouded, not
@@ -1380,12 +1369,16 @@ def nightTimeline(rows, not_searched=(), chunk_seconds=None, bounds=None, clear_
             None by default.
         clear_level: [float] Clear fraction of a chunk at and above which it is clear. CLEAR_FRACTION_CLEAR by
             default.
+        input_ends: [dict] End of the inputs (datetime, UTC) by their names: the last chunk lasts until it, as the
+            frames after the last chunk (fewer than a chunk, which the star extraction doesn't use) belong to it.
+            None by default (the last chunk lasts for the time of a chunk).
 
     Return:
         timeline: [dict] input_rows (the indices of the rows of every input), steps (the time of the chunks of
             every input), chunk (the time of a chunk of all inputs), max_gap (the longest time between chunks
             which is not a gap), labels (the state of every chunk), segments (state, start, end), gaps (start,
-            end), and summary (the observed time in hours, and its fractions in every state).
+            end), summary (the observed time in hours, and its fractions in every state), and ends (the end of
+            the last chunk of every input).
     """
 
     times = [row['time'] for row in rows]
@@ -1438,9 +1431,18 @@ def nightTimeline(rows, not_searched=(), chunk_seconds=None, bounds=None, clear_
     labels = np.where(clear >= clear_level, 'clear', np.where(clear > 0, 'partly', 'clouded'))
 
     # Turn the chunks of every input into spans of time, and add the inputs which were not searched
-    intervals = []
+    input_ends = input_ends or {}
+    intervals, ends = [], {}
     for name, idx in input_rows.items():
-        intervals += _spans([times[i] for i in idx], [labels[i] for i in idx], 3*steps[name], steps[name])
+        spans = _spans([times[i] for i in idx], [labels[i] for i in idx], 3*steps[name], steps[name])
+
+        # The last chunk lasts until the end of the input, if that is less than a chunk after the chunk itself
+        end, last = input_ends.get(name), times[idx[-1]]
+        ends[name] = last + steps[name]
+        if spans and (end is not None) and (last + steps[name] < end <= last + 2*steps[name]):
+            spans[-1] = spans[-1][:2] + (end,)
+            ends[name] = end
+        intervals += spans
     intervals += [('not_searched', start, end) for start, end, _, _ in not_searched]
 
     # Only take the time within the night (a chunk can begin before it or end after it)
@@ -1463,11 +1465,11 @@ def nightTimeline(rows, not_searched=(), chunk_seconds=None, bounds=None, clear_
     gaps = [(a[2], b[1]) for a, b in zip(segments[:-1], segments[1:]) if b[1] - a[2] > max_gap]
 
     return {'input_rows': input_rows, 'steps': steps, 'chunk': chunk, 'max_gap': max_gap, 'labels': labels,
-            'segments': segments, 'gaps': gaps, 'summary': summary}
+            'segments': segments, 'gaps': gaps, 'summary': summary, 'ends': ends}
 
 
 def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(), removed_detections=0,
-                      cloud_max_offset=None, min_matched=None, chunk_seconds=None, bounds=None):
+                      cloud_max_offset=None, min_matched=None, chunk_seconds=None, bounds=None, input_ends=None):
     """ Plot the sky conditions of a night: the dimming of the stars, the clear fraction of the image and the stars
         through the night, with the time when the sky was clouded and partly clouded shaded, and the times of
         the detections.
@@ -1488,6 +1490,7 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
             for the inputs which are not in it. None by default.
         bounds: [tuple] Beginning and end of the night (datetime, UTC), the plot and the summary are within them.
             None by default.
+        input_ends: [dict] End of the inputs (datetime, UTC) by their names, see nightTimeline. None by default.
 
     Return:
         [dict] Summary: the observed time (h, overlapping inputs counted once), and the fractions of it which
@@ -1513,8 +1516,10 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     matched = np.array([row['matched'] for row in rows])
 
     # Build the time line of the state of the sky, which is shaded on the panels and summarized at the top
-    timeline = nightTimeline(rows, not_searched=not_searched, chunk_seconds=chunk_seconds, bounds=bounds)
-    input_rows, steps, chunk, max_gap = (timeline[k] for k in ('input_rows', 'steps', 'chunk', 'max_gap'))
+    timeline = nightTimeline(rows, not_searched=not_searched, chunk_seconds=chunk_seconds, bounds=bounds,
+                             input_ends=input_ends)
+    input_rows, steps, chunk, max_gap, ends = (timeline[k] for k in ('input_rows', 'steps', 'chunk', 'max_gap',
+                                                                     'ends'))
     labels, segments, gaps, summary = (timeline[k] for k in ('labels', 'segments', 'gaps', 'summary'))
     step = chunk.total_seconds()
     n = len(rows)
@@ -1599,11 +1604,11 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
 
     ### Clear part of the image ###
 
-    # Fill the clear part of the image of every chunk
+    # Fill the clear part of the image of every chunk, the last chunk of every input until its end
     for name, idx in input_rows.items():
-        t_cl, v_cl = _withGaps([times[i] for i in idx], 100*clear[idx], 3*steps[name])
+        t_cl, v_cl = _withGaps([times[i] for i in idx] + [ends[name]], 100*clear[idx + idx[-1:]], 3*steps[name])
         ax_clear.fill_between(t_cl, 0, v_cl, step='post', color=green, alpha=0.12, lw=0, zorder=2)
-    _plotInputs(ax_clear, 100*clear, '-', drawstyle='steps-post', color=green, lw=1.4, zorder=3)
+        ax_clear.plot(t_cl, v_cl, '-', drawstyle='steps-post', color=green, lw=1.4, zorder=3)
 
     # Plot the share of the stars which are reliably seen on clear sky that are seen
     _plotInputs(ax_clear, 100*seen, '--', color='#111827', lw=1.0, zorder=3)

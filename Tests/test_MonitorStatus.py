@@ -1626,3 +1626,24 @@ def test_sky_with_a_newer_file_which_was_not_measured(tmp_path, now):
 
     sky = status.build(_state())['sky']
     assert (sky['state'], sky['observable']) == ('no_data', None)
+
+
+def test_sky_until_the_end_of_the_input(tmp_path, now):
+    """ The time of the sky includes the frames after the last chunk of the input (fewer than a chunk), from the
+        number of frames in the summary of the matched filter.
+    """
+
+    status, config = _status(tmp_path)
+    results_dir = _searchedFile(str(tmp_path/'output'), config, 'file1', n_chunks=12)
+
+    # 20 frames after the last chunk
+    summary_path = os.path.join(str(tmp_path/'output'), results_dir, mnr.MF_DONE_NAME)
+    with open(summary_path) as f:
+        summary = json.load(f)
+    summary['total_frames'] += 20
+    with open(summary_path, 'w') as f:
+        json.dump(summary, f)
+
+    end = BEG_TIME + datetime.timedelta(seconds=(12*128 + 20)/25.0)
+    assert mnr.readFileSkyResults(os.path.join(str(tmp_path/'output'), results_dir), config)['end_time'] == end
+    assert status.build(_state())['sky']['observed_utc'] == mst._timeString(end)
