@@ -1340,3 +1340,25 @@ def test_latest_stars_with_their_time(tmp_path, now):
     sky = status.build(_state())['sky']
     assert sky['state'] == 'clouded'
     assert sky['stars_utc'] == mst._timeString(BEG_TIME + datetime.timedelta(seconds=11*128/25.0))
+
+
+def test_calibration_after_a_failed_sky_scan(tmp_path, now, monkeypatch):
+    """ When the conditions of the sky could not be read, the calibration is judged again once they can. """
+
+    status, config = _status(tmp_path)
+    _searchedFile(str(tmp_path/'output'), config, 'file1')
+
+    # The conditions can't be read once
+    read_rows = mst.nightConditionRows
+    calls = {'n': 0}
+
+    def _failOnce(*args, **kwargs):
+        calls['n'] += 1
+        if calls['n'] == 1:
+            raise OSError("The log is being written")
+        return read_rows(*args, **kwargs)
+
+    monkeypatch.setattr(mst, 'nightConditionRows', _failOnce)
+
+    assert status.build(_state())['calibration']['status'] == 'unknown'
+    assert status.build(_state())['calibration']['status'] == 'ok'

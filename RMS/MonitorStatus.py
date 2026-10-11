@@ -1145,6 +1145,7 @@ class MonitorStatus(object):
         per_file = []
         for results_dir, info, file_result, _ in files:
             cache = self.file_cache.get(results_dir, (None, None, {}))[2]
+            file_calibration = cache.get('calibration')
             if 'calibration' not in cache:
 
                 # The times of the chunks of the file on clear sky. With the cloud filter, a file whose sky was
@@ -1152,15 +1153,23 @@ class MonitorStatus(object):
                 #   sky is never known, and all chunks count
                 cloud_filter = self.config.mf_enable and self.config.mf_cloud_filter
                 clear_times = [] if cloud_filter else None
+                conditions_known = True
                 if file_result['measured']:
                     input_file = info.get('input_file')
-                    clear_times = [r['time'] for r in self.conditions_cache[1]
-                                   if (r['input'] in (input_file, os.path.basename(input_file or '')))
-                                   and (r['clear_fraction'] >= CALIBRATION_CLEAR_FRACTION)]
-                cache['calibration'] = fileCalibration(os.path.join(self.output_dir, results_dir), self.config,
-                                                       clear_times=clear_times)
-            if cache['calibration'] is not None:
-                per_file.append(cache['calibration'])
+                    file_rows = [r for r in self.conditions_cache[1]
+                                 if r['input'] in (input_file, os.path.basename(input_file or ''))]
+                    clear_times = [r['time'] for r in file_rows if r['clear_fraction'] >= CALIBRATION_CLEAR_FRACTION]
+                    conditions_known = bool(file_rows)
+                file_calibration = fileCalibration(os.path.join(self.output_dir, results_dir), self.config,
+                                                   clear_times=clear_times)
+
+                # Kept only when the conditions of a measured file were read (they may not be, e.g. when the log
+                #   could not be read), otherwise it is judged again with them
+                if conditions_known:
+                    cache['calibration'] = file_calibration
+
+            if file_calibration is not None:
+                per_file.append(file_calibration)
 
         # Nothing to judge without recalibrated files
         if not per_file:
