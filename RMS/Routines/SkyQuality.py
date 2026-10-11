@@ -1229,7 +1229,7 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     # Imported here, the plotting is not needed for the processing. A figure without pyplot doesn't depend on
     #   the backend or the display
     from matplotlib.figure import Figure
-    from matplotlib.patches import Patch
+    from matplotlib.patches import FancyBboxPatch, Patch
     from matplotlib.lines import Line2D
     import matplotlib.dates as mdates
     import matplotlib.ticker as mticker
@@ -1289,8 +1289,8 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     #   were not processed)
     gaps = [(a[2], b[1]) for a, b in zip(segments[:-1], segments[1:]) if b[1] - a[2] > max_gap]
 
-    fig = Figure(figsize=(14, 8.6), dpi=110)
-    axes = fig.subplots(4, 1, sharex=True, gridspec_kw={'height_ratios': [3, 2, 2, 0.7], 'hspace': 0.1})
+    fig = Figure(figsize=(14, 10.4), dpi=110)
+    axes = fig.subplots(4, 1, sharex=True, gridspec_kw={'height_ratios': [3, 2, 2, 0.7], 'hspace': 0.3})
     ax_dim, ax_clear, ax_stars, ax_det = axes
 
     # Shade the time when the sky was partly clouded and clouded, when the inputs were not searched, and without
@@ -1304,6 +1304,7 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
         for start, end in gaps:
             ax.axvspan(start, end, lw=0, zorder=0, **no_data)
         ax.grid(True, color='#e5e7eb', lw=0.8, zorder=1)
+        ax.tick_params(labelsize=10)
         for side in ('top', 'right'):
             ax.spines[side].set_visible(False)
 
@@ -1327,8 +1328,15 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     if len(finite):
         lo, hi = np.percentile(finite, [0.5, 99.5])
         top = max(hi, (cloud_max_offset or 0)*2, 0.3)
-        ax_dim.set_ylim(min(lo, -0.1), top + 0.05*(top - min(lo, -0.1)))
-    ax_dim.set_ylabel('Dimming of the stars\nvs clear sky (mag)')
+        bottom, top = min(lo, -0.1), top + 0.05*(top - min(lo, -0.1))
+        ax_dim.set_ylim(bottom, top)
+
+        # The chunks dimmed beyond the top of the plot (thick clouds) are marked at its top
+        above = np.isfinite(dimming) & (dimming > top)
+        if above.any():
+            ax_dim.plot([t for t, a in zip(times, above) if a], np.full(int(above.sum()), top), '^', color=blue,
+                        ms=4, alpha=0.6, clip_on=False, zorder=3)
+    ax_dim.set_ylabel('mag', fontsize=10)
 
     # The clear fraction of the image, and the fraction of the reliably seen stars which are seen
     t_cl, v_cl = _withGaps(times, 100*clear, max_gap)
@@ -1337,7 +1345,7 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     t_se, v_se = _withGaps(times, 100*seen, max_gap)
     ax_clear.plot(t_se, v_se, '-', color=grey, lw=1.0, zorder=3)
     ax_clear.set_ylim(0, 105)
-    ax_clear.set_ylabel('Clear (%)')
+    ax_clear.set_ylabel('%', fontsize=10)
 
     # The extracted and the matched stars, also of the inputs which were not searched
     t_st, v_st = _withGaps(times, stars, max_gap)
@@ -1357,18 +1365,17 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     if len(star_counts):
         ax_stars.set_ylim(max(min(star_counts.min(), min_matched or star_counts.min())/1.5, 1),
                           star_counts.max()*1.5)
-    ax_stars.set_ylabel('Stars per chunk')
+    ax_stars.set_ylabel('stars', fontsize=10)
 
     # The times of the detections
     if len(detection_times):
         ax_det.eventplot([list(detection_times)], colors=red, lineoffsets=0.5, linelengths=0.8, linewidths=0.8)
     ax_det.set_ylim(0, 1)
     ax_det.set_yticks([])
-    ax_det.set_ylabel('Detections', rotation=0, ha='right', va='center')
     ax_det.grid(False)
 
     # The time axis (UTC), with the seconds for a short time
-    ax_det.set_xlabel('Time (UTC)')
+    ax_det.set_xlabel('Time (UTC)', fontsize=10)
     all_times = times + [t for span in not_searched for t in span[:2]] + list(detection_times)
     time_format = '%H:%M'
     if all_times:
@@ -1377,15 +1384,22 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
             time_format = '%H:%M:%S'
     ax_det.xaxis.set_major_formatter(mdates.DateFormatter(time_format))
 
+    # The name of every panel above it
+    for ax, name in [(ax_dim, 'Dimming of the stars vs clear sky'), (ax_clear, 'Clear part of the image'),
+                     (ax_stars, 'Stars per chunk'), (ax_det, 'Detections')]:
+        ax.set_title(name, loc='left', fontsize=10.5, fontweight='bold', color='#111827', pad=4)
+
     # Every panel has the legend of its values on its right, and the shading of all panels has its legend above
     #   them
     legends = [
-        (ax_dim, [Line2D([], [], color=blue, marker='.', ls='none', ms=6, alpha=0.6, label='Every chunk (~4 s)'),
+        (ax_dim, [Line2D([], [], color=blue, marker='.', ls='none', ms=6, alpha=0.6,
+                         label='Every chunk (~{:.0f} s)'.format(step)),
                   Line2D([], [], color=blue, lw=1.6, label='1-minute median'),
                   Line2D([], [], color=grey, lw=0.8, label='Clear sky')]
                  + ([Line2D([], [], color=red, lw=1, ls='--',
                             label='Cloud limit ({:.2f} mag)'.format(cloud_max_offset))]
-                    if cloud_max_offset is not None else [])),
+                    if cloud_max_offset is not None else [])
+                 + [Line2D([], [], color=blue, marker='^', ls='none', ms=5, alpha=0.6, label='Off the scale')]),
         (ax_clear, [Patch(facecolor=green, alpha=0.3, edgecolor=green, label='Clear part of the image'),
                     Line2D([], [], color=grey, lw=1.0, label='Reliable stars seen')]),
         (ax_stars, [Line2D([], [], color='#7c3aed', lw=1.0, label='Extracted'),
@@ -1405,22 +1419,37 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
                      label='Clouded: detections removed'),
                Patch(facecolor='none', edgecolor='#9aa7b8', hatch='////', label='Too few stars: not searched'),
                Patch(label='No data', **no_data)]
-    fig.legend(handles=shading, loc='upper center', ncol=4, frameon=False, fontsize=9,
-               bbox_to_anchor=(0.44, 0.935), title='Shading of all panels', title_fontsize=9)
+    fig.legend(handles=shading, loc='upper center', ncol=4, frameon=False, fontsize=9.5,
+               bbox_to_anchor=(0.44, 0.862), title='Shading of all panels', title_fontsize=9.5)
 
-    # The title with the summary of the night
-    stats = 'Observed {:.1f} h: clear {:.0f}%, partly clouded {:.0f}%, clouded {:.0f}%'.format(
-        summary['observed_h'], 100*summary['clear'], 100*summary['partly'], 100*summary['clouded'])
+    # The title, and the summary of the night as a row of cards: the value large and its name below it, coloured
+    #   as the shading of the state
+    fig.suptitle(title, fontsize=15, fontweight='bold', y=0.985, x=0.44)
+    cards = [('{:.1f} h'.format(summary['observed_h']), 'observed', '#111827', '#f9fafb'),
+             ('{:.0f}%'.format(100*summary['clear']), 'clear', green, '#ecf6f0'),
+             ('{:.0f}%'.format(100*summary['partly']), 'partly clouded', '#b7791f', '#fbf0dc'),
+             ('{:.0f}%'.format(100*summary['clouded']), 'clouded', '#4b5563', '#e3e7ed')]
     if not_searched:
-        stats += ', too few stars {:.0f}%'.format(100*summary['not_searched'])
+        cards.append(('{:.0f}%'.format(100*summary['not_searched']), 'too few stars', '#4b5563', '#f3f4f6'))
     if np.isfinite(summary['median_dimming']):
-        stats += ', median dimming {:.2f} mag'.format(summary['median_dimming'])
-    stats += '  |  {:d} detections'.format(len(detection_times))
+        cards.append(('{:.2f} mag'.format(summary['median_dimming']), 'median dimming', blue, '#eaf1f8'))
+    cards.append(('{:d}'.format(len(detection_times)), 'detections', red, '#fbeceb'))
     if removed_detections:
-        stats += ', {:d} removed on clouded sky'.format(removed_detections)
-    fig.suptitle(title, fontsize=13, fontweight='bold', y=0.985, x=0.44)
-    fig.text(0.44, 0.952, stats, ha='center', fontsize=9.5, color='#374151')
-    fig.subplots_adjust(left=0.08, right=0.80, top=0.85, bottom=0.07)
+        cards.append(('{:d}'.format(removed_detections), 'removed (clouds)', red, '#fbeceb'))
+
+    # The cards span the width of the panels
+    left, right, bottom, height, space = 0.08, 0.80, 0.875, 0.068, 0.008
+    width = (right - left - space*(len(cards) - 1))/len(cards)
+    for i, (value, name, color, background) in enumerate(cards):
+        x = left + i*(width + space)
+        fig.patches.append(FancyBboxPatch((x, bottom), width, height, boxstyle='round,pad=0,rounding_size=0.008',
+                                          transform=fig.transFigure, facecolor=background, edgecolor='#e5e7eb',
+                                          lw=0.8))
+        fig.text(x + width/2, bottom + 0.62*height, value, ha='center', va='center', fontsize=15,
+                 fontweight='bold', color=color)
+        fig.text(x + width/2, bottom + 0.2*height, name, ha='center', va='center', fontsize=9, color='#4b5563')
+
+    fig.subplots_adjust(left=0.08, right=0.80, top=0.785, bottom=0.055)
 
     fig.savefig(plot_path)
 
