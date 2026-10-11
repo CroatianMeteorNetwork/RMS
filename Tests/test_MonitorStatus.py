@@ -1142,6 +1142,11 @@ def test_paused_camera_doesnt_share_the_workers(tmp_path, monkeypatch):
         status = json.load(f)
     assert status['processing']['queued'] == 1 and status['processing']['queue_empty_in_min'] == 5.0
 
+    # The paused camera can't tell when its files will be done
+    with open(str(cameras[1][2]/mst.STATUS_FILE_NAME)) as f:
+        status = json.load(f)
+    assert status['processing']['queued'] == 3 and status['processing']['queue_empty_in_min'] is None
+
 
 def test_progress_with_a_backlog_of_other_nights(tmp_path, now):
     """ The waiting files of other nights are counted apart from the progress of the night. """
@@ -1362,3 +1367,35 @@ def test_calibration_after_a_failed_sky_scan(tmp_path, now, monkeypatch):
 
     assert status.build(_state())['calibration']['status'] == 'unknown'
     assert status.build(_state())['calibration']['status'] == 'ok'
+
+
+def test_queue_of_a_camera_paused_for_space(tmp_path, now):
+    """ While the camera is paused for disk space, its waiting files can't start, so it can't tell when they
+        will be done.
+    """
+
+    status, config = _statusWithSizes(tmp_path, {'waiting.vid': 1.0})
+    for i in range(3):
+        status.fileFinished('done{:d}'.format(i), 'ok', 60.0, input_name='done.vid', size_bytes=1024**3)
+    waiting, t1 = _inputFile(tmp_path, 'waiting.vid', 5)
+
+    processing = status.build(_state(paused_for_space=True, queued=[(waiting, t1)]))['processing']
+    assert processing['queued'] == 1 and processing['queue_empty_in_min'] is None
+
+
+@pytest.mark.parametrize('dropped', ['many', 2.5, True, [3]])
+def test_damaged_summary_of_the_matched_filter(tmp_path, now, dropped):
+    """ A damaged number of the dropped candidates in the summary of the matched filter doesn't stop the status. """
+
+    status, config = _status(tmp_path)
+    results_dir = _searchedFile(str(tmp_path/'output'), config, 'file1')
+    summary_path = os.path.join(str(tmp_path/'output'), results_dir, mnr.MF_DONE_NAME)
+    with open(summary_path) as f:
+        summary = json.load(f)
+    summary['tracks_dropped'] = dropped
+    with open(summary_path, 'w') as f:
+        json.dump(summary, f)
+
+    built = status.build(_state())
+    assert built['detector']['candidates_dropped_last_file'] is None
+    assert 'CANDIDATES_DROPPED' not in [fault['code'] for fault in built['faults']]

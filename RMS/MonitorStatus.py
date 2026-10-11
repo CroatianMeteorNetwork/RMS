@@ -628,8 +628,14 @@ class MonitorStatus(object):
         status['disk'] = _section('disk', lambda: self._disk(state),
                                   {'paused_for_space': bool(state.get('paused_for_space'))})
 
-        # The faults, from the most severe, and the overall state
-        status['faults'] = self._faults(status, state, now, failed_sections)
+        # The faults, from the most severe, and the overall state. If they can't be judged, the status says so
+        try:
+            status['faults'] = self._faults(status, state, now, failed_sections)
+        except Exception as e:
+            log.warning("[{}] The faults of the status could not be judged: {}".format(self.camera_id, repr(e)))
+            status['faults'] = [{'code': 'STATUS_INCOMPLETE', 'severity': 'warning',
+                                 'message': 'The faults could not be judged (see the log)',
+                                 'since_utc': _timeString(now)}]
         severities = [SEVERITIES.index(fault['severity']) for fault in status['faults']]
         worst = max(severities) if severities else 0
         status['overall'] = {2: 'error', 1: 'warning'}.get(worst, 'ok')
@@ -913,6 +919,11 @@ class MonitorStatus(object):
         else:
             running, waiting = self.openWork(state)
             queue_empty_min = simulateQueues(self.nproc, [(self.camera_id, running, waiting)])[self.camera_id]
+
+        # While the camera is paused for disk space its waiting files can't start, so it is not known when they
+        #   will be done
+        if state.get('paused_for_space') and queued:
+            queue_empty_min = None
 
         # The progress of the night: the files of the night which are done, being processed, waiting, and still
         #   being written. The files of other nights (e.g. a backlog) are counted apart
@@ -1252,7 +1263,9 @@ class MonitorStatus(object):
             summary = file_result['summary']
             if file_result['searched'] and summary:
                 detector['gpu_used_last_file'] = summary.get('gpu')
-                detector['candidates_dropped_last_file'] = summary.get('tracks_dropped')
+                dropped = summary.get('tracks_dropped')
+                if isinstance(dropped, int) and not isinstance(dropped, bool):
+                    detector['candidates_dropped_last_file'] = dropped
                 break
 
         return detector
