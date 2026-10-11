@@ -867,6 +867,12 @@ class MonitorStatus(object):
         # Only the processed files of the last day count, also if no file was processed for a while
         self._pruneRecords(now)
 
+        # The sizes and nights of the inputs are only kept while they are open (waiting, processed or written)
+        open_paths = {file_path for _, file_path, _ in state.get('in_progress', [])}
+        open_paths |= {path for path, _ in state.get('queued', []) + state.get('settling', [])}
+        self.size_cache = {key: value for key, value in self.size_cache.items() if key[0] in open_paths}
+        self.night_cache = {key: value for key, value in self.night_cache.items() if key[0] in open_paths}
+
         # The length of the input files (median of the processed files of the night, min). The lengths of the
         #   processed files are kept in the history, so they are known after a restart too
         lengths = {os.path.basename(results_dir): length for results_dir, _, _, length in files if length}

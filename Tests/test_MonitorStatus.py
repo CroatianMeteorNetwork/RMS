@@ -1399,3 +1399,18 @@ def test_damaged_summary_of_the_matched_filter(tmp_path, now, dropped):
     built = status.build(_state())
     assert built['detector']['candidates_dropped_last_file'] is None
     assert 'CANDIDATES_DROPPED' not in [fault['code'] for fault in built['faults']]
+
+
+def test_caches_keep_only_the_open_files(tmp_path, now):
+    """ The sizes and nights of the inputs are only kept while the inputs wait, are processed or are written. """
+
+    status, config = _statusWithSizes(tmp_path, {'a.vid': 1.0, 'b.vid': 1.0, 'c.vid': 1.0})
+    a, ta = _inputFile(tmp_path, 'a.vid', 5)
+    b, tb = _inputFile(tmp_path, 'b.vid', 3)
+    c, tc = _inputFile(tmp_path, 'c.vid', 1)
+
+    status.build(_state(queued=[(a, ta), (b, tb)]))
+    status.build(_state(in_progress=[('b', b, NOW)], settling=[(c, tc)]))
+
+    assert {key[0] for key in status.size_cache} <= {b, c}
+    assert {key[0] for key in status.night_cache} == {b, c}
