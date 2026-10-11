@@ -246,6 +246,8 @@ monitor_fov_kml: false
 monitor_flux: false
 monitor_observation_summary: false
 monitor_staging_dir:
+monitor_status: true
+monitor_status_interval: 60
 ```
 
 | Option | What it does |
@@ -262,6 +264,8 @@ monitor_staging_dir:
 | `monitor_save_ecsv` | Save every calibrated detection as an ECSV file; the night report collects them into the `ECSV` directory of the night. |
 | `monitor_shower_association`, `monitor_fov_kml`, `monitor_flux`, `monitor_observation_summary` | Additional night products: single station shower association, FOV KML files (25, 70 and 100 km), flux, and the observation summary. |
 | `monitor_staging_dir` | Local directory to which every input file is copied before it is processed. Only for input files on a relatively slow network share, see [Input files on a slow network](#input-files-on-a-slow-network). Empty (the default): the files are processed where they are. |
+| `monitor_status` | Keep the live status of the monitor in `monitor_status.json` in the output directory, for external monitoring, see [Live status](#live-status-for-external-monitoring). |
+| `monitor_status_interval` | Seconds between the writes of the status (it is also written right after every processed file). |
 
 The usual RMS options for the night products also apply, e.g. `timelapse_generate_captured`, `thumb_stack`,
 `upload_mode`, `capt_dirs_to_keep`, `arch_dirs_to_keep`, `bz2_files_to_keep`, `logdays_to_keep` and
@@ -314,6 +318,10 @@ In the night directory `OUTPUT/CapturedFiles/<night>/`, next to the image pairs:
   RA/Dec), and `platepars_all_recalibrated.json`
 - the calibration report (`<night>_calib_report_astrometry.jpg`) and the calibration and photometry variation
   plots of the night
+- with the matched filter, the sky conditions of the night (`<night>_sky_conditions.png`): how much the stars
+  were dimmed vs clear sky, the clear part of the image, the stars and the detections through the night, with
+  the time on partly clouded, clouded sky (where the detections were removed), with too few stars (not searched)
+  and without data shaded; and the conditions of every chunk in `<night>_sky_conditions.csv`
 - the captured stack, the detected stack (all images covering detected meteors), and the CAPTURED and
   DETECTED thumbnails
 - the timelapse, if `timelapse_generate_captured` is set
@@ -453,6 +461,10 @@ OUTPUT/
     observation.db                  observation summary database (monitor_observation_summary)
     FILES_TO_UPLOAD.inf             upload queue (monitor_upload)
     .night_reports.json             which files of every night were reported, and how
+    monitor_status.json             live status of the monitor, see [Live status](#live-status-for-external-monitoring)
+    .monitor_status_files.jsonl     processed files of the last day, for the statistics of the status
+    sky_conditions_<station>_<date>.csv   sky conditions of every chunk (matched filter, one file per UTC date)
+    sky_reference_<station>.npz     clear-sky brightness of the stars (matched filter)
     .failed_files.json              failed and given up files
     .monitor.lock                   lock of the running monitor
     .report_now                     create it to request the reports
@@ -478,6 +490,144 @@ over: the nights are reported again and the failed files are retried.
   file is processed again; harmless if rare.
 - `.night_reports.json` shows when each night was reported, why (`partial`, `sunrise`, `idle`, `trigger`), and
   which steps failed. The trigger file also retries nights whose report failed.
+- `monitor_status.json` sums all of this up in one file, see below.
+
+
+## Live status for external monitoring
+
+The monitor keeps the live status of every camera in `monitor_status.json` in its output directory, so another
+program (e.g. the online monitor of the station) can show what is going on without reading the logs: whether
+the input is being recorded, whether the processing keeps up, how the sky is, how the night is going, how
+healthy the calibration is, and any faults. In multi-camera mode every camera has its own file.
+
+- It is rewritten every `monitor_status_interval` seconds (60), right after every processed file, and once
+  more when the monitor stops (`monitor.state` is then `stopped`).
+- It is written to a temporary file which then replaces the old one, so a reader never sees a partly written
+  file.
+- **If `written_utc` is older than three intervals, the monitor is not running** (it was killed, or hangs). A
+  monitor which stops normally says so itself.
+- The sky and the night come from the processed data, so they are as old as the processing: about one input
+  file length plus the processing time behind the sky (`sky.age_min` says how old they are).
+- All times are UTC. Fields which are not known are `null`.
+- `schema_version` is increased when fields are changed or removed, not when new ones are added, so a reader
+  should ignore the fields it doesn't know.
+
+An example (shortened; the processing statistics and the calibration of the night have more fields):
+
+```json
+{
+ "schema_version": 1, "camera": "CAWEE1", "station": "CAWEE1",
+ "written_utc": "2026-10-11T01:46:00.000000", "interval_s": 60.0, "overall": "ok",
+ "monitor": {"state": "running", "nproc": 3, "workers_busy": 2, "workers_this_camera": 1,
+             "started_utc": "2026-10-10T23:57:51.000000", "code_version": "18205a99..."},
+ "recording": {"state": "not_recording", "newest_file": "dump_6ACAE5CA_02F.vid",
+               "minutes_since_last_write": 18.0, "files_tonight": 4},
+ "processing": {"progress": {"done_tonight": 4, "in_progress": 1, "queued": 1, "being_written": 1,
+                             "percent_done": 66.7},
+                "in_progress": [{"file": "dump_6ACAE372_02F", "input": "dump_6ACAE372_02F.vid",
+                                 "running_min": 4.2, "expected_min": 11.3, "remaining_min": 7.1,
+                                 "expected_done_utc": "2026-10-11T01:43:30.000000"}],
+                "queued": 1, "queued_inputs": ["dump_6ACAE5CA_02F.vid"],
+                "queue_empty_utc": "2026-10-11T01:45:30.000000", "queue_empty_in_min": 9.1,
+                "prediction_basis": "size", "delay_min": 14.5, "file_length_min": 9.96, "not_keeping_up": false,
+                "processing_time_min_last_hour": {"n": 4, "min": 2.0, "median": 12.4, "max": 15.2}},
+ "sky": {"state": "clouded", "observed_utc": "2026-10-11T01:28:21.556237", "age_min": 17.6,
+         "observable": false, "clear_percent": 0.0, "stars": 0,
+         "last_hour": {"clear_percent": 0.0, "partly_clouded_percent": 94.8, "clouded_percent": 5.2,
+                       "median_dimming_mag": 0.31}},
+ "night": {"name": "CAWEE1_20261010_231829_000000", "observed_h": 0.53, "clear_percent": 0.0,
+           "partly_clouded_percent": 94.8, "clouded_percent": 5.2, "detections": 9, "removed_by_clouds": 0},
+ "calibration": {"status": "unknown", "reason": "Too few chunks on clear sky to judge the calibration",
+                 "tonight": {"chunks": 27, "recalibrated": 27, "median_residual_px": 0.058,
+                             "median_pointing_shift_px": 0.27}},
+ "detector": {"name": "matched_filter", "gpu_configured": "auto", "gpu_used_last_file": true},
+ "reports": {"last_night": "CAWEE1_20261009_232009_000000", "last_report_ok": true},
+ "disk": {"output_free_gb": 1039.8, "paused_for_space": false},
+ "faults": []
+}
+```
+
+### Fields
+
+| Section | Field | Meaning |
+|---|---|---|
+| | `overall` | `ok`, `warning` or `error`: the most severe fault (faults of severity `info` don't count). |
+| | `written_utc`, `interval_s` | When it was written, and the interval of the writes. |
+| `monitor` | `state` | `running`, `paused_disk_full` or `stopped`. |
+| | `pid`, `host`, `started_utc`, `code_version` | The monitor process, its start and the git commit of the code. |
+| | `nproc`, `workers_busy`, `workers_this_camera` | Worker processes: all, busy, and busy with this camera. |
+| `recording` | `state` | `recording` (the newest input was written in the last 5 minutes), `not_recording` (at night, nothing written for 5 minutes), `daytime`, or `unknown` (the input can't be read). |
+| | `newest_file`, `newest_file_written_utc`, `newest_file_size_gb`, `minutes_since_last_write`, `files_tonight` | The newest input and the inputs written tonight, found as the monitor finds them for every input type (a FITS directory counts as one input, written when frames are added; its size is not given). |
+| `processing` | `progress` | The files of the night: `done_tonight`, `in_progress`, `queued`, `being_written`, and `percent_done` (done of done, in progress and queued), and `other_nights_open`, the files of other nights which are waiting, running or being written (e.g. a backlog). The files which are not processed yet are put in a night by the time they were last written, which is the end of their recording when they are written live. |
+| | `in_progress` | The files being processed: the ID (`file`), the input (`input`, the file name or the name of the FITS directory), `started_utc`, `running_min`, and the prediction `expected_min`, `remaining_min` and `expected_done_utc`. |
+| | `queued`, `queued_inputs`, `settling` | Files waiting to be processed (with their inputs, in the order they will be processed) and still being written. |
+| | `queue_empty_utc`, `queue_empty_in_min`, `prediction_basis` | When the waiting and running files (of all nights) are predicted to be done (UTC, and in minutes from `written_utc`), see below. `0` when no file is open. `null` when files are open but no file was processed yet, while files wait but the camera is paused for disk space, and after the monitor stopped. |
+| | `delay_min` | How long ago the oldest waiting or processed file was recorded; 0 when nothing waits. |
+| | `file_length_min`, `waiting_recording_min` | Length of the input files (from the processed ones), and the recording time which waits. |
+| | `not_keeping_up` | The delay is more than three file lengths. |
+| | `last_done`, `recent_files` | The last processed file, and the latest ones with their outcome, input, size, processing time and length. |
+| | `processing_time_min_last_24h`, `processing_time_min_last_hour` | Processing time per file: number, minimum, 10th, 25th, 50th (median), 75th and 90th percentile, maximum, of all files of the last day and hour. |
+| | `processing_to_file_length_ratio` | Processing time over the length of the file, the same statistics. Above 1 per worker the processing falls behind. |
+| | `files_done_last_24h`, `files_failed_last_24h`, `failed_files`, `given_up` | Processed and failed files, the files which failed and will be retried, and the ones given up. |
+| `sky` | `state` | The sky at the end of the latest processed data: `clear`, `partly_clouded`, `clouded`, `too_few_stars` (not searched), or `no_data` (nothing measured yet, or the latest files were not measured, e.g. with the normal detection). |
+| | `observed_utc`, `age_min` | When the sky was observed, and how long ago. |
+| | `observable` | At least 80% of the observed time in the last 10 minutes of the data had at least 80% of the image clear. `null` with less than about 3 minutes of data. |
+| | `clear_percent`, `dimming_mag`, `stars`, `matched_stars`, `reliable_seen_percent` | The latest chunk: the clear part of the image, how much the stars are dimmed vs clear sky, the stars, and the share of the stars which are reliably seen on clear sky that are seen. Only given when the latest data was searched (otherwise only its stars are known). |
+| | `stars`, `stars_utc` | Without the cloud filter of the matched filter (e.g. with the normal detection or FF input) the state of the sky is not measured, but the stars of the latest chunk are given. With the measured sky, they are the stars of the chunk which gave the latest state, at its time. |
+| | `last_hour` | The shares of the states and the median dimming in the last hour of the data. |
+| `night` | `name`, `start_utc`, `end_utc` | The night (sunset to sunrise). |
+| | `observed_h`, `clear_percent`, `partly_clouded_percent`, `clouded_percent`, `too_few_stars_percent` | The night so far, the same numbers as the [sky conditions plot](#what-a-report-produces) of the night report. |
+| | `files_processed`, `files_not_searched`, `files_unreadable`, `detections`, `removed_by_clouds` | Files and detections of the night so far (`files_unreadable`: processed files whose results could not be read, they are read again at the next status). The detections are counted in the FTPdetectinfo of every file (the normal detection, or the matched filter when it replaces it). |
+| | `matched_filter_detections` | The detections of the matched filter when it runs as a separate pass next to the normal detection. |
+| `calibration` | `status`, `reason` | `ok`, `failing`, `degraded` (the camera may have moved) or `unknown` (too few chunks on clear sky to judge), with the reason. |
+| | `last_file`, `recent`, `tonight` | For the last file, the latest files with at least 10 chunks on clear sky, and the night: the chunks, how many were recalibrated, the share of the chunks on clear sky which were recalibrated, the median residual of the fit (px), the median number of matched stars, the photometric zero point (mag) and the median difference of the pointing from the reference platepar (px). |
+| | `dist_check_threshold_px`, `camera_moved_threshold_px` | The limits of the judgement. |
+| | `platepar`, `platepar_utc`, `platepar_from_previous_night` | The platepar which the following files are processed with, selected as by the workers (see [Platepar](#platepar)), and whether it is the best platepar of a previous night. |
+| `detector` | `name` | `matched_filter`, `normal_and_matched_filter` or `normal`. |
+| | `gpu_configured`, `gpu_used_last_file`, `cloud_filter`, `candidates_dropped_last_file` | The matched filter: GPU setting and use, the cloud filter, and the candidates which were not measured. |
+| `reports` | `mode`, `report_running`, `last_night`, `last_report_utc`, `last_report_ok`, `failed_steps`, `recalibration` | The night reports: the latest one which finished, and whether one is running. |
+| `disk` | `output_free_gb`, `staging_free_gb`, `paused_for_space`, `last_cleanup_utc` | Free space, and the cleanup. |
+| `faults` | `code`, `severity`, `since_utc`, `message` | The faults, the most severe first, see below. |
+
+### Faults
+
+| Code | Severity | When |
+|---|---|---|
+| `MONITOR_STOPPED` | error | The monitor has stopped. |
+| `INPUT_UNREADABLE` | error | The input directory can't be read (e.g. the network share is down). |
+| `DISK_LOW` | error | The processing is paused as the output disk is full. |
+| `FILE_GIVEN_UP` | error | Files failed too often and are not processed, see [Failed files](#failed-files). |
+| `FILE_FAILED` | warning | Files failed and will be processed again. |
+| `NOT_KEEPING_UP` | warning | The oldest waiting file was recorded more than three file lengths ago. |
+| `CALIBRATION_FAILING` | error | Fewer than half of the latest chunks on clear sky could be recalibrated (which requires the stars to match within `dist_check_threshold`, 0.33 px, with at least `min_matched_stars` stars): the platepar doesn't fit. |
+| `CAMERA_MOVED` | warning | The pointing differs from the reference platepar by more than 2 px (it normally changes by a fraction of a pixel through the night). |
+| `REPORT_FAILED` | error or warning | The latest night report failed, an error if an essential step failed (`merge`, `thumbnails_and_stacks`, `archive`). |
+| `GPU_NOT_USED` | warning (info with `mf_gpu: auto`) | The matched filter ran on the CPU. |
+| `CANDIDATES_DROPPED` | info | The last file had more candidates than `mf_max_tracks`, the weakest ones were not measured. |
+| `STATUS_INCOMPLETE` | warning | Parts of the status could not be made (they are in the log); the rest of the status is still written. |
+
+**Predicting the processing.** The processing time of a file is predicted from the processing time per GB of
+the input of the recent files (the last hour if it had at least 3 files, otherwise the last day), so short and
+long inputs are both predicted (`prediction_basis: size`; `file` uses the median time per file when the sizes
+are not known). A file being processed has its predicted time minus the time it has run left. The scheduling of
+the monitor is then run forward: a free worker takes the next waiting file of the camera with the fewest running
+files (the next camera in turn when they have as many), so in multi-camera mode the prediction of every camera
+accounts for the workers busy with the other cameras. The waiting files of a camera which is paused for disk
+space can't get a worker and are left out; a camera without processed files yet is not predicted, its files are
+given the median time for the other cameras. Cameras with `monitor_status: false` write no status, but their files
+are part of the prediction of the other cameras. The prediction is for
+the files known now: while the input is being recorded, new files keep coming. The start of a file comes from
+the monotonic clock of the monitor, so the times don't jump when the clock of the system is set.
+
+The processed files of the last day are also kept in `.monitor_status_files.jsonl` in the output directory (one
+line per file, with the length of the file once it is known), so the statistics cover the whole last day, also
+after a restart. Files being processed when the monitor stops are not processing in its final status; they are
+processed again after a restart.
+
+The recording is only reported, never as a fault: it is done by other software, which the monitor doesn't
+communicate with, and which may not record on purpose (e.g. on cloudy nights). The calibration is only judged
+on the chunks on clear sky (at least 80% of the image clear: the fit uses the stars of the whole image, so a little
+cloud doesn't spoil it), as under clouds there are too few stars for any calibration.
 
 
 ## Faint objects: the matched filter
