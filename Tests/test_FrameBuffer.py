@@ -495,3 +495,47 @@ def test_track_shares_sum_to_the_cap():
     assert sum(apportion(3, [1, 1, 1, 1])) == 3
     assert apportion(300, [640, 512, 512, 384]) == [94, 75, 75, 56]
     assert apportion(10, [0, 5]) == [0, 10]
+
+
+def test_persistence_carried_past_a_segment_not_searched(monkeypatch):
+    """ When the next segment is not searched, the persistence counts of a segment are carried in full (also its
+        overlap with the segment not searched, which counts them nowhere else). """
+
+    import RMS.MatchedFilterDetection as mfd
+
+    config = cr.Config()
+    config.mf_block_frames = 256
+    config.mf_segment_overlap = 256
+    config.ff_min_stars = 3
+    handle = _Input(total_frames=2048)
+
+    # The chunks of the second segment (512-1280) have too few stars
+    def stars(img_handle, config, chunk_range=None, **kwargs):
+        from RMS.Formats.FFfile import constructFFName
+        return [[constructFFName('XX0001', handle.currentFrameTime(frame_no=c*128, dt_obj=True)),
+                 [(1.0,)*8]*(1 if 512 <= c*128 < 1280 else 5)] for c in range(*chunk_range)]
+
+    calls = []
+    class _Detector(object):
+        psf_sigma = None
+        tracks_measured = 0
+    def detect(img_handle, config, frame_range=None, persistence_prior=None, persistence_prior_frames=0,
+               **kwargs):
+        calls.append((frame_range, persistence_prior, persistence_prior_frames))
+        det = _Detector()
+        det.persistence_carry, det.persistence_carry_frames = 'before {}'.format(frame_range), 1
+        det.persistence_full, det.persistence_full_frames = 'all {}'.format(frame_range), 2
+        return [], det
+
+    monkeypatch.setattr(mfd, 'extractStarsFrameInterface', stars)
+    monkeypatch.setattr(mfd, 'detectMatchedFilter', detect)
+    monkeypatch.setattr(mfd, 'skyQuality', lambda *args, **kwargs: None)
+    monkeypatch.setattr(mfd, 'SegmentedRun', lambda *args, **kwargs: None)
+
+    mfd.detectMatchedFilterSegments(handle, config, 768)
+
+    # The second segment is not searched, and the third one continues from all counts of the first one
+    searched = [c[0] for c in calls]
+    assert (512, 1280) not in searched
+    following = calls[searched.index((1024, 1792))]
+    assert following[1:] == ('all (0, 768)', 2)

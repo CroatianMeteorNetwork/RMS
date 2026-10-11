@@ -514,6 +514,11 @@ class MatchedFilterDetector(object):
         self.persistence_prior_frames = 0
         self.persistence_carry_frames = 0
 
+        # All the persistence counts at the end of the search, carried instead when the next segment is not searched
+        #   (its overlap with this one is then counted only here)
+        self.persistence_full = None
+        self.persistence_full_frames = 0
+
 
     ### Frames ###
 
@@ -1109,6 +1114,11 @@ class MatchedFilterDetector(object):
         Arguments:
             first: [int] First frame of the block which is searched next, None at the end of the search.
         """
+
+        if first is None:
+            self.persistence_full = {key: (counts.copy(), self.persistence_runs[key])
+                                     for key, counts in self.persistence_counts.items()}
+            self.persistence_full_frames = self.persistence_prior_frames + (self.frame_end - self.frame_first)
 
         if self.persistence_carry is not None:
             return
@@ -3814,6 +3824,11 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
         if max_stars < config.ff_min_stars:
             log.info('Matched filter: segment {:d} ({:d}-{:d}) not searched, {:d} < {:d} stars'.format(
                 k + 1, first, end, max_stars, config.ff_min_stars))
+
+            # The overlap with the segment before it is not counted here, so all counts of that one are carried
+            if detectors and (detectors[-1] is not None):
+                persistence = detectors[-1].persistence_full
+                persistence_frames = detectors[-1].persistence_full_frames
             detectors.append(None)
             segment_detections.append([])
             continue
