@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 
 import RMS.ConfigReader as cr
-from RMS.Formats.FrameBuffer import SegmentBuffer, segmentFrames, segmentRanges, segmentUnit
+from RMS.Formats.FrameBuffer import SegmentBuffer, segmentFrames, segmentMinimum, segmentRanges, segmentUnit
 from RMS.MatchedFilterDetection import stitchSegments
 from RMS.Routines.DynamicFTPCompressionCy import FFMimickInterface
 
@@ -89,6 +89,39 @@ def test_segment_frames():
 
     handle.input_type = 'images'
     assert segmentFrames(handle, config, 4.0) == 0
+
+
+def test_segment_minimum():
+    """ A segment holds the blocks which the slow search of the matched filter compares, a memory which can't hold
+        twice as many is not used, and the last segment is never shorter. """
+
+    config = cr.Config()
+    handle = _Input(size=(512, 512))
+    unit = segmentUnit(config, handle)
+    minimum = segmentMinimum(config, handle)
+    assert minimum == 6*256
+
+    # 1 GB holds 2048 frames, less than twice the minimum, so the input is read whole; 1.5 GB holds 3072
+    assert segmentFrames(handle, config, 1.0) == 0
+    assert segmentFrames(handle, config, 1.5) == 3072
+
+    # A last segment of 812 frames begins earlier, so it holds the minimum, and still shares frames only with the
+    #   segment before it, at most half a segment
+    assert segmentRanges(5932, 3072, 512, unit)[-1] == (5120, 5932)
+    assert segmentRanges(5932, 3072, 512, unit, minimum=minimum) == [(0, 3072), (2560, 5632), (4352, 5932)]
+
+    # For any input: every segment holds the minimum (or the whole input), begins on a whole unit, shares at most
+    #   half a segment with the one before it and nothing with the others, and all frames are covered
+    for total in range(100, 20000, 37):
+        ranges = segmentRanges(total, 3072, 512, unit, minimum=minimum)
+        assert ranges[0][0] == 0 and ranges[-1][1] == total
+        for k, (first, end) in enumerate(ranges):
+            assert (end - first >= min(minimum, total)) and (end - first <= 3072) and (first % unit == 0)
+            if k > 0:
+                assert first <= ranges[k - 1][1]
+                assert ranges[k - 1][1] - first <= 3072//2
+            if k > 1:
+                assert first >= ranges[k - 2][1]
 
 
 def test_segment_buffer():

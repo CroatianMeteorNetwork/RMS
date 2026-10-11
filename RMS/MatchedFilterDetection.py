@@ -67,7 +67,7 @@ from RMS.DetectStarsAndMeteors import saveResultsFrameInterface
 from RMS.ExtractStarsFrameInterface import extractStarsFrameInterface
 from RMS.Formats import FTPdetectinfo
 from RMS.Formats.FFfile import filenameToDatetime, validFFName
-from RMS.Formats.FrameBuffer import SegmentBuffer, segmentOverlap, segmentRanges, segmentUnit
+from RMS.Formats.FrameBuffer import SegmentBuffer, segmentMinimum, segmentOverlap, segmentRanges, segmentUnit
 from RMS.Formats.FrameInterface import detectInputType
 from RMS.Formats.Platepar import Platepar
 from RMS.Logger import getLogger, LoggingManager
@@ -3819,7 +3819,8 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
                     'used'.format(int(config.mf_segment_overlap), segment_frames,
                                   segmentOverlap(segment_frames, overlap, unit)))
         overlap = segmentOverlap(segment_frames, overlap, unit)
-    ranges = segmentRanges(img_handle.total_frames, segment_frames, overlap, unit)
+    ranges = segmentRanges(img_handle.total_frames, segment_frames, overlap, unit,
+                           minimum=min(segmentMinimum(config, img_handle), (segment_frames//2)//unit*unit))
     buffer = SegmentBuffer(img_handle, max(end - first for first, end in ranges))
     log.info('Matched filter: {:d} segments of up to {:d} frames ({:.1f} min), overlap {:d} frames'.format(
         len(ranges), segment_frames, segment_frames/img_handle.fps/60.0, overlap))

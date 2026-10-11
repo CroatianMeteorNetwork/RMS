@@ -440,6 +440,9 @@ all steps of the matched filter take the frames from memory:
   measurements there are then not kept, unlike without segments.
 - The candidate tracks measured per file are at most `mf_max_tracks`, shared by the segments: every segment has a
   share by its length, and what a segment doesn't use is left to the next ones.
+- The search of very slow objects compares every block of frames with blocks a few blocks before and after it,
+  so a segment holds at least 6 blocks: a memory too small for 12 (1.5 GB for 512x512 frames) is not used,
+  and a short last segment begins earlier.
 - 0 (the default) reads the file for every step. Only `.vid` files are read in segments.
 
 
