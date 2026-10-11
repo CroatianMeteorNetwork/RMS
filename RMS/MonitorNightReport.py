@@ -965,12 +965,13 @@ def plotNightSkyConditions(night_dir, night_name, output_dir, results, config, f
             if chunk_s <= 0:
                 chunk_s = 256/max(config.fps, 1)
 
-            # Only the chunks within the night, as the conditions (the files of a night can begin before it or
-            #   end after it), split where the recording paused (a gap of more than a few chunks)
+            # Only the chunks in the night, as the conditions (the files of a night can begin before it or end
+            #   after it, the time within it is taken by the plot), split where the recording paused (a gap of more
+            #   than a few chunks)
             chunk = datetime.timedelta(seconds=chunk_s)
             spans = []
             for t, n in star_list:
-                if not (night_start <= t <= night_end):
+                if not ((night_start < t + chunk) and (t < night_end)):
                     continue
                 if spans and (t - spans[-1][0][-1] <= 3*chunk):
                     spans[-1][0].append(t)
@@ -978,19 +979,24 @@ def plotNightSkyConditions(night_dir, night_name, output_dir, results, config, f
                 else:
                     spans.append(([t], [n]))
             for span_times, span_counts in spans:
-                not_searched.append((span_times[0], min(span_times[-1] + chunk, night_end), span_times,
-                                     span_counts))
+                not_searched.append((span_times[0], span_times[-1] + chunk, span_times, span_counts))
 
     # The conditions of the chunks of the night of the files which measured the sky (only the logs of the dates of
     #   the night are read, and only the chunks within it are taken, as the names of the inputs can repeat on other
     #   nights). The files are named by their path in the log, and by their name in older logs, which are read only
     #   for the files without rows by their path
-    rows = readConditions(output_dir, config.stationID, inputs=set(measured), start=night_start, end=night_end)
+    #   The chunks which begin before the night and end in it are taken too (the plot takes the time within it)
+    margin = datetime.timedelta(seconds=max(list(chunk_seconds.values()) + [0]))
+    rows = readConditions(output_dir, config.stationID, inputs=set(measured), start=night_start - margin,
+                          end=night_end)
     by_path = set(row['input'] for row in rows)
     legacy = set(os.path.basename(path) for path in measured if path not in by_path)
     if legacy:
-        rows = sorted(rows + readConditions(output_dir, config.stationID, inputs=legacy, start=night_start,
-                                            end=night_end), key=lambda row: (row['time'], row['input']))
+        rows = sorted(rows + readConditions(output_dir, config.stationID, inputs=legacy,
+                                            start=night_start - margin, end=night_end),
+                      key=lambda row: (row['time'], row['input']))
+    rows = [row for row in rows if row['time'] + datetime.timedelta(seconds=chunk_seconds.get(row['input'], 0))
+            > night_start]
 
     if (not rows) and (not not_searched):
         log.info("No sky conditions for night {:s}".format(night_name))
@@ -1033,7 +1039,7 @@ def plotNightSkyConditions(night_dir, night_name, output_dir, results, config, f
     summary = plotSkyConditions(rows, plot_path, '{:s} sky conditions, night of {:s}'.format(config.stationID,
         night_date), not_searched=not_searched, detection_times=detection_times, removed_detections=removed,
         cloud_max_offset=(config.mf_cloud_max_offset if config.mf_cloud_filter else None),
-        min_matched=config.mf_cloud_min_matched, chunk_seconds=chunk_seconds)
+        min_matched=config.mf_cloud_min_matched, chunk_seconds=chunk_seconds, bounds=(night_start, night_end))
 
     log.info("Sky conditions of night {:s}: {:.1f} h observed, clear {:.0f}%, partly clouded {:.0f}%, clouded "
              "{:.0f}%, {:d} file(s) not searched".format(night_name, summary['observed_h'],

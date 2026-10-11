@@ -1282,7 +1282,7 @@ def _legendPlace(fig, ax, handles):
         return 'upper right'
 
 
-def nightTimeline(rows, not_searched=(), chunk_seconds=None):
+def nightTimeline(rows, not_searched=(), chunk_seconds=None, bounds=None):
     """ The time line of the states of the sky through a night: the time of every chunk is clear, partly clouded
         or clouded (see CLEAR_FRACTION_CLEAR) until the next chunk of its input, the inputs which were not searched
         are not searched, the worse state holds where they overlap (clouded, not searched, partly clouded, clear),
@@ -1295,6 +1295,8 @@ def nightTimeline(rows, not_searched=(), chunk_seconds=None):
         not_searched: [list] Spans of the inputs which were not searched (start, end, times, stars).
         chunk_seconds: [dict] Time of the chunks of the inputs (s) by their names, from the spacing of their chunks
             for the inputs which are not in it. None by default.
+        bounds: [tuple] Beginning and end of the night (datetime, UTC), the time of the chunks is taken within them.
+            None by default.
 
     Return:
         [dict] input_rows (the indices of the rows of every input), steps (the time of the chunks of every
@@ -1346,6 +1348,10 @@ def nightTimeline(rows, not_searched=(), chunk_seconds=None):
     for name, idx in input_rows.items():
         intervals += _spans([times[i] for i in idx], [labels[i] for i in idx], 3*steps[name], steps[name])
     intervals += [('not_searched', start, end) for start, end, _, _ in not_searched]
+
+    # Only the time within the night (a chunk can begin before it or end after it)
+    if bounds is not None:
+        intervals = [(state, max(start, bounds[0]), min(end, bounds[1])) for state, start, end in intervals]
     segments = _stateSegments(intervals, ['clouded', 'not_searched', 'partly', 'clear'])
 
     # The summary: the observed time (the union of the intervals) and its fractions in every state
@@ -1366,7 +1372,7 @@ def nightTimeline(rows, not_searched=(), chunk_seconds=None):
 
 
 def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(), removed_detections=0,
-                      cloud_max_offset=None, min_matched=None, chunk_seconds=None):
+                      cloud_max_offset=None, min_matched=None, chunk_seconds=None, bounds=None):
     """ Plot the sky conditions of a night: the dimming of the stars, the clear fraction of the image and the stars
         through the night, with the time when the sky was clouded and partly clouded shaded, and the times of
         the detections.
@@ -1385,6 +1391,8 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
         min_matched: [int] Smallest number of matched stars, drawn if given.
         chunk_seconds: [dict] Time of the chunks of the inputs (s) by their names, from the spacing of their chunks
             for the inputs which are not in it. None by default.
+        bounds: [tuple] Beginning and end of the night (datetime, UTC), the plot and the summary are within them.
+            None by default.
 
     Return:
         [dict] Summary: the observed time (h, overlapping inputs counted once), and the fractions of it which
@@ -1409,7 +1417,7 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     matched = np.array([row['matched'] for row in rows])
 
     # The time line of the states of the sky
-    timeline = nightTimeline(rows, not_searched=not_searched, chunk_seconds=chunk_seconds)
+    timeline = nightTimeline(rows, not_searched=not_searched, chunk_seconds=chunk_seconds, bounds=bounds)
     input_rows, steps, chunk, max_gap = (timeline[k] for k in ('input_rows', 'steps', 'chunk', 'max_gap'))
     labels, segments, gaps, summary = (timeline[k] for k in ('labels', 'segments', 'gaps', 'summary'))
     step = chunk.total_seconds()
@@ -1520,7 +1528,10 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     all_times = times + [t for span in not_searched for t in span[:2]] + list(detection_times)
     time_format = '%H:%M'
     if all_times:
-        ax_det.set_xlim(min(all_times), max(all_times) + chunk)
+        x_start, x_end = min(all_times), max(all_times) + chunk
+        if bounds is not None:
+            x_start, x_end = max(x_start, bounds[0]), min(x_end, bounds[1])
+        ax_det.set_xlim(x_start, x_end)
         if max(all_times) - min(all_times) < datetime.timedelta(minutes=30):
             time_format = '%H:%M:%S'
     ax_det.xaxis.set_major_formatter(mdates.DateFormatter(time_format))

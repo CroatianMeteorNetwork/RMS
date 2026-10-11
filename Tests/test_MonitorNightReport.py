@@ -1480,12 +1480,14 @@ def test_night_report_plots_sky_conditions(tmp_path, monkeypatch, replace):
     assert len(lines) == 4 and all(line.startswith('2025-12-25T03:00') and ',"/data/a, b/file1.vid",' in line
                                    for line in lines[1:])
 
-    # The files with too few stars are shown as not searched for the time of their chunks within the night, and
-    #   the removed detections are counted
+    # The files with too few stars are shown as not searched for the time of their chunks in the night (also the
+    #   chunk which begins before it, the plot takes the time within the night), and the removed detections are
+    #   counted
     assert len(plotted['not_searched']) == 2
     early_span, skipped_span = sorted(plotted['not_searched'], key=lambda span: span[0])
     start, end, times, stars = early_span
-    assert abs((start - night_start).total_seconds() - 0.5*128/25.0) < 0.01 and stars == [1, 1]
+    assert abs((start - night_start).total_seconds() + 0.5*128/25.0) < 0.01 and stars == [1, 1, 1]
+    assert plotted['bounds'][0] == night_start
     start, end, times, stars = skipped_span
     assert start == BEG_TIME + datetime.timedelta(seconds=60) and stars == [1]
     assert (end - start).total_seconds() == pytest.approx(128/25.0)
