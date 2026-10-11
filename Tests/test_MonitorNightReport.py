@@ -1398,7 +1398,8 @@ def test_night_report_plots_sky_conditions(tmp_path, monkeypatch, replace):
     """ With the matched filter, the night report plots the sky conditions of the files of the night from the log
         of the conditions, with the files which were not searched as they had too few stars, and saves the
         conditions of the night. When the matched filter is a separate pass, a file with too few stars has no
-        summary of it.
+        summary of it, and a summary of an earlier processing with the matched filter replacing the normal
+        detection is not read.
     """
 
     import RMS.Routines.SkyQuality as sq
@@ -1431,6 +1432,11 @@ def test_night_report_plots_sky_conditions(tmp_path, monkeypatch, replace):
             os.makedirs(os.path.join(results_path, summary_dir), exist_ok=True)
             with open(os.path.join(results_path, summary_dir, DONE_NAME), 'w') as f:
                 json.dump(summary, f)
+
+        # A summary of an earlier processing in the other mode is not read
+        if not replace:
+            with open(os.path.join(results_path, DONE_NAME), 'w') as f:
+                json.dump({'total_frames': 384, 'cloud_detections_removed': 5}, f)
 
     # The conditions of the searched file, of a file of another night with the same name, and of another file
     with open(os.path.join(output_dir, 'sky_conditions_XX0001_{:s}.csv'.format(BEG_TIME.strftime('%Y%m%d'))),

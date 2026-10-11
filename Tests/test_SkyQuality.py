@@ -691,3 +691,23 @@ def test_plot_sky_conditions_inputs_at_the_same_times(tmp_path):
 
     summary = sq.plotSkyConditions(rows, str(tmp_path/'conditions.png'), 'Test')
     assert summary['clear'] == pytest.approx(1.0)
+    assert summary['observed_h'] == pytest.approx(200/3600.0)
+
+
+def test_plot_sky_conditions_overlapping_inputs(tmp_path):
+    """ The time of overlapping inputs is counted once, and the worse state of the sky holds where they
+        overlap.
+    """
+
+    begin = datetime.datetime(2025, 12, 25, 22, 0, 0)
+    rows = []
+    for name, offset, clear in [('a.vid', 0, 1.0), ('b.vid', 200, 0.0)]:
+        rows += [{'time': begin + datetime.timedelta(seconds=offset + 4*i), 'input': name, 'clear_fraction': clear,
+                  'transparency_mag': 0.0, 'reliable_seen': 1.0, 'stars': 500, 'matched': 300} for i in range(100)]
+    rows.sort(key=lambda row: row['time'])
+
+    # a.vid from 0 to 400 s, b.vid (clouded) from 200 to 600 s
+    summary = sq.plotSkyConditions(rows, str(tmp_path/'conditions.png'), 'Test')
+    assert summary['observed_h'] == pytest.approx(600/3600.0)
+    assert summary['clear'] == pytest.approx(200/600.0)
+    assert summary['clouded'] == pytest.approx(400/600.0)

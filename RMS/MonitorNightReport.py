@@ -882,15 +882,16 @@ def plotNightSkyConditions(night_dir, night_name, output_dir, results, config, f
     for results_dir in sorted(results):
         results_path = os.path.join(output_dir, results_dir)
 
-        # A file which was searched has the summary of the detector (e.g. its number of frames)
+        # A file which was searched has the summary of the detector (e.g. its number of frames). Only the summary
+        #   of the current mode is read, a file processed in the other mode before can have both
+        summary_path = os.path.join(results_path, DONE_NAME) if config.mf_replace_detection \
+            else os.path.join(results_path, MATCHED_FILTER_DIR, DONE_NAME)
         searched = False
-        for summary_path in [os.path.join(results_path, DONE_NAME),
-                             os.path.join(results_path, MATCHED_FILTER_DIR, DONE_NAME)]:
-            if os.path.isfile(summary_path):
-                with open(summary_path) as f:
-                    summary = json.load(f)
-                removed += summary.get('cloud_detections_removed', 0)
-                searched = searched or ('total_frames' in summary)
+        if os.path.isfile(summary_path):
+            with open(summary_path) as f:
+                summary = json.load(f)
+            removed += summary.get('cloud_detections_removed', 0)
+            searched = 'total_frames' in summary
 
         if searched:
             continue

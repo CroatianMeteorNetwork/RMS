@@ -27,6 +27,7 @@ from __future__ import print_function, division, absolute_import
 
 import os
 import csv
+import collections
 import copy
 import glob
 import math
@@ -1133,19 +1134,56 @@ def readConditions(dir_path, station_id, inputs=None):
     return sorted(rows.values(), key=lambda row: row['time'])
 
 
-def _spans(times, labels, max_gap):
+def _spans(times, labels, max_gap, chunk):
     """ The spans of consecutive chunks with the same label: (label, start, end), where a chunk lasts until the
-        next one (at most max_gap), and a gap longer than max_gap ends a span. """
+        next one, or for the time of a chunk before a gap longer than max_gap (which ends a span) and at the end.
+    """
 
     spans = []
     for i, (t, label) in enumerate(zip(times, labels)):
-        end = t + max_gap if i == len(times) - 1 else min(times[i + 1], t + max_gap)
+        end = times[i + 1] if (i + 1 < len(times)) and (times[i + 1] - t <= max_gap) else t + chunk
         if spans and (spans[-1][0] == label) and (spans[-1][2] >= t):
             spans[-1][2] = end
         else:
             spans.append([label, t, end])
 
     return [tuple(span) for span in spans]
+
+
+def _stateSegments(intervals, order):
+    """ The time line of the states from intervals which can overlap (e.g. recordings which overlap): where
+        intervals overlap, the first state in the order holds.
+
+    Arguments:
+        intervals: [list] Intervals (state, start, end).
+        order: [list] States, the one which holds first.
+
+    Return:
+        [list] Disjoint segments (state, start, end) in time order, neighbouring segments of the same state
+            joined.
+    """
+
+    # The beginnings and the ends of the intervals, an end before a beginning at the same time
+    events = sorted([(start, 1, state) for state, start, end in intervals if end > start]
+                    + [(end, -1, state) for state, start, end in intervals if end > start],
+                    key=lambda event: (event[0], event[1]))
+
+    segments = []
+    active = collections.Counter()
+    for i, (t, change, state) in enumerate(events):
+        active[state] += change
+
+        # The state from this event to the next one, if any interval is open
+        if (i + 1 < len(events)) and (events[i + 1][0] > t):
+            current = next((st for st in order if active[st] > 0), None)
+            if current is None:
+                continue
+            if segments and (segments[-1][0] == current) and (segments[-1][2] == t):
+                segments[-1][2] = events[i + 1][0]
+            else:
+                segments.append([current, t, events[i + 1][0]])
+
+    return [tuple(segment) for segment in segments]
 
 
 def _withGaps(times, values, max_gap):
@@ -1183,8 +1221,9 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
         min_matched: [int] Smallest number of matched stars, drawn if given.
 
     Return:
-        [dict] Summary: the observed time (h), and the fractions of it which were clear, partly clouded and
-            clouded, and the median dimming of the chunks which were not clouded.
+        [dict] Summary: the observed time (h, overlapping inputs counted once), and the fractions of it which
+            were clear, partly clouded, clouded and not searched, and the median dimming of the chunks which
+            were not clouded.
     """
 
     # Imported here, the plotting is not needed for the processing. A figure without pyplot doesn't depend on
@@ -1217,15 +1256,26 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     # The state of every chunk
     labels = np.where(clear >= CLEAR_FRACTION_CLEAR, 'clear', np.where(clear > 0, 'partly', 'clouded'))
 
-    # The summary: the observed time and its fractions in every state, from the chunks and the inputs which were
-    #   not searched
+    # The time line of the states: a chunk lasts until the next chunk of its input, and where inputs overlap (e.g.
+    #   two recordings of the same time), the worse state holds
+    input_rows = collections.defaultdict(list)
+    for i, row in enumerate(rows):
+        input_rows[row.get('input')].append(i)
+    intervals = []
+    for idx in input_rows.values():
+        intervals += _spans([times[i] for i in idx], [labels[i] for i in idx], max_gap, chunk)
+    intervals += [('not_searched', start, end) for start, end, _, _ in not_searched]
+    segments = _stateSegments(intervals, ['clouded', 'not_searched', 'partly', 'clear'])
+
+    # The summary: the observed time (the union of the intervals) and its fractions in every state
     n = len(rows)
-    not_searched_s = sum((end - start).total_seconds() for start, end, _, _ in not_searched)
-    observed_s = n*step + not_searched_s
+    durations = collections.defaultdict(float)
+    for state, start, end in segments:
+        durations[state] += (end - start).total_seconds()
+    observed_s = sum(durations.values())
     summary = {'observed_h': observed_s/3600.0}
-    for state in ('clear', 'partly', 'clouded'):
-        summary[state] = float(np.sum(labels == state))*step/observed_s if observed_s else 0.0
-    summary['not_searched'] = not_searched_s/observed_s if observed_s else 0.0
+    for state in ('clear', 'partly', 'clouded', 'not_searched'):
+        summary[state] = durations[state]/observed_s if observed_s else 0.0
     usable = (labels != 'clouded') & np.isfinite(dimming)
     summary['median_dimming'] = float(np.median(dimming[usable])) if usable.any() else float('nan')
 
@@ -1235,15 +1285,9 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
 
     no_data = {'facecolor': '#f3f4f6', 'edgecolor': '#cbd5e1', 'hatch': '..'}
 
-    # The time without data within the night: the gaps between the chunks and the inputs which were not searched
-    #   (e.g. no recording, or the files were not processed)
-    covered = sorted([(start, end) for _, start, end in _spans(times, labels, max_gap)]
-                     + [(start, end) for start, end, _, _ in not_searched])
-    gaps = []
-    for (_, end), (start, _) in zip(covered[:-1], covered[1:]):
-        end = max(end, gaps[-1][1] if gaps else end)
-        if start - end > max_gap:
-            gaps.append((end, start))
+    # The time without data: the gaps in the time line longer than a few chunks (e.g. no recording, or the files
+    #   were not processed)
+    gaps = [(a[2], b[1]) for a, b in zip(segments[:-1], segments[1:]) if b[1] - a[2] > max_gap]
 
     fig = Figure(figsize=(14, 8.6), dpi=110)
     axes = fig.subplots(4, 1, sharex=True, gridspec_kw={'height_ratios': [3, 2, 2, 0.7], 'hspace': 0.1})
@@ -1252,11 +1296,11 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     # Shade the time when the sky was partly clouded and clouded, when the inputs were not searched, and without
     #   data, on all panels
     for ax in axes:
-        for state, start, end in _spans(times, labels, max_gap):
+        for state, start, end in segments:
             if state in shade:
                 ax.axvspan(start, end, color=shade[state][0], alpha=shade[state][1], lw=0, zorder=0)
-        for start, end, _, _ in not_searched:
-            ax.axvspan(start, end, facecolor='none', edgecolor='#9aa7b8', hatch='////', lw=0, zorder=0)
+            elif state == 'not_searched':
+                ax.axvspan(start, end, facecolor='none', edgecolor='#9aa7b8', hatch='////', lw=0, zorder=0)
         for start, end in gaps:
             ax.axvspan(start, end, lw=0, zorder=0, **no_data)
         ax.grid(True, color='#e5e7eb', lw=0.8, zorder=1)
