@@ -3875,7 +3875,7 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
                 k + 1, first, end, max_stars, config.ff_min_stars))
 
             # The overlap with the segment before it is not counted here, so all counts of that one are carried
-            if detectors and (detectors[-1] is not None):
+            if detectors and (detectors[-1] is not None) and (detectors[-1].persistence_full is not None):
                 persistence = detectors[-1].persistence_full
                 persistence_frames = detectors[-1].persistence_full_frames
             detectors.append(None)
@@ -3899,8 +3899,8 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
             remaining = max(remaining - detector.tracks_measured, 0)
 
         # The persistent pixels are judged over all segments so far (the runs of every overlap once), as over the
-        #   whole input
-        if detector is not None:
+        #   whole input. A segment which was too short to be searched has no counts, those so far are kept
+        if (detector is not None) and (detector.persistence_carry is not None):
             persistence, persistence_frames = detector.persistence_carry, detector.persistence_carry_frames
         segment_detections.append(detections)
         log.info('Matched filter: segment {:d}/{:d} ({:d}-{:d}): {:d} detections'.format(k + 1, len(ranges), first,

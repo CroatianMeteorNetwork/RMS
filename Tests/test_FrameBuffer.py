@@ -634,3 +634,53 @@ def test_tail_segment_without_a_chunk_of_its_own(monkeypatch):
 
     mfd.detectMatchedFilterSegments(handle, config, 256)
     assert calls[-1] == (512, 600)
+
+
+def test_persistence_kept_past_a_segment_too_short_to_search(monkeypatch):
+    """ A segment too short to be searched (shorter than the longest run) has no persistence counts, and the counts
+        of the segments before it are used for the detections of the whole input. """
+
+    import RMS.MatchedFilterDetection as mfd
+
+    config = cr.Config()
+    config.mf_block_frames = 256
+    config.mf_segment_overlap = 0
+    config.ff_min_stars = 1
+    handle = _Input(total_frames=600)
+
+    def stars(img_handle, config, chunk_range=None, **kwargs):
+        from RMS.Formats.FFfile import constructFFName
+        return [[constructFFName('XX0001', handle.currentFrameTime(frame_no=c*128, dt_obj=True)), [(1.0,)*8]*5]
+                for c in range(*chunk_range)]
+
+    class _Det(_Detector):
+        psf_sigma = 0.7
+        tracks_measured = 0
+
+        def joinDetections(self, detections):
+            return detections
+
+    def detect(img_handle, config, frame_range=None, **kwargs):
+        det = _Det()
+
+        # The last segment is not searched (too short): no counts
+        if frame_range[0] >= 512:
+            det.persistence_carry = det.persistence_full = None
+        else:
+            det.persistence_carry = det.persistence_full = 'counts to {}'.format(frame_range[1])
+        det.persistence_carry_frames = det.persistence_full_frames = frame_range[1]
+        return [], det
+
+    used = {}
+    def persistent(detections, persistence, fraction, det_bin):
+        used['persistence'] = persistence
+        return detections
+
+    monkeypatch.setattr(mfd, 'extractStarsFrameInterface', stars)
+    monkeypatch.setattr(mfd, 'detectMatchedFilter', detect)
+    monkeypatch.setattr(mfd, 'skyQuality', lambda *args, **kwargs: None)
+    monkeypatch.setattr(mfd, 'SegmentedRun', lambda *args, **kwargs: None)
+    monkeypatch.setattr(mfd, 'removePersistentDetections', persistent)
+
+    mfd.detectMatchedFilterSegments(handle, config, 256)
+    assert used['persistence'] == 'counts to 512'
