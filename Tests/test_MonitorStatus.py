@@ -913,3 +913,40 @@ def test_platepar_in_use(tmp_path, now, update, latest_newer, expected):
     calibration = status.build(_state())['calibration']
     assert calibration['platepar'] == (latest if expected == 'latest' else given)
     assert calibration['platepar_from_previous_night'] == (expected == 'latest')
+
+
+def test_reports_which_didnt_finish(tmp_path, now):
+    """ A report which was started but didn't finish is not the latest report. """
+
+    status, config = _status(tmp_path)
+    output_dir = str(tmp_path/'output')
+    mnr.updateReportState(output_dir, 'XX0001_20251223_222000_000000', reported_at='2025-12-24T12:00:00.000000',
+                          failed_steps=[])
+    mnr.updateReportState(output_dir, NIGHT, trigger='sunrise', upload_files=[])
+
+    reports = status.build(_state())['reports']
+    assert reports['last_night'] == 'XX0001_20251223_222000_000000' and reports['last_report_ok']
+
+
+def test_results_which_cant_be_read_are_read_again(tmp_path, now):
+    """ A processed file whose results can't be read counts as processed, and is read again later. """
+
+    status, config = _status(tmp_path)
+    output_dir = str(tmp_path/'output')
+    results_dir = _searchedFile(output_dir, config, 'file1')
+    summary_path = os.path.join(output_dir, results_dir, mnr.MF_DONE_NAME)
+    with open(summary_path) as f:
+        summary = f.read()
+    with open(summary_path, 'w') as f:
+        f.write(summary[:20])
+
+    night = status.build(_state())['night']
+    assert (night['files_processed'], night['files_unreadable'], night['files_not_searched']) == (1, 1, 0)
+    assert night['detections'] == 1
+
+    # The summary is complete again (the done flag didn't change)
+    with open(summary_path, 'w') as f:
+        f.write(summary)
+    night = status.build(_state())['night']
+    assert (night['files_processed'], night['files_unreadable']) == (1, 0)
+    assert night['observed_h'] > 0

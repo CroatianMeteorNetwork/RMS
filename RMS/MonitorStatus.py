@@ -593,14 +593,21 @@ class MonitorStatus(object):
             cached = self.file_cache.get(results_dir)
             if (cached is None) or (cached[0] != stamp):
                 file_result = readFileSkyResults(results_path, self.config)
-                if file_result is not None:
-                    file_result['ftp_detections'] = fileDetections(results_path)
-                cached = (stamp, file_result, {})
-                self.file_cache[results_dir] = cached
+
+                # Results which can't be read are read again next time (e.g. they were being written), and the
+                #   file still counts as processed, without its sky
+                if file_result is None:
+                    file_result = {'star_chunks': [], 'chunk_s': None, 'summary': None, 'searched': False,
+                                   'measured': False, 'removed_times': None, 'removed_count': 0, 'detections': 0,
+                                   'unreadable': True}
+                    cached = (None, file_result, {})
+                else:
+                    cached = (stamp, file_result, {})
+                    self.file_cache[results_dir] = cached
+
+                file_result['ftp_detections'] = fileDetections(results_path)
 
             file_result = cached[1]
-            if file_result is None:
-                continue
 
             # The length of the file from the times of its chunks (min)
             length_min = None
@@ -819,7 +826,9 @@ class MonitorStatus(object):
             'start_utc': _timeString(night_start),
             'end_utc': _timeString(night_end),
             'files_processed': len(files),
-            'files_not_searched': sum(1 for _, _, file_result, _ in files if not file_result['searched']),
+            'files_not_searched': sum(1 for _, _, file_result, _ in files
+                                      if not (file_result['searched'] or file_result.get('unreadable'))),
+            'files_unreadable': sum(1 for _, _, file_result, _ in files if file_result.get('unreadable')),
             'observed_h': _round(summary['observed_h']),
             'clear_percent': _round(100*summary['clear'], 1),
             'partly_clouded_percent': _round(100*summary['partly'], 1),
@@ -1043,8 +1052,9 @@ class MonitorStatus(object):
         except Exception:
             nights = {}
 
-        # The latest report
-        reported = [(night_state.get('reported_at') or '', night) for night, night_state in nights.items()]
+        # The latest report which was done (a report which is running or didn't finish has no time yet)
+        reported = [(night_state['reported_at'], night) for night, night_state in nights.items()
+                    if night_state.get('reported_at')]
         if reported:
             reported_at, night = max(reported)
             night_state = nights[night]

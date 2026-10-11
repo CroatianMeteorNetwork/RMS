@@ -577,7 +577,7 @@ An example (shortened; the processing statistics and the calibration of the nigh
 | | `last_hour` | The shares of the states and the median dimming in the last hour of the data. |
 | `night` | `name`, `start_utc`, `end_utc` | The night (sunset to sunrise). |
 | | `observed_h`, `clear_percent`, `partly_clouded_percent`, `clouded_percent`, `too_few_stars_percent` | The night so far, the same numbers as the [sky conditions plot](#what-a-report-produces) of the night report. |
-| | `files_processed`, `files_not_searched`, `detections`, `removed_by_clouds` | Files and detections of the night so far. The detections are counted in the FTPdetectinfo of every file (the normal detection, or the matched filter when it replaces it). |
+| | `files_processed`, `files_not_searched`, `files_unreadable`, `detections`, `removed_by_clouds` | Files and detections of the night so far (`files_unreadable`: processed files whose results could not be read, they are read again at the next status). The detections are counted in the FTPdetectinfo of every file (the normal detection, or the matched filter when it replaces it). |
 | | `matched_filter_detections` | The detections of the matched filter when it runs as a separate pass next to the normal detection. |
 | `calibration` | `status`, `reason` | `ok`, `failing`, `degraded` (the camera may have moved) or `unknown` (too few chunks on clear sky to judge), with the reason. |
 | | `last_file`, `recent`, `tonight` | For the last file, the latest files with at least 10 chunks on clear sky, and the night: the chunks, how many were recalibrated, the share of the chunks on clear sky which were recalibrated, the median residual of the fit (px), the median number of matched stars, the photometric zero point (mag) and the median difference of the pointing from the reference platepar (px). |
@@ -585,7 +585,7 @@ An example (shortened; the processing statistics and the calibration of the nigh
 | | `platepar`, `platepar_utc`, `platepar_from_previous_night` | The platepar which the following files are processed with, selected as by the workers (see [Platepar](#platepar)), and whether it is the best platepar of a previous night. |
 | `detector` | `name` | `matched_filter`, `normal_and_matched_filter` or `normal`. |
 | | `gpu_configured`, `gpu_used_last_file`, `cloud_filter`, `candidates_dropped_last_file` | The matched filter: GPU setting and use, the cloud filter, and the candidates which were not measured. |
-| `reports` | `mode`, `report_running`, `last_night`, `last_report_utc`, `last_report_ok`, `failed_steps`, `recalibration` | The night reports. |
+| `reports` | `mode`, `report_running`, `last_night`, `last_report_utc`, `last_report_ok`, `failed_steps`, `recalibration` | The night reports: the latest one which finished, and whether one is running. |
 | `disk` | `output_free_gb`, `staging_free_gb`, `paused_for_space`, `last_cleanup_utc` | Free space, and the cleanup. |
 | `faults` | `code`, `severity`, `since_utc`, `message` | The faults, the most severe first, see below. |
 
