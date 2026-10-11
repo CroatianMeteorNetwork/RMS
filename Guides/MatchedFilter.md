@@ -265,6 +265,14 @@ Objects are at 0.87–1, cloud structures at 0.2–0.7. A detection below 0.6 is
 candidate tracks move with it (cloud structures move together). The frames on clouded sky are left out of the stack.
 Very significant detections (above 200) are not tested: a very bright object is spread by its own trails.
 
+**Linear structures.** A track along a thin line (a trail, or light left along the path of a bright source which
+crossed the field) is concentrated at the centre of the ring as a whole, as the line lights only a small part of it.
+The ring is therefore also taken along axes through the centre in 16 directions (its pixels within 1.5 px of each
+axis), and $c$ computed with the brightest axis in place of the whole ring. A detection below
+`mf_line_concentration` (0.5) is rejected if that axis is at least 5 sigma above the background. Tracks on such
+light are at 0.08–0.38, objects at 0.5–1 (lower only for tracks which run beside a bright object or pick up its
+trails). The number of rejected detections is in the done file (`linear_structure_rejected`); 0 turns the test off.
+
 ### 8. Clear sky
 
 The measurements on clouded sky are removed: first the fitted positions (and the track if fewer than
@@ -544,6 +552,7 @@ All settings are in the `[MatchedFilter]` section, see the comments in `.config`
 | `mf_run_frames`, `mf_slow_run_frames` | 8, 16; 32 | Frames of the runs searched for all motions, and of the runs for small motions |
 | `mf_threshold` | 5.0 | Threshold of the search (sigma of the maximum over the motions) |
 | `mf_track_significance` | 12.0 | Minimum significance of a detection |
+| `mf_line_concentration` | 0.5 | Minimum concentration against the brightest axis (linear structures), 0 off |
 | `mf_min_frames` | 20 | Minimum duration of a detection (frames) |
 | `mf_min_centroids` | 6 | Minimum number of measurements of a detection (on clear sky) |
 | `mf_max_pos_error` | 0.5 | Target position error of a measurement (px): sets the frames per position; measurements up to twice this are accepted |
