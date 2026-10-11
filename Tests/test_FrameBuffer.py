@@ -147,8 +147,7 @@ def _track(frames, x0=100.0, y0=200.0, vx=0.5, vy=-0.2):
 
 def test_stitch_segments():
     """ An object found in both segments of an overlap is joined at its middle, the detections found in one
-        segment are kept (in the half of the overlap of that segment), and different objects in the overlap are not
-        joined. """
+        segment are kept whole, and different objects in the overlap are not joined. """
 
     # Segments 0-2048 and 1536-3584, overlap 1536-2048, cut at 1792
     cuts, overlaps = [1792], [(1536, 2048)]
@@ -167,9 +166,8 @@ def test_stitch_segments():
     joined = [det[2] for det in detections if det[2][0, 0] == 1000][0]
     assert joined[0, 0] == 1000 and joined[-1, 0] == 2996
     assert np.all(np.diff(joined[:, 0]) > 0)
-    # The object found only in the second segment begins at the middle of the overlap (the first segment has the
-    #   frames before it)
-    assert any(det[2][0, 0] == 1792 for det in detections)
+    # The object found only in the second segment is kept whole (the first one found nothing near it)
+    assert any(det[2][0, 0] == 1600 for det in detections)
 
 
 def test_block_indices_within_the_blocks():
@@ -185,13 +183,14 @@ def test_block_indices_within_the_blocks():
 
 def test_stitch_segments_ownership():
     """ The detections of a segment which lie entirely in the half of an overlap which belongs to the neighbouring
-        segment are left to that segment (e.g. a fragment of an object at the edge of a segment). """
+        segment are left to that segment if it found something near them (e.g. a fragment of an object at the edge
+        of a segment, next to its track measured by the other segment). """
 
     cuts, overlaps = [1792], [(1536, 2048)]
 
-    # The previous segment has a fragment after the cut, the next one before it
-    fragment_a = _track(np.arange(1850, 1900, 4), x0=600.0)
-    fragment_b = _track(np.arange(1600, 1700, 4), x0=700.0)
+    # The previous segment has a fragment after the cut, the next one before it, both 8 px from the object
+    fragment_a = _track(np.arange(1850, 1900, 4), x0=108.0)
+    fragment_b = _track(np.arange(1600, 1700, 4), x0=108.0)
     crossing_a = _track(np.arange(1000, 2048, 4))
     crossing_b = _track(np.arange(1536, 3000, 4))
 
@@ -266,3 +265,19 @@ def test_stitch_segments_each_frame_once():
     assert len(detections) == 2
     spans = sorted((det[2][0, 0], det[2][-1, 0]) for det in detections)
     assert spans[0][1] < 1792 <= spans[1][0]
+
+
+def test_stitch_segments_keeps_one_sided_detections():
+    """ A detection in the half of an overlap which belongs to the other segment, or crossing its middle, is kept
+        whole if the other segment found nothing near it (the segments are searched with their own statistics, so
+        an object can be found in one of them only). """
+
+    cuts, overlaps = [1792], [(1536, 2048)]
+    only_first = _track(np.arange(1850, 1950, 4), x0=600.0)
+    only_second = _track(np.arange(1600, 1700, 4), x0=700.0)
+    crossing_first = _track(np.arange(1700, 2000, 4), x0=800.0)
+
+    detections = stitchSegments([[[0, 0, only_first], [0, 0, crossing_first]], [[0, 0, only_second]]], cuts,
+                                overlaps, _Detector(), tolerance=5.0)
+    spans = sorted((det[2][0, 0], det[2][-1, 0]) for det in detections)
+    assert spans == [(1600, 1696), (1700, 1996), (1850, 1946)]

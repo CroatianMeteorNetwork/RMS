@@ -3325,14 +3325,19 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
 
 
 
+# A detection of a segment is near one of the neighbouring segment within this many times the tolerance of the same
+#   object (see stitchSegments)
+NEAR_TOLERANCE_FACTOR = 4.0
+
+
 def stitchSegments(segment_detections, cuts, overlaps, detector, tolerance, searched=None):
     """ Join the detections of neighbouring segments of an input. Every overlap of two segments is split at its
-        middle: the frames before it belong to the first segment, the ones after it to the second one, and the
-        detections of a segment which lie entirely in the half of the other one are left to the other one (which has
-        the same frames). An object which crosses the middle is found in both segments: its detections are joined
-        there (the part before it from the first segment, the part after it from the second one). The detections
-        which cross it and are not joined are cut there, so every frame of an overlap is covered by the detections
-        of one segment only (the pieces are joined later, see MatchedFilterDetector.joinDetections).
+        middle: the frames before it belong to the first segment, the ones after it to the second one. An object which crosses the middle is found in both segments: its detections are joined
+        there (the part before it from the first segment, the part after it from the second one). The other
+        detections in the half of the other segment (or crossing the middle) are left to it (or cut at the middle)
+        if it found something near them, e.g. the same object measured differently, so an object is not kept twice;
+        those found in one segment only are kept whole (the segments are searched with their own statistics). The
+        pieces are joined later, see MatchedFilterDetector.joinDetections.
 
     Arguments:
         segment_detections: [list] Detections of every segment, as [rho, theta, centroids].
@@ -3357,17 +3362,40 @@ def stitchSegments(segment_detections, cuts, overlaps, detector, tolerance, sear
         f, x, y = cent[order, 0], cent[order, 1], cent[order, 2]
         return np.interp(frames, f, x), np.interp(frames, f, y)
 
+    def _near(cent, others):
+        """ Whether one of the other detections follows an object near this one (within a few PSF widths, a
+            looser tolerance than for the same object) in the frames they share. """
+
+        for other in others:
+            common = cent[(cent[:, 0] >= other[:, 0].min()) & (cent[:, 0] <= other[:, 0].max())]
+            if len(common) < 3:
+                continue
+            x, y = _positionsAt(other, common[:, 0])
+            if np.median(np.hypot(common[:, 1] - x, common[:, 2] - y)) <= NEAR_TOLERANCE_FACTOR*tolerance:
+                return True
+
+        return False
+
     detections = list(segment_detections[0]) if segment_detections else []
     for k in range(1, len(segment_detections)):
         cut, (ov_first, ov_end) = cuts[k - 1], overlaps[k - 1]
+        segment = segment_detections[k]
+
+        # The detections of the two segments as they were found, to check if one has something near
+        previous_cents = [det[2] for det in detections]
+        segment_cents = [det[2] for det in segment]
+        cut_previous = ((searched is None) or searched[k])
+        cut_segment = ((searched is None) or searched[k - 1])
 
         # The detections of the previous segment entirely after the middle of the overlap, and the ones of this
-        #   segment entirely before it, belong to the other segment (if it was searched)
-        segment = segment_detections[k]
-        if (searched is None) or searched[k]:
-            detections = [det for det in detections if det[2][:, 0].min() < cut]
-        if (searched is None) or searched[k - 1]:
-            segment = [det for det in segment if det[2][:, 0].max() >= cut]
+        #   segment entirely before it, belong to the other segment if it found something near them (otherwise
+        #   they were found in this segment only, and are kept)
+        if cut_previous:
+            detections = [det for det in detections
+                          if (det[2][:, 0].min() < cut) or not _near(det[2], segment_cents)]
+        if cut_segment:
+            segment = [det for det in segment
+                       if (det[2][:, 0].max() >= cut) or not _near(det[2], previous_cents)]
 
         # The detections of the previous segment which reach into the overlap can be joined
         candidates = [i for i, det in enumerate(detections) if det[2][:, 0].max() >= ov_first]
@@ -3392,10 +3420,11 @@ def stitchSegments(segment_detections, cuts, overlaps, detector, tolerance, sear
                 if dist <= best_dist:
                     best, best_dist = i, dist
 
-            # Not found in the previous segment: its part after the middle of the overlap (all of it if the
-            #   previous segment was not searched)
+            # Not the same object as one of the previous segment: its part after the middle of the overlap if the
+            #   previous segment found something near it (e.g. the same object measured differently), all of it
+            #   otherwise
             if best is None:
-                if (searched is None) or searched[k - 1]:
+                if cut_segment and (cent[:, 0].min() < cut) and _near(cent, previous_cents):
                     cent = cent[cent[:, 0] >= cut]
                 if len(cent) >= 2:
                     new.append([*detector.polarLine(cent), cent])
@@ -3413,11 +3442,11 @@ def stitchSegments(segment_detections, cuts, overlaps, detector, tolerance, sear
             used.add(best)
 
         # The detections of the previous segment which cross the middle of the overlap and were not joined: their
-        #   part before it (the segment after it has the same frames), if this segment was searched
-        if (searched is None) or searched[k]:
+        #   part before it, if this segment found something near them
+        if cut_previous:
             for i in candidates:
                 cent = detections[i][2]
-                if (i not in used) and (cent[:, 0].max() >= cut):
+                if (i not in used) and (cent[:, 0].max() >= cut) and _near(cent, segment_cents):
                     cent = cent[cent[:, 0] < cut]
                     detections[i] = [*detector.polarLine(cent), cent] if len(cent) >= 2 else None
             detections = [det for det in detections if det is not None]
