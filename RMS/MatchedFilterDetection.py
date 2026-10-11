@@ -3316,7 +3316,7 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
 
 
 
-def stitchSegments(segment_detections, cuts, overlaps, detector, tolerance):
+def stitchSegments(segment_detections, cuts, overlaps, detector, tolerance, searched=None):
     """ Join the detections of neighbouring segments of an input. Every overlap of two segments is split at its
         middle: the frames before it belong to the first segment, the ones after it to the second one, and the
         detections of a segment which lie entirely in the half of the other one are left to the other one (which has
@@ -3331,6 +3331,10 @@ def stitchSegments(segment_detections, cuts, overlaps, detector, tolerance):
         detector: [MatchedFilterDetector] A detector of the input, for the polar lines of the joined detections.
         tolerance: [float] Largest median distance (unbinned px) between the two detections of an object in the
             overlap.
+
+    Keyword arguments:
+        searched: [list] Whether every segment was searched. The half of an overlap which belongs to a segment that
+            was not searched stays with the other one. None by default (all were searched).
 
     Return:
         [list] Detections of the whole input.
@@ -3348,9 +3352,12 @@ def stitchSegments(segment_detections, cuts, overlaps, detector, tolerance):
         cut, (ov_first, ov_end) = cuts[k - 1], overlaps[k - 1]
 
         # The detections of the previous segment entirely after the middle of the overlap, and the ones of this
-        #   segment entirely before it, belong to the other segment
-        detections = [det for det in detections if det[2][:, 0].min() < cut]
-        segment = [det for det in segment_detections[k] if det[2][:, 0].max() >= cut]
+        #   segment entirely before it, belong to the other segment (if it was searched)
+        segment = segment_detections[k]
+        if (searched is None) or searched[k]:
+            detections = [det for det in detections if det[2][:, 0].min() < cut]
+        if (searched is None) or searched[k - 1]:
+            segment = [det for det in segment if det[2][:, 0].max() >= cut]
 
         # The detections of the previous segment which reach into the overlap can be joined
         candidates = [i for i, det in enumerate(detections) if det[2][:, 0].max() >= ov_first]
@@ -3379,9 +3386,12 @@ def stitchSegments(segment_detections, cuts, overlaps, detector, tolerance):
                 detections.append(det)
                 continue
 
-            # The same object: the centroids before the cut from the previous segment, the others from this one
+            # The same object: the centroids before the cut from the previous segment, the others from this one.
+            #   Where one of them doesn't reach the cut, they are joined where the other one begins or ends, so no
+            #   measured frames are lost
             other = detections[best][2]
-            joined = np.vstack([other[other[:, 0] < cut], cent[cent[:, 0] >= cut]])
+            split = min(max(cut, cent[:, 0].min()), other[:, 0].max() + 1)
+            joined = np.vstack([other[other[:, 0] < split], cent[cent[:, 0] >= split]])
             if len(joined) < 2:
                 joined = other if len(other) >= len(cent) else cent
             detections[best] = [*detector.polarLine(joined), joined]
@@ -3421,13 +3431,25 @@ class SegmentedRun(object):
         """ Summary of the input, from the summaries of its segments. Counts of the detections removed by
             clouds are taken from the segment which the time belongs to (each overlap is split at its middle). """
 
-        bounds = [0] + list(self.cuts) + [self.img_handle.total_frames]
         run = [(k, det) for k, det in enumerate(self.detectors) if det is not None]
+
+        # Without a searched segment the input was not searched, as an input without enough stars
+        if not run:
+            return {}
+
+        # The frames which belong to every segment: up to the middle of its overlaps with the neighbouring
+        #   segments which were searched, the whole overlap otherwise
+        searched = [det is not None for det in self.detectors]
+        bounds = []
+        for k, (first, end) in enumerate(self.ranges):
+            lo = self.cuts[k - 1] if (k > 0) and searched[k - 1] else first
+            hi = self.cuts[k] if (k < len(self.cuts)) and searched[k + 1] else end
+            bounds.append((lo, hi))
 
         # The detections removed by clouds in the frames which belong to every segment
         removed = []
         for k, det in run:
-            removed += [f for f in det.cloud_removed_frames if bounds[k] <= f < bounds[k + 1]]
+            removed += [f for f in det.cloud_removed_frames if bounds[k][0] <= f < bounds[k][1]]
 
         # The time of every step summed over the segments, with the steps outside them
         timing = collections.defaultdict(float)
@@ -3493,6 +3515,10 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
 
     # The segments, which share the overlap (in whole blocks)
     overlap = -(-int(config.mf_segment_overlap)//unit)*unit
+    if overlap > segment_frames - unit:
+        log.warning('Matched filter: mf_segment_overlap {:d} is too large for segments of {:d} frames, {:d} '
+                    'used'.format(int(config.mf_segment_overlap), segment_frames, max(segment_frames - unit, 0)))
+        overlap = max(segment_frames - unit, 0)
     ranges = segmentRanges(img_handle.total_frames, segment_frames, overlap, unit)
     buffer = SegmentBuffer(img_handle, max(end - first for first, end in ranges))
     log.info('Matched filter: {:d} segments of up to {:d} frames ({:.1f} min), overlap {:d} frames'.format(
@@ -3548,7 +3574,8 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
     detections = []
     if searched:
         tolerance = 3*2.355*searched[0].psf_sigma*searched[0].det_bin
-        detections = stitchSegments(segment_detections, cuts, overlaps, searched[0], tolerance)
+        detections = stitchSegments(segment_detections, cuts, overlaps, searched[0], tolerance,
+                                    searched=[det is not None for det in detectors])
         detections = searched[0].joinDetections(detections)
 
     # The sky reference and the log of the conditions are updated once, with the stars of the whole input

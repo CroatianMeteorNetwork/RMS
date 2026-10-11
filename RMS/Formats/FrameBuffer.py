@@ -51,8 +51,9 @@ def segmentUnit(config, img_handle):
 
 def segmentRanges(total_frames, segment_frames, overlap, unit):
     """ The frame ranges of the segments of an input: every segment begins overlap frames before the end of the
-        previous one, and the last one ends at the end of the input. A last segment which would be shorter than
-        the overlap and a unit is taken into the one before it instead.
+        previous one, and the last one ends at the end of the input. A last segment which would add less than a
+        unit of new frames is taken into the one before it, if that still fits in the memory. The overlap is at
+        most a unit less than a segment, so every segment adds new frames.
 
     Arguments:
         total_frames: [int] Number of frames of the input.
@@ -67,6 +68,7 @@ def segmentRanges(total_frames, segment_frames, overlap, unit):
     if (segment_frames <= 0) or (total_frames <= segment_frames):
         return [(0, total_frames)]
 
+    overlap = max(0, min(overlap, segment_frames - unit))
     step = segment_frames - overlap
     ranges = []
     first = 0
@@ -75,8 +77,8 @@ def segmentRanges(total_frames, segment_frames, overlap, unit):
         first += step
 
     # The last segment ends at the end of the input. If it would add little more than the overlap, the segment
-    #   before it is extended to the end instead
-    if (total_frames - first) - overlap < unit:
+    #   before it is extended to the end instead (if it still fits)
+    if ((total_frames - first) - overlap < unit) and (total_frames - ranges[-1][0] <= segment_frames):
         ranges[-1] = (ranges[-1][0], total_frames)
     else:
         ranges.append((first, total_frames))

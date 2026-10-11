@@ -64,8 +64,11 @@ def test_segment_ranges():
         counts[first:end] += 1
     assert counts.min() == 1 and counts.max() == 2 and (counts == 2).sum() == 3*512
 
-    # A last segment of little more than the overlap is taken into the one before it
-    assert segmentRanges(5200, 2048, 512, 256) == [(0, 2048), (1536, 3584), (3072, 5200)]
+    # A last segment of little more than the overlap is taken into the one before it if that still fits in the
+    #   memory, otherwise it is a short segment of its own
+    assert segmentRanges(5200, 2048, 512, 256) == [(0, 2048), (1536, 3584), (3072, 5120), (4608, 5200)]
+    assert segmentRanges(5100, 2048, 512, 256) == [(0, 2048), (1536, 3584), (3072, 5100)]
+    assert max(end - first for first, end in segmentRanges(5320, 2048, 512, 256)) <= 2048
 
     # An input which fits in one segment, and no segments
     assert segmentRanges(1000, 2048, 512, 256) == [(0, 1000)]
@@ -193,3 +196,53 @@ def test_stitch_segments_ownership():
                                 cuts, overlaps, _Detector(), tolerance=5.0)
 
     assert len(detections) == 1 and detections[0][2][0, 0] == 1000 and detections[0][2][-1, 0] == 2996
+
+
+@pytest.mark.parametrize('segment_frames', [256, 512, 768])
+def test_segment_ranges_with_a_large_overlap(segment_frames):
+    """ An overlap which is not smaller than a segment is reduced, so every segment adds at least a unit of new
+        frames (it would never advance otherwise). """
+
+    ranges = segmentRanges(10000, segment_frames, 512, 256)
+    assert ranges[0][0] == 0 and ranges[-1][1] == 10000
+    assert all(b[0] - a[0] >= 256 for a, b in zip(ranges[:-1], ranges[1:]))
+    assert all(end - first <= segment_frames for first, end in ranges)
+
+
+def test_stitch_segments_next_to_a_segment_not_searched():
+    """ The half of an overlap which belongs to a segment that was not searched stays with the searched segment. """
+
+    cuts, overlaps = [1792], [(1536, 2048)]
+    after_cut = _track(np.arange(1900, 1950, 4))
+    before_cut = _track(np.arange(1600, 1650, 4), x0=300.0)
+
+    detections = stitchSegments([[[0, 0, after_cut]], []], cuts, overlaps, _Detector(), tolerance=5.0,
+                                searched=[True, False])
+    assert len(detections) == 1
+
+    detections = stitchSegments([[], [[0, 0, before_cut]]], cuts, overlaps, _Detector(), tolerance=5.0,
+                                searched=[False, True])
+    assert len(detections) == 1
+
+
+def test_stitch_segments_without_a_gap():
+    """ The two detections of an object are joined where both have measurements, so no frames are lost when one
+        of them doesn't reach the middle of the overlap. """
+
+    cuts, overlaps = [1792], [(1536, 2048)]
+    first = _track(np.arange(1600, 2048, 1))
+    second = _track(np.arange(1900, 2400, 1))
+
+    joined = stitchSegments([[[0, 0, first]], [[0, 0, second]]], cuts, overlaps, _Detector(), tolerance=5.0)[0][2]
+    assert joined[0, 0] == 1600 and joined[-1, 0] == 2399
+    assert np.all(np.diff(joined[:, 0]) == 1)
+
+
+def test_summary_without_a_searched_segment():
+    """ A file of which no segment was searched has no summary of the matched filter (it is not searched, as a
+        file without enough stars). """
+
+    from RMS.MatchedFilterDetection import SegmentedRun
+
+    run = SegmentedRun(_Input(), [(0, 1024), (512, 2000)], [None, None], [768], None, None, {})
+    assert run.summary() == {}
