@@ -1680,3 +1680,18 @@ def test_magnitude_of_a_detection():
     assert mnr.detectionMagnitude([_meas(True, 3.0), _meas(True, 5.0), _meas(True, 4.0)]) == pytest.approx(4.0)
     assert mnr.detectionMagnitude([_meas(False, 0.0), _meas(False, 0.0)]) is None
     assert mnr.detectionMagnitude([_meas(True, float('nan'))]) is None
+
+
+@pytest.mark.parametrize('calibration, status', [(None, 0), ('Recalibrated with RMS on: 2025-12-25', 1)])
+def test_calibration_status_of_the_detections(tmp_path, calibration, status):
+    """ The calibration status of the measurements read from an FTPdetectinfo follows the calibration line of
+        every detection: 0 for an uncalibrated one, 1 for a calibrated one.
+    """
+
+    picks = [[f, 10.0 + f, 20.0, 170.0, 50.0, 60.0, 70.0, 1000, 2.5, 50, 8.0, 0] for f in (3.0, 4.0)]
+    FTPdetectinfo.writeFTPdetectinfo([['FF_XX0001_20251225_030000_000_0000000.fits', 1, 10.0, 45.0, picks, 25.0]],
+        str(tmp_path), 'FTPdetectinfo_test.txt', str(tmp_path), 'XX0001', 25.0, calibration=calibration,
+        celestial_coords_given=True)
+
+    entries = FTPdetectinfo.readFTPdetectinfo(str(tmp_path), 'FTPdetectinfo_test.txt')
+    assert [meas[0] for meas in entries[0][11]] == [status, status]
