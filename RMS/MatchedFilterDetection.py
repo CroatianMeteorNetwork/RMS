@@ -3432,6 +3432,29 @@ def apportion(total, weights):
     return shares.tolist()
 
 
+def isValidDetection(cent, detector):
+    """ Whether the rows of a detection make a detection, with the checks of MatchedFilterDetector.run: enough of
+        them, lasting and moving long enough (the motion in the binned frames of the detection).
+
+    Arguments:
+        cent: [ndarray] Rows of the detection (unbinned), [frame, x, y, ...], sorted by frame.
+        detector: [MatchedFilterDetector] A detector of the input, for the limits.
+
+    Return:
+        [bool] True if it is a detection.
+    """
+
+    return (len(cent) >= max(2, detector.opts.min_centroids)) \
+        and (cent[-1, 0] - cent[0, 0] >= detector.opts.min_frames) \
+        and (np.hypot(*(cent[-1, 1:3] - cent[0, 1:3]))/detector.det_bin >= detector.minDisplacement())
+
+
+def removeInvalidDetections(detections, detector):
+    """ The detections which pass the checks of a detection (see isValidDetection). """
+
+    return [det for det in detections if isValidDetection(det[2], detector)]
+
+
 def removeCloudedRows(detections, sky_map, detector):
     """ Remove the rows of the detections on clouded sky (see SkyQualityMap.isClear), and the detections which
         are then no detections any more (too few rows, too short in time or in motion, see
@@ -3457,13 +3480,10 @@ def removeCloudedRows(detections, sky_map, detector):
             kept.append(det)
             continue
 
-        # The rows on clear sky, if they still make a detection as the checks of MatchedFilterDetector.run: enough
-        #   of them, lasting and moving long enough (the motion in the binned frames of the detection)
+        # The rows on clear sky, if they still make a detection
         removed_rows += cent[~clear, 0].tolist()
         rows = cent[clear]
-        if (len(rows) < max(2, detector.opts.min_centroids)) \
-                or (rows[-1, 0] - rows[0, 0] < detector.opts.min_frames) \
-                or (np.hypot(*(rows[-1, 1:3] - rows[0, 1:3]))/detector.det_bin < detector.minDisplacement()):
+        if not isValidDetection(rows, detector):
             removed_first.append(int(round(cent[0, 0])))
             continue
         kept.append([*detector.polarLine(rows), rows])
@@ -3817,7 +3837,7 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
     remaining = int(config.mf_max_tracks)
 
     timing = collections.defaultdict(float)
-    star_list, detectors, segment_detections = [], [], []
+    star_list, star_firsts, detectors, segment_detections = [], [], [], []
     done_chunks = 0
     persistence, persistence_frames = {}, 0
     for k, (first, end) in enumerate(ranges):
@@ -3832,15 +3852,21 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
         t1 = time()
         end_chunk = img_handle.total_fr_chunks if (k == len(ranges) - 1) else end//chunk_frames
         if end_chunk > done_chunks:
-            star_list += extractStarsFrameInterface(buffer, config, chunk_frames=chunk_frames,
+            new_stars = extractStarsFrameInterface(buffer, config, chunk_frames=chunk_frames,
                 flat_struct=flat_struct, dark=dark, mask=mask, save_calstars=False, chunk_callback=chunk_callback,
                 chunk_range=(done_chunks, end_chunk))
+            star_firsts += chunkFirstFrames(new_stars, buffer,
+                                            frame_range=(done_chunks*chunk_frames, end_chunk*chunk_frames))
+            star_list += new_stars
             done_chunks = end_chunk
         timing['stars'] += time() - t1
 
-        # The stars of the chunks of this segment
-        firsts = chunkFirstFrames(star_list, buffer, frame_range=(first, end)) if star_list else []
-        segment_stars = [entry for entry, f in zip(star_list, firsts) if f >= 0]
+        # The stars of the chunks which the frames of this segment belong to (the frames after the last whole chunk
+        #   of the input belong to it)
+        last_chunk = (img_handle.total_fr_chunks - 1)*chunk_frames
+        segment_stars = [entry for entry, f in zip(star_list, star_firsts)
+                         if (f >= 0) and (f < end)
+                         and ((img_handle.total_frames if f == last_chunk else f + chunk_frames) > first)]
 
         # Like the whole input, a segment without enough stars (clouds, twilight) is not searched
         max_stars = max([len(entry[1]) for entry in segment_stars] + [0])
@@ -3888,6 +3914,9 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
         detections = stitchSegments(segment_detections, cuts, overlaps, searched[0], tolerance,
                                     searched=[det is not None for det in detectors])
         detections = searched[0].joinDetections(detections)
+
+        # The pieces cut at the middle of an overlap and not joined again may be no detections any more
+        detections = removeInvalidDetections(detections, searched[0])
 
         # The detections mostly on pixels which are persistent over the whole input are removed, as their hits
         #   would be without segments (the segments only removed the hits on pixels persistent for sure)

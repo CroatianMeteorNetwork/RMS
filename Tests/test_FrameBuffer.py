@@ -587,3 +587,50 @@ def test_segments_on_the_blocks_of_the_detector():
     block = matchedFilterBlockFrames(config)
     assert block != 300
     assert segmentUnit(config, _Input()) % block == 0
+
+
+def test_invalid_detections_removed():
+    """ Detections which don't pass the checks of a detection (e.g. a short fragment left by the cut at the middle of
+        an overlap) are removed after the segments are joined. """
+
+    from RMS.MatchedFilterDetection import removeInvalidDetections
+
+    fragment = _track(np.arange(1792, 1800, 1), vx=50.0)
+    good = _track(np.arange(100, 300, 1), vx=5.0)
+    kept = removeInvalidDetections([[0, 0, fragment], [0, 0, good]], _Detector())
+    assert len(kept) == 1 and kept[0][2][0, 0] == 100
+
+
+def test_tail_segment_without_a_chunk_of_its_own(monkeypatch):
+    """ A last segment shorter than a chunk of the star extraction is judged by the stars of the chunk which its
+        frames belong to (the frames after the last whole chunk belong to it), and is searched. """
+
+    import RMS.MatchedFilterDetection as mfd
+
+    config = cr.Config()
+    config.mf_block_frames = 256
+    config.mf_segment_overlap = 0
+    config.ff_min_stars = 3
+    handle = _Input(total_frames=600)
+
+    def stars(img_handle, config, chunk_range=None, **kwargs):
+        from RMS.Formats.FFfile import constructFFName
+        return [[constructFFName('XX0001', handle.currentFrameTime(frame_no=c*128, dt_obj=True)), [(1.0,)*8]*5]
+                for c in range(*chunk_range)]
+
+    calls = []
+    class _Det(object):
+        psf_sigma = None
+        tracks_measured = 0
+        persistence_carry, persistence_carry_frames, persistence_full, persistence_full_frames = {}, 0, {}, 0
+    def detect(img_handle, config, frame_range=None, **kwargs):
+        calls.append(frame_range)
+        return [], _Det()
+
+    monkeypatch.setattr(mfd, 'extractStarsFrameInterface', stars)
+    monkeypatch.setattr(mfd, 'detectMatchedFilter', detect)
+    monkeypatch.setattr(mfd, 'skyQuality', lambda *args, **kwargs: None)
+    monkeypatch.setattr(mfd, 'SegmentedRun', lambda *args, **kwargs: None)
+
+    mfd.detectMatchedFilterSegments(handle, config, 256)
+    assert calls[-1] == (512, 600)
