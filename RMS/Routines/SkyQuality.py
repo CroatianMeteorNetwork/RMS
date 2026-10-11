@@ -407,7 +407,8 @@ class _FileLock(object):
 class SkyQualityMap(object):
     def __init__(self, star_list, platepar, config, begin_time, fps, chunk_frames, n_neighbours=10,
                  max_offset=0.15, max_radius_ratio=2.0, grid_cells=32, match_radius=1.0, matched=None,
-                 total_frames=None, first_frames=None, min_matched=30, reference=None, input_name=''):
+                 total_frames=None, first_frames=None, min_matched=30, reference=None, input_name='',
+                 first_frame=0):
         """ Local sky quality of the chunks of frames of one input.
 
         Arguments:
@@ -438,6 +439,8 @@ class SkyQualityMap(object):
             reference: [SkyReference] Clear-sky reference of the camera, from its other inputs. None by default
                 (only this input is used).
             input_name: [str] Name of the input (its path), for the log of the conditions. Empty by default.
+            first_frame: [int] First frame of the part of the input which the stars are from, e.g. of a segment
+                (see RMS.Formats.FrameBuffer); with total_frames as its end. 0 by default (the whole input).
         """
 
         # The options
@@ -502,19 +505,22 @@ class SkyQualityMap(object):
 
         # Chunks without stars (e.g. skipped by the star extraction, or failed) are clouded: empty chunks are put
         #   in the gaps of the chunks, and before the first and after the last one
-        self.addMissingChunks(total_frames)
+        self.addMissingChunks(total_frames, first_frame=first_frame)
         self.n_matched = np.array([len(m) for m in self.matched])
 
         # Which grid points of which chunks are clear
         self.clear = self.computeClear()
 
 
-    def addMissingChunks(self, total_frames):
+    def addMissingChunks(self, total_frames, first_frame=0):
         """ Add empty chunks (no stars, so clouded) where chunks are missing: in the gaps between the chunks,
             before the first chunk, and after the last one up to total_frames (also for a part of a chunk).
 
         Arguments:
             total_frames: [int] Number of frames of the input, or None.
+
+        Keyword arguments:
+            first_frame: [int] First frame of the input (or of its part). 0 by default.
         """
 
         cf = self.chunk_frames
@@ -524,7 +530,7 @@ class SkyQualityMap(object):
         # The first frames of the chunks, with the missing ones (a chunk is missing where the next one begins
         #   more than half a chunk after the expected frame). Before the first chunk: the chunks back to the
         #   beginning of the input
-        firsts = list(np.arange(self.chunk_first[0] - cf, -cf/2.0, -cf)[::-1].astype(int))
+        firsts = list(np.arange(self.chunk_first[0] - cf, first_frame - cf/2.0, -cf)[::-1].astype(int))
         for k, f0 in enumerate(self.chunk_first):
 
             # In the gap between this chunk and the previous one, every chunk which fits in it
@@ -1063,7 +1069,7 @@ def filterClouded(detections, sky_map, min_rows):
 
 
 
-def chunkFirstFrames(star_list, img_handle):
+def chunkFirstFrames(star_list, img_handle, frame_range=None):
     """ The first frame of every chunk of the stars: the frame of the input at the time of the chunk (the time in
         its name), among the first frames of the chunks of the input. With timestamped frames, the frames after a
         gap in the recording are not where the time and the frame rate would put them.
@@ -1071,6 +1077,10 @@ def chunkFirstFrames(star_list, img_handle):
     Arguments:
         star_list: [list] Stars of the chunks, [ff_name, stars] per chunk.
         img_handle: [FrameInterface] The input of the stars, with its chunk_frames.
+
+    Keyword arguments:
+        frame_range: [tuple] (first frame, end frame) of the part of the input which the stars are from (e.g. a
+            segment, see RMS.Formats.FrameBuffer). None by default (the whole input).
 
     Return:
         [list] The first frame of every chunk, -1 for a chunk whose time is not the time of a chunk of the input.
@@ -1081,8 +1091,9 @@ def chunkFirstFrames(star_list, img_handle):
     chunk_frames = img_handle.chunk_frames
     begin = img_handle.beginning_datetime.replace(tzinfo=None)
 
-    # The times of the first frames of all chunks of the input (s from the beginning)
-    firsts = np.arange(0, img_handle.total_frames, chunk_frames)
+    # The times of the first frames of all chunks of the input, or of its part (s from the beginning)
+    first, end = frame_range if (frame_range is not None) else (0, img_handle.total_frames)
+    firsts = np.arange(-(-first//chunk_frames)*chunk_frames, end, chunk_frames)
     times = np.array([(img_handle.currentFrameTime(frame_no=int(f), dt_obj=True).replace(tzinfo=None)
                        - begin).total_seconds() for f in firsts])
 

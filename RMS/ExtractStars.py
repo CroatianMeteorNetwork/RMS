@@ -419,7 +419,7 @@ def extractStarsImgHandle(img_handle,
         max_global_intensity=150, 
         neighborhood_size=10, intensity_threshold=18, 
         segment_radius=4, roundness_threshold=0.5, max_feature_ratio=0.8,
-        debug=False, chunk_callback=None
+        debug=False, chunk_callback=None, chunk_range=None
     ):
 
     """ Extracts stars on a given image handle by searching for local maxima and applying PSF fit for star 
@@ -446,6 +446,8 @@ def extractStarsImgHandle(img_handle,
         chunk_callback: [callable] Called as chunk_callback(img_handle, ff) after every chunk is loaded,
             before any calibration is applied. If it returns a name, that name is used as the FF name of the
             chunk. None by default.
+        chunk_range: [tuple] (first chunk, end chunk) of the chunks to extract the stars from, e.g. those of a
+            segment of the input (see RMS.Formats.FrameBuffer). None by default (all chunks).
 
     Return:
         star_list: [list] Stars of every chunk in the CALSTARS format: [[ff_name, [(Y, X, IntensSum, Ampltd,
@@ -482,16 +484,19 @@ def extractStarsImgHandle(img_handle,
     # Summed binned images have more bits than the data (e.g. 4 more for 4x4), which sets the saturation level
     bit_depth = config.bit_depth + int(round(np.log2(level_factor)))
 
-    # Start from the first chunk
-    img_handle.setFrame(0)
-    if hasattr(img_handle, 'current_frame_chunk'):
-        img_handle.current_frame_chunk = 0
+    # The chunks to go through, all of them by default
+    first_chunk, end_chunk = chunk_range if (chunk_range is not None) else (0, img_handle.total_fr_chunks)
 
-    # Go through all the chunks in the image handle
-    for chunk_no in range(img_handle.total_fr_chunks):
+    # Start from the first chunk
+    img_handle.setFrame(first_chunk*getattr(img_handle, 'chunk_frames', 0))
+    if hasattr(img_handle, 'current_frame_chunk'):
+        img_handle.current_frame_chunk = first_chunk
+
+    # Go through the chunks in the image handle
+    for chunk_no in range(first_chunk, end_chunk):
 
         # Advance to the next chunk at the top of the loop, so skipped chunks can never be loaded twice
-        if chunk_no > 0:
+        if chunk_no > first_chunk:
             img_handle.nextChunk()
 
         print("Processing chunk {:d}/{:d}".format(chunk_no+1, img_handle.total_fr_chunks))

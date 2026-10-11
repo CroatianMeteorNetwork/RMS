@@ -419,6 +419,29 @@ there, processes the local copy and deletes it, so each file is read over the ne
 - The copies of workers which are stopped or killed are deleted when the monitor notices that the worker ended,
   and at the next start of the monitor.
 
+### Reading each file once (matched filter)
+
+When the matched filter replaces the normal detection, every step of it (the background, the search, the
+measurement and the verification of the objects) reads the frames again, so a `.vid` file is read about four to
+five times. With `mf_buffer_memory` in the `[MatchedFilter]` section (GB per worker), a `.vid` file is instead
+read **once**, in segments of as many frames as fit in that memory, and the star extraction, the image pairs and
+all steps of the matched filter take the frames from memory:
+
+- A segment is searched as a file of its own. Neighbouring segments share `mf_segment_overlap` frames (512 by
+  default, about 16 s at 32 fps, at most half a segment), and an object which crosses from one to the next is found in both and joined.
+- The stars of every chunk are extracted once. The sky reference and the log of the sky conditions are updated
+  once for the whole file, as without segments.
+- The memory is that of the frames as they are read (512x512 16-bit frames are 0.5 MB each, so 4 GB is about
+  8000 frames, 4 minutes at 32 fps); a worker needs about that much more memory. Size it for `--nproc` workers.
+- A segment without enough stars (`ff_min_stars`) is not searched, as a whole file without them isn't.
+- The decisions which depend on the whole file are taken at its end: the pixels which are persistent over the whole
+  file, and the clouded sky of the whole file, remove the detections and measurements on them as without segments.
+  A segment only knows the file so far, so it may take sky as clouded which the whole file shows as clear; its
+  measurements there are then not kept, unlike without segments.
+- The candidate tracks measured per file are at most `mf_max_tracks`, shared by the segments: every segment has a
+  share by its length, and what a segment doesn't use is left to the next ones.
+- 0 (the default) reads the file for every step. Only `.vid` files are read in segments.
+
 
 ## Disk space and cleanup
 

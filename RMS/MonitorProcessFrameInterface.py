@@ -920,13 +920,18 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
         #   needs the frames, so FF files always use the normal detection
         mf_only = config.mf_enable and config.mf_replace_detection and (img_handle.input_type != 'ff')
 
+        # The frames are read from the file, or from memory when it is read in segments (see below)
+        frame_source = img_handle
+
         if mf_only:
 
             # The matched filter is imported here, in the worker, and not at the top of the module: importing its
             #   kernels checks for a CUDA GPU, which initializes CUDA. Imported at the top, CUDA would be
             #   initialized in the main monitor process, and a CUDA context can't be used in the processes forked
             #   from it (the workers)
-            from RMS.MatchedFilterDetection import DONE_NAME, MATCHED_FILTER_DIR, detectMatchedFilter, saveSummary
+            from RMS.MatchedFilterDetection import (DONE_NAME, MATCHED_FILTER_DIR, detectMatchedFilter,
+                                                    detectMatchedFilterSegments, saveSummary)
+            from RMS.Formats.FrameBuffer import segmentFrames
 
             # Results of an earlier processing with the separate matched-filter pass would be merged again, and the
             #   summary of an earlier processing is removed, so a processing which doesn't finish leaves none
@@ -934,25 +939,38 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
             if os.path.isfile(os.path.join(results_dir, DONE_NAME)):
                 os.remove(os.path.join(results_dir, DONE_NAME))
 
-            # Star extraction (and the image pairs), then the matched filter instead of the normal detection
-            star_list = extractStarsFrameInterface(img_handle, config, chunk_frames=chunk_frames,
-                flat_struct=flat_struct, dark=dark, mask=mask, save_calstars=False, chunk_callback=image_saver)
+            # With mf_buffer_memory, the file is read only once, in segments held in memory, and the stars
+            #   (and the image pairs) and the matched filter take the frames from there. A segment without enough
+            #   stars is not searched
+            segment_frames = segmentFrames(img_handle, config, config.mf_buffer_memory)
+            if segment_frames:
+                mf_t0 = time.time()
+                star_list, meteor_list, mf_detector, frame_source = detectMatchedFilterSegments(
+                    img_handle, config, segment_frames, mask=mask, dark=dark, flat_struct=flat_struct,
+                    platepar=readPlatepar(results_platepar_path), reference_dir=output_dir,
+                    input_name=os.path.abspath(file_path), chunk_callback=image_saver)
+                max_stars = max([len(entry[1]) for entry in star_list] + [0])
 
-            # Like the normal detection, nothing is detected without enough stars (clouds, twilight). The number
-            #   of stars is the largest number in a chunk of frames
-            max_stars = max([len(entry[1]) for entry in star_list] + [0])
-            mf_t0 = time.time()
-            if max_stars >= config.ff_min_stars:
-                meteor_list, mf_detector = detectMatchedFilter(img_handle, config, mask=mask, dark=dark,
-                                                               flat_struct=flat_struct, star_list=star_list,
-                                                               return_detector=True,
-                                                               platepar=readPlatepar(results_platepar_path),
-                                                               reference_dir=output_dir,
-                                                               input_name=os.path.abspath(file_path))
+            # Otherwise the star extraction (and the image pairs) reads the file, then the matched filter
             else:
-                proc_log.info("Not enough stars for the matched filter: {:d} < {:d}".format(max_stars,
-                                                                                          config.ff_min_stars))
-                meteor_list, mf_detector = [], None
+                star_list = extractStarsFrameInterface(img_handle, config, chunk_frames=chunk_frames,
+                    flat_struct=flat_struct, dark=dark, mask=mask, save_calstars=False, chunk_callback=image_saver)
+
+                # Like the normal detection, nothing is detected without enough stars (clouds, twilight). The
+                #   number of stars is the largest number in a chunk of frames
+                max_stars = max([len(entry[1]) for entry in star_list] + [0])
+                mf_t0 = time.time()
+                if max_stars >= config.ff_min_stars:
+                    meteor_list, mf_detector = detectMatchedFilter(img_handle, config, mask=mask, dark=dark,
+                                                                   flat_struct=flat_struct, star_list=star_list,
+                                                                   return_detector=True,
+                                                                   platepar=readPlatepar(results_platepar_path),
+                                                                   reference_dir=output_dir,
+                                                                   input_name=os.path.abspath(file_path))
+                else:
+                    proc_log.info("Not enough stars for the matched filter: {:d} < {:d}".format(max_stars,
+                                                                                              config.ff_min_stars))
+                    meteor_list, mf_detector = [], None
 
             # The summary of the matched filter is saved as its done file in the results directory. The
             #   detections themselves are saved below with the stars, as the results of the normal detection
@@ -972,7 +990,7 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
 
         # Save the images of the frames after the last full chunk
         if image_saver is not None:
-            image_saver.saveTrailing(img_handle)
+            image_saver.saveTrailing(frame_source)
             proc_log.info("Saved {:d} chunk image pairs to: {}".format(len(image_saver.chunk_images),
                 image_saver.night_dir))
 

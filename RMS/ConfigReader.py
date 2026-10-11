@@ -1037,6 +1037,13 @@ class Config:
         #   divided by the number of workers avoids oversubscribing the CPU
         self.mf_threads = 0
 
+        # Memory of the frames read at once (GB per file being processed). With it, a .vid file is read once, in
+        #   segments of as many frames as fit, and every pass over the frames (stars, background, search,
+        #   measurement) takes them from memory; neighbouring segments share mf_segment_overlap frames, and the
+        #   detections found in both are joined. 0 reads the frames from the file for every pass
+        self.mf_buffer_memory = 0.0
+        self.mf_segment_overlap = 512
+
         # Clouded sky: the stars of every chunk of frames are matched to the catalog, and where the stars are
         #   fainter than on clear sky by more than mf_cloud_max_offset (mag), or reliably seen stars are missing, the
         #   sky is clouded (see RMS.Routines.SkyQuality). The clouded regions are not searched, and the measurements
@@ -2392,13 +2399,14 @@ def parseMatchedFilter(config, parser):
     for name in ("mf_block_frames", "mf_slow_run_frames", "mf_min_hits",
                  "mf_max_measure_frames", "mf_min_centroids", "mf_edge_margin", "mf_min_frames", "mf_threads",
                  "mf_smooth_frames", "mf_saturation_level", "mf_max_tracks", "mf_link_max_gap", "mf_max_bin",
-                 "mf_cloud_min_matched"):
+                 "mf_cloud_min_matched", "mf_segment_overlap"):
         if parser.has_option(section, name):
             setattr(config, name, parser.getint(section, name))
 
     for name in ("mf_threshold", "mf_ang_vel_min", "mf_ang_vel_max", "mf_psf_sigma", "mf_max_pos_error",
                  "mf_min_sample_snr", "mf_star_threshold", "mf_persistence", "mf_clip", "mf_trail_level", "mf_min_displacement",
-                 "mf_sigma_scale", "mf_track_significance", "mf_tier_speed", "mf_cloud_max_offset"):
+                 "mf_sigma_scale", "mf_track_significance", "mf_tier_speed", "mf_cloud_max_offset",
+                 "mf_buffer_memory"):
         if parser.has_option(section, name):
             setattr(config, name, parser.getfloat(section, name))
 

@@ -10,7 +10,7 @@ from RMS.DetectionTools import loadImageCalibration
 def extractStarsFrameInterface(img_handle, config, 
                                chunk_frames=128, 
                                flat_struct=None, dark=None, mask=None, 
-                               save_calstars=True, debug=False, chunk_callback=None):
+                               save_calstars=True, debug=False, chunk_callback=None, chunk_range=None):
     """ Given an image handle, extract the stars from the image data.
 
     Arguments:
@@ -24,6 +24,7 @@ def extractStarsFrameInterface(img_handle, config,
         mask: [np.array] Mask structure.
         save_calstars: [bool] Flag to indicate if the CALSTARS file should be saved.
         chunk_callback: [callable] Called for every loaded chunk, see extractStarsImgHandle. None by default.
+        chunk_range: [tuple] (first chunk, end chunk) to extract, see extractStarsImgHandle. None by default.
 
     Return:
         star_list: [list] List of stars detected in the image.
@@ -32,7 +33,7 @@ def extractStarsFrameInterface(img_handle, config,
     # Extract the stars on the image handle
     star_list = extractStarsImgHandle(img_handle, config=config, 
                                       flat_struct=flat_struct, dark=dark, mask=mask, debug=debug,
-                                      chunk_callback=chunk_callback)
+                                      chunk_callback=chunk_callback, chunk_range=chunk_range)
     
     if save_calstars:
 
