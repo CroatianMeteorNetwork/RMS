@@ -133,13 +133,13 @@ EXTENT_STEP = 2
 MIN_CONCENTRATION = 0.8
 EXTENT_MAX_SIGNIFICANCE = 200.0
 
-# A detection along a thin linear structure (e.g. the light left for a while along the path of a bright source
-#   which crossed the field faster than the searched motions, or a trail) is concentrated at the centre of the
-#   ring but not along the structure: the light of the ring is also taken along axes through the centre in
-#   LINE_ANGLES directions (the pixels of the ring within LINE_HALF_WIDTH px of the axis), see extentLine. Below mf_line_concentration along the brightest axis, with that axis at least
-#   LINE_MIN_SIGNIFICANCE (sigma) above the background, the detection is rejected. On recorded data, tracks on
-#   such light are at 0.08-0.38, objects at 0.5-1 (lower only for tracks which run beside a bright object or
-#   pick up its trails)
+# A detection along a thin linear structure (e.g. a trail, or light left along the path of a bright source which
+#   crossed the field) is concentrated at the centre of the ring but not along the structure: the light of the
+#   ring is also taken along axes through the centre in LINE_ANGLES directions (the pixels of the ring within
+#   LINE_HALF_WIDTH px of the axis), see extentLine. Below mf_line_concentration along the brightest axis, with
+#   that axis at least LINE_MIN_SIGNIFICANCE (sigma) above the background, the detection is rejected. On recorded
+#   data, tracks on such light are at 0.08-0.38, objects at 0.5-1 (lower only for tracks which run beside a bright
+#   object or pick up its trails)
 LINE_ANGLES = 16
 LINE_HALF_WIDTH = 1.5
 LINE_MIN_SIGNIFICANCE = 5.0

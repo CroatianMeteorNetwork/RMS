@@ -992,8 +992,8 @@ class Config:
         self.mf_track_significance = 12.0
 
         # A detection whose light is less concentrated at its centre than this, compared with the brightest axis
-        #   through it (a thin linear structure, e.g. light left for a while along the path of a bright source
-        #   which crossed the field faster than the searched motions), is rejected. 0 turns the test off
+        #   through it (a thin linear structure, e.g. a trail, or light left along the path of a bright source which
+        #   crossed the field), is rejected. 0 turns the test off
         self.mf_line_concentration = 0.5
 
         # Stars brighter than this in the median of the frames (in the noise of the sky in one frame) are masked
