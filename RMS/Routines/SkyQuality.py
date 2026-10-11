@@ -1328,12 +1328,13 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     for i, row in enumerate(rows):
         input_rows[row.get('input')].append(i)
 
-    # The time between the chunks of every input (the median spacing of its chunks, the inputs can have different
-    #   frame rates), and of all inputs for those of one chunk. A gap of more than a few chunks is a gap in the data
+    # The time between the chunks of every input (the shortest spacing of its chunks, as the chunks are regular and
+    #   an input of a few chunks can have a pause between them; the inputs can have different frame rates), and of
+    #   all inputs for those of one chunk. A gap of more than a few chunks is a gap in the data
     def _spacing(idx):
         dt = [(times[j] - times[i]).total_seconds() for i, j in zip(idx[:-1], idx[1:])]
         dt = [d for d in dt if d > 0]
-        return float(np.median(dt)) if dt else None
+        return float(min(dt)) if dt else None
 
     steps = {name: _spacing(idx) for name, idx in input_rows.items()}
     known = [st for st in steps.values() if st is not None]

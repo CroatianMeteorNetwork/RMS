@@ -471,9 +471,11 @@ class MatchedFilterDetector(object):
         #   everywhere
         self.sky_map = None
 
-        # Frames of the detections and detections removed on clouded sky (see run)
+        # Frames of the detections and detections removed on clouded sky (see run), and the first frames of the
+        #   removed detections
         self.cloud_rows_removed = 0
         self.cloud_detections_removed = 0
+        self.cloud_removed_frames = []
 
         # Number of the weakest candidate tracks which were not measured (see mf_max_tracks)
         self.tracks_dropped = 0
@@ -1818,6 +1820,7 @@ class MatchedFilterDetector(object):
                 clear = self.sky_map.isClear(xy[:, 0], xy[:, 1], cent[:, 0])
                 if clear.sum() < self.opts.min_centroids:
                     self.cloud_detections_removed += 1
+                    self.cloud_removed_frames.append(int(round(cent[0, 0])))
                     continue
                 cent = cent[clear]
 
@@ -1834,9 +1837,11 @@ class MatchedFilterDetector(object):
                 xy = cent[:, 1:3]*self.det_bin + (self.det_bin - 1)/2.0
                 clear = self.sky_map.isClear(xy[:, 0], xy[:, 1], cent[:, 0])
                 self.cloud_rows_removed += int((~clear).sum())
+                first = cent[0, 0]
                 cent = cent[clear]
                 if len(cent) < 2:
                     self.cloud_detections_removed += 1
+                    self.cloud_removed_frames.append(int(round(first)))
                     continue
 
             # Unbinned coordinates, and the intensity of the unbinned image (averaged bins hold the mean of the
@@ -1964,6 +1969,7 @@ class MatchedFilterDetector(object):
                                    else None),
             'cloud_frames_removed': int(self.cloud_rows_removed),
             'cloud_detections_removed': int(self.cloud_detections_removed),
+            'cloud_removed_frames': [int(f) for f in self.cloud_removed_frames],
             'tracks_dropped': int(self.tracks_dropped),
             'total_frames': int(self.total_frames),
             'psf_sigma': self.psf_sigma,

@@ -899,6 +899,22 @@ def plotNightSkyConditions(night_dir, night_name, output_dir, results, config, f
     for results_dir in sorted(results):
         results_path = os.path.join(output_dir, results_dir)
 
+        # The stars of the chunks of the file, the times of the chunks (sorted), the time of a chunk (s) and the
+        #   frame rate. A file whose stars can't be read is left out
+        star_list, chunk_s, fps = [], None, None
+        try:
+            for calstars_path in glob.glob(os.path.join(results_path, 'CALSTARS_*.txt')):
+                stars, chunk_frames, calstars_fps = CALSTARS.readCALSTARS(results_path,
+                    os.path.basename(calstars_path), return_fps=True)
+                star_list += stars
+                if chunk_frames and calstars_fps:
+                    chunk_s, fps = chunk_frames/calstars_fps, calstars_fps
+            star_list = sorted(((filenameToDatetime(entry[0]), len(entry[1])) for entry in star_list),
+                               key=lambda entry: entry[0])
+        except Exception as e:
+            log.warning("The stars of {:s} could not be read: {:s}".format(results_path, repr(e)))
+            continue
+
         # A file which was searched has the summary of the detector (e.g. its number of frames). Only the summary
         #   of the current mode is read, a file processed in the other mode before can have both
         summary_path = os.path.join(results_path, DONE_NAME) if config.mf_replace_detection \
@@ -908,11 +924,22 @@ def plotNightSkyConditions(night_dir, night_name, output_dir, results, config, f
             try:
                 with open(summary_path) as f:
                     summary = json.load(f)
-                removed += int(summary.get('cloud_detections_removed') or 0)
+                searched = 'total_frames' in summary
+
+                # The detections removed on clouded sky within the night, from the time of their first frames
+                #   (the frames from the beginning of the file, the time of its first chunk). Only their number
+                #   is in the summaries of older processings
+                frames = summary.get('cloud_removed_frames')
+                if isinstance(frames, list) and star_list and fps:
+                    begin = star_list[0][0]
+                    removed += sum(1 for f in frames
+                                   if night_start <= begin + datetime.timedelta(seconds=f/fps) <= night_end)
+                else:
+                    removed += int(summary.get('cloud_detections_removed') or 0)
+
             except (ValueError, TypeError, AttributeError) as e:
                 log.warning("The summary {:s} could not be read: {:s}".format(summary_path, repr(e)))
                 continue
-            searched = 'total_frames' in summary
 
             # The conditions of the file are named by its path in the log (by its name in older logs)
             input_file = results[results_dir].get('input_file')
@@ -925,24 +952,8 @@ def plotNightSkyConditions(night_dir, night_name, output_dir, results, config, f
         # A file which was not searched had too few stars in all its chunks. Without the separate pass of the
         #   matched filter, such a file has no summary of it, and a file which has enough stars but no summary
         #   (e.g. the pass failed) is not shown as not searched. Every chunk lasts the time of its frames
-        star_list = []
-        chunk_s = None
-        try:
-            for calstars_path in glob.glob(os.path.join(results_path, 'CALSTARS_*.txt')):
-                stars, chunk_frames, fps = CALSTARS.readCALSTARS(results_path, os.path.basename(calstars_path),
-                                                                 return_fps=True)
-                star_list += stars
-                if chunk_frames and fps:
-                    chunk_s = chunk_frames/fps
-            times = [filenameToDatetime(entry[0]) for entry in star_list]
-        except Exception as e:
-            log.warning("The stars of {:s} could not be read: {:s}".format(results_path, repr(e)))
-            continue
-
-        if star_list and (max(len(entry[1]) for entry in star_list) < config.ff_min_stars):
-            order = sorted(range(len(star_list)), key=lambda i: times[i])
-            times = [times[i] for i in order]
-            counts = [len(star_list[i][1]) for i in order]
+        if star_list and (max(n for _, n in star_list) < config.ff_min_stars):
+            times = [t for t, _ in star_list]
             if not chunk_s:
                 chunk_s = (times[-1] - times[0]).total_seconds()/(len(times) - 1) if len(times) > 1 else 0
             if chunk_s <= 0:
@@ -952,7 +963,7 @@ def plotNightSkyConditions(night_dir, night_name, output_dir, results, config, f
             #   end after it), split where the recording paused (a gap of more than a few chunks)
             chunk = datetime.timedelta(seconds=chunk_s)
             spans = []
-            for t, n in zip(times, counts):
+            for t, n in star_list:
                 if not (night_start <= t <= night_end):
                     continue
                 if spans and (t - spans[-1][0][-1] <= 3*chunk):

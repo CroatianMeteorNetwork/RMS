@@ -785,3 +785,14 @@ def test_plot_sky_conditions_inputs_of_different_cadence(tmp_path):
     summary = sq.plotSkyConditions(rows, str(tmp_path/'conditions.png'), 'Test')
     assert summary['observed_h'] == pytest.approx(600/3600.0)
     assert summary['clouded'] == pytest.approx(200/600.0)
+
+
+def test_plot_sky_conditions_input_of_a_few_chunks_with_a_pause(tmp_path):
+    """ The time of the chunks of an input of a few chunks with a pause between them is not the pause. """
+
+    begin = datetime.datetime(2025, 12, 25, 22, 0, 0)
+    rows = [{'time': begin + datetime.timedelta(seconds=t), 'input': 'a.vid', 'clear_fraction': 1.0,
+             'transparency_mag': 0.0, 'reliable_seen': 1.0, 'stars': 500, 'matched': 300} for t in (0, 4, 600)]
+
+    summary = sq.plotSkyConditions(rows, str(tmp_path/'conditions.png'), 'Test')
+    assert summary['observed_h'] == pytest.approx(12/3600.0)

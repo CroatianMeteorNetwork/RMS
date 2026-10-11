@@ -1599,3 +1599,46 @@ def test_night_report_removes_sky_conditions_without_the_matched_filter(tmp_path
     night_state = mnr.generateNightReport(output_dir, NIGHT, config, archive=False)
     assert 'sky_conditions' not in night_state['ok_steps']
     assert not any(f.startswith(NIGHT + '_sky_conditions') for f in os.listdir(night_dir))
+
+
+def test_night_sky_conditions_counts_the_removed_detections_within_the_night(tmp_path, monkeypatch):
+    """ Only the detections removed on clouded sky within the night are counted, from the times of their first
+        frames, and all of them for a summary which has only their number.
+    """
+
+    import RMS.Routines.SkyQuality as sq
+
+    config = _config()
+    config.mf_enable = True
+    config.mf_replace_detection = True
+    output_dir = str(tmp_path)
+    night_dir = mnr.nightDirPath(output_dir, NIGHT, config)
+    night_start, _ = mnr.nightBoundsFromName(config, NIGHT)
+
+    # A file which begins 10 s before the night, with a detection removed in its first second and one 20 s later,
+    #   and a file of an older processing with the number of the removed detections only
+    early = _makeResults(output_dir, config, 'file1', n_chunks=8,
+                         start_s=(night_start - BEG_TIME).total_seconds() - 10)
+    older = _makeResults(output_dir, config, 'file2', n_chunks=2)
+    for results_dir, summary in [(early, {'total_frames': 1024, 'clear_sky_fraction': 0.5,
+                                          'cloud_detections_removed': 2, 'cloud_removed_frames': [10, 500]}),
+                                 (older, {'total_frames': 256, 'clear_sky_fraction': 0.5,
+                                          'cloud_detections_removed': 3})]:
+        with open(os.path.join(output_dir, results_dir, DONE_NAME), 'w') as f:
+            json.dump(summary, f)
+
+    plotted = {}
+    plot = sq.plotSkyConditions
+    def _plot(rows, plot_path, title, **kwargs):
+        plotted.update(kwargs)
+        return plot(rows, plot_path, title, **kwargs)
+    monkeypatch.setattr(sq, 'plotSkyConditions', _plot)
+
+    # A file which was not searched, so there is something to plot
+    skipped = _makeResults(output_dir, config, 'file3', n_chunks=2, start_s=60)
+    with open(os.path.join(output_dir, skipped, DONE_NAME), 'w') as f:
+        json.dump({'max_stars': 1}, f)
+
+    results = {d: mnr.readDoneFlag(os.path.join(output_dir, d)) for d in (early, older, skipped)}
+    assert mnr.plotNightSkyConditions(night_dir, NIGHT, output_dir, results, config, '')
+    assert plotted['removed_detections'] == 1 + 3
