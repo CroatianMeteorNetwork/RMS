@@ -1116,9 +1116,13 @@ class MonitorStatus(object):
         #   searched, only the stars are known
         latest_start = segments[-1][1]
         steps, labels = timeline['steps'], timeline['labels']
+
+        # A chunk lasts for its time, the last chunk of an input until the end of the input
+        last_rows = {idx[-1]: name for name, idx in timeline['input_rows'].items()}
+        row_ends = [timeline['ends'][last_rows[i]] if i in last_rows else r['time'] + steps[r.get('input')]
+                    for i, r in enumerate(rows)]
         candidates = [i for i, r in enumerate(rows)
-                      if (r['time'] < latest_end) and (r['time'] + steps[r.get('input')] > latest_start)
-                      and (labels[i] == latest_state)]
+                      if (r['time'] < latest_end) and (row_ends[i] > latest_start) and (labels[i] == latest_state)]
         if candidates:
             row = rows[max(candidates, key=lambda i: (rows[i]['time'], -rows[i]['clear_fraction']))]
             sky.update({'clear_percent': _round(100*row['clear_fraction'], 1),

@@ -1672,3 +1672,28 @@ def test_sky_with_a_newer_file_which_was_not_measured_until_its_end(tmp_path, no
     _summary(unmeasured, total_frames=12*128 + 20, clear_sky_fraction=None)
 
     assert status.build(_state())['sky']['state'] == 'no_data'
+
+
+def test_latest_sky_values_until_the_end_of_the_input(tmp_path, now, monkeypatch):
+    """ The values of the latest sky come from the chunk which gave its state also when that state is in the
+        frames after the last chunk of its input (here a clear input until 7 s, and a clouded one from 1 to 5 s).
+    """
+
+    status, config = _status(tmp_path)
+    t0 = NOW - datetime.timedelta(minutes=10)
+
+    def _file(name, start, end_time, clear):
+        result = {'star_chunks': [(start, 500)], 'chunk_s': 4.0, 'summary': {'total_frames': 1},
+                  'searched': True, 'measured': True, 'removed_times': [], 'removed_count': 0, 'detections': 0,
+                  'ftp_detections': 0, 'end_time': end_time}
+        row = {'time': start, 'input': name, 'clear_fraction': clear, 'transparency_mag': 0.02 if clear else np.nan,
+               'reliable_seen': 1.0, 'stars': 500, 'matched': 300}
+        return (name, {'input_file': name}, result, 1.0), row
+
+    clear_file, clear_row = _file('a.vid', t0, t0 + datetime.timedelta(seconds=7), 1.0)
+    clouded_file, clouded_row = _file('b.vid', t0 + datetime.timedelta(seconds=1), None, 0.0)
+    monkeypatch.setattr(status, '_conditionRows', lambda *args: [clear_row, clouded_row])
+
+    _, sky = status._sky(NOW, 'night', NOW - datetime.timedelta(hours=5), NOW + datetime.timedelta(hours=5),
+                         [clear_file, clouded_file])
+    assert (sky['state'], sky['clear_percent']) == ('clear', 100.0)

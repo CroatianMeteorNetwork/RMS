@@ -298,6 +298,13 @@ def test_first_frames_after_a_recording_gap():
     assert len(sky_map.chunk_first) == N_CHUNKS
     assert sky_map.isClear(np.array([200.0]), np.array([200.0]), np.array([8*CHUNK_FRAMES + 10]))[0]
 
+    # The last chunk missing: it is added after the last chunk present, by its time (after the gap)
+    sky_map = SkyQualityMap(stars[:-1], clear_map.platepar_for_test, clear_map.config, BEGIN, FPS, CHUNK_FRAMES,
+                            matched=clear_map.matched_for_test[:-1], total_frames=N_CHUNKS*CHUNK_FRAMES,
+                            first_frames=first_frames[:N_CHUNKS - 1])
+    assert len(sky_map.chunk_first) == N_CHUNKS
+    assert sky_map.chunk_times[-1] == sky_map.chunk_times[-2] + datetime.timedelta(seconds=CHUNK_FRAMES/FPS)
+
 
 def _patchCalibration(monkeypatch, catalog, offset):
     """ Replace the catalog, the recalibration and the projection: the catalog stars are projected to their
