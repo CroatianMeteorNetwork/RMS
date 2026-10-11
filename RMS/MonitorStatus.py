@@ -894,10 +894,16 @@ class MonitorStatus(object):
         sky['observed_utc'] = _timeString(latest_end)
         sky['age_min'] = _round((now - latest_end).total_seconds()/60.0, 1)
 
-        # The values of the latest chunk with conditions, if it is in the latest data (the latest file may not have
-        #   been searched, then only its stars are known)
-        if rows and (rows[-1]['time'] + timeline['steps'][rows[-1].get('input')] > segments[-1][1]):
-            row = rows[-1]
+        # The values of the latest chunk which gave the latest state (with overlapping files, the worse state is
+        #   taken, so the values come from the chunk with that state). Without one, e.g. when the latest file was not
+        #   searched, only the stars are known
+        latest_start = segments[-1][1]
+        steps, labels = timeline['steps'], timeline['labels']
+        candidates = [i for i, r in enumerate(rows)
+                      if (r['time'] < latest_end) and (r['time'] + steps[r.get('input')] > latest_start)
+                      and (labels[i] == latest_state)]
+        if candidates:
+            row = rows[max(candidates, key=lambda i: (rows[i]['time'], -rows[i]['clear_fraction']))]
             sky.update({'clear_percent': _round(100*row['clear_fraction'], 1),
                         'dimming_mag': _round(row['transparency_mag']),
                         'stars': int(row['stars']), 'matched_stars': int(row['matched']),
@@ -920,7 +926,6 @@ class MonitorStatus(object):
         #   every chunk is weighted (a clear chunk counts as good, the files which were not searched as bad)
         window_start = latest_end - datetime.timedelta(minutes=OBSERVABLE_WINDOW_MIN)
         good = total = 0.0
-        steps = timeline['steps']
         for r in rows:
             if r['time'] >= window_start:
                 length = steps[r.get('input')].total_seconds()

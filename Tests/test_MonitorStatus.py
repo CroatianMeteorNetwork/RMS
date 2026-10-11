@@ -950,3 +950,17 @@ def test_results_which_cant_be_read_are_read_again(tmp_path, now):
     night = status.build(_state())['night']
     assert (night['files_processed'], night['files_unreadable']) == (1, 0)
     assert night['observed_h'] > 0
+
+
+def test_latest_sky_of_overlapping_files(tmp_path, now):
+    """ With two files of the same time, one clouded and one clear, the sky is clouded, with the values of the
+        clouded chunk.
+    """
+
+    status, config = _status(tmp_path)
+    output_dir = str(tmp_path/'output')
+    _searchedFile(output_dir, config, 'file1', n_chunks=12, clear=0.0)
+    _searchedFile(output_dir, config, 'file2', n_chunks=12, clear=1.0)
+
+    sky = status.build(_state())['sky']
+    assert sky['state'] == 'clouded' and sky['clear_percent'] == 0.0
