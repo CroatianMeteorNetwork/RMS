@@ -1312,14 +1312,14 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     usable = (labels != 'clouded') & np.isfinite(dimming)
     summary['median_dimming'] = float(np.median(dimming[usable])) if usable.any() else float('nan')
 
-    # Colours of the states and of the values
-    # Colours of the states and of the values, from the palette of Okabe and Ito which is distinguishable with
-    #   colour vision deficiencies: the states are told apart by orange and blue, and by brightness (the time
-    #   without stars or data is grey, and named in the plot)
-    shade = {'partly': ('#E69F00', 0.25), 'clouded': ('#0072B2', 0.22), 'not_searched': ('#000000', 0.32),
+    # Colours of the states and of the values, distinguishable with colour vision deficiencies: the clouded sky
+    #   is a darker and more saturated orange than the partly clouded one, the time without stars or data is grey
+    #   of two brightnesses (and named in the plot), and the values are in blue, green and black (from the palette
+    #   of Okabe and Ito)
+    shade = {'partly': ('#E69F00', 0.25), 'clouded': ('#D55E00', 0.45), 'not_searched': ('#000000', 0.4),
              'no_data': ('#000000', 0.07)}
-    cards_bg = {'partly': '#f9e7bf', 'clouded': '#c7e0ee', 'not_searched': '#adadad'}
-    blue, green, grey, red = '#0072B2', '#009E73', '#4b5563', '#D55E00'
+    cards_bg = {'partly': '#f9e7bf', 'clouded': '#ecb48c', 'not_searched': '#999999'}
+    blue, green, grey, dark = '#0072B2', '#009E73', '#4b5563', '#111827'
 
 
     # The time without data: the gaps in the time line longer than a few chunks (e.g. no recording, or the files
@@ -1363,7 +1363,7 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     smooth[~np.isfinite(dimming)] = np.nan
     _plotInputs(ax_dim, smooth, '-', color=blue, lw=1.6, zorder=3)
     if cloud_max_offset is not None:
-        ax_dim.axhline(cloud_max_offset, color=red, lw=1, ls='--', zorder=2)
+        ax_dim.axhline(cloud_max_offset, color=dark, lw=1, ls='--', zorder=2)
     ax_dim.axhline(0, color=grey, lw=0.8, zorder=2)
     finite = dimming[np.isfinite(dimming)]
     if len(finite):
@@ -1390,11 +1390,11 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
 
     # The extracted and the matched stars, also of the inputs which were not searched
     _plotInputs(ax_stars, stars, '-', color=blue, lw=1.0, zorder=3)
-    _plotInputs(ax_stars, matched, '-', color=red, lw=1.0, zorder=3)
+    _plotInputs(ax_stars, matched, '-', color=dark, lw=1.0, zorder=3)
     for _, _, ns_times, ns_stars in not_searched:
         ax_stars.plot(ns_times, ns_stars, '-', color=blue, lw=1.0, zorder=3)
     if min_matched is not None:
-        ax_stars.axhline(min_matched, color=red, lw=1, ls='--', zorder=2)
+        ax_stars.axhline(min_matched, color=dark, lw=1, ls='--', zorder=2)
     ax_stars.set_yscale('log')
     ax_stars.yaxis.set_major_locator(mticker.LogLocator(subs=(1.0, 2.0, 5.0)))
     ax_stars.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: '{:g}'.format(v)))
@@ -1408,7 +1408,7 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
 
     # The times of the detections
     if len(detection_times):
-        ax_det.eventplot([list(detection_times)], colors=red, lineoffsets=0.5, linelengths=0.8, linewidths=0.8)
+        ax_det.eventplot([list(detection_times)], colors=dark, lineoffsets=0.5, linelengths=0.8, linewidths=0.8)
     ax_det.set_ylim(0, 1)
     ax_det.set_yticks([])
     ax_det.grid(False)
@@ -1433,7 +1433,7 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
         a, b = mdates.date2num(start), mdates.date2num(end)
         if (b - a) > 0.02*(x1 - x0):
             ax_dim.text(mdates.num2date((a + b)/2), 0.5, name, transform=label_transform, ha='center',
-                        va='center', rotation=90 if (b - a) < 0.05*(x1 - x0) else 0, fontsize=9.5,
+                        va='center', rotation=90, fontsize=9.5,
                         color='#111827', alpha=0.8, zorder=4)
 
     # The name of every panel above it
@@ -1448,15 +1448,15 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
                          label='Every chunk (~{:.0f} s)'.format(step)),
                   Line2D([], [], color=blue, lw=1.6, label='1-minute median'),
                   Line2D([], [], color=grey, lw=0.8, label='Clear sky')]
-                 + ([Line2D([], [], color=red, lw=1, ls='--',
+                 + ([Line2D([], [], color=dark, lw=1, ls='--',
                             label='Cloud limit ({:.2f} mag)'.format(cloud_max_offset))]
                     if cloud_max_offset is not None else [])
                  + [Line2D([], [], color=blue, marker='^', ls='none', ms=5, alpha=0.6, label='Off the scale')]),
         (ax_clear, [Patch(facecolor=green, alpha=0.3, edgecolor=green, label='Clear part of the image'),
                     Line2D([], [], color='#111827', lw=1.0, ls='--', label='Reliable stars seen')]),
         (ax_stars, [Line2D([], [], color=blue, lw=1.0, label='Extracted'),
-                    Line2D([], [], color=red, lw=1.0, label='Matched to the catalog')]
-                   + ([Line2D([], [], color=red, lw=1, ls='--',
+                    Line2D([], [], color=dark, lw=1.0, label='Matched to the catalog')]
+                   + ([Line2D([], [], color=dark, lw=1, ls='--',
                               label='Fewest matched ({:d})'.format(int(min_matched)))]
                       if min_matched is not None else [])),
     ]
@@ -1477,7 +1477,7 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     fig.suptitle(title, fontsize=15, fontweight='bold', y=0.985, x=0.53)
     states = [('{:.0f}%'.format(100*summary['clear']), 'clear', '#007a5a', '#e0f2ec'),
               ('{:.0f}%'.format(100*summary['partly']), 'partly clouded', '#a36f00', cards_bg['partly']),
-              ('{:.0f}%'.format(100*summary['clouded']), 'clouded', blue, cards_bg['clouded'])]
+              ('{:.0f}%'.format(100*summary['clouded']), 'clouded', '#8a3a00', cards_bg['clouded'])]
     if not_searched:
         states.append(('{:.0f}%'.format(100*summary['not_searched']), 'too few stars', '#111827',
                        cards_bg['not_searched']))

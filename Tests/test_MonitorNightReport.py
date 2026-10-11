@@ -1428,7 +1428,7 @@ def test_night_report_plots_sky_conditions(tmp_path, monkeypatch, replace):
                                  (skipped, {'max_stars': 1} if replace else None)]:
         results_path = os.path.join(output_dir, results_dir)
         info = mnr.readDoneFlag(results_path)
-        info['input_file'] = '/data/{:s}.vid'.format(os.path.basename(results_dir))
+        info['input_file'] = '/data/a, b/{:s}.vid'.format(os.path.basename(results_dir))
         mnr.writeDoneFlag(results_path, info)
         if summary is not None:
             os.makedirs(os.path.join(results_path, summary_dir), exist_ok=True)
@@ -1447,10 +1447,10 @@ def test_night_report_plots_sky_conditions(tmp_path, monkeypatch, replace):
         f.write(','.join(CONDITION_COLUMNS) + ',processed_utc\n')
         for i in range(3):
             t = BEG_TIME + datetime.timedelta(seconds=i*128/25.0)
-            f.write('{:s},/data/file1.vid,500,300,{:.3f},0.020,0.950,2025-12-26T00:00:00\n'.format(
+            f.write('{:s},"/data/a, b/file1.vid",500,300,{:.3f},0.020,0.950,2025-12-26T00:00:00\n'.format(
                 t.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3], 1.0 if i < 2 else 0.0))
         f.write('2025-12-25T00:00:00.000,other.vid,500,300,1.000,0.020,0.950,2025-12-26T00:00:00\n')
-        f.write('2025-12-25T03:01:00.000,/data/file2.vid,500,300,1.000,0.020,0.950,2025-12-25T12:00:00\n')
+        f.write('2025-12-25T03:01:00.000,"/data/a, b/file2.vid",500,300,1.000,0.020,0.950,2025-12-25T12:00:00\n')
     with open(os.path.join(output_dir, 'sky_conditions_XX0001_20251226.csv'), 'w') as f:
         f.write(','.join(CONDITION_COLUMNS) + ',processed_utc\n')
         f.write('2025-12-26T03:00:00.000,file1.vid,500,300,1.000,0.020,0.950,2025-12-27T00:00:00\n')
@@ -1465,7 +1465,7 @@ def test_night_report_plots_sky_conditions(tmp_path, monkeypatch, replace):
     with open(os.path.join(night_dir, NIGHT + '_sky_conditions.csv')) as f:
         lines = f.read().splitlines()
     assert lines[0] == ','.join(CONDITION_COLUMNS)
-    assert len(lines) == 4 and all(line.startswith('2025-12-25T03:00') and ',/data/file1.vid,' in line
+    assert len(lines) == 4 and all(line.startswith('2025-12-25T03:00') and ',"/data/a, b/file1.vid",' in line
                                    for line in lines[1:])
 
     # The file with too few stars is shown as not searched for the time of its chunk, and the removed detections

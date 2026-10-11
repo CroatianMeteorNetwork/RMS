@@ -26,6 +26,7 @@ import bisect
 import collections
 import contextlib
 import copy
+import csv
 import datetime
 import glob
 import json
@@ -938,11 +939,13 @@ def plotNightSkyConditions(night_dir, night_name, output_dir, results, config, f
                                        + datetime.timedelta(seconds=meteor_meas[0][1]/meteor_fps))
 
     # The conditions of the night as a CSV file, in the format of the log
+    #   (the inputs are paths, which are quoted if they have a comma)
     with open(os.path.join(night_dir, night_name + '_sky_conditions.csv'), 'w') as f:
-        f.write(','.join(CONDITION_COLUMNS) + '\n')
+        writer = csv.writer(f, lineterminator='\n')
+        writer.writerow(CONDITION_COLUMNS)
         for row in rows:
-            f.write(','.join(row[c] if c in ('chunk_utc', 'input') else '{:g}'.format(row[c])
-                             for c in CONDITION_COLUMNS) + '\n')
+            writer.writerow([row[c] if c in ('chunk_utc', 'input') else '{:g}'.format(row[c])
+                             for c in CONDITION_COLUMNS])
 
     summary = plotSkyConditions(rows, os.path.join(night_dir, night_name + '_sky_conditions.png'),
         '{:s} sky conditions, night of {:s}'.format(config.stationID,
