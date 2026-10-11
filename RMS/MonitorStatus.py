@@ -23,6 +23,7 @@ import numpy as np
 
 from RMS.DeleteOldObservations import availableSpace
 from RMS.Formats.FFfile import filenameToDatetime
+from RMS.Formats.FTPdetectinfo import validDefaultFTPdetectinfo
 from RMS.Formats.Platepar import Platepar
 from RMS.Logger import getLogger
 from RMS.Misc import RmsDateTime, UTCFromTimestamp
@@ -122,6 +123,32 @@ def _codeVersion():
 
 
 
+def fileDetections(results_path):
+    """ The number of the detections of a processed file, from the header of its FTPdetectinfo (the detections
+        of the normal detection, or of the matched filter when it replaces it).
+
+    Arguments:
+        results_path: [str] Results directory of the file.
+
+    Return:
+        [int] Number of the detections, None if there is no FTPdetectinfo or it can't be read.
+    """
+
+    detections = None
+    for file_name in os.listdir(results_path):
+        if not validDefaultFTPdetectinfo(file_name):
+            continue
+
+        # The first line is "Meteor Count = N"
+        try:
+            with open(os.path.join(results_path, file_name)) as f:
+                detections = (detections or 0) + int(f.readline().split('=')[1])
+        except (OSError, ValueError, IndexError):
+            continue
+
+    return detections
+
+
 def fileCalibration(results_path, config, clear_times=None):
     """ How well the chunks of a processed file could be calibrated, from the platepars which were recalibrated on
         the stars of every chunk (ApplyRecalibrate).
@@ -215,7 +242,7 @@ def fileCalibration(results_path, config, clear_times=None):
 
 
 class MonitorStatus(object):
-    def __init__(self, camera_id, output_dir, input_dir, config, file_matcher, nproc, recursive=False):
+    def __init__(self, camera_id, output_dir, input_dir, config, input_scanner, nproc):
         """ Keeps the status file of a camera of the monitor up to date.
 
         Arguments:
@@ -223,20 +250,18 @@ class MonitorStatus(object):
             output_dir: [str] Output directory of the camera, where the status file is written.
             input_dir: [str] Input directory of the camera.
             config: [Config] Configuration of the camera.
-            file_matcher: [callable] Function which tells if a file name is an input file.
+            input_scanner: [callable] Function which returns the inputs as the monitor finds them, as (path,
+                mtime, size), see MonitorProcessFrameInterface.scanInputs. It raises OSError if the input
+                directory can't be read.
             nproc: [int] Number of the worker processes of the monitor.
-
-        Keyword arguments:
-            recursive: [bool] The input files are also in the subdirectories. False by default.
         """
 
         self.camera_id = camera_id
         self.output_dir = output_dir
         self.input_dir = input_dir
         self.config = config
-        self.file_matcher = file_matcher
+        self.input_scanner = input_scanner
         self.nproc = nproc
-        self.recursive = recursive
 
         self.path = os.path.join(output_dir, STATUS_FILE_NAME)
         self.interval = getattr(config, 'monitor_status_interval', STATUS_INTERVAL)
@@ -431,24 +456,16 @@ class MonitorStatus(object):
 
         recording = {'input_dir': self.input_dir, 'input_readable': state.get('input_readable')}
 
-        # Find the newest input file, and count the files which were written tonight
+        # Find the newest input (as the monitor finds them, also FITS directories), and count the inputs which
+        #   were written tonight
         newest, newest_mtime, newest_size, files_tonight = None, None, None, 0
         try:
-            for root, dirs, file_names in os.walk(self.input_dir):
-                for file_name in file_names:
-                    if not self.file_matcher(file_name):
-                        continue
-                    try:
-                        st = os.stat(os.path.join(root, file_name))
-                    except OSError:
-                        continue
-                    mtime = UTCFromTimestamp.utcfromtimestamp(st.st_mtime)
-                    if night_start <= mtime <= now:
-                        files_tonight += 1
-                    if (newest_mtime is None) or (mtime > newest_mtime):
-                        newest, newest_mtime, newest_size = file_name, mtime, st.st_size
-                if not self.recursive:
-                    break
+            for path, mtime, size in self.input_scanner():
+                mtime = UTCFromTimestamp.utcfromtimestamp(mtime)
+                if night_start <= mtime <= now:
+                    files_tonight += 1
+                if (newest_mtime is None) or (mtime > newest_mtime):
+                    newest, newest_mtime, newest_size = os.path.basename(path), mtime, size
 
         except OSError:
             recording['input_readable'] = False
@@ -504,6 +521,8 @@ class MonitorStatus(object):
             cached = self.file_cache.get(results_dir)
             if (cached is None) or (cached[0] != stamp):
                 file_result = readFileSkyResults(results_path, self.config)
+                if file_result is not None:
+                    file_result['ftp_detections'] = fileDetections(results_path)
                 cached = (stamp, file_result, {})
                 self.file_cache[results_dir] = cached
 
@@ -628,11 +647,24 @@ class MonitorStatus(object):
             'partly_clouded_percent': _round(100*summary['partly'], 1),
             'clouded_percent': _round(100*summary['clouded'], 1),
             'too_few_stars_percent': _round(100*summary['not_searched'], 1),
-            'detections': sum(file_result['detections'] for _, _, file_result, _ in files),
+            'detections': sum(file_result['ftp_detections'] or 0 for _, _, file_result, _ in files),
             'removed_by_clouds': removed,
         }
 
+        # The detections of the matched filter when it runs as a separate pass next to the normal detection
+        if self.config.mf_enable and not self.config.mf_replace_detection:
+            night['matched_filter_detections'] = sum(file_result['detections'] for _, _, file_result, _ in files)
+
         sky = {'state': 'no_data', 'observed_utc': None, 'age_min': None, 'observable': None}
+
+        # The stars of the latest chunk, also without the conditions (e.g. with the normal detection)
+        latest_chunks = [file_result['star_chunks'][-1] for _, _, file_result, _ in files
+                         if file_result['star_chunks']]
+        if latest_chunks:
+            latest_time, latest_stars = max(latest_chunks)
+            sky['stars'] = int(latest_stars)
+            sky['stars_utc'] = _timeString(latest_time)
+
         segments = timeline['segments']
         if not segments:
             return night, sky

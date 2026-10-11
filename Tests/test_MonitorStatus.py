@@ -72,8 +72,8 @@ def _status(tmp_path, config=None):
     output_dir = tmp_path/'output'
     input_dir.mkdir(parents=True, exist_ok=True)
     output_dir.mkdir(parents=True, exist_ok=True)
-    return mst.MonitorStatus('XX0001', str(output_dir), str(input_dir), config,
-                             lambda name: name.endswith('.vid'), 2), config
+    scanner = lambda: mon.scanInputs(str(input_dir), str(output_dir), config, 'vid', False)
+    return mst.MonitorStatus('XX0001', str(output_dir), str(input_dir), config, scanner, 2), config
 
 
 def _inputFile(tmp_path, name, minutes_ago):
@@ -210,7 +210,10 @@ def test_sky_and_night(tmp_path, now):
     built = status.build(_state())
     night, sky = built['night'], built['sky']
     assert night['name'] == mnr.nightInfo(config, NOW)[0]
-    assert night['files_processed'] == 3 and night['detections'] == 4 and night['removed_by_clouds'] == 1
+    assert night['files_processed'] == 3 and night['removed_by_clouds'] == 1
+
+    # The detections are counted in the FTPdetectinfo of every file (one each)
+    assert night['detections'] == 3
     assert night['clear_percent'] == pytest.approx(100*12/84, abs=1.0)
     assert night['clouded_percent'] == pytest.approx(100*72/84, abs=1.0)
 
@@ -442,3 +445,187 @@ def test_a_failing_section_doesnt_stop_the_status(tmp_path, now, monkeypatch):
         written = json.load(f)
     assert [fault['code'] for fault in written['faults']] == ['STATUS_INCOMPLETE']
     assert written['overall'] == 'warning' and written['recording']['state'] == 'not_recording'
+
+
+### All input types ###
+
+# An input of every type the monitor reads: (file_type, name, is a FITS directory)
+INPUTS = [('vid', 'dump_6AC5999C_02F.vid', False), ('mkv', 'CAWE01_20261008_010203_123456_video.mkv', False),
+          ('mp4', '20261008_010203.mp4', False), ('ff', 'FF_XX0001_20251225_031500_123_0000000.fits', False),
+          ('ff', 'FF_XX0001_20251225_031500_123_0000000.bin', False), ('fitsdirs', '20261008_010203', True)]
+
+
+def _makeInput(input_dir, name, fits_dir, minutes_ago=60):
+    """ An input file, or a FITS directory with frames, last written the given number of minutes ago. """
+
+    t = time.time() - 60*minutes_ago
+    path = os.path.join(str(input_dir), name)
+    if fits_dir:
+        os.makedirs(path)
+        for i in range(3):
+            frame = os.path.join(path, 'frame_{:03d}.fits'.format(i))
+            with open(frame, 'wb') as f:
+                f.write(b'0'*100)
+            os.utime(frame, (t, t))
+    else:
+        with open(path, 'wb') as f:
+            f.write(b'0'*100)
+    os.utime(path, (t, t))
+    return path
+
+
+@pytest.mark.parametrize('file_type, name, fits_dir', INPUTS)
+def test_inputs_of_every_type(tmp_path, file_type, name, fits_dir):
+    """ The inputs of every type are found as by the monitor, with the time of their last change and their size,
+        and the other files and directories are not inputs.
+    """
+
+    path = _makeInput(tmp_path, name, fits_dir)
+
+    # Not inputs: a file of another type, an empty directory, and for FITS directories a file
+    _makeInput(tmp_path, 'notes.txt', False)
+    os.makedirs(str(tmp_path/'empty_dir'))
+
+    inputs = mon.scanInputs(str(tmp_path), str(tmp_path/'output'), _config(), file_type, False)
+    assert [os.path.basename(p) for p, _, _ in inputs] == [name]
+    assert mon.isInputPath(path, file_type)
+    assert not mon.isInputPath(str(tmp_path/'empty_dir'), file_type)
+
+    # The state of the input: the size of the file, or of the frames of a FITS directory
+    mtime, size = mon.inputState(path, file_type)
+    assert size == (300 if fits_dir else 100)
+    assert mtime == pytest.approx(time.time() - 3600, abs=5)
+
+
+def test_recursive_inputs(tmp_path):
+    """ The inputs in the subdirectories are found when the monitor is recursive, the night directories of the
+        monitor in the input directory are skipped (as by the monitor).
+    """
+
+    config = _config()
+    os.makedirs(str(tmp_path/'night1'))
+    _makeInput(tmp_path/'night1', 'a.vid', False)
+    _makeInput(tmp_path, 'b.vid', False)
+    os.makedirs(str(tmp_path/config.captured_dir))
+    _makeInput(tmp_path/config.captured_dir, 'c.vid', False)
+
+    names = lambda inputs: sorted(os.path.basename(p) for p, _, _ in inputs)
+    assert names(mon.scanInputs(str(tmp_path), str(tmp_path), config, 'vid', True)) == ['a.vid', 'b.vid']
+    assert names(mon.scanInputs(str(tmp_path), str(tmp_path), config, 'vid', False)) == ['b.vid']
+
+
+def test_recording_of_fits_directories(tmp_path, now):
+    """ A FITS directory which gets new frames is being recorded. """
+
+    config = _matchedFilterConfig()
+    (tmp_path/'output').mkdir()
+    scanner = lambda: mon.scanInputs(str(tmp_path/'input'), str(tmp_path/'output'), config, 'fitsdirs', False)
+    status = mst.MonitorStatus('XX0001', str(tmp_path/'output'), str(tmp_path/'input'), config, scanner, 2)
+
+    # A directory written to a minute ago (by the time of the status)
+    (tmp_path/'input').mkdir()
+    path = _makeInput(tmp_path/'input', '20251225_030000', True)
+    t = (NOW - datetime.timedelta(minutes=1) - datetime.datetime(1970, 1, 1)).total_seconds()
+    os.utime(path, (t, t))
+
+    recording = status.build(_state())['recording']
+    assert recording['state'] == 'recording' and recording['newest_file'] == '20251225_030000'
+
+
+@pytest.mark.parametrize('file_type, name, fits_dir', INPUTS)
+def test_monitor_loop_with_every_input_type(tmp_path, monkeypatch, file_type, name, fits_dir):
+    """ The monitor processes the inputs of every type and writes the status with them. """
+
+    input_dir = tmp_path/'input'
+    output_dir = tmp_path/'output'
+    input_dir.mkdir()
+    output_dir.mkdir()
+    _makeInput(input_dir, name, fits_dir)
+
+    monkeypatch.setattr(mon, 'processFileWorker', _fakeWorker)
+    status_path = str(output_dir/mst.STATUS_FILE_NAME)
+    real_sleep = time.sleep
+    started = time.time()
+    def _sleep(seconds):
+        if time.time() - started > 30:
+            raise KeyboardInterrupt
+        try:
+            with open(status_path) as f:
+                if json.load(f)['processing']['recent_files']:
+                    raise KeyboardInterrupt
+        except (OSError, ValueError):
+            pass
+        real_sleep(0.05)
+    monkeypatch.setattr(mon.time, 'sleep', _sleep)
+
+    mon.monitorDirectory(str(input_dir), file_type, REPO_CONFIG, TEMPLATE_PLATEPAR, str(output_dir), nproc=1,
+                         poll_interval=0.01, report_mode='none')
+
+    with open(status_path) as f:
+        status = json.load(f)
+    assert [r['file'] for r in status['processing']['recent_files']] == [mon.uniqueId(name)]
+    assert status['recording']['newest_file'] == name and status['recording']['input_readable']
+
+
+def test_multicamera_status_with_the_disk_full(tmp_path, monkeypatch):
+    """ The files held back while the output disk is full are waiting in the status of the camera. """
+
+    input_dir = tmp_path/'input'
+    output_dir = tmp_path/'output'
+    input_dir.mkdir()
+    output_dir.mkdir()
+    _makeInput(input_dir, 'dump_6AC5999C_02F.vid', False, minutes_ago=30)
+    ini_path = tmp_path/'multicam.ini'
+    ini_path.write_text('[Global]\nnproc = 1\nfile_type = vid\npoll_interval = 0.01\n\n[CAM1]\ninput_dir = {:s}\n'
+                        'output_dir = {:s}\nconfig = {:s}\nplatepar = {:s}\n'.format(str(input_dir), str(output_dir),
+                                                                                   REPO_CONFIG, TEMPLATE_PLATEPAR))
+
+    # The disk is full, and the monitor stops after a few polls
+    def _full(self):
+        self.paused = True
+        return False
+    monkeypatch.setattr(mon.FreeSpaceGuard, 'ok', _full)
+    polls = {'n': 0}
+    real_sleep = time.sleep
+    def _sleep(seconds):
+        polls['n'] += 1
+        if polls['n'] > 5:
+            raise KeyboardInterrupt
+        real_sleep(0.01)
+    monkeypatch.setattr(mon.time, 'sleep', _sleep)
+
+    mon.monitorMultipleCameras(str(ini_path), report_mode='none')
+
+    with open(str(output_dir/mst.STATUS_FILE_NAME)) as f:
+        status = json.load(f)
+    assert status['processing']['queued'] == 1
+    assert status['processing']['delay_min'] == pytest.approx(30, abs=1)
+    assert 'DISK_LOW' in [fault['code'] for fault in status['faults']]
+
+
+@pytest.mark.parametrize('mf_enable, replace', [(False, False), (True, False)])
+def test_detections_without_the_matched_filter_replacing(tmp_path, now, mf_enable, replace):
+    """ With the normal detection, the detections are counted in the FTPdetectinfo of the files, and the ones of a
+        separate pass of the matched filter apart.
+    """
+
+    config = _config()
+    config.mf_enable = mf_enable
+    config.mf_replace_detection = replace
+    status, _ = _status(tmp_path, config)
+    output_dir = str(tmp_path/'output')
+
+    for name in ('file1', 'file2'):
+        results_dir = _makeResults(output_dir, config, name, n_chunks=3)
+        if mf_enable:
+            os.makedirs(os.path.join(output_dir, results_dir, mnr.MF_DIR_NAME))
+            with open(os.path.join(output_dir, results_dir, mnr.MF_DIR_NAME, mnr.MF_DONE_NAME), 'w') as f:
+                json.dump({'total_frames': 384, 'detections': 5}, f)
+
+    built = status.build(_state())
+    assert built['night']['detections'] == 2
+    assert built['night'].get('matched_filter_detections') == (10 if mf_enable else None)
+    assert built['detector']['name'] == ('normal_and_matched_filter' if mf_enable else 'normal')
+
+    # Without the conditions, the sky has the stars of the latest chunk
+    assert built['sky']['stars'] == 1 and built['sky']['state'] in ('no_data', 'too_few_stars')

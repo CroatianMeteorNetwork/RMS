@@ -549,8 +549,8 @@ An example (shortened; the processing statistics and the calibration of the nigh
 | `monitor` | `state` | `running`, `paused_disk_full` or `stopped`. |
 | | `pid`, `host`, `started_utc`, `code_version` | The monitor process, its start and the git commit of the code. |
 | | `nproc`, `workers_busy`, `workers_this_camera` | Worker processes: all, busy, and busy with this camera. |
-| `recording` | `state` | `recording` (the newest input file grew in the last 5 minutes), `not_recording` (at night, nothing written for 5 minutes), `daytime`, or `unknown` (the input can't be read). |
-| | `newest_file`, `newest_file_written_utc`, `newest_file_size_gb`, `minutes_since_last_write`, `files_tonight` | The newest input file, and the input files written tonight. |
+| `recording` | `state` | `recording` (the newest input was written in the last 5 minutes), `not_recording` (at night, nothing written for 5 minutes), `daytime`, or `unknown` (the input can't be read). |
+| | `newest_file`, `newest_file_written_utc`, `newest_file_size_gb`, `minutes_since_last_write`, `files_tonight` | The newest input and the inputs written tonight, found as the monitor finds them for every input type (a FITS directory counts as one input, written when frames are added; its size is not given). |
 | `processing` | `queued`, `settling`, `in_progress` | Files waiting to be processed, still being written, and being processed (with their running time). |
 | | `delay_min` | How long ago the oldest waiting or processed file was recorded; 0 when nothing waits. |
 | | `file_length_min`, `waiting_recording_min` | Length of the input files (from the processed ones), and the recording time which waits. |
@@ -563,10 +563,12 @@ An example (shortened; the processing statistics and the calibration of the nigh
 | | `observed_utc`, `age_min` | When the sky was observed, and how long ago. |
 | | `observable` | At least 80% of the observed time in the last 10 minutes of the data had at least 80% of the image clear. `null` with less than about 3 minutes of data. |
 | | `clear_percent`, `dimming_mag`, `stars`, `matched_stars`, `reliable_seen_percent` | The latest chunk: the clear part of the image, how much the stars are dimmed vs clear sky, the stars, and the share of the stars which are reliably seen on clear sky that are seen. |
+| | `stars`, `stars_utc` | Without the cloud filter of the matched filter (e.g. with the normal detection or FF input) the state of the sky is not measured, but the stars of the latest chunk are given. |
 | | `last_hour` | The shares of the states and the median dimming in the last hour of the data. |
 | `night` | `name`, `start_utc`, `end_utc` | The night (sunset to sunrise). |
 | | `observed_h`, `clear_percent`, `partly_clouded_percent`, `clouded_percent`, `too_few_stars_percent` | The night so far, the same numbers as the [sky conditions plot](#what-a-report-produces) of the night report. |
-| | `files_processed`, `files_not_searched`, `detections`, `removed_by_clouds` | Files and detections of the night so far. |
+| | `files_processed`, `files_not_searched`, `detections`, `removed_by_clouds` | Files and detections of the night so far. The detections are counted in the FTPdetectinfo of every file (the normal detection, or the matched filter when it replaces it). |
+| | `matched_filter_detections` | The detections of the matched filter when it runs as a separate pass next to the normal detection. |
 | `calibration` | `status`, `reason` | `ok`, `failing`, `degraded` (the camera may have moved) or `unknown` (too few chunks on clear sky to judge), with the reason. |
 | | `last_file`, `recent`, `tonight` | For the last file, the latest files with at least 10 chunks on clear sky, and the night: the chunks, how many were recalibrated, the share of the chunks on clear sky which were recalibrated, the median residual of the fit (px), the median number of matched stars, the photometric zero point (mag) and the median difference of the pointing from the reference platepar (px). |
 | | `dist_check_threshold_px`, `camera_moved_threshold_px` | The limits of the judgement. |

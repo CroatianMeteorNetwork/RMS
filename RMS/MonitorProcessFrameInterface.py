@@ -341,6 +341,95 @@ def matchesFileType(file_name, file_type):
 
 
 
+def isInputPath(file_path, file_type):
+    """ Check if a path is an input of the monitor: a file of the given type, or for FITS directories a directory
+        with FITS frames.
+
+    Arguments:
+        file_path: [str] Path to check.
+        file_type: [str] File type identifier (e.g. 'vid', 'ff', 'mkv', 'fitsdirs').
+
+    Return:
+        [bool] True if it is an input.
+    """
+
+    if not matchesFileType(os.path.basename(file_path), file_type):
+        return False
+
+    # A FITS directory is a directory with FITS frames, any other input is a file
+    if file_type == 'fitsdirs':
+        try:
+            return os.path.isdir(file_path) and any(f.lower().endswith('.fits') for f in os.listdir(file_path))
+        except OSError:
+            return False
+
+    return not os.path.isdir(file_path)
+
+
+def inputState(file_path, file_type):
+    """ The time of the last change and the size of an input, which tell whether it is still being written. A
+        FITS directory changes with its frames, so it has the newest time and the total size of its frames.
+
+    Arguments:
+        file_path: [str] Path of the input (see isInputPath).
+        file_type: [str] File type identifier.
+
+    Return:
+        (mtime, size): [tuple] Time of the last change (Unix time) and size (bytes). None if it can't be read
+            (e.g. it was deleted meanwhile).
+    """
+
+    try:
+        if file_type == 'fitsdirs':
+            fits_paths = [os.path.join(file_path, f) for f in os.listdir(file_path) if f.lower().endswith('.fits')]
+            if not fits_paths:
+                return None
+            return max(os.path.getmtime(f) for f in fits_paths), sum(os.path.getsize(f) for f in fits_paths)
+
+        return os.path.getmtime(file_path), os.path.getsize(file_path)
+
+    except OSError:
+        return None
+
+
+def scanInputs(input_dir, output_dir, config, file_type, recursive):
+    """ The inputs in the input directory with the time of their last change and their size, for the status of
+        the monitor (MonitorStatus). The inputs are found as by the monitor. For FITS directories only the time
+        of the directory is read (it changes when frames are added), as reading all frames would be slow.
+
+    Arguments:
+        input_dir: [str] Input directory.
+        output_dir: [str] Output directory, which is skipped when it is inside the input directory.
+        config: [Config] Configuration.
+        file_type: [str] File type identifier.
+        recursive: [bool] The inputs are also in the subdirectories.
+
+    Return:
+        [list] (path, mtime, size) of every input, size None for FITS directories. Raises OSError if the input
+            directory can't be read.
+    """
+
+    # Collect the paths as the monitor does
+    if recursive:
+        paths = []
+        for root, dirs, files in walkInput(input_dir, output_dir, config):
+            paths += [os.path.join(root, name) for name in (dirs if file_type == 'fitsdirs' else files)]
+    else:
+        paths = [os.path.join(input_dir, name) for name in os.listdir(input_dir)]
+
+    inputs = []
+    for path in paths:
+        if not isInputPath(path, file_type):
+            continue
+        try:
+            st = os.stat(path)
+        except OSError:
+            continue
+        inputs.append((path, st.st_mtime, None if file_type == 'fitsdirs' else st.st_size))
+
+    return inputs
+
+
 class ChunkImageSaver(object):
     """ Saves the max pixel and average pixel images of every star extraction chunk as an FF-equivalent image
         pair, corrected with the dark and the flat, and keeps the list of saved chunks. Used as the chunk
@@ -1503,7 +1592,8 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
         # Keep the live status of the monitor in the output directory, for external monitoring
         if reporter.config.monitor_status:
             status = MonitorStatus(reporter.config.stationID, output_dir, input_dir, reporter.config,
-                                   lambda name: matchesFileType(name, file_type), nproc, recursive=recursive)
+                                   lambda: scanInputs(input_dir, output_dir, reporter.config, file_type, recursive),
+                                   nproc)
 
         # Delete the local copies of input files left behind by workers which were killed
         removeStagedFiles(reporter.config.monitor_staging_dir)
@@ -1599,28 +1689,11 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
             # 2. Identify which paths are "Stable"
             stable_files = []
             for file_path in candidate_paths:
-                file_name = os.path.basename(file_path)
                 file_rel_path = os.path.relpath(file_path, input_dir)
 
-                # Check if the file matches the requested type
-                if not matchesFileType(file_name, file_type):
+                # Skip the paths which are not inputs of the requested type
+                if not isInputPath(file_path, file_type):
                     continue
-
-                if file_type == 'fitsdirs':
-                    if not os.path.isdir(file_path):
-                        continue
-                    
-                    # Ensure it contains .fits files
-                    try:
-                        fits_files = [f for f in os.listdir(file_path) if f.lower().endswith('.fits')]
-                        if not fits_files:
-                            continue
-                    except OSError:
-                        continue
-
-                else:
-                    if os.path.isdir(file_path):
-                        continue
 
                 unique_id = uniqueId(file_rel_path)
 
@@ -1633,18 +1706,11 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                     if (time.time() - failed_files[unique_id]['last_fail_time']) < fail_wait_time:
                         continue
 
-                # Non-blocking stability check
-                try:
-                    if file_type == 'fitsdirs':
-                        # For directories, check the mtime and total size of all .fits files
-                        full_fits_paths = [os.path.join(file_path, f) for f in fits_files]
-                        curr_mtime = max(os.path.getmtime(f) for f in full_fits_paths)
-                        curr_size = sum(os.path.getsize(f) for f in full_fits_paths)
-                    else:
-                        curr_mtime = os.path.getmtime(file_path)
-                        curr_size = os.path.getsize(file_path)
-                except OSError:
-                    continue  # File disappeared or momentarily locked, try next pass
+                # Non-blocking stability check (skip the file if it disappeared or is momentarily locked)
+                input_state = inputState(file_path, file_type)
+                if input_state is None:
+                    continue
+                curr_mtime, curr_size = input_state
 
                 # If file is older than max age, consider it stable immediately
                 if (time.time() - curr_mtime) > stable_max_age:
@@ -2001,11 +2067,16 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
                                                   log_prefix="[{}] ".format(cam['id'])) for cam in cameras}
 
         # Keep the live status of every camera in its output directory, for external monitoring
-        statuses = {cam['id']: MonitorStatus(cam['id'], cam['output_dir'], cam['input_dir'],
-                                             reporters[cam['id']].config,
-                                             lambda name: matchesFileType(name, file_type), nproc,
-                                             recursive=recursive)
-                    for cam in cameras if reporters[cam['id']].config.monitor_status}
+        for cam in cameras:
+            cam_config = reporters[cam['id']].config
+            if cam_config.monitor_status:
+
+                # The inputs of the camera as the monitor finds them (bound to this camera)
+                def _scanner(cam=cam, cam_config=cam_config):
+                    return scanInputs(cam['input_dir'], cam['output_dir'], cam_config, file_type, recursive)
+
+                statuses[cam['id']] = MonitorStatus(cam['id'], cam['output_dir'], cam['input_dir'], cam_config,
+                                                    _scanner, nproc)
         input_readable = {cam['id']: None for cam in cameras}
 
         # Initialize state tracking dictionaries. Since files from different cameras might have the same name,
@@ -2054,8 +2125,10 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
         # Keep track of the last camera that received a process slot to facilitate round-robin tiebreaking
         last_assigned_idx = 0
 
-        # The files waiting to be processed by every camera, filled at every poll
+        # The files waiting to be processed by every camera, filled at every poll, and all stable files of every
+        #   camera (also the ones held back while its output disk is full), for the status
         stable_per_cam = {}
+        waiting_per_cam = {cam['id']: [] for cam in cameras}
 
         def cameraState(cam_id, stopped=False):
             """ The state of a camera for its status. """
@@ -2063,7 +2136,9 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
             workers = {uid: (worker_paths.get((c_id, uid)), proc) for (c_id, uid), proc in active_workers.items()
                        if c_id == cam_id}
 
-            return statusState(workers, stable_per_cam.get(cam_id, []), stability_tracker[cam_id],
+            queued = [entry for entry in waiting_per_cam[cam_id] if (cam_id, entry[2]) not in active_workers]
+
+            return statusState(workers, queued, stability_tracker[cam_id],
                                failed_files[cam_id], space_guards[cam_id], reporters[cam_id], input_readable[cam_id],
                                len(active_workers), stopped=stopped)
 
@@ -2159,28 +2234,11 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
 
                 cam_stable = []
                 for file_path in candidate_paths:
-                    file_name = os.path.basename(file_path)
                     file_rel_path = os.path.relpath(file_path, cam['input_dir'])
                     
                     # Filter out non-target files and directories
-                    if not matchesFileType(file_name, file_type):
+                    if not isInputPath(file_path, file_type):
                         continue
-
-                    if file_type == 'fitsdirs':
-                        if not os.path.isdir(file_path):
-                            continue
-                        
-                        # Ensure it contains .fits files
-                        try:
-                            fits_files = [f for f in os.listdir(file_path) if f.lower().endswith('.fits')]
-                            if not fits_files:
-                                continue
-                        except OSError:
-                            continue
-
-                    else:
-                        if os.path.isdir(file_path):
-                            continue
                     
                     # Generate a unique ID based on the path name.
                     unique_id = uniqueId(file_rel_path)
@@ -2195,19 +2253,12 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
                         if (time.time() - failed_files[cam_id][unique_id]['last_fail_time']) < fail_wait_time:
                             continue
 
-                    # Attempt to read path metadata for stability checking
-                    try:
-                        if file_type == 'fitsdirs':
-                            # For directories, check the mtime and total size of all .fits files
-                            full_fits_paths = [os.path.join(file_path, f) for f in fits_files]
-                            curr_mtime = max(os.path.getmtime(f) for f in full_fits_paths)
-                            curr_size = sum(os.path.getsize(f) for f in full_fits_paths)
-                        else:
-                            curr_mtime = os.path.getmtime(file_path)
-                            curr_size = os.path.getsize(file_path)
-                    except OSError:
-                        # File might have been deleted or locked, we'll try again next poll
+                    # Attempt to read path metadata for stability checking (the file might have been deleted or
+                    #   locked, we'll try again next poll)
+                    input_state = inputState(file_path, file_type)
+                    if input_state is None:
                         continue
+                    curr_mtime, curr_size = input_state
 
                     # Check if the file is "stable" (fully written to disk)
                     if (time.time() - curr_mtime) > stable_max_age:
@@ -2258,6 +2309,7 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
                     return mtime
 
                 cam_stable.sort(key=getSortTime)
+                waiting_per_cam[cam_id] = list(cam_stable)
                 if cam_stable and space_guards[cam_id].ok():
                     stable_per_cam[cam_id] = cam_stable
 
