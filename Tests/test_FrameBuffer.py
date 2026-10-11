@@ -147,7 +147,8 @@ def _track(frames, x0=100.0, y0=200.0, vx=0.5, vy=-0.2):
 
 def test_stitch_segments():
     """ An object found in both segments of an overlap is joined at its middle, the detections found in one
-        segment are kept whole, and different objects in the overlap are not joined. """
+        segment are kept (in the half of the overlap of that segment), and different objects in the overlap are not
+        joined. """
 
     # Segments 0-2048 and 1536-3584, overlap 1536-2048, cut at 1792
     cuts, overlaps = [1792], [(1536, 2048)]
@@ -166,7 +167,9 @@ def test_stitch_segments():
     joined = [det[2] for det in detections if det[2][0, 0] == 1000][0]
     assert joined[0, 0] == 1000 and joined[-1, 0] == 2996
     assert np.all(np.diff(joined[:, 0]) > 0)
-    assert any(det[2][0, 0] == 1600 for det in detections)
+    # The object found only in the second segment begins at the middle of the overlap (the first segment has the
+    #   frames before it)
+    assert any(det[2][0, 0] == 1792 for det in detections)
 
 
 def test_block_indices_within_the_blocks():
@@ -246,3 +249,20 @@ def test_summary_without_a_searched_segment():
 
     run = SegmentedRun(_Input(), [(0, 1024), (512, 2000)], [None, None], [768], None, None, {})
     assert run.summary() == {}
+
+
+def test_stitch_segments_each_frame_once():
+    """ The detections which cross the middle of an overlap and are not the same object as one of the other segment
+        are cut at the middle, so the frames of the overlap are covered by the detections of one segment only (an
+        object measured differently in the two segments isn't kept twice). """
+
+    cuts, overlaps = [1792], [(1536, 2048)]
+
+    # The same faint object, found 8 px apart in the two segments (more than the tolerance)
+    first = _track(np.arange(1600, 2048, 4))
+    second = _track(np.arange(1650, 2200, 4), x0=108.0)
+
+    detections = stitchSegments([[[0, 0, first]], [[0, 0, second]]], cuts, overlaps, _Detector(), tolerance=5.0)
+    assert len(detections) == 2
+    spans = sorted((det[2][0, 0], det[2][-1, 0]) for det in detections)
+    assert spans[0][1] < 1792 <= spans[1][0]

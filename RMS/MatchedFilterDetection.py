@@ -499,6 +499,10 @@ class MatchedFilterDetector(object):
         # Significances of the measured tracks: (first frame, last frame, significance, off time, reordered)
         self.significances = []
 
+        # The persistence counts of the segments of the input before this one, {(run, bin): (counts, runs)} (see
+        #   removePersistent)
+        self.persistence_prior = {}
+
 
     ### Frames ###
 
@@ -1028,9 +1032,10 @@ class MatchedFilterDetector(object):
         #   object slower than about a PSF width per 100 frames is too slow to be detected anyway
         self.backgroundPass()
 
-        # Number of runs in which every pixel of the search image is above the threshold
-        self.persistence_counts = {}
-        self.persistence_runs = {}
+        # Number of runs in which every pixel of the search image is above the threshold, continued from the
+        #   segments before this one when the input is read in segments
+        self.persistence_counts = {key: counts.copy() for key, (counts, _) in self.persistence_prior.items()}
+        self.persistence_runs = {key: runs for key, (_, runs) in self.persistence_prior.items()}
 
         # The PSF sigma is measured on the stars of the first block in which enough isolated stars are visible (the
         #   first blocks can be clouded), unless it is given. Until then 1 px is used: the smoothing of the search
@@ -1080,9 +1085,9 @@ class MatchedFilterDetector(object):
 
     def removePersistent(self, hits):
         """ Remove the hits at persistent pixels: above the threshold in a large fraction of all runs of the
-            input (e.g. flickering pixels, variable stars). It is judged over the whole input, as a slow object
-            stays at a position for a large part of a block: at the slowest speeds of the search it takes a few
-            hundred frames to cross the PSF.
+            input (e.g. flickering pixels, variable stars). It is judged over the whole input (over the segments
+            so far when it is read in segments), as an object which moves little stays at a position for a large
+            part of a block: at the smallest motions of the search it takes a few hundred frames to cross the PSF.
 
         Arguments:
             hits: [list] Hits of the search.
@@ -3242,7 +3247,8 @@ def skyQuality(img_handle, config, star_list, platepar, reference_dir=None, inpu
 
 
 def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=None, star_list=None,
-                        return_detector=False, platepar=None, reference_dir=None, input_name='', frame_range=None):
+                        return_detector=False, platepar=None, reference_dir=None, input_name='', frame_range=None,
+                        persistence_prior=None):
     """ Run the matched-filter detection on an image handle.
 
     Arguments:
@@ -3265,6 +3271,8 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
         frame_range: [tuple] (first frame, end frame) of a segment of the input to search (see
             detectMatchedFilterSegments), with the stars of its chunks. The sky reference and the log are then not
             updated. None by default (the whole input).
+        persistence_prior: [dict] Persistence counts of the segments before this one (see
+            MatchedFilterDetector.removePersistent). None by default.
 
     Return:
         [list] Detections as [rho, theta, centroids], or (detections, detector) with return_detector. The
@@ -3289,6 +3297,7 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
     # Detect and measure the objects
     detector = MatchedFilterDetector(img_handle, config, mask=mask, dark=dark, flat_struct=flat_struct,
                                      frame_range=frame_range)
+    detector.persistence_prior = persistence_prior or {}
     detector.sky_map = skyQuality(img_handle, config, star_list, platepar, reference_dir=reference_dir,
                                   input_name=input_name, frame_range=frame_range, update=(frame_range is None))
     detections = detector.run()
@@ -3322,7 +3331,8 @@ def stitchSegments(segment_detections, cuts, overlaps, detector, tolerance, sear
         detections of a segment which lie entirely in the half of the other one are left to the other one (which has
         the same frames). An object which crosses the middle is found in both segments: its detections are joined
         there (the part before it from the first segment, the part after it from the second one). The detections
-        which cross it and are found in only one segment are kept whole.
+        which cross it and are not joined are cut there, so every frame of an overlap is covered by the detections
+        of one segment only (the pieces are joined later, see MatchedFilterDetector.joinDetections).
 
     Arguments:
         segment_detections: [list] Detections of every segment, as [rho, theta, centroids].
@@ -3362,6 +3372,7 @@ def stitchSegments(segment_detections, cuts, overlaps, detector, tolerance, sear
         # The detections of the previous segment which reach into the overlap can be joined
         candidates = [i for i, det in enumerate(detections) if det[2][:, 0].max() >= ov_first]
         used = set()
+        new = []
         for det in segment:
             cent = det[2]
 
@@ -3381,9 +3392,13 @@ def stitchSegments(segment_detections, cuts, overlaps, detector, tolerance, sear
                 if dist <= best_dist:
                     best, best_dist = i, dist
 
-            # Not found in the previous segment: kept whole
+            # Not found in the previous segment: its part after the middle of the overlap (all of it if the
+            #   previous segment was not searched)
             if best is None:
-                detections.append(det)
+                if (searched is None) or searched[k - 1]:
+                    cent = cent[cent[:, 0] >= cut]
+                if len(cent) >= 2:
+                    new.append([*detector.polarLine(cent), cent])
                 continue
 
             # The same object: the centroids before the cut from the previous segment, the others from this one.
@@ -3396,6 +3411,17 @@ def stitchSegments(segment_detections, cuts, overlaps, detector, tolerance, sear
                 joined = other if len(other) >= len(cent) else cent
             detections[best] = [*detector.polarLine(joined), joined]
             used.add(best)
+
+        # The detections of the previous segment which cross the middle of the overlap and were not joined: their
+        #   part before it (the segment after it has the same frames), if this segment was searched
+        if (searched is None) or searched[k]:
+            for i in candidates:
+                cent = detections[i][2]
+                if (i not in used) and (cent[:, 0].max() >= cut):
+                    cent = cent[cent[:, 0] < cut]
+                    detections[i] = [*detector.polarLine(cent), cent] if len(cent) >= 2 else None
+            detections = [det for det in detections if det is not None]
+        detections += new
 
     detections.sort(key=lambda det: det[2][0, 0])
 
@@ -3527,6 +3553,7 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
     timing = collections.defaultdict(float)
     star_list, detectors, segment_detections = [], [], []
     done_chunks = 0
+    persistence = {}
     for k, (first, end) in enumerate(ranges):
 
         # Read the new frames of the segment
@@ -3561,8 +3588,13 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
         detections, detector = detectMatchedFilter(buffer, config, mask=mask, dark=dark, flat_struct=flat_struct,
                                                    star_list=segment_stars, return_detector=True,
                                                    platepar=platepar, reference_dir=reference_dir,
-                                                   input_name=input_name, frame_range=(first, end))
+                                                   input_name=input_name, frame_range=(first, end),
+                                                   persistence_prior=persistence)
         detectors.append(detector)
+
+        # The persistent pixels are judged over all segments so far, as over the whole input
+        persistence = {key: (detector.persistence_counts[key], detector.persistence_runs[key])
+                       for key in detector.persistence_counts}
         segment_detections.append(detections)
         log.info('Matched filter: segment {:d}/{:d} ({:d}-{:d}): {:d} detections'.format(k + 1, len(ranges), first,
                                                                                        end, len(detections)))
