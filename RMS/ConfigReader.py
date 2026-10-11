@@ -927,6 +927,11 @@ class Config:
         #   network. Empty disables it
         self.monitor_staging_dir = ''
 
+        # Keep the live status of the monitor in a JSON file in the output directory (monitor_status.json), for
+        #   external monitoring, rewritten every given number of seconds and after every processed file
+        self.monitor_status = True
+        self.monitor_status_interval = 60.0
+
 
         #### Matched-filter detection of faint moving objects (RMS.MatchedFilterDetection)
 
@@ -2471,6 +2476,12 @@ def parseMonitorProcessing(config, parser):
     if parser.has_option(section, "monitor_staging_dir"):
         staging_dir = parser.get(section, "monitor_staging_dir").strip()
         config.monitor_staging_dir = os.path.expanduser(staging_dir) if staging_dir else ''
+
+    if parser.has_option(section, "monitor_status"):
+        config.monitor_status = parser.getboolean(section, "monitor_status")
+
+    if parser.has_option(section, "monitor_status_interval"):
+        config.monitor_status_interval = max(parser.getfloat(section, "monitor_status_interval"), 1.0)
 
 
 def parseColors(config, parser):

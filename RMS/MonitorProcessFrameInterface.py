@@ -48,6 +48,7 @@ from RMS.Routines import Image
 from RMS.MonitorNightReport import exitWithMonitor, latestPlateparPath, lockOutputDir, lockOwner, \
     MONITOR_LOCK_FILE_NAME, nightDirPath, nightInfo, NightReporter, readDoneFlag, readStateFile, ReportLock, \
     stopProcess, writeDoneFlag
+from RMS.MonitorStatus import MonitorStatus
 from RMS.ExtractStarsFrameInterface import extractStarsFrameInterface
 from RMS.DetectStarsAndMeteors import (
     detectStarsAndMeteorsFrameInterface,
@@ -1353,6 +1354,48 @@ def stopWorker(proc):
     stopProcess(proc, "Worker")
 
 
+def workerOutcome(proc):
+    """ The outcome of a finished worker for the status of the monitor (see MonitorStatus.fileFinished), and how
+        long it ran (s). """
+
+    outcome = {0: 'ok', SKIP_EXIT_CODE: 'skipped', CHANGED_EXIT_CODE: 'changed'}.get(proc.exitcode, 'failed')
+
+    return outcome, time.monotonic() - proc.start_time
+
+
+def statusState(workers, queued, settling, failed_files, space_guard, reporter, input_readable, workers_busy,
+                stopped=False):
+    """ The state of the monitor for the status of a camera (see MonitorStatus.build).
+
+    Arguments:
+        workers: [dict] {unique_id: (file_path, process)} of the workers of the camera.
+        queued: [list] Files waiting to be processed, as (file_path, mtime, ...).
+        settling: [list] Files which are still being written.
+        failed_files: [dict] The failed files of the camera.
+        space_guard: [FreeSpaceGuard] Guard of the free space of the camera.
+        reporter: [NightReporter] Night reporter of the camera.
+        input_readable: [bool] The input directory could be read at the last scan, None if not known.
+        workers_busy: [int] Busy workers of the whole monitor.
+
+    Keyword arguments:
+        stopped: [bool] The monitor has stopped. False by default.
+
+    Return:
+        [dict] The state.
+    """
+
+    # The wall time when every worker started (they keep the monotonic time)
+    now_wall, now_mono = RmsDateTime.utcnow(), time.monotonic()
+    in_progress = [(uid, file_path, now_wall - datetime.timedelta(seconds=now_mono - proc.start_time))
+                   for uid, (file_path, proc) in sorted(workers.items())]
+
+    return {'stopped': stopped, 'input_readable': input_readable, 'paused_for_space': space_guard.paused,
+            'workers_busy': workers_busy, 'in_progress': in_progress,
+            'queued': [(entry[0], entry[1]) for entry in queued], 'settling': list(settling),
+            'failed_files': failed_files, 'max_failures': MAX_FAILURES, 'max_kills': MAX_KILLS,
+            'reporter': reporter}
+
+
 def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_dir, nproc=2,
                      chunk_frames=128, poll_interval=2, force=False, recursive=False, flat_path=None,
                      dark_path=None, fail_wait_time=300, start_time=None, report_mode=None,
@@ -1426,8 +1469,25 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
     #   fails or is interrupted, as the monitor would otherwise not exit
     reporter = None
 
-    # Active worker processes: {unique_id: Process}
+    # Active worker processes: {unique_id: Process}, and their input files
     active_workers = {}
+    worker_paths = {}
+
+    # The live status of the monitor (see below), the files waiting to be processed and being written, and
+    #   whether the input could be read at the last scan
+    status = None
+    stable_files = []
+    stability_tracker = {}
+    input_readable = None
+
+    def monitorState(stopped=False):
+        """ The state of the monitor for its status. """
+
+        workers = {uid: (worker_paths.get(uid), proc) for uid, proc in active_workers.items()}
+        queued = [entry for entry in stable_files if entry[2] not in active_workers]
+
+        return statusState(workers, queued, stability_tracker, failed_files, space_guard, reporter, input_readable,
+                           len(active_workers), stopped=stopped)
 
     try:
 
@@ -1439,6 +1499,11 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
 
         # Pauses the processing while the output disk is full
         space_guard = FreeSpaceGuard(output_dir, reporter)
+
+        # Keep the live status of the monitor in the output directory, for external monitoring
+        if reporter.config.monitor_status:
+            status = MonitorStatus(reporter.config.stationID, output_dir, input_dir, reporter.config,
+                                   lambda name: matchesFileType(name, file_type), nproc, recursive=recursive)
 
         # Delete the local copies of input files left behind by workers which were killed
         removeStagedFiles(reporter.config.monitor_staging_dir)
@@ -1478,6 +1543,10 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                     # Delete the local copy of a worker which was killed
                     removeStagedFiles(reporter.config.monitor_staging_dir, pid=proc.pid)
 
+                    # Record the file in the status
+                    if status is not None:
+                        status.fileFinished(uid, *workerOutcome(proc))
+
                     if proc.exitcode == 0:
                         log.info("Successfully processed: {}".format(uid))
                         processed_files.add(uid)
@@ -1502,6 +1571,7 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
 
             for uid in finished:
                 del active_workers[uid]
+                worker_paths.pop(uid, None)
 
             # 1. Get ALL paths and their metadata first
             candidate_paths = []
@@ -1517,8 +1587,10 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                 else:
                     candidate_paths = [os.path.join(input_dir, f) for f in os.listdir(input_dir)]
                 logReadable(input_dir, True)
+                input_readable = True
             except OSError:
                 logReadable(input_dir, False)
+                input_readable = False
 
             # Forget the files which disappeared while waiting for them to be written
             stability_tracker = {path: trk for path, trk in stability_tracker.items()
@@ -1635,6 +1707,7 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                     break
 
                 active_workers[unique_id] = proc
+                worker_paths[unique_id] = file_path
                 new_files_queued = True
 
             # If no workers are active and no new files were queued, we're idle
@@ -1652,6 +1725,10 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
             except Exception as e:
                 log.error("Night report scheduling failed: {:s}".format(repr(e)))
                 log.error(traceback.format_exc())
+
+            # Update the status (every interval, and right after a file was processed)
+            if status is not None:
+                status.update(monitorState())
 
             time.sleep(poll_interval)
 
@@ -1674,6 +1751,13 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
             removeStagedFiles(reporter.config.monitor_staging_dir)
 
             reporter.stop(timeout=SHUTDOWN_TIMEOUT)
+
+        # The status says the monitor has stopped
+        if status is not None:
+            try:
+                status.update(monitorState(stopped=True), force=True)
+            except Exception as e:
+                log.warning("The final status could not be written: {}".format(repr(e)))
 
         log.info("All workers stopped.")
 
@@ -1886,6 +1970,10 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
     # Format: { (camera_id, unique_id) : multiprocessing.Process }
     active_workers = {}
 
+    # The input files of the active jobs, and the status of every camera (see below)
+    worker_paths = {}
+    statuses = {}
+
     # The reporters (and their upload managers) are created in the try block, so they're stopped if the
     #   startup fails or is interrupted, as the monitor would otherwise not exit
     try:
@@ -1911,6 +1999,14 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
         # Pause the processing of a camera while its output disk is full
         space_guards = {cam['id']: FreeSpaceGuard(cam['output_dir'], reporters[cam['id']],
                                                   log_prefix="[{}] ".format(cam['id'])) for cam in cameras}
+
+        # Keep the live status of every camera in its output directory, for external monitoring
+        statuses = {cam['id']: MonitorStatus(cam['id'], cam['output_dir'], cam['input_dir'],
+                                             reporters[cam['id']].config,
+                                             lambda name: matchesFileType(name, file_type), nproc,
+                                             recursive=recursive)
+                    for cam in cameras if reporters[cam['id']].config.monitor_status}
+        input_readable = {cam['id']: None for cam in cameras}
 
         # Initialize state tracking dictionaries. Since files from different cameras might have the same name,
         # we track these metrics per camera using nested dictionaries or sets.
@@ -1958,6 +2054,19 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
         # Keep track of the last camera that received a process slot to facilitate round-robin tiebreaking
         last_assigned_idx = 0
 
+        # The files waiting to be processed by every camera, filled at every poll
+        stable_per_cam = {}
+
+        def cameraState(cam_id, stopped=False):
+            """ The state of a camera for its status. """
+
+            workers = {uid: (worker_paths.get((c_id, uid)), proc) for (c_id, uid), proc in active_workers.items()
+                       if c_id == cam_id}
+
+            return statusState(workers, stable_per_cam.get(cam_id, []), stability_tracker[cam_id],
+                               failed_files[cam_id], space_guards[cam_id], reporters[cam_id], input_readable[cam_id],
+                               len(active_workers), stopped=stopped)
+
         # Main monitoring loop
         while True:
 
@@ -1974,6 +2083,10 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
 
                     # A worker has finished, so we free up a slot for this camera
                     active_count_per_cam[cam_id] -= 1
+
+                    # Record the file in the status of the camera
+                    if cam_id in statuses:
+                        statuses[cam_id].fileFinished(uid, *workerOutcome(proc))
                     
                     if proc.exitcode == 0:
 
@@ -2009,6 +2122,7 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
             # Remove finished processes from our tracking dictionary
             for key in finished:
                 del active_workers[key]
+                worker_paths.pop(key, None)
 
             # 2. Collect all new, stable files ready to be processed for each camera
             stable_per_cam = {}
@@ -2032,9 +2146,11 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
                         candidate_paths = [os.path.join(cam['input_dir'], f)
                                            for f in os.listdir(cam['input_dir'])]
                     logReadable(cam['input_dir'], True, log_prefix="[{}] ".format(cam_id))
+                    input_readable[cam_id] = True
 
                 except OSError:
                     logReadable(cam['input_dir'], False, log_prefix="[{}] ".format(cam_id))
+                    input_readable[cam_id] = False
                     continue
 
                 # Forget the files which disappeared while waiting for them to be written
@@ -2202,6 +2318,7 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
 
                 # Update load balancing metrics and tracking dictionaries
                 active_workers[(cam_id, unique_id)] = proc
+                worker_paths[(cam_id, unique_id)] = file_path
                 active_count_per_cam[cam_id] += 1
                 new_files_queued = True
                 last_assigned_idx = chosen_idx
@@ -2222,6 +2339,10 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
                 except Exception as e:
                     log.error("[{}] Night report scheduling failed: {}".format(cam_id, repr(e)))
                     log.error(traceback.format_exc())
+
+            # Update the status of every camera (every interval, and right after a file was processed)
+            for cam_id, status in statuses.items():
+                status.update(cameraState(cam_id))
 
             time.sleep(poll_interval)
 
@@ -2245,6 +2366,13 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
             removeStagedFiles(reporter.config.monitor_staging_dir)
 
             reporter.stop(timeout=SHUTDOWN_TIMEOUT)
+
+        # The status of every camera says the monitor has stopped
+        for cam_id, status in statuses.items():
+            try:
+                status.update(cameraState(cam_id, stopped=True), force=True)
+            except Exception as e:
+                log.warning("[{}] The final status could not be written: {}".format(cam_id, repr(e)))
 
         log.info("All workers stopped.")
 
