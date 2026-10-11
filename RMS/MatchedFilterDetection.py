@@ -480,6 +480,7 @@ class MatchedFilterDetector(object):
         # Frames of the detections and detections removed on clouded sky (see run), and the first frames of the
         #   removed detections
         self.cloud_rows_removed = 0
+        self.cloud_removed_row_frames = []
         self.cloud_detections_removed = 0
         self.cloud_removed_frames = []
 
@@ -1889,6 +1890,7 @@ class MatchedFilterDetector(object):
                 xy = cent[:, 1:3]*self.det_bin + (self.det_bin - 1)/2.0
                 clear = self.sky_map.isClear(xy[:, 0], xy[:, 1], cent[:, 0])
                 self.cloud_rows_removed += int((~clear).sum())
+                self.cloud_removed_row_frames += cent[~clear, 0].tolist()
                 first = cent[0, 0]
                 cent = cent[clear]
                 if len(cent) < 2:
@@ -3248,7 +3250,7 @@ def skyQuality(img_handle, config, star_list, platepar, reference_dir=None, inpu
 
 def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=None, star_list=None,
                         return_detector=False, platepar=None, reference_dir=None, input_name='', frame_range=None,
-                        persistence_prior=None):
+                        persistence_prior=None, sky_range=None):
     """ Run the matched-filter detection on an image handle.
 
     Arguments:
@@ -3273,6 +3275,9 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
             updated. None by default (the whole input).
         persistence_prior: [dict] Persistence counts of the segments before this one (see
             MatchedFilterDetector.removePersistent). None by default.
+        sky_range: [tuple] (first frame, end frame) of the stars of the sky quality, e.g. all the frames of the
+            input read so far, as a short segment alone may have too few chunks for the references of the stars.
+            None by default (frame_range).
 
     Return:
         [list] Detections as [rho, theta, centroids], or (detections, detector) with return_detector. The
@@ -3299,7 +3304,8 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
                                      frame_range=frame_range)
     detector.persistence_prior = persistence_prior or {}
     detector.sky_map = skyQuality(img_handle, config, star_list, platepar, reference_dir=reference_dir,
-                                  input_name=input_name, frame_range=frame_range, update=(frame_range is None))
+                                  input_name=input_name, frame_range=(sky_range or frame_range),
+                                  update=(frame_range is None))
     detections = detector.run()
 
     # The measurements on clouded sky were removed in the run
@@ -3483,9 +3489,9 @@ class SegmentedRun(object):
 
 
     def summary(self):
-        """ Summary of the input, from the summaries of its segments. The detections removed by clouds and the
-            measured tracks are taken from the segment which their time belongs to (each overlap is split at its
-            middle), so those in an overlap are counted once. """
+        """ Summary of the input, from the summaries of its segments. The detections and the measurements
+            removed by clouds and the measured tracks are taken from the segment which their time belongs to (each
+            overlap is split at its middle), so those in an overlap are counted once. """
 
         run = [(k, det) for k, det in enumerate(self.detectors) if det is not None]
 
@@ -3522,7 +3528,8 @@ class SegmentedRun(object):
             'aperture_correction': float(np.median(corrections)) if corrections else None,
             'clear_sky_fraction': (round(float(np.mean(self.sky_map.clear)), 3) if self.sky_map is not None
                                    else None),
-            'cloud_frames_removed': int(sum(det.cloud_rows_removed for _, det in run)),
+            'cloud_frames_removed': sum(int(bounds[k][0] <= f < bounds[k][1]) for k, det in run
+                                        for f in det.cloud_removed_row_frames),
             'cloud_detections_removed': len(removed),
             'cloud_removed_utc': first.frameTimes(sorted(removed)) if first is not None else [],
             'tracks_dropped': int(sum(det.tracks_dropped for _, det in run)),
@@ -3616,16 +3623,19 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
             segment_detections.append([])
             continue
 
+        # The segment is searched, with the sky quality from the stars of all chunks read so far (the intensities
+        #   are scaled to the stars of the segment itself, see apertureCorrection)
         detections, detector = detectMatchedFilter(buffer, config, mask=mask, dark=dark, flat_struct=flat_struct,
-                                                   star_list=segment_stars, return_detector=True,
+                                                   star_list=list(star_list), return_detector=True,
                                                    platepar=platepar, reference_dir=reference_dir,
                                                    input_name=input_name, frame_range=(first, end),
-                                                   persistence_prior=persistence)
+                                                   persistence_prior=persistence, sky_range=(0, end))
         detectors.append(detector)
 
         # The persistent pixels are judged over all segments so far, as over the whole input
-        persistence = {key: (detector.persistence_counts[key], detector.persistence_runs[key])
-                       for key in detector.persistence_counts}
+        if detector is not None:
+            persistence = {key: (detector.persistence_counts[key], detector.persistence_runs[key])
+                           for key in detector.persistence_counts}
         segment_detections.append(detections)
         log.info('Matched filter: segment {:d}/{:d} ({:d}-{:d}): {:d} detections'.format(k + 1, len(ranges), first,
                                                                                        end, len(detections)))

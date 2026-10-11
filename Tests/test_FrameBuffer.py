@@ -293,6 +293,7 @@ class _SegmentDetector(object):
         self.tracks = tracks
         self.cloud_removed_frames, self.timing, self.aperture_correction = [], {}, None
         self.cloud_rows_removed, self.tracks_dropped, self.psf_sigma = 0, 0, 0.7
+        self.cloud_removed_row_frames = []
 
     def frameTimes(self, frames):
         return []
@@ -317,3 +318,51 @@ def test_summary_tracks_of_the_segments():
                        {})
     tracks = sorted((t['first_frame'], t['last_frame']) for t in run.summary()['tracks'])
     assert tracks == [(100, 400), (1700, 1900), (2500, 2800)]
+
+
+def test_summary_cloud_rows_of_the_segments():
+    """ The measurements removed on clouded sky are counted in the segment which their frame belongs to (those in
+        an overlap are removed in both segments). """
+
+    from RMS.MatchedFilterDetection import SegmentedRun
+
+    first, second = _SegmentDetector([]), _SegmentDetector([])
+    first.cloud_removed_row_frames = [100, 200, 1700, 1750, 1800]
+    second.cloud_removed_row_frames = [1700, 1750, 1800, 2500]
+    first.cloud_rows_removed, second.cloud_rows_removed = 5, 4
+    run = SegmentedRun(_Input(), [(0, 2048), (1536, 3584)], [first, second], [1792], None, SegmentBuffer(_Input(), 1),
+                       {})
+    assert run.summary()['cloud_frames_removed'] == 6
+
+
+def test_segments_sky_from_the_stars_so_far(monkeypatch):
+    """ The sky quality of every segment is made from the stars of all chunks read so far (a short segment alone may
+        have too few chunks for the reference of the stars), while the segment itself is searched. """
+
+    import RMS.MatchedFilterDetection as mfd
+
+    config = cr.Config()
+    config.mf_block_frames = 256
+    config.mf_segment_overlap = 256
+    config.ff_min_stars = 1
+    handle = _Input(total_frames=2048)
+
+    # Every chunk has stars, named by the time of its first frame
+    def stars(img_handle, config, chunk_range=None, **kwargs):
+        from RMS.Formats.FFfile import constructFFName
+        return [[constructFFName('XX0001', handle.currentFrameTime(frame_no=c*128, dt_obj=True)), [(1.0,)*8]*5]
+                for c in range(*chunk_range)]
+
+    calls = []
+    def detect(img_handle, config, star_list=None, frame_range=None, sky_range=None, **kwargs):
+        calls.append((frame_range, sky_range, len(star_list)))
+        return [], None
+
+    monkeypatch.setattr(mfd, 'extractStarsFrameInterface', stars)
+    monkeypatch.setattr(mfd, 'detectMatchedFilter', detect)
+    monkeypatch.setattr(mfd, 'skyQuality', lambda *args, **kwargs: None)
+
+    mfd.detectMatchedFilterSegments(handle, config, 768)
+    assert [c[0] for c in calls] == [(0, 768), (512, 1280), (1024, 1792), (1536, 2048)]
+    assert [c[1] for c in calls] == [(0, 768), (0, 1280), (0, 1792), (0, 2048)]
+    assert [c[2] for c in calls] == [6, 10, 14, 16]
