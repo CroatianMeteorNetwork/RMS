@@ -406,6 +406,7 @@ class MonitorStatus(object):
         self.scan_cache = {}
         self.file_cache = {}
         self.conditions_cache = (None, [])
+        self.conditions_fresh = False
         self.size_cache = {}
         self.night_cache = {}
 
@@ -615,6 +616,8 @@ class MonitorStatus(object):
         status['processing'] = _section('processing', lambda: self._processing(state, now, files),
                                         {'not_keeping_up': False, 'failed_files': [], 'given_up': []})
 
+        # The sky reads the conditions of the night (see _conditionRows)
+        self.conditions_fresh = False
         night, sky = _section('sky', lambda: self._sky(now, night_name, night_start, night_end, files),
                               ({'name': night_name}, {'state': 'no_data', 'observable': None}))
         status['sky'] = sky
@@ -1134,6 +1137,9 @@ class MonitorStatus(object):
             rows = nightConditionRows(self.output_dir, self.config, measured, chunk_seconds, night_start, night_end)
             self.conditions_cache = (key, rows)
 
+        # The conditions are up to date for this status
+        self.conditions_fresh = True
+
         return self.conditions_cache[1]
 
 
@@ -1176,12 +1182,12 @@ class MonitorStatus(object):
                     file_rows = [r for r in self.conditions_cache[1]
                                  if r['input'] in (input_file, os.path.basename(input_file or ''))]
                     clear_times = [r['time'] for r in file_rows if r['clear_fraction'] >= CALIBRATION_CLEAR_FRACTION]
-                    conditions_known = bool(file_rows)
+                    conditions_known = self.conditions_fresh and bool(file_rows)
                 file_calibration = fileCalibration(os.path.join(self.output_dir, results_dir), self.config,
                                                    clear_times=clear_times)
 
-                # Kept only when the conditions of a measured file were read (they may not be, e.g. when the log
-                #   could not be read), otherwise it is judged again with them
+                # Kept only when the conditions of a measured file were read for this status (they may not be,
+                #   e.g. when the log could not be read), otherwise it is judged again with them
                 if conditions_known:
                     cache['calibration'] = file_calibration
 

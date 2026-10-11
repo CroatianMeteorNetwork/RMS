@@ -7,6 +7,7 @@ by the monitor loop.
 import datetime
 import json
 import os
+import shutil
 import time
 
 import numpy as np
@@ -1414,3 +1415,41 @@ def test_caches_keep_only_the_open_files(tmp_path, now):
 
     assert {key[0] for key in status.size_cache} <= {b, c}
     assert {key[0] for key in status.night_cache} == {b, c}
+
+
+def test_calibration_of_a_file_processed_again_after_a_failed_sky_scan(tmp_path, now, monkeypatch):
+    """ When a file was processed again and the new conditions could not be read, the calibration is judged
+        again once they can, not on the conditions of the earlier processing.
+    """
+
+    status, config = _status(tmp_path)
+    output_dir = str(tmp_path/'output')
+    results_dir = _searchedFile(output_dir, config, 'file1')
+    assert status.build(_state())['calibration']['status'] == 'ok'
+
+    # Processed again on a clouded sky, not recalibrated (the new conditions are processed later)
+    shutil.rmtree(os.path.join(output_dir, results_dir))
+    _searchedFile(output_dir, config, 'file1', clear=0.0, recalibrated=False)
+    log_path = os.path.join(output_dir, 'sky_conditions_XX0001_{:s}.csv'.format(BEG_TIME.strftime('%Y%m%d')))
+    with open(log_path) as f:
+        lines = [line.replace('2025-12-25T04:00:00', '2025-12-25T05:00:00') if ',0.000,0.020,' in line else line
+                 for line in f]
+    with open(log_path, 'w') as f:
+        f.writelines(lines)
+    done_flag = os.path.join(output_dir, results_dir, 'done.flag')
+    os.utime(done_flag, (os.path.getmtime(done_flag) + 10, os.path.getmtime(done_flag) + 10))
+
+    # The new conditions can't be read once
+    read_rows = mst.nightConditionRows
+    calls = {'n': 0}
+
+    def _failOnce(*args, **kwargs):
+        calls['n'] += 1
+        if calls['n'] == 1:
+            raise OSError("The log is being written")
+        return read_rows(*args, **kwargs)
+
+    monkeypatch.setattr(mst, 'nightConditionRows', _failOnce)
+
+    status.build(_state())
+    assert status.build(_state())['calibration']['status'] == 'unknown'
