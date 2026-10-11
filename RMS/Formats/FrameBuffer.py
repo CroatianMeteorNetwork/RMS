@@ -50,11 +50,27 @@ def segmentUnit(config, img_handle):
     return int(np.lcm(int(config.mf_block_frames), int(getattr(img_handle, 'chunk_frames', 1) or 1)))
 
 
+def segmentOverlap(segment_frames, overlap, unit):
+    """ The overlap of neighbouring segments: at most half a segment, in whole units, so only neighbouring
+        segments share frames (and every segment adds new frames).
+
+    Arguments:
+        segment_frames: [int] Number of frames of a segment.
+        overlap: [int] Requested overlap (frames).
+        unit: [int] Frames which segments begin and end on.
+
+    Return:
+        [int] The overlap (frames).
+    """
+
+    return max(0, min(overlap, (segment_frames//2)//unit*unit))
+
+
 def segmentRanges(total_frames, segment_frames, overlap, unit):
     """ The frame ranges of the segments of an input: every segment begins overlap frames before the end of the
         previous one, and the last one ends at the end of the input. A last segment which would add less than a
         unit of new frames is taken into the one before it, if that still fits in the memory. The overlap is at
-        most a unit less than a segment, so every segment adds new frames.
+        most half a segment (see segmentOverlap), so only neighbouring segments share frames.
 
     Arguments:
         total_frames: [int] Number of frames of the input.
@@ -71,8 +87,8 @@ def segmentRanges(total_frames, segment_frames, overlap, unit):
         return [(0, total_frames)]
 
     # Every segment begins a step after the previous one, the step being the new frames of a segment (at least
-    #   a unit)
-    overlap = max(0, min(overlap, segment_frames - unit))
+    #   half a segment)
+    overlap = segmentOverlap(segment_frames, overlap, unit)
     step = segment_frames - overlap
 
     # The whole segments before the end of the input

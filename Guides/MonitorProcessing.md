@@ -428,7 +428,7 @@ read **once**, in segments of as many frames as fit in that memory, and the star
 all steps of the matched filter take the frames from memory:
 
 - A segment is searched as a file of its own. Neighbouring segments share `mf_segment_overlap` frames (512 by
-  default, about 16 s at 32 fps), and an object which crosses from one to the next is found in both and joined.
+  default, about 16 s at 32 fps, at most half a segment), and an object which crosses from one to the next is found in both and joined.
 - The stars of every chunk are extracted once. The sky reference and the log of the sky conditions are updated
   once for the whole file, as without segments.
 - The memory is that of the frames as they are read (512x512 16-bit frames are 0.5 MB each, so 4 GB is about

@@ -67,7 +67,7 @@ from RMS.DetectStarsAndMeteors import saveResultsFrameInterface
 from RMS.ExtractStarsFrameInterface import extractStarsFrameInterface
 from RMS.Formats import FTPdetectinfo
 from RMS.Formats.FFfile import filenameToDatetime, validFFName
-from RMS.Formats.FrameBuffer import SegmentBuffer, segmentRanges, segmentUnit
+from RMS.Formats.FrameBuffer import SegmentBuffer, segmentOverlap, segmentRanges, segmentUnit
 from RMS.Formats.FrameInterface import detectInputType
 from RMS.Formats.Platepar import Platepar
 from RMS.Logger import getLogger, LoggingManager
@@ -3772,10 +3772,11 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
 
     # The segments, which share the overlap (in whole blocks)
     overlap = -(-int(config.mf_segment_overlap)//unit)*unit
-    if overlap > segment_frames - unit:
-        log.warning('Matched filter: mf_segment_overlap {:d} is too large for segments of {:d} frames, {:d} '
-                    'used'.format(int(config.mf_segment_overlap), segment_frames, max(segment_frames - unit, 0)))
-        overlap = max(segment_frames - unit, 0)
+    if overlap > segmentOverlap(segment_frames, overlap, unit):
+        log.warning('Matched filter: mf_segment_overlap {:d} is more than half of segments of {:d} frames, {:d} '
+                    'used'.format(int(config.mf_segment_overlap), segment_frames,
+                                  segmentOverlap(segment_frames, overlap, unit)))
+        overlap = segmentOverlap(segment_frames, overlap, unit)
     ranges = segmentRanges(img_handle.total_frames, segment_frames, overlap, unit)
     buffer = SegmentBuffer(img_handle, max(end - first for first, end in ranges))
     log.info('Matched filter: {:d} segments of up to {:d} frames ({:.1f} min), overlap {:d} frames'.format(

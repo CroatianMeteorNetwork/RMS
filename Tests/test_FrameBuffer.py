@@ -539,3 +539,13 @@ def test_persistence_carried_past_a_segment_not_searched(monkeypatch):
     assert (512, 1280) not in searched
     following = calls[searched.index((1024, 1792))]
     assert following[1:] == ('all (0, 768)', 2)
+
+
+@pytest.mark.parametrize('segment_frames, overlap', [(768, 512), (1024, 768), (2048, 2000), (8192, 512)])
+def test_only_neighbouring_segments_overlap(segment_frames, overlap):
+    """ The overlap is at most half a segment, so only neighbouring segments share frames (the joining of the
+        detections and the persistence counts assume it). """
+
+    ranges = segmentRanges(20000, segment_frames, overlap, 256)
+    assert all(ranges[k + 2][0] >= ranges[k][1] for k in range(len(ranges) - 2))
+    assert ranges[0][0] == 0 and ranges[-1][1] == 20000
