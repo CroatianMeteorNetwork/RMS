@@ -1097,9 +1097,10 @@ class MonitorStatus(object):
         latest_state, _, latest_end = segments[-1]
 
         # The sky now is not known if data which was not measured (e.g. with the normal detection) ends after the
-        #   time line (the measured files and the ones with too few stars are on it)
-        unmeasured_ends = [file_result['star_chunks'][-1][0]
-                           + datetime.timedelta(seconds=file_result['chunk_s'] or 0)
+        #   time line (the measured files and the ones with too few stars are on it), at the end of the input where
+        #   it is known
+        unmeasured_ends = [file_result.get('end_time') or (file_result['star_chunks'][-1][0]
+                           + datetime.timedelta(seconds=file_result['chunk_s'] or 0))
                            for _, _, file_result, _ in files
                            if file_result['star_chunks'] and not file_result['measured']
                            and not _tooFewStars(file_result, self.config)]

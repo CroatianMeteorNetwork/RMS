@@ -1647,3 +1647,28 @@ def test_sky_until_the_end_of_the_input(tmp_path, now):
     end = BEG_TIME + datetime.timedelta(seconds=(12*128 + 20)/25.0)
     assert mnr.readFileSkyResults(os.path.join(str(tmp_path/'output'), results_dir), config)['end_time'] == end
     assert status.build(_state())['sky']['observed_utc'] == mst._timeString(end)
+
+
+def test_sky_with_a_newer_file_which_was_not_measured_until_its_end(tmp_path, now):
+    """ A file which was searched but whose sky was not measured, which ends after the measured data only with
+        the frames after its last chunk, makes the sky now unknown.
+    """
+
+    status, config = _status(tmp_path)
+    output_dir = str(tmp_path/'output')
+
+    def _summary(results_dir, **changes):
+        path = os.path.join(output_dir, results_dir, mnr.MF_DONE_NAME)
+        with open(path) as f:
+            summary = json.load(f)
+        summary.update(changes)
+        with open(path, 'w') as f:
+            json.dump(summary, f)
+
+    # Both files have 20 frames after their last chunks, the second one begins 0.5 s later and was not measured
+    measured = _searchedFile(output_dir, config, 'file1', n_chunks=12)
+    _summary(measured, total_frames=12*128 + 20)
+    unmeasured = _searchedFile(output_dir, config, 'file2', n_chunks=12, start_s=0.5)
+    _summary(unmeasured, total_frames=12*128 + 20, clear_sky_fraction=None)
+
+    assert status.build(_state())['sky']['state'] == 'no_data'
