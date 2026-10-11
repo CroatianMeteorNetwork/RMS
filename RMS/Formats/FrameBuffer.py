@@ -33,10 +33,11 @@ def segmentFrames(img_handle, config, memory_gb):
         [int] Number of frames of a segment, 0 for none.
     """
 
+    # Without the memory, or for other inputs, the frames are read from the input for every pass
     if (memory_gb <= 0) or (img_handle.input_type not in SEGMENT_INPUT_TYPES):
         return 0
 
-    # The frames are kept as they are read (binned, uint16 for the .vid files)
+    # The frames are kept as they are read (binned, uint16 for the .vid files), as many as fit, in whole units
     frame_bytes = img_handle.nrows*img_handle.ncols*np.dtype(np.uint16).itemsize
     unit = segmentUnit(config, img_handle)
 
@@ -65,11 +66,16 @@ def segmentRanges(total_frames, segment_frames, overlap, unit):
         [list] Segments as (first frame, end frame), one for the whole input if it fits in one.
     """
 
+    # An input which fits in one segment is one segment
     if (segment_frames <= 0) or (total_frames <= segment_frames):
         return [(0, total_frames)]
 
+    # Every segment begins a step after the previous one, the step being the new frames of a segment (at least
+    #   a unit)
     overlap = max(0, min(overlap, segment_frames - unit))
     step = segment_frames - overlap
+
+    # The whole segments before the end of the input
     ranges = []
     first = 0
     while first + segment_frames < total_frames:
@@ -135,6 +141,7 @@ class SegmentBuffer(object):
             end: [int] End of the segment (the frame after its last one).
         """
 
+        # The memory holds the longest segment
         if end - first > self.capacity:
             raise ValueError("A segment of {:d} frames doesn't fit in {:d}".format(end - first, self.capacity))
 
@@ -150,7 +157,8 @@ class SegmentBuffer(object):
             self.times = []
             read_from = first
 
-        # The other frames are read from the input, in order
+        # The other frames are read from the input, in order, with their times. The memory is allocated for the
+        #   longest segment with the first frame, when the size and the type of the frames are known
         for i in range(read_from, end):
             self.img_handle.setFrame(i)
             frame = self.img_handle.loadFrame()
@@ -160,6 +168,7 @@ class SegmentBuffer(object):
             self.times.append(self.img_handle.currentFrameTime(frame_no=i, dt_obj=True))
         self.frames_read += end - read_from
 
+        # The range of the input which is in memory now
         self.first, self.end = first, end
 
 
@@ -175,11 +184,13 @@ class SegmentBuffer(object):
         """ The current frame, from memory, or read from the input outside of the segment. The frame in memory is
             returned itself, it must not be changed. """
 
+        # A frame of the segment, from memory
         n = self.current_frame
         if self.first <= n < self.end:
             self.current_frame_time = self.times[n - self.first]
             return self.frames[n - self.first]
 
+        # A frame outside of the segment is read from the input (and counted)
         self.frames_outside += 1
         self.img_handle.setFrame(n)
         frame = self.img_handle.loadFrame()
@@ -191,12 +202,14 @@ class SegmentBuffer(object):
     def currentFrameTime(self, frame_no=None, dt_obj=False):
         """ The time of the given frame (of the current one if not given). """
 
+        # The time of a frame of the segment from memory, of the other frames from the input
         n = self.current_frame if frame_no is None else frame_no
         if self.first <= n < self.end:
             dt = self.times[n - self.first]
         else:
             dt = self.img_handle.currentFrameTime(frame_no=n, dt_obj=True)
 
+        # As a datetime, or as a tuple like the frame interfaces
         if dt_obj:
             return dt
 
@@ -222,12 +235,15 @@ class SegmentBuffer(object):
             [FFMimickInterface] The images of the chunk.
         """
 
+        # The frames of the chunk, at most until the end of the input
         chunk_frames = self.img_handle.chunk_frames
         if first_frame is None:
             first_frame = self.current_frame_chunk*chunk_frames
         n = chunk_frames if (read_nframes is None) else read_nframes
         n = max(min(n, self.img_handle.total_frames - first_frame), 0)
 
+        # The images of the chunk are made from its frames as the input makes them: the type of the images is
+        #   set from the first frame, and the time of every frame is kept (as UNIX time)
         ff = None
         self.frame_chunk_unix_times = []
         for i in range(n):
@@ -243,6 +259,7 @@ class SegmentBuffer(object):
             t = self.current_frame_time
             self.frame_chunk_unix_times.append((t - datetime.datetime(1970, 1, 1, tzinfo=t.tzinfo)).total_seconds())
 
+        # The finished images are the current chunk
         ff.finish()
         self.current_fr_chunk_size = n
         self.ff = ff
