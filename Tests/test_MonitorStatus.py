@@ -1037,3 +1037,81 @@ def test_unreadable_camera_has_no_queue(tmp_path, monkeypatch):
         status = json.load(f)
     assert status['processing']['queued'] == 0
     assert 'INPUT_UNREADABLE' in [fault['code'] for fault in status['faults']]
+
+
+def test_observable_with_overlapping_files(tmp_path, now):
+    """ Overlapping files count once in the observable time, with the worse state: four mostly clear files and one
+        clouded file of the same time are not observable.
+    """
+
+    status, config = _status(tmp_path)
+    output_dir = str(tmp_path/'output')
+    for i in range(4):
+        _searchedFile(output_dir, config, 'clear{:d}'.format(i), n_chunks=60, clear=0.85)
+    _searchedFile(output_dir, config, 'clouded', n_chunks=60, clear=0.0)
+
+    assert status.build(_state())['sky']['observable'] is False
+
+
+def test_pointing_shift_on_clear_sky_only(tmp_path, now):
+    """ The pointing shift of the camera is only measured on the chunks on clear sky. """
+
+    config = _matchedFilterConfig()
+    output_dir = str(tmp_path/'output')
+    os.makedirs(output_dir)
+    results_dir = _searchedFile(output_dir, config, 'file1', shift_deg=0.5)
+    results_path = os.path.join(output_dir, results_dir)
+
+    assert len(mst.fileCalibration(results_path, config, clear_times=None)['shifts_px']) == 12
+    assert mst.fileCalibration(results_path, config, clear_times=[])['shifts_px'] == []
+
+
+def test_paused_camera_doesnt_share_the_workers(tmp_path, monkeypatch):
+    """ The waiting files of a camera paused for disk space don't take workers from the prediction of another
+        camera.
+    """
+
+    cameras = []
+    for cam_id, n_files in (('CAM1', 1), ('CAM2', 3)):
+        input_dir = tmp_path/cam_id/'input'
+        output_dir = tmp_path/cam_id/'output'
+        input_dir.mkdir(parents=True)
+        output_dir.mkdir(parents=True)
+        for i in range(n_files):
+            _makeInput(input_dir, 'dump_{:s}{:d}_02F.vid'.format(cam_id, i), False, minutes_ago=30)
+        cameras.append((cam_id, input_dir, output_dir))
+
+        # Processed files of the last day, so the processing can be predicted
+        with open(str(output_dir/mst.HISTORY_FILE_NAME), 'w') as f:
+            for i in range(3):
+                f.write(json.dumps({'file': 'old{:d}'.format(i), 'outcome': 'ok', 'processing_min': 5.0,
+                                    'finished_utc': mst.RmsDateTime.utcnow().strftime(mnr.JSON_TIME_FORMAT)})
+                        + '\n')
+
+    ini_path = tmp_path/'multicam.ini'
+    ini_path.write_text('[Global]\nnproc = 4\nfile_type = vid\npoll_interval = 0.01\n\n' + '\n'.join(
+        '[{:s}]\ninput_dir = {:s}\noutput_dir = {:s}\nconfig = {:s}\nplatepar = {:s}\n'.format(
+            cam_id, str(input_dir), str(output_dir), REPO_CONFIG, TEMPLATE_PLATEPAR)
+        for cam_id, input_dir, output_dir in cameras))
+
+    # The disk of every camera is full (nothing is processed), CAM2 is paused
+    paused_dir = str(cameras[1][2])
+    def _ok(self):
+        self.paused = (self.output_dir == paused_dir)
+        return False
+    monkeypatch.setattr(mon.FreeSpaceGuard, 'ok', _ok)
+    polls = {'n': 0}
+    real_sleep = time.sleep
+    def _sleep(seconds):
+        polls['n'] += 1
+        if polls['n'] > 5:
+            raise KeyboardInterrupt
+        real_sleep(0.01)
+    monkeypatch.setattr(mon.time, 'sleep', _sleep)
+    monkeypatch.setattr(mst.MonitorStatus, 'update', _alwaysUpdate(mst.MonitorStatus.update))
+
+    mon.monitorMultipleCameras(str(ini_path), report_mode='none')
+
+    with open(str(cameras[0][2]/mst.STATUS_FILE_NAME)) as f:
+        status = json.load(f)
+    assert status['processing']['queued'] == 1 and status['processing']['prediction_workers'] == 4

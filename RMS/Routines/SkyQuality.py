@@ -1350,7 +1350,7 @@ def _legendPlace(fig, ax, handles):
         return 'upper right'
 
 
-def nightTimeline(rows, not_searched=(), chunk_seconds=None, bounds=None):
+def nightTimeline(rows, not_searched=(), chunk_seconds=None, bounds=None, clear_level=CLEAR_FRACTION_CLEAR):
     """ Build the time line of the state of the sky through a night. Every chunk is clear, partly clouded or
         clouded (see CLEAR_FRACTION_CLEAR) until the next chunk of its input, the inputs which were not searched
         (too few stars) fill their time, and where inputs overlap the worse state is taken (clouded, not
@@ -1365,6 +1365,8 @@ def nightTimeline(rows, not_searched=(), chunk_seconds=None, bounds=None):
             for the inputs which are not in it. None by default.
         bounds: [tuple] Beginning and end of the night (datetime, UTC), the time of the chunks is taken within them.
             None by default.
+        clear_level: [float] Clear fraction of a chunk at and above which it is clear. CLEAR_FRACTION_CLEAR by
+            default.
 
     Return:
         timeline: [dict] input_rows (the indices of the rows of every input), steps (the time of the chunks of
@@ -1420,7 +1422,7 @@ def nightTimeline(rows, not_searched=(), chunk_seconds=None, bounds=None):
 
 
     # Classify every chunk by how much of the image is clear
-    labels = np.where(clear >= CLEAR_FRACTION_CLEAR, 'clear', np.where(clear > 0, 'partly', 'clouded'))
+    labels = np.where(clear >= clear_level, 'clear', np.where(clear > 0, 'partly', 'clouded'))
 
     # Turn the chunks of every input into spans of time, and add the inputs which were not searched
     intervals = []

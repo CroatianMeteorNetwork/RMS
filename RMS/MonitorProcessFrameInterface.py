@@ -2174,10 +2174,12 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
 
             queued = [entry for entry in waiting_per_cam[cam_id] if (cam_id, entry[2]) not in active_workers]
 
-            # The files of the other cameras which share the workers
+            # The files of the other cameras which share the workers (the waiting files of a camera which is paused
+            #   for disk space don't get a worker)
             other_files = sum(1 for c_id, _ in active_workers if c_id != cam_id) \
                 + sum(sum(1 for entry in entries if (c_id, entry[2]) not in active_workers)
-                      for c_id, entries in waiting_per_cam.items() if c_id != cam_id)
+                      for c_id, entries in waiting_per_cam.items()
+                      if (c_id != cam_id) and not space_guards[c_id].paused)
 
             return statusState(workers, queued, stability_tracker[cam_id],
                                failed_files[cam_id], space_guards[cam_id], reporters[cam_id], input_readable[cam_id],

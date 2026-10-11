@@ -175,7 +175,8 @@ def fileCalibration(results_path, config, clear_times=None):
         calibration: [dict] chunks, recalibrated, clear_chunks, clear_recalibrated, residuals_px (median distance
             between the image and the catalog stars after the fit, of every recalibrated chunk), matched_stars,
             zero_points (photometric zero points, mag) and shifts_px (difference of the pointing from the
-            reference platepar of the file). None if there are no recalibrated platepars.
+            reference platepar of the file, of the chunks on clear sky). None if there are no recalibrated
+            platepars.
     """
 
     # Read the platepars which were recalibrated on every chunk, there is nothing to judge without them
@@ -240,8 +241,9 @@ def fileCalibration(results_path, config, clear_times=None):
             # The photometric zero point of the chunk
             calibration['zero_points'].append(float(platepar.mag_lev))
 
-            # The difference of the pointing from the reference platepar, in pixels (the plate scale is in px/deg)
-            if reference is not None:
+            # The difference of the pointing from the reference platepar, in pixels (the plate scale is in px/deg),
+            #   on clear sky only, as the rest of the judgement of the calibration
+            if (reference is not None) and clear:
                 d_az = (platepar.az_centre - reference.az_centre + 180)%360 - 180
                 d_alt = platepar.alt_centre - reference.alt_centre
                 shift_deg = np.hypot(d_az*np.cos(np.radians(reference.alt_centre)), d_alt)
@@ -748,6 +750,7 @@ class MonitorStatus(object):
         #   them first, then every waiting file goes to the next free worker. The workers are shared by the cameras
         #   of the monitor, this camera gets a share by its number of files
         queue_empty_min = None
+        workers = None
         if not (in_progress or queued):
             queue_empty_min = 0.0
         elif basis is not None:
@@ -815,6 +818,7 @@ class MonitorStatus(object):
             'queue_empty_utc': _timeString(now + datetime.timedelta(minutes=queue_empty_min))
                 if queue_empty_min is not None else None,
             'prediction_basis': basis,
+            'prediction_workers': workers,
             'file_length_min': _round(file_length_min),
             'waiting_recording_min': _round((len(queued) + len(in_progress))*file_length_min)
                 if file_length_min else None,
@@ -842,7 +846,7 @@ class MonitorStatus(object):
             (night, sky): [tuple of dict] The night so far, and the sky in the latest data.
         """
 
-        from RMS.Routines.SkyQuality import CLEAR_FRACTION_CLEAR, nightTimeline
+        from RMS.Routines.SkyQuality import nightTimeline
 
         # The files whose sky was measured, the files which were not searched, and the detections
         file_results = [(info.get('input_file'), file_result) for _, info, file_result, _ in files]
@@ -926,19 +930,14 @@ class MonitorStatus(object):
                             'too_few_stars_percent': _round(100*hour['not_searched'], 1),
                             'median_dimming_mag': _round(np.median(dimming)) if dimming else None}
 
-        # Observable: most of the time in the last minutes of the data had most of the image clear. The time of
-        #   every chunk is weighted (a clear chunk counts as good, the files which were not searched as bad)
-        window_start = latest_end - datetime.timedelta(minutes=OBSERVABLE_WINDOW_MIN)
-        good = total = 0.0
-        for r in rows:
-            if r['time'] >= window_start:
-                length = steps[r.get('input')].total_seconds()
-                total += length
-                good += length*(r['clear_fraction'] >= min(OBSERVABLE_CLEAR_FRACTION, CLEAR_FRACTION_CLEAR))
-        for start, end, _, _ in not_searched:
-            total += max(0.0, (min(end, latest_end) - max(start, window_start)).total_seconds())
-        if total >= 60*OBSERVABLE_WINDOW_MIN/3:
-            sky['observable'] = bool(good/total >= OBSERVABLE_SHARE)
+        # Observable: most of the time in the last minutes of the data had most of the image clear. The time is
+        #   taken from the time line, so overlapping files count once, with the worse state (the files which were
+        #   not searched count as not observable)
+        window = nightTimeline(rows, not_searched=not_searched, chunk_seconds=chunk_seconds,
+                               bounds=(latest_end - datetime.timedelta(minutes=OBSERVABLE_WINDOW_MIN), latest_end),
+                               clear_level=OBSERVABLE_CLEAR_FRACTION)['summary']
+        if window['observed_h']*60 >= OBSERVABLE_WINDOW_MIN/3:
+            sky['observable'] = bool(window['clear'] >= OBSERVABLE_SHARE)
 
         return night, sky
 

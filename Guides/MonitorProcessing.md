@@ -561,7 +561,7 @@ An example (shortened; the processing statistics and the calibration of the nigh
 | `processing` | `progress` | The files of the night: `done_tonight`, `in_progress`, `queued`, `being_written`, and `percent_done` (done of done, in progress and queued). |
 | | `in_progress` | The files being processed: the ID (`file`), the input (`input`, the file name or the name of the FITS directory), `started_utc`, `running_min`, and the prediction `expected_min`, `remaining_min` and `expected_done_utc`. |
 | | `queued`, `queued_inputs`, `settling` | Files waiting to be processed (with their inputs, in the order they will be processed) and still being written. |
-| | `queue_empty_utc`, `queue_empty_in_min`, `prediction_basis` | When the waiting files are predicted to be done (UTC, and in minutes from `written_utc`), see below. `null` before any file was processed. |
+| | `queue_empty_utc`, `queue_empty_in_min`, `prediction_basis`, `prediction_workers` | When the waiting files are predicted to be done (UTC, and in minutes from `written_utc`), and the workers the prediction gives this camera, see below. `null` before any file was processed. |
 | | `delay_min` | How long ago the oldest waiting or processed file was recorded; 0 when nothing waits. |
 | | `file_length_min`, `waiting_recording_min` | Length of the input files (from the processed ones), and the recording time which waits. |
 | | `not_keeping_up` | The delay is more than three file lengths. |
@@ -611,7 +611,8 @@ the input of the recent files (the last hour if it had at least 3 files, otherwi
 long inputs are both predicted (`prediction_basis: size`; `file` uses the median time per file when the sizes
 are not known). A file being processed has its predicted time minus the time it has run left. The waiting files
 are then given to the workers in their order, every one to the next free worker; in multi-camera mode the
-workers are shared, and a camera gets a share by its number of waiting and running files. The prediction is for
+workers are shared, and a camera gets a share by its number of waiting and running files (the waiting files of a
+camera which is paused for disk space don't count, as they can't get a worker). The prediction is for
 the files known now: while the input is being recorded, new files keep coming. The start of a file comes from
 the monotonic clock of the monitor, so the times don't jump when the clock of the system is set.
 
