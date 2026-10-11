@@ -388,8 +388,8 @@ class MonitorStatus(object):
         self.size_cache = {}
         self.night_cache = {}
 
-        # The status is written right away the first time
-        self.last_write = 0.0
+        # The status is written right away the first time (the time of the last write is of the monotonic clock)
+        self.last_write = -float('inf')
         self.dirty = True
 
         # Continue the statistics and the faults of a previous run of the monitor
@@ -496,7 +496,9 @@ class MonitorStatus(object):
     def due(self):
         """ Check if the status is due to be written (every interval, or right after a file was processed). """
 
-        return self.dirty or (time.time() - self.last_write >= self.interval)
+        # The interval is measured on the monotonic clock, so the writes go on when the clock of the system is set
+        #   (only the times written in the status are of the clock of the system)
+        return self.dirty or (time.monotonic() - self.last_write >= self.interval)
 
 
     def update(self, state, force=False):
@@ -519,7 +521,7 @@ class MonitorStatus(object):
 
         try:
             _writeJSON(self.path, self.build(state))
-            self.last_write = time.time()
+            self.last_write = time.monotonic()
             self.dirty = False
             return True
 
@@ -646,7 +648,7 @@ class MonitorStatus(object):
         try:
             for path, mtime, size in self.input_scanner():
                 mtime = UTCFromTimestamp.utcfromtimestamp(mtime)
-                if night_start <= mtime <= now:
+                if night_start <= mtime <= min(now, night_end):
                     files_tonight += 1
                 if (newest_mtime is None) or (mtime > newest_mtime):
                     newest, newest_mtime, newest_size = os.path.basename(path), mtime, size

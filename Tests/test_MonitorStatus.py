@@ -1229,3 +1229,42 @@ def test_files_searched_by_the_normal_detection(tmp_path, now):
 
     night = status.build(_state())['night']
     assert (night['files_processed'], night['files_not_searched']) == (2, 1)
+
+
+def test_files_of_the_night_end_at_sunrise(tmp_path, monkeypatch):
+    """ After sunrise (before noon, while it is still the same night), the inputs written after sunrise are not
+        counted as written tonight.
+    """
+
+    config = _matchedFilterConfig()
+    _, night_start, night_end = mnr.nightInfo(config, NOW)
+    after_sunrise = night_end + datetime.timedelta(hours=2)
+    assert mnr.nightInfo(config, after_sunrise)[0] == mnr.nightInfo(config, NOW)[0]
+    monkeypatch.setattr(mst.RmsDateTime, 'utcnow', staticmethod(lambda: after_sunrise))
+
+    status, _ = _status(tmp_path, config)
+    for name, t in [('night.vid', night_end - datetime.timedelta(hours=1)),
+                    ('day.vid', night_end + datetime.timedelta(hours=1))]:
+        path = tmp_path/'input'/name
+        path.write_bytes(b'0')
+        ts = (t - datetime.datetime(1970, 1, 1)).total_seconds()
+        os.utime(str(path), (ts, ts))
+
+    assert status.build(_state())['recording']['files_tonight'] == 1
+
+
+def test_writes_continue_when_the_clock_is_set_back(tmp_path, now, monkeypatch):
+    """ The status is written every interval of the monotonic clock, also when the clock of the system is set
+        back after a write.
+    """
+
+    status, config = _status(tmp_path)
+    clock = {'wall': 1e9, 'mono': 1000.0}
+    monkeypatch.setattr(mst.time, 'time', lambda: clock['wall'])
+    monkeypatch.setattr(mst.time, 'monotonic', lambda: clock['mono'])
+    assert status.update(_state())
+
+    # The clock of the system is set back by an hour, and a minute passes
+    clock['wall'] -= 3600 - status.interval
+    clock['mono'] += status.interval
+    assert status.due()
