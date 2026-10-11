@@ -2187,13 +2187,14 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
             states = {cam_id: cameraState(cam_id, stopped=stopped) for cam_id in statuses}
 
             # The files of every camera for the prediction. A camera whose files can't be predicted (e.g. a damaged
-            #   history) is left out of it, and isn't predicted
+            #   history) takes part without files (so the turn of the cameras stays), and isn't predicted
             work, failed = [], set()
             for cam in cameras:
                 try:
                     work.append((cam['id'],) + statuses[cam['id']].openWork(states[cam['id']]))
                 except Exception as e:
                     log.warning("[{}] The queue could not be predicted: {}".format(cam['id'], repr(e)))
+                    work.append((cam['id'], [], []))
                     failed.add(cam['id'])
 
             # The prediction continues the turn of the cameras where the monitor is

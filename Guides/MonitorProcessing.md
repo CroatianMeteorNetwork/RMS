@@ -561,7 +561,7 @@ An example (shortened; the processing statistics and the calibration of the nigh
 | `processing` | `progress` | The files of the night: `done_tonight`, `in_progress`, `queued`, `being_written`, and `percent_done` (done of done, in progress and queued), and `other_nights_open`, the files of other nights which are waiting, running or being written (e.g. a backlog). The files which are not processed yet are put in a night by the time they were last written, which is the end of their recording when they are written live. |
 | | `in_progress` | The files being processed: the ID (`file`), the input (`input`, the file name or the name of the FITS directory), `started_utc`, `running_min`, and the prediction `expected_min`, `remaining_min` and `expected_done_utc`. |
 | | `queued`, `queued_inputs`, `settling` | Files waiting to be processed (with their inputs, in the order they will be processed) and still being written. |
-| | `queue_empty_utc`, `queue_empty_in_min`, `prediction_basis` | When the waiting and running files (of all nights) are predicted to be done (UTC, and in minutes from `written_utc`), see below. `null` before any file was processed, and while files wait but the camera is paused for disk space. |
+| | `queue_empty_utc`, `queue_empty_in_min`, `prediction_basis` | When the waiting and running files (of all nights) are predicted to be done (UTC, and in minutes from `written_utc`), see below. `0` when no file is open. `null` when files are open but no file was processed yet, while files wait but the camera is paused for disk space, and after the monitor stopped. |
 | | `delay_min` | How long ago the oldest waiting or processed file was recorded; 0 when nothing waits. |
 | | `file_length_min`, `waiting_recording_min` | Length of the input files (from the processed ones), and the recording time which waits. |
 | | `not_keeping_up` | The delay is more than three file lengths. |
@@ -569,7 +569,7 @@ An example (shortened; the processing statistics and the calibration of the nigh
 | | `processing_time_min_last_24h`, `processing_time_min_last_hour` | Processing time per file: number, minimum, 10th, 25th, 50th (median), 75th and 90th percentile, maximum, of all files of the last day and hour. |
 | | `processing_to_file_length_ratio` | Processing time over the length of the file, the same statistics. Above 1 per worker the processing falls behind. |
 | | `files_done_last_24h`, `files_failed_last_24h`, `failed_files`, `given_up` | Processed and failed files, the files which failed and will be retried, and the ones given up. |
-| `sky` | `state` | The sky at the end of the latest processed data: `clear`, `partly_clouded`, `clouded`, `too_few_stars` (not searched), or `no_data`. |
+| `sky` | `state` | The sky at the end of the latest processed data: `clear`, `partly_clouded`, `clouded`, `too_few_stars` (not searched), or `no_data` (nothing measured yet, or the latest files were not measured, e.g. with the normal detection). |
 | | `observed_utc`, `age_min` | When the sky was observed, and how long ago. |
 | | `observable` | At least 80% of the observed time in the last 10 minutes of the data had at least 80% of the image clear. `null` with less than about 3 minutes of data. |
 | | `clear_percent`, `dimming_mag`, `stars`, `matched_stars`, `reliable_seen_percent` | The latest chunk: the clear part of the image, how much the stars are dimmed vs clear sky, the stars, and the share of the stars which are reliably seen on clear sky that are seen. Only given when the latest data was searched (otherwise only its stars are known). |
@@ -601,7 +601,7 @@ An example (shortened; the processing statistics and the calibration of the nigh
 | `NOT_KEEPING_UP` | warning | The oldest waiting file was recorded more than three file lengths ago. |
 | `CALIBRATION_FAILING` | error | Fewer than half of the latest chunks on clear sky could be recalibrated (which requires the stars to match within `dist_check_threshold`, 0.33 px, with at least `min_matched_stars` stars): the platepar doesn't fit. |
 | `CAMERA_MOVED` | warning | The pointing differs from the reference platepar by more than 2 px (it normally changes by a fraction of a pixel through the night). |
-| `REPORT_FAILED` | error or warning | The latest night report failed, an error if an essential step failed (`merge`, `archive`). |
+| `REPORT_FAILED` | error or warning | The latest night report failed, an error if an essential step failed (`merge`, `thumbnails_and_stacks`, `archive`). |
 | `GPU_NOT_USED` | warning (info with `mf_gpu: auto`) | The matched filter ran on the CPU. |
 | `CANDIDATES_DROPPED` | info | The last file had more candidates than `mf_max_tracks`, the weakest ones were not measured. |
 | `STATUS_INCOMPLETE` | warning | Parts of the status could not be made (they are in the log); the rest of the status is still written. |

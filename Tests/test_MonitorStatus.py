@@ -896,6 +896,17 @@ def _alwaysUpdate(update):
     return _update
 
 
+def _runningUpdate(update):
+    """ Write the status at every update while the monitor runs, and keep it when the monitor stops (the
+        stopped status has no prediction of the queue).
+    """
+
+    def _update(self, state, force=False):
+        return False if state.get('stopped') else update(self, state, force=True)
+
+    return _update
+
+
 def test_latest_sky_of_a_file_which_was_not_searched(tmp_path, now):
     """ When the latest file was not searched (too few stars), the sky has its state and stars, and not the
         values of the older measured file.
@@ -1135,7 +1146,7 @@ def test_paused_camera_doesnt_share_the_workers(tmp_path, monkeypatch):
             raise KeyboardInterrupt
         real_sleep(0.01)
     monkeypatch.setattr(mon.time, 'sleep', _sleep)
-    monkeypatch.setattr(mst.MonitorStatus, 'update', _alwaysUpdate(mst.MonitorStatus.update))
+    monkeypatch.setattr(mst.MonitorStatus, 'update', _runningUpdate(mst.MonitorStatus.update))
 
     mon.monitorMultipleCameras(str(ini_path), report_mode='none')
 
@@ -1211,7 +1222,7 @@ def test_camera_without_the_status_shares_the_workers(tmp_path, monkeypatch):
             raise KeyboardInterrupt
         real_sleep(0.01)
     monkeypatch.setattr(mon.time, 'sleep', _sleep)
-    monkeypatch.setattr(mst.MonitorStatus, 'due', lambda self: True)
+    monkeypatch.setattr(mst.MonitorStatus, 'update', _runningUpdate(mst.MonitorStatus.update))
 
     mon.monitorMultipleCameras(str(ini_path), report_mode='none')
 
@@ -1485,3 +1496,92 @@ def test_progress_of_files_processed_again(tmp_path, now):
 
     progress = status.build(_state(queued=[('/data/file1.vid', mtime)]))['processing']['progress']
     assert (progress['done_tonight'], progress['queued'], progress['percent_done']) == (1, 1, 50.0)
+
+
+def test_damaged_bytes_in_the_history(tmp_path, now):
+    """ A history with bytes which are not text or with numbers too large to use doesn't stop the monitor from
+        starting, and its other lines are kept.
+    """
+
+    (tmp_path/'output').mkdir()
+    good = {'file': 'good', 'outcome': 'ok', 'processing_min': 5.0,
+            'finished_utc': NOW.strftime(mnr.JSON_TIME_FORMAT)}
+    with open(str(tmp_path/'output'/mst.HISTORY_FILE_NAME), 'wb') as f:
+        f.write(b'\xff\xfe{"damaged": \x80}\n')
+        f.write(('{"file": "huge", "outcome": "ok", "processing_min": 1' + '0'*400 + ', "finished_utc": "'
+                 + NOW.strftime(mnr.JSON_TIME_FORMAT) + '"}\n').encode())
+        f.write((json.dumps(good) + '\n').encode())
+
+    status, config = _status(tmp_path)
+    assert [r['file'] for r in status.file_records] == ['huge', 'good']
+    assert status.file_records[0]['processing_min'] is None
+
+
+def test_failed_write_waits_for_the_interval(tmp_path, now, monkeypatch):
+    """ When the status can't be written, it is tried again after the interval, not at every poll. """
+
+    status, config = _status(tmp_path)
+    builds = {'n': 0}
+    real_build = status.build
+
+    def _build(state):
+        builds['n'] += 1
+        return real_build(state)
+
+    monkeypatch.setattr(status, 'build', _build)
+    monkeypatch.setattr(mst, '_writeJSON', lambda *args: (_ for _ in ()).throw(OSError(28, 'No space left')))
+
+    for _ in range(5):
+        status.update(_state())
+    assert builds['n'] == 1 and not status.due()
+
+
+def test_stopped_monitor_has_no_queue_end(tmp_path, now):
+    """ When the monitor has stopped, its waiting files are not processed, so no end of the queue is given. """
+
+    status, config = _statusWithSizes(tmp_path, {'waiting.vid': 1.0})
+    for i in range(3):
+        status.fileFinished('done{:d}'.format(i), 'ok', 60.0, input_name='done.vid', size_bytes=1024**3)
+    waiting, t1 = _inputFile(tmp_path, 'waiting.vid', 5)
+
+    for state in (_state(stopped=True, queued=[(waiting, t1)]),
+                  _state(stopped=True, queued=[(waiting, t1)], queue_empty_min=1.0)):
+        processing = status.build(state)['processing']
+        assert processing['queued'] == 1 and processing['queue_empty_in_min'] is None
+        assert processing['queue_empty_utc'] is None
+
+
+def test_sky_without_measurements_after_a_file_with_too_few_stars(tmp_path, now):
+    """ Without the measured sky (e.g. with the normal detection), a file with too few stars early in the night
+        doesn't give the state of the sky after later files with enough stars.
+    """
+
+    config = _config()
+    config.mf_enable = False
+    status, _ = _status(tmp_path, config)
+    night_start, night_end = NOW - datetime.timedelta(hours=5), NOW + datetime.timedelta(hours=7)
+
+    def _fileResult(start, stars):
+        return {'star_chunks': [(start + datetime.timedelta(seconds=10*i), stars) for i in range(60)],
+                'chunk_s': 10.0, 'summary': None, 'searched': False, 'measured': False, 'removed_times': None,
+                'removed_count': 0, 'detections': 0, 'ftp_detections': 0}
+
+    files = [('a', {'input_file': '/in/a.vid'}, _fileResult(NOW - datetime.timedelta(hours=4), 2), 10),
+             ('b', {'input_file': '/in/b.vid'}, _fileResult(NOW - datetime.timedelta(minutes=15), 150), 10)]
+    _, sky = status._sky(NOW, 'night', night_start, night_end, files)
+    assert (sky['state'], sky['observable'], sky['stars']) == ('no_data', None, 150)
+
+
+def test_camera_without_the_status_keeps_no_sizes(tmp_path, now):
+    """ A camera without the status (whose status is never made) only keeps the sizes of its open files, which
+        the prediction of the other cameras asks for.
+    """
+
+    status, config = _statusWithSizes(tmp_path, {'a.vid': 1.0, 'b.vid': 1.0})
+    status.enabled = False
+    a, ta = _inputFile(tmp_path, 'a.vid', 5)
+    b, tb = _inputFile(tmp_path, 'b.vid', 3)
+
+    status.openWork(_state(queued=[(a, ta)]))
+    status.openWork(_state(queued=[(b, tb)]))
+    assert {key[0] for key in status.size_cache} == {b}

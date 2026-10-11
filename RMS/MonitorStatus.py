@@ -138,9 +138,11 @@ def _cleanRecord(record):
     # The numbers, None where they are not numbers (a bool is not taken as a number)
     for name in ('processing_min', 'size_gb', 'length_min'):
         value = record.get(name)
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not np.isfinite(value):
+        try:
+            value = None if isinstance(value, bool) else float(value) if isinstance(value, (int, float)) else None
+        except OverflowError:
             value = None
-        record[name] = value
+        record[name] = value if (value is not None) and np.isfinite(value) else None
 
     return record
 
@@ -414,8 +416,12 @@ class MonitorStatus(object):
         self.last_write = -float('inf')
         self.dirty = True
 
-        # Continue the statistics and the faults of a previous run of the monitor
-        self._restore()
+        # Continue the statistics and the faults of a previous run of the monitor (a damaged file of the previous
+        #   run must not stop the monitor from starting)
+        try:
+            self._restore()
+        except Exception as e:
+            log.warning("[{}] The status of the previous run could not be read: {}".format(camera_id, repr(e)))
 
 
     def _restore(self):
@@ -425,13 +431,12 @@ class MonitorStatus(object):
         # The processed files of the last day (lines which can't be read are skipped)
         if os.path.isfile(self.history_path):
             try:
-                with open(self.history_path) as f:
+                with open(self.history_path, errors='replace') as f:
                     for line in f:
                         try:
-                            record = json.loads(line)
-                        except ValueError:
+                            record = _cleanRecord(json.loads(line))
+                        except Exception:
                             continue
-                        record = _cleanRecord(record)
                         if record is not None:
                             self.file_records.append(record)
             except OSError as e:
@@ -550,6 +555,10 @@ class MonitorStatus(object):
 
         except Exception as e:
             log.warning("[{}] The status could not be written: {}".format(self.camera_id, repr(e)))
+
+            # Try again after the interval, not at every poll
+            self.last_write = time.monotonic()
+            self.dirty = False
             return False
 
 
@@ -823,6 +832,15 @@ class MonitorStatus(object):
         return (lambda size_gb: rate*size_gb if size_gb else per_file), 'size'
 
 
+    def _pruneCaches(self, state):
+        """ Keep the sizes and nights of the inputs only while they are open (waiting, processed or written). """
+
+        open_paths = {file_path for _, file_path, _ in state.get('in_progress', [])}
+        open_paths |= {path for path, _ in list(state.get('queued', [])) + list(state.get('settling', []))}
+        self.size_cache = {key: value for key, value in self.size_cache.items() if key[0] in open_paths}
+        self.night_cache = {key: value for key, value in self.night_cache.items() if key[0] in open_paths}
+
+
     def openWork(self, state):
         """ The files of the camera which are being processed and which wait, as times for the prediction of the
             queue (see simulateQueues).
@@ -838,6 +856,9 @@ class MonitorStatus(object):
 
         now = RmsDateTime.utcnow()
         predict, _ = self._expectedMinutes(now)
+
+        # Also a camera without the status keeps only the sizes of its open files
+        self._pruneCaches(state)
 
         # The remaining time of every running file: its expected time minus how long it has been running
         running = []
@@ -870,11 +891,8 @@ class MonitorStatus(object):
         # Only the processed files of the last day count, also if no file was processed for a while
         self._pruneRecords(now)
 
-        # The sizes and nights of the inputs are only kept while they are open (waiting, processed or written)
-        open_paths = {file_path for _, file_path, _ in state.get('in_progress', [])}
-        open_paths |= {path for path, _ in state.get('queued', []) + state.get('settling', [])}
-        self.size_cache = {key: value for key, value in self.size_cache.items() if key[0] in open_paths}
-        self.night_cache = {key: value for key, value in self.night_cache.items() if key[0] in open_paths}
+        # The sizes and nights of the inputs are only kept while they are open
+        self._pruneCaches(state)
 
         # The length of the input files (median of the processed files of the night, min). The lengths of the
         #   processed files are kept in the history, so they are known after a restart too
@@ -930,8 +948,8 @@ class MonitorStatus(object):
             queue_empty_min = simulateQueues(self.nproc, [(self.camera_id, running, waiting)])[self.camera_id]
 
         # While the camera is paused for disk space its waiting files can't start, so it is not known when they
-        #   will be done
-        if state.get('paused_for_space') and queued:
+        #   will be done, and after the monitor stopped they are not processed
+        if (state.get('paused_for_space') and queued) or state.get('stopped'):
             queue_empty_min = None
 
         # The progress of the night: the files of the night which are done, being processed, waiting, and still
@@ -1077,6 +1095,11 @@ class MonitorStatus(object):
 
         # The state at the end of the latest data, from the time line (the worst of overlapping files)
         latest_state, _, latest_end = segments[-1]
+
+        # The sky now is not known if newer files were not measured (e.g. with the normal detection)
+        if latest_chunks and (latest_time >= latest_end):
+            return night, sky
+
         sky['state'] = {'partly': 'partly_clouded', 'not_searched': 'too_few_stars'}.get(latest_state, latest_state)
         sky['observed_utc'] = _timeString(latest_end)
         sky['age_min'] = _round((now - latest_end).total_seconds()/60.0, 1)
