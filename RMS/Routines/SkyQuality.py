@@ -428,7 +428,7 @@ class SkyQualityMap(object):
             match_radius: [float] Largest distance between a star and its catalog star (px). 1.0 by default.
             matched: [list] The matched stars of the chunks (see matchStars), instead of matching them. None by
                 default.
-            total_frames: [int] Number of frames of the input, for the chunks missing at its end. None by
+            total_frames: [int] Number of frames of the input, for the whole chunks missing at its end. None by
                 default (the frames after the last chunk belong to it).
             min_matched: [int] Smallest number of matched stars of the chunk the platepar is fitted on, for the
                 calibration to be trusted. 30 by default.
@@ -534,11 +534,12 @@ class SkyQualityMap(object):
                     firsts.append(int(expected))
                     expected += cf
             firsts.append(int(f0))
-        # After the last chunk, every remaining frame is in a missing chunk (the star extraction uses only full
-        #   chunks, so the frames at the end of the input have no stars)
+        # After the last chunk, every whole chunk which fits in the remaining frames is missing. The frames at the
+        #   end of the input, fewer than a chunk, belong to the chunk before them (the star extraction uses only
+        #   whole chunks, so they never have stars of their own)
         if total_frames is not None:
             expected = self.chunk_first[-1] + cf
-            while expected < total_frames:
+            while expected + cf <= total_frames:
                 firsts.append(int(expected))
                 expected += cf
 
