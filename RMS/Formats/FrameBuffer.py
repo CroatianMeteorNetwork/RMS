@@ -40,8 +40,14 @@ def segmentFrames(img_handle, config, memory_gb):
     # The frames are kept as they are read (binned, uint16 for the .vid files), as many as fit, in whole units
     frame_bytes = img_handle.nrows*img_handle.ncols*np.dtype(np.uint16).itemsize
     unit = segmentUnit(config, img_handle)
+    segment_frames = int(memory_gb*1024**3//frame_bytes)//unit*unit
 
-    return int(memory_gb*1024**3//frame_bytes)//unit*unit
+    # A segment holds at least twice the blocks which the slow search compares, so that the last segment can
+    #   begin early enough to hold them too (see segmentRanges). A smaller memory is not used
+    if segment_frames < 2*segmentMinimum(config, img_handle):
+        return 0
+
+    return segment_frames
 
 
 def segmentUnit(config, img_handle):
@@ -52,6 +58,19 @@ def segmentUnit(config, img_handle):
     from RMS.MatchedFilterDetection import matchedFilterBlockFrames
 
     return int(np.lcm(matchedFilterBlockFrames(config), int(getattr(img_handle, 'chunk_frames', 1) or 1)))
+
+
+def segmentMinimum(config, img_handle):
+    """ The fewest frames of a segment, in whole units: the slow search of the matched filter compares every block
+        with blocks a few blocks before and after it, and can find nothing in fewer blocks (see
+        slowSearchMinBlocks). """
+
+    # Imported here, as the matched filter uses this module
+    from RMS.MatchedFilterDetection import matchedFilterBlockFrames, slowSearchMinBlocks
+
+    unit = segmentUnit(config, img_handle)
+
+    return -(-slowSearchMinBlocks()*matchedFilterBlockFrames(config)//unit)*unit
 
 
 def segmentOverlap(segment_frames, overlap, unit):
@@ -70,17 +89,22 @@ def segmentOverlap(segment_frames, overlap, unit):
     return max(0, min(overlap, (segment_frames//2)//unit*unit))
 
 
-def segmentRanges(total_frames, segment_frames, overlap, unit):
+def segmentRanges(total_frames, segment_frames, overlap, unit, minimum=0):
     """ The frame ranges of the segments of an input: every segment begins overlap frames before the end of the
         previous one, and the last one ends at the end of the input. A last segment which would add less than a
-        unit of new frames is taken into the one before it, if that still fits in the memory. The overlap is at
-        most half a segment (see segmentOverlap), so only neighbouring segments share frames.
+        unit of new frames is taken into the one before it, if that still fits in the memory, and a last segment
+        shorter than the minimum begins earlier. The overlap is at most half a segment (see segmentOverlap), so
+        only neighbouring segments share frames.
 
     Arguments:
         total_frames: [int] Number of frames of the input.
         segment_frames: [int] Number of frames of a segment (a multiple of unit).
         overlap: [int] Number of frames which neighbouring segments share (a multiple of unit).
         unit: [int] Frames which segments begin and end on.
+
+    Keyword arguments:
+        minimum: [int] Fewest frames of a segment (a multiple of unit, at most half a segment, see
+            segmentMinimum). 0 by default.
 
     Return:
         [list] Segments as (first frame, end frame), one for the whole input if it fits in one.
@@ -107,6 +131,11 @@ def segmentRanges(total_frames, segment_frames, overlap, unit):
     if ((total_frames - first) - overlap < unit) and (total_frames - ranges[-1][0] <= segment_frames):
         ranges[-1] = (ranges[-1][0], total_frames)
     else:
+
+        # A short last segment begins earlier, on a whole unit, to hold the minimum. It shares more frames with the
+        #   segment before it, but at most half a segment (the minimum is at most that)
+        if total_frames - first < minimum:
+            first = max((total_frames - minimum)//unit*unit, ranges[-1][1] - (segment_frames//2)//unit*unit)
         ranges.append((first, total_frames))
 
     return ranges

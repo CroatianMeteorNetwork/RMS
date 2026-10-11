@@ -67,7 +67,7 @@ from RMS.DetectStarsAndMeteors import saveResultsFrameInterface
 from RMS.ExtractStarsFrameInterface import extractStarsFrameInterface
 from RMS.Formats import FTPdetectinfo
 from RMS.Formats.FFfile import filenameToDatetime, validFFName
-from RMS.Formats.FrameBuffer import SegmentBuffer, segmentOverlap, segmentRanges, segmentUnit
+from RMS.Formats.FrameBuffer import SegmentBuffer, segmentMinimum, segmentOverlap, segmentRanges, segmentUnit
 from RMS.Formats.FrameInterface import detectInputType
 from RMS.Formats.Platepar import Platepar
 from RMS.Logger import getLogger, LoggingManager
@@ -200,6 +200,47 @@ def matchedFilterBlockFrames(config):
         block_frames = max(unit, int(round(block_frames/float(unit)))*unit)
 
     return block_frames
+
+
+def slowReferenceBlocks(k, n):
+    """ The blocks with which the slow search compares the block k of n blocks: SLOW_REF_BLOCKS (and one more)
+        before and after it, those which exist. The nearer blocks are left out, as their medians share frames with
+        the block k (see backgroundPass) and the object has not moved away yet.
+
+    Arguments:
+        k: [int] Index of the block.
+        n: [int] Number of blocks.
+
+    Return:
+        [list] Indices of the reference blocks.
+    """
+
+    return [j for j in (k - SLOW_REF_BLOCKS - 1, k - SLOW_REF_BLOCKS, k + SLOW_REF_BLOCKS, k + SLOW_REF_BLOCKS + 1)
+            if 0 <= j < n]
+
+
+def slowSearchMinBlocks():
+    """ The fewest blocks in which the slow search can find an object: an object has to be seen in
+        SLOW_MIN_BLOCKS consecutive blocks, each compared with at least two reference blocks (see
+        slowReferenceBlocks).
+
+    Return:
+        [int] Number of blocks.
+    """
+
+    n = SLOW_MIN_BLOCKS
+    while True:
+
+        # The longest run of consecutive blocks with two reference blocks
+        run = longest = 0
+        for k in range(n):
+            run = (run + 1) if (len(slowReferenceBlocks(k, n)) >= 2) else 0
+            longest = max(longest, run)
+
+        if longest >= SLOW_MIN_BLOCKS:
+            return n
+
+        n += 1
 
 
 class MatchedFilterOptions(object):
@@ -1243,9 +1284,7 @@ class MatchedFilterDetector(object):
         # The reference blocks: SLOW_REF_BLOCKS and one more block before and after (those which exist). The nearer
         #   blocks are left out, as their medians share frames with this block (see backgroundPass) and the object
         #   has not moved away yet
-        n = len(self.block_starts)
-        refs = [j for j in (k - SLOW_REF_BLOCKS - 1, k - SLOW_REF_BLOCKS, k + SLOW_REF_BLOCKS,
-                            k + SLOW_REF_BLOCKS + 1) if (0 <= j < n) and (self.backgrounds[j].raw_median is not None)]
+        refs = [j for j in slowReferenceBlocks(k, len(self.block_starts)) if self.backgrounds[j].raw_median is not None]
         if len(refs) < 2:
             return None, None
 
@@ -1280,9 +1319,9 @@ class MatchedFilterDetector(object):
             [list] Tracks as arrays of hits, rows [frame, x, y, z, vx, vy, run].
         """
 
-        # The comparison needs reference blocks on both sides of most blocks
+        # The comparison needs reference blocks for consecutive blocks
         n = len(self.block_starts)
-        if (n < 2*SLOW_REF_BLOCKS) or (self.backgrounds[0].raw_median is None):
+        if (n < slowSearchMinBlocks()) or (self.backgrounds[0].raw_median is None):
             return []
 
         # Candidates closer to the border than the edge margin plus the PSF are not used
@@ -3819,7 +3858,8 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
                     'used'.format(int(config.mf_segment_overlap), segment_frames,
                                   segmentOverlap(segment_frames, overlap, unit)))
         overlap = segmentOverlap(segment_frames, overlap, unit)
-    ranges = segmentRanges(img_handle.total_frames, segment_frames, overlap, unit)
+    ranges = segmentRanges(img_handle.total_frames, segment_frames, overlap, unit,
+                           minimum=min(segmentMinimum(config, img_handle), (segment_frames//2)//unit*unit))
     buffer = SegmentBuffer(img_handle, max(end - first for first, end in ranges))
     log.info('Matched filter: {:d} segments of up to {:d} frames ({:.1f} min), overlap {:d} frames'.format(
         len(ranges), segment_frames, segment_frames/img_handle.fps/60.0, overlap))
