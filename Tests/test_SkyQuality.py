@@ -949,3 +949,29 @@ def test_plot_of_the_detections(tmp_path, mags, removed):
     sq.plotSkyConditions(rows, plot_path, 'Test', detection_times=detection_times, detection_mags=list(mags),
                          removed_detections=removed, removed_times=removed_times, chunk_seconds={'a.vid': 4.0})
     assert os.path.getsize(plot_path) > 0
+
+
+def test_plot_until_the_end_of_the_last_input(tmp_path, monkeypatch):
+    """ The time axis of the plot reaches the end of the last input (its frames after the last chunk). """
+
+    import matplotlib.dates as mdates
+    import matplotlib.figure
+
+    begin = datetime.datetime(2025, 12, 25, 22, 0, 0)
+    rows = [{'time': begin + datetime.timedelta(seconds=4*i), 'input': 'a.vid', 'clear_fraction': 1.0,
+             'transparency_mag': 0.0, 'reliable_seen': 1.0, 'stars': 500, 'matched': 300} for i in range(10)]
+    end = begin + datetime.timedelta(seconds=42.5)
+
+    # Keep the figure which is saved
+    saved = {}
+    real_save = matplotlib.figure.Figure.savefig
+    def _save(self, *args, **kwargs):
+        saved['fig'] = self
+        return real_save(self, *args, **kwargs)
+    monkeypatch.setattr(matplotlib.figure.Figure, 'savefig', _save)
+
+    summary = sq.plotSkyConditions(rows, str(tmp_path/'conditions.png'), 'Test', chunk_seconds={'a.vid': 4.0},
+                                   input_ends={'a.vid': end})
+    assert summary['observed_h']*3600 == pytest.approx(42.5)
+    x_end = saved['fig'].axes[3].get_xlim()[1]
+    assert x_end >= mdates.date2num(end) - 1e-9

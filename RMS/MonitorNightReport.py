@@ -1002,6 +1002,20 @@ def medianMagnitude(mags):
     return float(-2.5*np.log10(np.median(10**(-0.4*mags))))
 
 
+def detectionMagnitude(meteor_meas):
+    """ The magnitude of a detection: the median magnitude of its calibrated measurements (the measurements of an
+        uncalibrated detection only have a placeholder magnitude).
+
+    Arguments:
+        meteor_meas: [list] Measurements of the detection, see FTPdetectinfo.readFTPdetectinfo.
+
+    Return:
+        [float] Median magnitude, None if it is not known.
+    """
+
+    return medianMagnitude([m[9] for m in meteor_meas if (len(m) > 9) and (m[0] == 1)])
+
+
 def nightSkyResults(file_results, config, night_start, night_end):
     """ Combine the sky results of the files of a night (see readFileSkyResults).
 
@@ -1173,7 +1187,7 @@ def plotNightSkyConditions(night_dir, night_name, output_dir, results, config, f
             continue
         if night_start <= t <= night_end:
             detection_times.append(t)
-            detection_mags.append(medianMagnitude([m[9] for m in meteor_meas if len(m) > 9]))
+            detection_mags.append(detectionMagnitude(meteor_meas))
 
     # The time of every detection removed by clouds in the night, where it is known
     removed_times = [t for _, file_result in file_results for t in (file_result['removed_times'] or [])

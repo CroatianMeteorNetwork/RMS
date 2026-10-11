@@ -1702,7 +1702,7 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     all_times = times + [t for span in not_searched for t in span[:2]] + list(detection_times)
     time_format = '%H:%M'
     if all_times:
-        x_start, x_end = min(all_times), max(all_times) + chunk
+        x_start, x_end = min(all_times), max([max(all_times) + chunk] + list(ends.values()))
         if bounds is not None:
             x_start, x_end = max(x_start, bounds[0]), min(x_end, bounds[1])
         ax_det.set_xlim(x_start, x_end)

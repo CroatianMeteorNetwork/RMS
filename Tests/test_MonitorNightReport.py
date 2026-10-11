@@ -1667,3 +1667,16 @@ def test_median_magnitude():
     assert mnr.medianMagnitude([1.0, 2.0, 3.0, 4.0]) < 2.5
     assert mnr.medianMagnitude([None, float('nan'), 5.0]) == pytest.approx(5.0)
     assert mnr.medianMagnitude([None, float('nan')]) is None
+
+
+def test_magnitude_of_a_detection():
+    """ The magnitude of a detection is the median magnitude of its calibrated measurements: the measurements of
+        an uncalibrated detection have a placeholder magnitude, which is not taken.
+    """
+
+    def _meas(calibrated, mag):
+        return [int(calibrated), 10.0, 100.0, 100.0, 170.0, 50.0, 60.0, 70.0, 1000, mag, 50, 8.0, 0]
+
+    assert mnr.detectionMagnitude([_meas(True, 3.0), _meas(True, 5.0), _meas(True, 4.0)]) == pytest.approx(4.0)
+    assert mnr.detectionMagnitude([_meas(False, 0.0), _meas(False, 0.0)]) is None
+    assert mnr.detectionMagnitude([_meas(True, float('nan'))]) is None
