@@ -389,9 +389,9 @@ def test_persistence_carried_without_the_overlap():
 
 
 def test_segments_share_the_track_cap_and_carry_persistence(monkeypatch):
-    """ Every segment measures at most its share of mf_max_tracks (by the frames which belong to it), so the file
-        measures about mf_max_tracks as without segments, and the persistence is carried from before the next
-        segment. """
+    """ The segments share mf_max_tracks: every segment measures at most what the segments before it left, so a file
+        measures at most mf_max_tracks candidate tracks, and all of them while it has fewer (also if they are all in
+        one segment). The persistence is carried from before the next segment. """
 
     import RMS.MatchedFilterDetection as mfd
 
@@ -407,13 +407,17 @@ def test_segments_share_the_track_cap_and_carry_persistence(monkeypatch):
         return [[constructFFName('XX0001', handle.currentFrameTime(frame_no=c*128, dt_obj=True)), [(1.0,)*8]*5]
                 for c in range(*chunk_range)]
 
+    # The segments measure 0, 200, 80 and all the rest of the tracks they may
+    measured = iter([0, 200, 80, 999])
     calls = []
-    class _Carry(object):
+    class _Detector(object):
         persistence_carry = {}
         psf_sigma = None
     def detect(img_handle, config, max_tracks=None, persistence_until=None, **kwargs):
         calls.append((max_tracks, persistence_until))
-        return [], _Carry()
+        det = _Detector()
+        det.tracks_measured = min(next(measured), max_tracks)
+        return [], det
 
     monkeypatch.setattr(mfd, 'extractStarsFrameInterface', stars)
     monkeypatch.setattr(mfd, 'detectMatchedFilter', detect)
@@ -421,5 +425,5 @@ def test_segments_share_the_track_cap_and_carry_persistence(monkeypatch):
     monkeypatch.setattr(mfd, 'SegmentedRun', lambda *args, **kwargs: None)
 
     mfd.detectMatchedFilterSegments(handle, config, 768)
-    assert [c[0] for c in calls] == [94, 75, 75, 57]
+    assert [c[0] for c in calls] == [300, 300, 100, 20]
     assert [c[1] for c in calls] == [512, 1024, 1536, None]

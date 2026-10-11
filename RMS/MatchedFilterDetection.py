@@ -484,8 +484,9 @@ class MatchedFilterDetector(object):
         self.cloud_detections_removed = 0
         self.cloud_removed_frames = []
 
-        # Number of the weakest candidate tracks which were not measured (see mf_max_tracks)
+        # Number of the weakest candidate tracks which were not measured (see mf_max_tracks), and of the measured ones
         self.tracks_dropped = 0
+        self.tracks_measured = 0
 
         # Photometry of every frame of the verified tracks: id(centroids) -> (frames, intensities, saturated
         #   pixel counts, noise of the intensities)
@@ -1863,6 +1864,7 @@ class MatchedFilterDetector(object):
             log.warning('Matched filter: {:d} candidate tracks, only the {:d} strongest are measured'.format(
                 len(tracks), self.opts.max_tracks))
             tracks = [tracks[i] for i in keep]
+        self.tracks_measured = len(tracks)
         self._debug = (hits, linked)
         log.info('Matched filter: {:d} hits, {:d} candidate tracks ({:d} from the search of slow objects)'.format(
             len(hits), len(tracks), len(slow_tracks)))
@@ -3306,8 +3308,8 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
             None by default (frame_range).
         persistence_until: [int] First frame of the next segment, before which the persistence counts are kept to
             carry to it (see MatchedFilterDetector.persistenceCheckpoint). None by default.
-        max_tracks: [int] Largest number of candidate tracks which are measured, e.g. the share of a segment of
-            mf_max_tracks. None by default (mf_max_tracks).
+        max_tracks: [int] Largest number of candidate tracks which are measured, e.g. what the segments before this
+            one left of mf_max_tracks. None by default (mf_max_tracks).
 
     Return:
         [list] Detections as [rho, theta, centroids], or (detections, detector) with return_detector. The
@@ -3625,11 +3627,9 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
     cuts = [(ranges[k + 1][0] + ranges[k][1])//2 for k in range(len(ranges) - 1)]
     overlaps = [(ranges[k + 1][0], ranges[k][1]) for k in range(len(ranges) - 1)]
 
-    # Every segment measures at most its share of mf_max_tracks, by the frames which belong to it, so the input
-    #   measures about mf_max_tracks as without segments
-    bounds = [0] + cuts + [img_handle.total_frames]
-    max_tracks = [max(1, int(math.ceil(config.mf_max_tracks*(bounds[k + 1] - bounds[k])/img_handle.total_frames)))
-                  for k in range(len(ranges))]
+    # The segments share mf_max_tracks: every segment measures at most what the segments before it left, so the
+    #   input measures at most mf_max_tracks candidate tracks, and all of them while it has fewer
+    max_tracks = int(config.mf_max_tracks)
 
     timing = collections.defaultdict(float)
     star_list, detectors, segment_detections = [], [], []
@@ -3675,8 +3675,10 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
                                                    persistence_prior=persistence, sky_range=(0, end),
                                                    persistence_until=(ranges[k + 1][0] if k + 1 < len(ranges)
                                                                       else None),
-                                                   max_tracks=max_tracks[k])
+                                                   max_tracks=max_tracks)
         detectors.append(detector)
+        if detector is not None:
+            max_tracks = max(max_tracks - detector.tracks_measured, 0)
 
         # The persistent pixels are judged over all segments so far (the runs of every overlap once), as over the
         #   whole input
