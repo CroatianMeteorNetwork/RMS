@@ -848,6 +848,22 @@ def plotNightCalibrationVariation(night_dir, night_name, recalibrated, config, f
                                     ff_frames=ff_frames)
 
 
+def removeNightSkyConditions(night_dir, night_name):
+    """ Remove the sky conditions of a night (see plotNightSkyConditions), if there are any.
+
+    Return:
+        (csv_path, plot_path): [tuple of str] Paths of the CSV file and of the plot.
+    """
+
+    csv_path = os.path.join(night_dir, night_name + '_sky_conditions.csv')
+    plot_path = os.path.join(night_dir, night_name + '_sky_conditions.png')
+    for path in (csv_path, plot_path):
+        if os.path.isfile(path):
+            os.remove(path)
+
+    return csv_path, plot_path
+
+
 def plotNightSkyConditions(night_dir, night_name, output_dir, results, config, ftpdetectinfo_path):
     """ Plot the sky conditions of the night from the log of the conditions of the matched filter (see
         SkyQuality.SkyReference), with the files which were not searched as they had too few stars and the
@@ -869,11 +885,7 @@ def plotNightSkyConditions(night_dir, night_name, output_dir, results, config, f
     from RMS.Routines.SkyQuality import CONDITION_COLUMNS, plotSkyConditions, readConditions
 
     # The products of a previous report are removed first, so a report without conditions doesn't keep them
-    csv_path = os.path.join(night_dir, night_name + '_sky_conditions.csv')
-    plot_path = os.path.join(night_dir, night_name + '_sky_conditions.png')
-    for path in (csv_path, plot_path):
-        if os.path.isfile(path):
-            os.remove(path)
+    csv_path, plot_path = removeNightSkyConditions(night_dir, night_name)
 
     # The files which the matched filter did not search, as they had too few stars (clouds, twilight), with the
     #   stars of their chunks, the detections removed on clouded sky, and the files whose newest processing
@@ -1135,6 +1147,10 @@ def generateNightReport(output_dir, night_name, config, results=None, archive=Tr
 
 
     merged = _runStep('merge', lambda: mergeNightResults(night_dir, output_dir, results, config))
+
+    # The sky conditions of a previous report are removed, they are plotted again below if the matched filter is
+    #   enabled and the results could be merged
+    removeNightSkyConditions(night_dir, night_name)
 
     # The detections of the matched filter are merged into their own file in a subdirectory of the night, so
     #   they are kept apart from the normal detections in the rest of the report

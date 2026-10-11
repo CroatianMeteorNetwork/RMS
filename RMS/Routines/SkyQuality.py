@@ -1129,7 +1129,7 @@ def readConditions(dir_path, station_id, inputs=None, start=None, end=None):
     columns = list(CONDITION_COLUMNS) + ['processed_utc']
     processings = {}
     for log_path in log_paths:
-        with open(log_path, newline='') as f:
+        with open(log_path, newline='', encoding='utf-8', errors='replace') as f:
             lines = [line for line in f if line.strip() and not line.startswith('#')]
 
         for values in csv.reader(lines):
@@ -1455,7 +1455,7 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     star_counts = star_counts[np.isfinite(star_counts) & (star_counts > 0)]
     if len(star_counts):
         ax_stars.set_ylim(max(min(star_counts.min(), min_matched or star_counts.min())/1.5, 1),
-                          star_counts.max()*1.5)
+                          max(star_counts.max(), min_matched or 0)*1.5)
     ax_stars.set_ylabel('stars', fontsize=10)
 
     # The times of the detections

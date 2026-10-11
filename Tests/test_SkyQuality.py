@@ -753,7 +753,9 @@ def test_plot_sky_conditions_without_conditions(tmp_path):
 
 
 def test_read_conditions_skips_rows_which_cant_be_read(tmp_path):
-    """ A row which was not written completely or has values which can't be read is skipped. """
+    """ A row which was not written completely or has values which can't be read is skipped, and a log with bytes
+        which are not UTF-8 is read.
+    """
 
     _writeConditions(tmp_path/'sky_conditions_XX0001_20251225.csv', [
         ('2025-12-25T23:59:50.000', 'a.vid', 1.0, '2025-12-26T01:00:00')])
@@ -762,8 +764,10 @@ def test_read_conditions_skips_rows_which_cant_be_read(tmp_path):
         f.write('2025-12-25T23:59:58.000,a.vid,500,300,x,0.010,0.950,2025-12-26T01:00:00\n')
         f.write('not a time,a.vid,500,300,1.000,0.010,0.950,2025-12-26T01:00:00\n')
         f.write(','.join(sq.CONDITION_COLUMNS) + ',processed_utc\n')
+    with open(str(tmp_path/'sky_conditions_XX0001_20251225.csv'), 'ab') as f:
+        f.write(b'2025-12-25T23:59:59.000,a\xff.vid,500,300,1.000,0.010,0.950,2025-12-26T01:00:00\n')
 
-    rows = sq.readConditions(str(tmp_path), 'XX0001')
+    rows = sq.readConditions(str(tmp_path), 'XX0001', inputs={'a.vid'})
     assert [row['chunk_utc'] for row in rows] == ['2025-12-25T23:59:50.000']
 
 

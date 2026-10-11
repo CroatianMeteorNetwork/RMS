@@ -1584,3 +1584,18 @@ def test_night_sky_conditions_file_not_searched_with_a_pause(tmp_path, monkeypat
     assert mnr.plotNightSkyConditions(night_dir, NIGHT, output_dir, results, config, '')
     assert [len(span[2]) for span in plotted['not_searched']] == [2, 1]
     assert all((end - start).total_seconds() <= 2*128/25.0 + 0.01 for start, end, _, _ in plotted['not_searched'])
+
+
+def test_night_report_removes_sky_conditions_without_the_matched_filter(tmp_path):
+    """ The sky conditions of a previous report are removed when the matched filter is not enabled anymore. """
+
+    config = _config()
+    output_dir = str(tmp_path)
+    _makeResults(output_dir, config, 'file1', n_chunks=2)
+    night_dir = mnr.nightDirPath(output_dir, NIGHT, config)
+    for ext in ('csv', 'png'):
+        open(os.path.join(night_dir, '{:s}_sky_conditions.{:s}'.format(NIGHT, ext)), 'w').close()
+
+    night_state = mnr.generateNightReport(output_dir, NIGHT, config, archive=False)
+    assert 'sky_conditions' not in night_state['ok_steps']
+    assert not any(f.startswith(NIGHT + '_sky_conditions') for f in os.listdir(night_dir))
