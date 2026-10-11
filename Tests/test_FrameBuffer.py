@@ -412,6 +412,7 @@ def test_segments_share_the_track_cap_and_carry_persistence(monkeypatch):
     calls = []
     class _Detector(object):
         persistence_carry = {}
+        persistence_carry_frames = 0
         psf_sigma = None
     def detect(img_handle, config, max_tracks=None, persistence_until=None, **kwargs):
         calls.append((max_tracks, persistence_until))
@@ -427,3 +428,40 @@ def test_segments_share_the_track_cap_and_carry_persistence(monkeypatch):
     mfd.detectMatchedFilterSegments(handle, config, 768)
     assert [c[0] for c in calls] == [300, 300, 100, 20]
     assert [c[1] for c in calls] == [512, 1024, 1536, None]
+
+
+def test_persistence_of_a_segment_judged_over_the_whole_input():
+    """ In a segment, a pixel is persistent only if it is above the threshold in more than the fraction of the runs
+        of the whole input (the counts only grow, so it is then persistent over the whole input too). """
+
+    from RMS.MatchedFilterDetection import Hit, MatchedFilterDetector
+
+    detector = MatchedFilterDetector(_Input(total_frames=2048), cr.Config())
+    counts = np.zeros((8, 8), dtype=np.int32)
+    counts[4, 4] = 5
+    detector.persistence_counts, detector.persistence_runs = {(8, 2): counts}, {(8, 2): 10}
+    hit = Hit(100.0, 8.5, 8.5, 0.0, 0.0, 6.0, 8, 2)
+
+    # 5 of 10 runs, over all frames of the input: persistent
+    detector.persistence_frames = 2048
+    assert detector.removePersistent([hit]) == []
+
+    # 5 of 10 runs of a quarter of the input: not known to be persistent (5 < 0.2*40)
+    detector.persistence_frames = 512
+    assert detector.removePersistent([hit]) == [hit]
+
+
+def test_detections_on_persistent_pixels_of_the_whole_input():
+    """ After the segments, the detections mostly on pixels which are persistent over the whole input are removed. """
+
+    from RMS.MatchedFilterDetection import removePersistentDetections
+
+    counts = np.zeros((32, 32), dtype=np.int32)
+    counts[10, 5:15] = 50
+    persistence = {(8, 2): (counts, 100)}
+    on = np.array([[f, 2*x + 0.5, 20.5, 1.0] for f, x in zip(range(10), range(5, 15))], dtype=np.float64)
+    off = on.copy()
+    off[:, 2] = 40.5
+
+    kept = removePersistentDetections([[0, 0, on], [0, 0, off]], persistence, 0.2, 1)
+    assert len(kept) == 1 and kept[0][2][0, 2] == 40.5

@@ -508,6 +508,12 @@ class MatchedFilterDetector(object):
         self.persistence_until = None
         self.persistence_carry = None
 
+        # Number of frames which the persistence counts are of (all frames of the input without segments), and the
+        #   ones of the counts carried from the segments before this one and to the next one
+        self.persistence_frames = None
+        self.persistence_prior_frames = 0
+        self.persistence_carry_frames = 0
+
 
     ### Frames ###
 
@@ -1041,6 +1047,7 @@ class MatchedFilterDetector(object):
         #   segments before this one when the input is read in segments
         self.persistence_counts = {key: counts.copy() for key, (counts, _) in self.persistence_prior.items()}
         self.persistence_runs = {key: runs for key, (_, runs) in self.persistence_prior.items()}
+        self.persistence_frames = self.persistence_prior_frames + (self.frame_end - self.frame_first)
 
         # The PSF sigma is measured on the stars of the first block in which enough isolated stars are visible (the
         #   first blocks can be clouded), unless it is given. Until then 1 px is used: the smoothing of the search
@@ -1109,6 +1116,8 @@ class MatchedFilterDetector(object):
         if (first is None) or ((self.persistence_until is not None) and (first >= self.persistence_until)):
             self.persistence_carry = {key: (counts.copy(), self.persistence_runs[key])
                                       for key, counts in self.persistence_counts.items()}
+            last = self.frame_end if (first is None) else first
+            self.persistence_carry_frames = self.persistence_prior_frames + (last - self.frame_first)
 
 
     def removePersistent(self, hits):
@@ -1125,11 +1134,13 @@ class MatchedFilterDetector(object):
         """
 
         # The persistent pixels of every run length and bin: above the threshold in more than the fraction
-        #   persistence of all runs (and in at least 2 runs), grown by a binned pixel
-        persistent = {}
-        for key, counts in self.persistence_counts.items():
-            limit = max(2, self.opts.persistence*self.persistence_runs[key])
-            persistent[key] = cv2.dilate((counts > limit).astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
+        #   persistence of all runs (and in at least 2 runs), grown by a binned pixel. When the counts are of a part of
+        #   the input (its segments so far), the fraction is of the runs of the whole input: the counts only grow,
+        #   so these pixels are persistent over the whole input too (the others are judged at its end, see
+        #   removePersistentDetections)
+        scale = max(1.0, self.total_frames/float(self.persistence_frames or self.total_frames))
+        persistent = persistentMasks({key: (counts, self.persistence_runs[key]*scale)
+                                      for key, counts in self.persistence_counts.items()}, self.opts.persistence)
 
         # Keep the hits whose binned pixel (the inverse of the conversion to unbinned coordinates in searchBlock)
         #   is not persistent in the runs of their length and bin
@@ -3278,7 +3289,8 @@ def skyQuality(img_handle, config, star_list, platepar, reference_dir=None, inpu
 
 def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=None, star_list=None,
                         return_detector=False, platepar=None, reference_dir=None, input_name='', frame_range=None,
-                        persistence_prior=None, sky_range=None, persistence_until=None, max_tracks=None):
+                        persistence_prior=None, sky_range=None, persistence_until=None, max_tracks=None,
+                        persistence_prior_frames=0):
     """ Run the matched-filter detection on an image handle.
 
     Arguments:
@@ -3308,6 +3320,7 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
             None by default (frame_range).
         persistence_until: [int] First frame of the next segment, before which the persistence counts are kept to
             carry to it (see MatchedFilterDetector.persistenceCheckpoint). None by default.
+        persistence_prior_frames: [int] Number of frames of the counts of persistence_prior. 0 by default.
         max_tracks: [int] Largest number of candidate tracks which are measured, e.g. what the segments before this
             one left of mf_max_tracks. None by default (mf_max_tracks).
 
@@ -3336,6 +3349,7 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
                                      frame_range=frame_range)
     detector.persistence_prior = persistence_prior or {}
     detector.persistence_until = persistence_until
+    detector.persistence_prior_frames = persistence_prior_frames
     if max_tracks is not None:
         detector.opts.max_tracks = max_tracks
     detector.sky_map = skyQuality(img_handle, config, star_list, platepar, reference_dir=reference_dir,
@@ -3364,6 +3378,70 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
 
     return (detections, detector) if return_detector else detections
 
+
+
+def persistentMasks(persistence, fraction):
+    """ The persistent pixels of every run length and bin of the search: above the threshold in more than the
+        given fraction of the runs (and in at least 2 runs), grown by a binned pixel.
+
+    Arguments:
+        persistence: [dict] {(run, bin): (counts, runs)}, the number of runs in which every pixel was above the
+            threshold, and the number of runs.
+        fraction: [float] Fraction of the runs (mf_persistence).
+
+    Return:
+        [dict] {(run, bin): mask}.
+    """
+
+    return {key: cv2.dilate((counts > max(2, fraction*runs)).astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
+            for key, (counts, runs) in persistence.items()}
+
+
+def removePersistentDetections(detections, persistence, fraction, det_bin, max_share=0.5):
+    """ Remove the detections which are mostly (more than max_share of their centroids) on pixels which are
+        persistent over the whole input (see MatchedFilterDetector.removePersistent), in the runs of any length of
+        the finest bin of the search. Used after the segments of an input, which only remove the hits on pixels
+        which are persistent for sure.
+
+    Arguments:
+        detections: [list] Detections as [rho, theta, centroids] (unbinned).
+        persistence: [dict] {(run, bin): (counts, runs)} of the whole input.
+        fraction: [float] Fraction of the runs (mf_persistence).
+        det_bin: [int] Detection binning of the frames.
+
+    Keyword arguments:
+        max_share: [float] Largest share of the centroids on persistent pixels. 0.5 by default.
+
+    Return:
+        [list] The detections which are kept.
+    """
+
+    if (not persistence) or (not detections):
+        return detections
+
+    # The persistent pixels in the runs of the finest bin
+    masks = persistentMasks(persistence, fraction)
+    finest = min(b for _, b in masks)
+    masks = [(b, mask) for (_, b), mask in masks.items() if b == finest]
+
+    kept = []
+    for det in detections:
+        cent = det[2]
+
+        # The centroids in the binned frames of the detection, then in the bins of the search (as the hits, see
+        #   removePersistent)
+        x = (cent[:, 1] - (det_bin - 1)/2.0)/det_bin
+        y = (cent[:, 2] - (det_bin - 1)/2.0)/det_bin
+        on = np.zeros(len(cent), dtype=bool)
+        for b, mask in masks:
+            xb = np.clip(np.round((x + 0.5)/b - 0.5).astype(int), 0, mask.shape[1] - 1)
+            yb = np.clip(np.round((y + 0.5)/b - 0.5).astype(int), 0, mask.shape[0] - 1)
+            on |= mask[yb, xb]
+
+        if np.mean(on) <= max_share:
+            kept.append(det)
+
+    return kept
 
 
 # A detection of a segment is near one of the neighbouring segment within this many times the tolerance of the same
@@ -3634,7 +3712,7 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
     timing = collections.defaultdict(float)
     star_list, detectors, segment_detections = [], [], []
     done_chunks = 0
-    persistence = {}
+    persistence, persistence_frames = {}, 0
     for k, (first, end) in enumerate(ranges):
 
         # Read the new frames of the segment
@@ -3672,7 +3750,8 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
                                                    star_list=list(star_list), return_detector=True,
                                                    platepar=platepar, reference_dir=reference_dir,
                                                    input_name=input_name, frame_range=(first, end),
-                                                   persistence_prior=persistence, sky_range=(0, end),
+                                                   persistence_prior=persistence,
+                                                   persistence_prior_frames=persistence_frames, sky_range=(0, end),
                                                    persistence_until=(ranges[k + 1][0] if k + 1 < len(ranges)
                                                                       else None),
                                                    max_tracks=max_tracks)
@@ -3683,7 +3762,7 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
         # The persistent pixels are judged over all segments so far (the runs of every overlap once), as over the
         #   whole input
         if detector is not None:
-            persistence = detector.persistence_carry
+            persistence, persistence_frames = detector.persistence_carry, detector.persistence_carry_frames
         segment_detections.append(detections)
         log.info('Matched filter: segment {:d}/{:d} ({:d}-{:d}): {:d} detections'.format(k + 1, len(ranges), first,
                                                                                        end, len(detections)))
@@ -3696,6 +3775,14 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
         detections = stitchSegments(segment_detections, cuts, overlaps, searched[0], tolerance,
                                     searched=[det is not None for det in detectors])
         detections = searched[0].joinDetections(detections)
+
+        # The detections mostly on pixels which are persistent over the whole input are removed, as their hits
+        #   would be without segments (the segments only removed the hits on pixels persistent for sure)
+        n_before = len(detections)
+        detections = removePersistentDetections(detections, persistence, config.mf_persistence, searched[0].det_bin)
+        if len(detections) < n_before:
+            log.info('Matched filter: {:d} detections on persistent pixels of the whole input removed'.format(
+                n_before - len(detections)))
 
     # The sky reference and the log of the conditions are updated once, with the stars of the whole input
     t1 = time()
