@@ -531,7 +531,8 @@ class MatchedFilterDetector(object):
         # Significances of the measured tracks: (first frame, last frame, significance, off time, reordered)
         self.significances = []
 
-        # The candidate tracks rejected as lying on a thin linear structure (first and last frame, see verify)
+        # The tracks which would have been detections but were rejected as lying on a thin linear structure
+        #   (first and last frame, see verify)
         self.line_rejected = set()
 
         # The persistence counts of the segments of the input before this one, {(run, bin): (counts, runs)} (see
@@ -2566,8 +2567,10 @@ class MatchedFilterDetector(object):
                                                                                             cent[-1, 0],
                                                                                             significance,
                                                                                             *line))
+                    # Counted if it would have been a detection
+                    if significance >= self.opts.track_significance:
+                        self.line_rejected.add((cent[0, 0], cent[-1, 0]))
                     significance = min(significance, 0.0)
-                    self.line_rejected.add((cent[0, 0], cent[-1, 0]))
 
             # The significance of every candidate is kept for the done file, and the photometry of the kept ones
             #   for the conversion to detections (see run)
