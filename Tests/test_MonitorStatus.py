@@ -964,3 +964,76 @@ def test_latest_sky_of_overlapping_files(tmp_path, now):
 
     sky = status.build(_state())['sky']
     assert sky['state'] == 'clouded' and sky['clear_percent'] == 0.0
+
+
+def test_calibration_of_files_which_were_not_measured(tmp_path, now):
+    """ With the cloud filter, the chunks of a file whose sky was not measured are not on known clear sky, so its
+        failed recalibrations don't make the calibration fail; without the cloud filter all chunks count.
+    """
+
+    for cloud_filter, expected in [(True, 'unknown'), (False, 'failing')]:
+        config = _matchedFilterConfig()
+        config.mf_cloud_filter = cloud_filter
+        status, _ = _status(tmp_path/str(cloud_filter), config)
+        output_dir = str(tmp_path/str(cloud_filter)/'output')
+        results_dir = _searchedFile(output_dir, config, 'file1', recalibrated=False)
+
+        # The sky was not measured (no sky quality in the summary)
+        summary_path = os.path.join(output_dir, results_dir, mnr.MF_DONE_NAME)
+        with open(summary_path) as f:
+            summary = json.load(f)
+        summary['clear_sky_fraction'] = None
+        with open(summary_path, 'w') as f:
+            json.dump(summary, f)
+
+        assert status.build(_state())['calibration']['status'] == expected
+
+
+def test_file_length_from_the_history(tmp_path, now):
+    """ Before a file of the night was processed, the length of the files comes from the files of the last day. """
+
+    status, config = _status(tmp_path)
+    status.fileFinished('old', 'ok', 600)
+    status.file_records[-1]['length_min'] = 10.0
+
+    path, mtime = _inputFile(tmp_path, 'q1.vid', 40)
+    processing = status.build(_state(queued=[(path, mtime)]))['processing']
+    assert processing['file_length_min'] == 10.0 and processing['not_keeping_up']
+
+
+def test_unreadable_camera_has_no_queue(tmp_path, monkeypatch):
+    """ In multi-camera mode, a camera whose input can't be read any more has no waiting files. """
+
+    input_dir = tmp_path/'input'
+    output_dir = tmp_path/'output'
+    input_dir.mkdir()
+    output_dir.mkdir()
+    _makeInput(input_dir, 'dump_6AC5999C_02F.vid', False, minutes_ago=30)
+    ini_path = tmp_path/'multicam.ini'
+    ini_path.write_text('[Global]\nnproc = 1\nfile_type = vid\npoll_interval = 0.01\n\n[CAM1]\ninput_dir = {:s}\n'
+                        'output_dir = {:s}\nconfig = {:s}\nplatepar = {:s}\n'.format(str(input_dir), str(output_dir),
+                                                                                   REPO_CONFIG, TEMPLATE_PLATEPAR))
+
+    # The disk is full (the file waits), then the input disappears, and the monitor stops
+    def _full(self):
+        self.paused = True
+        return False
+    monkeypatch.setattr(mon.FreeSpaceGuard, 'ok', _full)
+    polls = {'n': 0}
+    real_sleep = time.sleep
+    def _sleep(seconds):
+        polls['n'] += 1
+        if polls['n'] == 3:
+            os.rename(str(input_dir), str(tmp_path/'gone'))
+        if polls['n'] > 6:
+            raise KeyboardInterrupt
+        real_sleep(0.01)
+    monkeypatch.setattr(mon.time, 'sleep', _sleep)
+    monkeypatch.setattr(mst.MonitorStatus, 'update', _alwaysUpdate(mst.MonitorStatus.update))
+
+    mon.monitorMultipleCameras(str(ini_path), report_mode='none')
+
+    with open(str(output_dir/mst.STATUS_FILE_NAME)) as f:
+        status = json.load(f)
+    assert status['processing']['queued'] == 0
+    assert 'INPUT_UNREADABLE' in [fault['code'] for fault in status['faults']]

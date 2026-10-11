@@ -710,7 +710,11 @@ class MonitorStatus(object):
                 new_lengths = True
         if new_lengths:
             self._writeHistory()
+        # Before a file of the night was processed (e.g. at its beginning), the lengths of the files of the last day
+        #   are taken
         known_lengths = [length for length in lengths.values()]
+        if not known_lengths:
+            known_lengths = [r['length_min'] for r in self.file_records if r.get('length_min')]
         file_length_min = float(np.median(known_lengths)) if known_lengths else None
 
         # The expected processing time of a file, from the recent files
@@ -988,8 +992,11 @@ class MonitorStatus(object):
             cache = self.file_cache.get(results_dir, (None, None, {}))[2]
             if 'calibration' not in cache:
 
-                # The times of the chunks of the file on clear sky (not known without its conditions)
-                clear_times = None
+                # The times of the chunks of the file on clear sky. With the cloud filter, a file whose sky was
+                #   not measured (e.g. too few stars) has no chunk known to be clear. Without the cloud filter the
+                #   sky is never known, and all chunks count
+                cloud_filter = self.config.mf_enable and self.config.mf_cloud_filter
+                clear_times = [] if cloud_filter else None
                 if file_result['measured']:
                     input_file = info.get('input_file')
                     clear_times = [r['time'] for r in self.conditions_cache[1]

@@ -2267,6 +2267,10 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
                 except OSError:
                     logReadable(cam['input_dir'], False, log_prefix="[{}] ".format(cam_id))
                     input_readable[cam_id] = False
+
+                    # Its files can't be found now, so none waits or is being written
+                    waiting_per_cam[cam_id] = []
+                    stability_tracker[cam_id] = {}
                     continue
 
                 # Forget the files which disappeared while waiting for them to be written
