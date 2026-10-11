@@ -1233,18 +1233,32 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     shade = {'partly': ('#f2d7a6', 0.55), 'clouded': ('#9aa7b8', 0.55)}
     blue, green, grey, red = '#1f5f99', '#2e8b57', '#6b7280', '#c0392b'
 
-    fig = Figure(figsize=(12, 8.2), dpi=110)
-    axes = fig.subplots(4, 1, sharex=True, gridspec_kw={'height_ratios': [3, 2, 2, 0.55], 'hspace': 0.08})
+    no_data = {'facecolor': '#f3f4f6', 'edgecolor': '#cbd5e1', 'hatch': '..'}
+
+    # The time without data within the night: the gaps between the chunks and the inputs which were not searched
+    #   (e.g. no recording, or the files were not processed)
+    covered = sorted([(start, end) for _, start, end in _spans(times, labels, max_gap)]
+                     + [(start, end) for start, end, _, _ in not_searched])
+    gaps = []
+    for (_, end), (start, _) in zip(covered[:-1], covered[1:]):
+        end = max(end, gaps[-1][1] if gaps else end)
+        if start - end > max_gap:
+            gaps.append((end, start))
+
+    fig = Figure(figsize=(14, 8.6), dpi=110)
+    axes = fig.subplots(4, 1, sharex=True, gridspec_kw={'height_ratios': [3, 2, 2, 0.7], 'hspace': 0.1})
     ax_dim, ax_clear, ax_stars, ax_det = axes
 
-    # Shade the time when the sky was partly clouded and clouded, and when the inputs were not searched, on all
-    #   panels
+    # Shade the time when the sky was partly clouded and clouded, when the inputs were not searched, and without
+    #   data, on all panels
     for ax in axes:
         for state, start, end in _spans(times, labels, max_gap):
             if state in shade:
                 ax.axvspan(start, end, color=shade[state][0], alpha=shade[state][1], lw=0, zorder=0)
         for start, end, _, _ in not_searched:
             ax.axvspan(start, end, facecolor='none', edgecolor='#9aa7b8', hatch='////', lw=0, zorder=0)
+        for start, end in gaps:
+            ax.axvspan(start, end, lw=0, zorder=0, **no_data)
         ax.grid(True, color='#e5e7eb', lw=0.8, zorder=1)
         for side in ('top', 'right'):
             ax.spines[side].set_visible(False)
@@ -1319,20 +1333,36 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
             time_format = '%H:%M:%S'
     ax_det.xaxis.set_major_formatter(mdates.DateFormatter(time_format))
 
-    # The legend of the shading and of the lines, above the plots
-    handles = [Patch(facecolor=shade['partly'][0], alpha=shade['partly'][1],
-                     label='Partly clouded: removed where clouded'),
-               Patch(facecolor=shade['clouded'][0], alpha=shade['clouded'][1], label='Clouded: detections removed'),
-               Patch(facecolor='none', edgecolor='#9aa7b8', hatch='////', label='Too few stars (not searched)'),
-               Line2D([], [], color=blue, lw=1.6, label='Dimming (1 min median)'),
-               Line2D([], [], color=green, lw=1.2, label='Clear part of the image'),
-               Line2D([], [], color=grey, lw=1.0, label='Reliable stars seen'),
-               Line2D([], [], color='#7c3aed', lw=1.0, label='Stars extracted'),
-               Line2D([], [], color='#db2777', lw=1.0, label='Stars matched')]
-    if cloud_max_offset is not None:
-        handles.insert(4, Line2D([], [], color=red, lw=1, ls='--', label='Cloud limit'))
-    fig.legend(handles=handles, loc='upper center', ncol=3 if len(handles) < 9 else 4, frameon=False, fontsize=8.5,
-               bbox_to_anchor=(0.5, 0.935))
+    # Every panel has the legend of its values on its right, and the shading of all panels has its legend above
+    #   them
+    legends = [
+        (ax_dim, [Line2D([], [], color=blue, marker='.', ls='none', ms=6, alpha=0.6, label='Every chunk (~4 s)'),
+                  Line2D([], [], color=blue, lw=1.6, label='1-minute median'),
+                  Line2D([], [], color=grey, lw=0.8, label='Clear sky')]
+                 + ([Line2D([], [], color=red, lw=1, ls='--',
+                            label='Cloud limit ({:.2f} mag)'.format(cloud_max_offset))]
+                    if cloud_max_offset is not None else [])),
+        (ax_clear, [Patch(facecolor=green, alpha=0.3, edgecolor=green, label='Clear part of the image'),
+                    Line2D([], [], color=grey, lw=1.0, label='Reliable stars seen')]),
+        (ax_stars, [Line2D([], [], color='#7c3aed', lw=1.0, label='Extracted'),
+                    Line2D([], [], color='#db2777', lw=1.0, label='Matched to the catalog')]
+                   + ([Line2D([], [], color='#db2777', lw=1, ls='--',
+                              label='Fewest matched ({:d})'.format(int(min_matched)))]
+                      if min_matched is not None else [])),
+        (ax_det, [Line2D([], [], color=red, lw=1.2, label='Detection')]),
+    ]
+    for ax, handles in legends:
+        ax.legend(handles=handles, loc='center left', bbox_to_anchor=(1.01, 0.5), frameon=False, fontsize=9,
+                  handlelength=2.2, borderaxespad=0)
+
+    shading = [Patch(facecolor=shade['partly'][0], alpha=shade['partly'][1],
+                     label='Partly clouded: detections removed where clouded'),
+               Patch(facecolor=shade['clouded'][0], alpha=shade['clouded'][1],
+                     label='Clouded: detections removed'),
+               Patch(facecolor='none', edgecolor='#9aa7b8', hatch='////', label='Too few stars: not searched'),
+               Patch(label='No data', **no_data)]
+    fig.legend(handles=shading, loc='upper center', ncol=4, frameon=False, fontsize=9,
+               bbox_to_anchor=(0.44, 0.935), title='Shading of all panels', title_fontsize=9)
 
     # The title with the summary of the night
     stats = 'Observed {:.1f} h: clear {:.0f}%, partly clouded {:.0f}%, clouded {:.0f}%'.format(
@@ -1344,9 +1374,9 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     stats += '  |  {:d} detections'.format(len(detection_times))
     if removed_detections:
         stats += ', {:d} removed on clouded sky'.format(removed_detections)
-    fig.suptitle(title, fontsize=13, fontweight='bold', y=0.985)
-    fig.text(0.5, 0.952, stats, ha='center', fontsize=9.5, color='#374151')
-    fig.subplots_adjust(left=0.09, right=0.98, top=0.86, bottom=0.07)
+    fig.suptitle(title, fontsize=13, fontweight='bold', y=0.985, x=0.44)
+    fig.text(0.44, 0.952, stats, ha='center', fontsize=9.5, color='#374151')
+    fig.subplots_adjust(left=0.08, right=0.80, top=0.85, bottom=0.07)
 
     fig.savefig(plot_path)
 
