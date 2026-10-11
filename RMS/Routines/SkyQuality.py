@@ -1672,7 +1672,7 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
         ax_det.plot([t for t, k in zip(det_times, known) if k], mags[known], 'o', ms=5.5, color=dark, mec='white',
                     mew=0.6, alpha=0.85, zorder=3)
         det_legend.append(Line2D([], [], marker='o', ms=5.5, color=dark, mec='white', ls='none',
-                                 label='Detection (median magnitude)'))
+                                 label='Median mag'))
     else:
         y_mid = 0.5
         ax_det.set_ylim(0, 1)
@@ -1683,14 +1683,14 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
         ax_det.plot([t for t, k in zip(det_times, known) if not k], np.full(int((~known).sum()), y_mid), 'o',
                     ms=5.5, mfc='white', mec=dark, mew=1.0, zorder=3)
         det_legend.append(Line2D([], [], marker='o', ms=5.5, mfc='white', mec=dark, ls='none',
-                                 label='Detection (magnitude not measured)'))
+                                 label='No mag'))
 
     # The detections removed on clouded sky
     if removed_times:
         ax_det.plot(removed_times, np.full(len(removed_times), y_mid), 'X', ms=7, color='#CC79A7', mec=dark,
                     mew=0.5, zorder=3)
         det_legend.append(Line2D([], [], marker='X', ms=7, color='#CC79A7', mec=dark, mew=0.5, ls='none',
-                                 label='Removed by clouds (magnitude not measured)'))
+                                 label='Removed by clouds (no mag)'))
     ax_det.grid(True, axis='y', color='#e5e7eb', lw=0.8, zorder=1)
     ax_det.grid(False, axis='x')
 
