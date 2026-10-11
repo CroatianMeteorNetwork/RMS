@@ -867,18 +867,14 @@ def plotNightSkyConditions(night_dir, night_name, output_dir, results, config, f
     from RMS.MatchedFilterDetection import DONE_NAME, MATCHED_FILTER_DIR
     from RMS.Routines.SkyQuality import CONDITION_COLUMNS, plotSkyConditions, readConditions
 
-    # The conditions of the chunks of the files of the night, which are named by their input file in the log. Only
-    #   the chunks within the night are taken, as the names of the inputs can repeat on other nights
-    night_start, night_end = nightBoundsFromName(config, night_name)
-    inputs = set(os.path.basename(info['input_file']) for info in results.values() if info.get('input_file'))
-    rows = [row for row in readConditions(output_dir, config.stationID, inputs)
-            if night_start <= row['time'] <= night_end]
-
     # The files which the matched filter did not search, as they had too few stars (clouds, twilight), with the
-    #   stars of their chunks, and the detections removed on clouded sky. The summary of the matched filter is in
-    #   the results directory when it replaces the normal detection, otherwise in its subdirectory
+    #   stars of their chunks, the detections removed on clouded sky, and the files whose newest processing
+    #   measured the sky (only their conditions are valid, an earlier processing could have measured it). The
+    #   summary of the matched filter is in the results directory when it replaces the normal detection, otherwise
+    #   in its subdirectory
     not_searched = []
     removed = 0
+    measured = set()
     for results_dir in sorted(results):
         results_path = os.path.join(output_dir, results_dir)
 
@@ -893,20 +889,39 @@ def plotNightSkyConditions(night_dir, night_name, output_dir, results, config, f
             removed += summary.get('cloud_detections_removed', 0)
             searched = 'total_frames' in summary
 
+            # The conditions of the file are named by its path in the log (by its name in older logs)
+            input_file = results[results_dir].get('input_file')
+            if searched and (summary.get('clear_sky_fraction') is not None) and input_file:
+                measured.update([input_file, os.path.basename(input_file)])
+
         if searched:
             continue
 
         # A file which was not searched had too few stars in all its chunks. Without the separate pass of the
         #   matched filter, such a file has no summary of it, and a file which has enough stars but no summary
-        #   (e.g. the pass failed) is not shown as not searched
+        #   (e.g. the pass failed) is not shown as not searched. Every chunk lasts the time of its frames
         star_list = []
+        chunk_s = None
         for calstars_path in glob.glob(os.path.join(results_path, 'CALSTARS_*.txt')):
-            star_list += CALSTARS.readCALSTARS(results_path, os.path.basename(calstars_path))[0]
+            stars, chunk_frames, fps = CALSTARS.readCALSTARS(results_path, os.path.basename(calstars_path),
+                                                             return_fps=True)
+            star_list += stars
+            if chunk_frames and fps:
+                chunk_s = chunk_frames/fps
         if star_list and (max(len(entry[1]) for entry in star_list) < config.ff_min_stars):
             star_list = sorted(star_list, key=lambda entry: entry[0])
             times = [filenameToDatetime(entry[0]) for entry in star_list]
-            step = (times[-1] - times[0])/max(len(times) - 1, 1)
-            not_searched.append((times[0], times[-1] + step, times, [len(entry[1]) for entry in star_list]))
+            if chunk_s is None:
+                chunk_s = (times[-1] - times[0]).total_seconds()/(len(times) - 1) if len(times) > 1 \
+                    else 256/config.fps
+            not_searched.append((times[0], times[-1] + datetime.timedelta(seconds=chunk_s), times,
+                                 [len(entry[1]) for entry in star_list]))
+
+    # The conditions of the chunks of the night of the files which measured the sky (only the logs of the dates of
+    #   the night are read, and only the chunks within it are taken, as the names of the inputs can repeat on other
+    #   nights)
+    night_start, night_end = nightBoundsFromName(config, night_name)
+    rows = readConditions(output_dir, config.stationID, inputs=measured, start=night_start, end=night_end)
 
     if (not rows) and (not not_searched):
         log.info("No sky conditions for night {:s}".format(night_name))

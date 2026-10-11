@@ -341,11 +341,12 @@ class SkyReference(object):
 
                     # A new file starts with a description and the header of the columns
                     if new_file:
-                        f.write('# Sky conditions of the chunks of frames (RMS.Routines.SkyQuality). A chunk processed '
-                                'again has a newer row (processed_utc), which is the valid one\n')
+                        f.write('# Sky conditions of the chunks of frames (RMS.Routines.SkyQuality). An input '
+                                'processed again has newer rows (processed_utc), which are the valid ones\n')
                         f.write(','.join(CONDITION_COLUMNS) + ',processed_utc\n')
+                    writer = csv.writer(f, lineterminator='\n')
                     for row in rows:
-                        f.write(','.join(str(row[c]) for c in CONDITION_COLUMNS) + ',' + processed + '\n')
+                        writer.writerow([row[c] for c in CONDITION_COLUMNS] + [processed])
 
 
 
@@ -436,7 +437,7 @@ class SkyQualityMap(object):
                 assumes no gaps in the recording).
             reference: [SkyReference] Clear-sky reference of the camera, from its other inputs. None by default
                 (only this input is used).
-            input_name: [str] Name of the input, for the log of the conditions. Empty by default.
+            input_name: [str] Name of the input (its path), for the log of the conditions. Empty by default.
         """
 
         # The options
@@ -1096,8 +1097,9 @@ def chunkFirstFrames(star_list, img_handle):
 CLEAR_FRACTION_CLEAR = 0.999
 
 
-def readConditions(dir_path, station_id, inputs=None):
-    """ Read the log of the conditions of the chunks (see SkyReference), the newest row of every chunk.
+def readConditions(dir_path, station_id, inputs=None, start=None, end=None):
+    """ Read the log of the conditions of the chunks (see SkyReference): the rows of the newest processing of every
+        input, so the rows of an earlier processing of an input processed again are not taken.
 
     Arguments:
         dir_path: [str] Directory of the log (the output directory of the camera).
@@ -1105,14 +1107,25 @@ def readConditions(dir_path, station_id, inputs=None):
 
     Keyword arguments:
         inputs: [set] Names of the inputs whose chunks are read (as in the log), None for all. None by default.
+        start: [datetime] Beginning of the time of the chunks which are read (UTC, naive), only the logs of the
+            dates from it on are read. None by default.
+        end: [datetime] End of the time of the chunks which are read (UTC, naive), only the logs of the dates up to
+            it are read. None by default.
 
     Return:
         [list] Rows sorted by time, dicts with the columns of the log (numbers as floats) and the time of the
             chunk as a datetime (UTC, naive) in 'time'.
     """
 
-    rows = {}
+    # The logs of the dates of the time which is read (one log per UTC date)
     log_paths = sorted(glob.glob(os.path.join(dir_path, 'sky_conditions_{:s}_*.csv'.format(station_id))))
+    if (start is not None) or (end is not None):
+        first = start.strftime('%Y%m%d') if start is not None else ''
+        last = end.strftime('%Y%m%d') if end is not None else '99999999'
+        log_paths = [path for path in log_paths if first <= path[-12:-4] <= last]
+
+    # The rows of every input by the time of their processing
+    processings = {}
     for log_path in log_paths:
         with open(log_path) as f:
             lines = [line for line in f if line.strip() and not line.startswith('#')]
@@ -1120,18 +1133,36 @@ def readConditions(dir_path, station_id, inputs=None):
         for row in csv.DictReader(lines):
             if (inputs is not None) and (row['input'] not in inputs):
                 continue
+            processings.setdefault(row['input'], {}).setdefault(row['processed_utc'], []).append(row)
 
-            # A chunk processed again has a newer row, which is the valid one
-            key = (row['chunk_utc'], row['input'])
-            if (key in rows) and (rows[key]['processed_utc'] >= row['processed_utc']):
-                continue
-
+    # The rows of the newest processing of every input, within the time which is read
+    rows = []
+    for by_time in processings.values():
+        for row in by_time[max(by_time)]:
             for name in ('stars', 'matched', 'clear_fraction', 'transparency_mag', 'reliable_seen'):
                 row[name] = float(row[name])
             row['time'] = datetime.datetime.strptime(row['chunk_utc'], '%Y-%m-%dT%H:%M:%S.%f')
-            rows[key] = row
+            if ((start is None) or (row['time'] >= start)) and ((end is None) or (row['time'] <= end)):
+                rows.append(row)
 
-    return sorted(rows.values(), key=lambda row: row['time'])
+    return sorted(rows, key=lambda row: (row['time'], row['input']))
+
+
+def _runningMedian(times, values, half_window):
+    """ The median of the finite values within half_window (s) of every value (NaN where there are none). """
+
+    times = np.asarray(times, dtype=np.float64)
+    values = np.asarray(values, dtype=np.float64)
+    lo = np.searchsorted(times, times - half_window, side='left')
+    hi = np.searchsorted(times, times + half_window, side='right')
+    out = np.full(len(values), np.nan)
+    for i, (a, b) in enumerate(zip(lo, hi)):
+        window = values[a:b]
+        window = window[np.isfinite(window)]
+        if len(window):
+            out[i] = np.median(window)
+
+    return out
 
 
 def _spans(times, labels, max_gap, chunk):
@@ -1229,7 +1260,8 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     # Imported here, the plotting is not needed for the processing. A figure without pyplot doesn't depend on
     #   the backend or the display
     from matplotlib.figure import Figure
-    from matplotlib.patches import FancyBboxPatch, Patch
+    from matplotlib.patches import FancyBboxPatch, Patch, Rectangle
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
     from matplotlib.lines import Line2D
     import matplotlib.dates as mdates
     import matplotlib.ticker as mticker
@@ -1280,10 +1312,10 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     summary['median_dimming'] = float(np.median(dimming[usable])) if usable.any() else float('nan')
 
     # Colours of the states and of the values
-    shade = {'partly': ('#f2d7a6', 0.55), 'clouded': ('#9aa7b8', 0.55)}
+    shade = {'partly': ('#f2d7a6', 0.55), 'clouded': ('#9aa7b8', 0.55), 'not_searched': ('#4b5563', 0.4),
+             'no_data': ('#f4b6b6', 0.55)}
     blue, green, grey, red = '#1f5f99', '#2e8b57', '#6b7280', '#c0392b'
 
-    no_data = {'facecolor': '#f3f4f6', 'edgecolor': '#cbd5e1', 'hatch': '..'}
 
     # The time without data: the gaps in the time line longer than a few chunks (e.g. no recording, or the files
     #   were not processed)
@@ -1299,28 +1331,32 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
         for state, start, end in segments:
             if state in shade:
                 ax.axvspan(start, end, color=shade[state][0], alpha=shade[state][1], lw=0, zorder=0)
-            elif state == 'not_searched':
-                ax.axvspan(start, end, facecolor='none', edgecolor='#9aa7b8', hatch='////', lw=0, zorder=0)
         for start, end in gaps:
-            ax.axvspan(start, end, lw=0, zorder=0, **no_data)
+            ax.axvspan(start, end, color=shade['no_data'][0], alpha=shade['no_data'][1], lw=0, zorder=0)
         ax.grid(True, color='#e5e7eb', lw=0.8, zorder=1)
         ax.tick_params(labelsize=10)
         for side in ('top', 'right'):
             ax.spines[side].set_visible(False)
 
+    def _plotInputs(ax, values, *args, **kwargs):
+        """ Plot the values of every input as its own line (the lines of inputs which overlap are not joined),
+            broken at the gaps. """
+        for idx in input_rows.values():
+            ax.plot(*_withGaps([times[i] for i in idx], np.asarray(values)[idx], max_gap), *args, **kwargs)
+
     # Dimming of the stars relative to clear sky: every chunk, and its running median over about a minute
     t_dim, v_dim = _withGaps(times, dimming, max_gap)
     dense = n > 2000
     ax_dim.plot(t_dim, v_dim, '.', color=blue, ms=2 if dense else 3.5, alpha=0.25 if dense else 0.5, zorder=2)
-    window = max(int(round(60.0/step)), 1)
-    smooth = np.array([np.nanmedian(dimming[max(i - window//2, 0):i + window//2 + 1])
-                       if np.isfinite(dimming[max(i - window//2, 0):i + window//2 + 1]).any() else np.nan
-                       for i in range(n)])
+    # The running median over a minute of every input (inputs which overlap are not mixed)
+    smooth = np.full(n, np.nan)
+    for idx in input_rows.values():
+        seconds = [(times[i] - times[idx[0]]).total_seconds() for i in idx]
+        smooth[idx] = _runningMedian(seconds, dimming[idx], 30.0)
 
     # No dimming is shown where it was not measured (e.g. no stars behind a thick cloud)
     smooth[~np.isfinite(dimming)] = np.nan
-    t_sm, v_sm = _withGaps(times, smooth, max_gap)
-    ax_dim.plot(t_sm, v_sm, '-', color=blue, lw=1.6, zorder=3)
+    _plotInputs(ax_dim, smooth, '-', color=blue, lw=1.6, zorder=3)
     if cloud_max_offset is not None:
         ax_dim.axhline(cloud_max_offset, color=red, lw=1, ls='--', zorder=2)
     ax_dim.axhline(0, color=grey, lw=0.8, zorder=2)
@@ -1339,19 +1375,17 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     ax_dim.set_ylabel('mag', fontsize=10)
 
     # The clear fraction of the image, and the fraction of the reliably seen stars which are seen
-    t_cl, v_cl = _withGaps(times, 100*clear, max_gap)
-    ax_clear.fill_between(t_cl, 0, v_cl, step='post', color=green, alpha=0.12, lw=0, zorder=2)
-    ax_clear.plot(t_cl, v_cl, '-', drawstyle='steps-post', color=green, lw=1.4, zorder=3)
-    t_se, v_se = _withGaps(times, 100*seen, max_gap)
-    ax_clear.plot(t_se, v_se, '-', color=grey, lw=1.0, zorder=3)
+    for idx in input_rows.values():
+        t_cl, v_cl = _withGaps([times[i] for i in idx], 100*clear[idx], max_gap)
+        ax_clear.fill_between(t_cl, 0, v_cl, step='post', color=green, alpha=0.12, lw=0, zorder=2)
+    _plotInputs(ax_clear, 100*clear, '-', drawstyle='steps-post', color=green, lw=1.4, zorder=3)
+    _plotInputs(ax_clear, 100*seen, '-', color=grey, lw=1.0, zorder=3)
     ax_clear.set_ylim(0, 105)
     ax_clear.set_ylabel('%', fontsize=10)
 
     # The extracted and the matched stars, also of the inputs which were not searched
-    t_st, v_st = _withGaps(times, stars, max_gap)
-    ax_stars.plot(t_st, v_st, '-', color='#7c3aed', lw=1.0, zorder=3)
-    t_ma, v_ma = _withGaps(times, matched, max_gap)
-    ax_stars.plot(t_ma, v_ma, '-', color='#db2777', lw=1.0, zorder=3)
+    _plotInputs(ax_stars, stars, '-', color='#7c3aed', lw=1.0, zorder=3)
+    _plotInputs(ax_stars, matched, '-', color='#db2777', lw=1.0, zorder=3)
     for _, _, ns_times, ns_stars in not_searched:
         ax_stars.plot(ns_times, ns_stars, '-', color='#7c3aed', lw=1.0, zorder=3)
     if min_matched is not None:
@@ -1407,49 +1441,89 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
                    + ([Line2D([], [], color='#db2777', lw=1, ls='--',
                               label='Fewest matched ({:d})'.format(int(min_matched)))]
                       if min_matched is not None else [])),
-        (ax_det, [Line2D([], [], color=red, lw=1.2, label='Detection')]),
     ]
-    for ax, handles in legends:
-        ax.legend(handles=handles, loc='center left', bbox_to_anchor=(1.01, 0.5), frameon=False, fontsize=9,
-                  handlelength=2.2, borderaxespad=0)
 
     shading = [Patch(facecolor=shade['partly'][0], alpha=shade['partly'][1],
                      label='Partly clouded: detections removed where clouded'),
                Patch(facecolor=shade['clouded'][0], alpha=shade['clouded'][1],
                      label='Clouded: detections removed'),
-               Patch(facecolor='none', edgecolor='#9aa7b8', hatch='////', label='Too few stars: not searched'),
-               Patch(label='No data', **no_data)]
+               Patch(facecolor=shade['not_searched'][0], alpha=shade['not_searched'][1],
+                     label='Too few stars: not searched'),
+               Patch(facecolor=shade['no_data'][0], alpha=shade['no_data'][1], label='No data')]
     fig.legend(handles=shading, loc='upper center', ncol=4, frameon=False, fontsize=9.5,
-               bbox_to_anchor=(0.44, 0.862), title='Shading of all panels', title_fontsize=9.5)
+               bbox_to_anchor=(0.53, 0.862), title='Shading of all panels', title_fontsize=9.5)
 
     # The title, and the summary of the night as a row of cards: the value large and its name below it, coloured
-    #   as the shading of the state
-    fig.suptitle(title, fontsize=15, fontweight='bold', y=0.985, x=0.44)
+    #   as the shading of the state. The detections and the ones removed on clouded sky are one card of two halves,
+    #   the removed ones coloured as the partly clouded sky they were removed on
+    fig.suptitle(title, fontsize=15, fontweight='bold', y=0.985, x=0.53)
     cards = [('{:.1f} h'.format(summary['observed_h']), 'observed', '#111827', '#f9fafb'),
              ('{:.0f}%'.format(100*summary['clear']), 'clear', green, '#ecf6f0'),
              ('{:.0f}%'.format(100*summary['partly']), 'partly clouded', '#b7791f', '#fbf0dc'),
              ('{:.0f}%'.format(100*summary['clouded']), 'clouded', '#4b5563', '#e3e7ed')]
     if not_searched:
-        cards.append(('{:.0f}%'.format(100*summary['not_searched']), 'too few stars', '#4b5563', '#f3f4f6'))
-    if np.isfinite(summary['median_dimming']):
-        cards.append(('{:.2f} mag'.format(summary['median_dimming']), 'median dimming', blue, '#eaf1f8'))
-    cards.append(('{:d}'.format(len(detection_times)), 'detections', red, '#fbeceb'))
+        cards.append(('{:.0f}%'.format(100*summary['not_searched']), 'too few stars', '#374151', '#d5d8dd'))
+    halves = [('{:d}'.format(len(detection_times)), 'detections', '#111827', '#f3f4f6')]
     if removed_detections:
-        cards.append(('{:d}'.format(removed_detections), 'removed (clouds)', red, '#fbeceb'))
+        halves.append(('\u2212{:d}'.format(removed_detections), 'removed by clouds', '#b7791f', '#fbf0dc'))
 
-    # The cards span the width of the panels
-    left, right, bottom, height, space = 0.08, 0.80, 0.875, 0.068, 0.008
-    width = (right - left - space*(len(cards) - 1))/len(cards)
+    # The cards span the width of the panels, the card of the detections is as wide as two
+    left, right, bottom, height, space = 0.08, 0.98, 0.875, 0.068, 0.008
+    units = len(cards) + 2
+    width = (right - left - space*len(cards))/units
+
+    def _cardText(x, w, value, name, color):
+        fig.text(x + w/2, bottom + 0.62*height, value, ha='center', va='center', fontsize=15, fontweight='bold',
+                 color=color)
+        fig.text(x + w/2, bottom + 0.2*height, name, ha='center', va='center', fontsize=9, color='#4b5563')
+
     for i, (value, name, color, background) in enumerate(cards):
         x = left + i*(width + space)
         fig.patches.append(FancyBboxPatch((x, bottom), width, height, boxstyle='round,pad=0,rounding_size=0.008',
                                           transform=fig.transFigure, facecolor=background, edgecolor='#e5e7eb',
                                           lw=0.8))
-        fig.text(x + width/2, bottom + 0.62*height, value, ha='center', va='center', fontsize=15,
-                 fontweight='bold', color=color)
-        fig.text(x + width/2, bottom + 0.2*height, name, ha='center', va='center', fontsize=9, color='#4b5563')
+        _cardText(x, width, value, name, color)
 
-    fig.subplots_adjust(left=0.08, right=0.80, top=0.785, bottom=0.055)
+    x = left + len(cards)*(width + space)
+    box = FancyBboxPatch((x, bottom), 2*width, height, boxstyle='round,pad=0,rounding_size=0.008',
+                         transform=fig.transFigure, facecolor='none', edgecolor='#e5e7eb', lw=0.8, zorder=2)
+    fig.patches.append(box)
+    half = 2*width/len(halves)
+    for i, (value, name, color, background) in enumerate(halves):
+        part = Rectangle((x + i*half, bottom), half, height, transform=fig.transFigure, facecolor=background,
+                         edgecolor='none', zorder=1)
+        part.set_clip_path(box)
+        fig.patches.append(part)
+        _cardText(x + i*half, half, value, name, color)
+
+    fig.subplots_adjust(left=0.08, right=0.98, top=0.785, bottom=0.055)
+
+    # The legend of every panel is on its right, at the height (upper, middle or lower) where it covers the fewest
+    #   points of the lines of the panel
+    renderer = FigureCanvasAgg(fig).get_renderer()
+    for ax, handles in legends:
+
+        points = []
+        for line in ax.get_lines():
+            xy = np.asarray(line.get_xydata(), dtype=np.float64)
+            if len(xy) < 50:
+                xy = np.column_stack([np.interp(np.linspace(0, len(xy) - 1, 200), np.arange(len(xy)), xy[:, k])
+                                      for k in range(2)])
+            xy = line.get_transform().transform(xy)
+            points.append(xy[np.all(np.isfinite(xy), axis=1)])
+        points = np.concatenate(points) if points else np.zeros((0, 2))
+
+        best = None
+        for loc in ('upper right', 'center right', 'lower right'):
+            legend = ax.legend(handles=handles, loc=loc, fontsize=9, handlelength=2.2, frameon=True,
+                               framealpha=0.92, facecolor='white', edgecolor='#e5e7eb')
+            box = legend.get_window_extent(renderer)
+            covered = int(np.sum((points[:, 0] >= box.x0) & (points[:, 0] <= box.x1)
+                                 & (points[:, 1] >= box.y0) & (points[:, 1] <= box.y1)))
+            if (best is None) or (covered < best[0]):
+                best = (covered, loc)
+        ax.legend(handles=handles, loc=best[1], fontsize=9, handlelength=2.2, frameon=True, framealpha=0.92,
+                  facecolor='white', edgecolor='#e5e7eb').set_zorder(10)
 
     fig.savefig(plot_path)
 

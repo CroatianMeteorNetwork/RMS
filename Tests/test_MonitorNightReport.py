@@ -1418,11 +1418,13 @@ def test_night_report_plots_sky_conditions(tmp_path, monkeypatch, replace):
         return plot(rows, plot_path, title, **kwargs)
     monkeypatch.setattr(sq, 'plotSkyConditions', _plot)
 
-    # A searched file with conditions in the log, and a file which was not searched (one star per chunk)
+    # A searched file with conditions in the log, and a file of one chunk which was not searched (one star per
+    #   chunk)
     searched = _makeResults(output_dir, config, 'file1', n_chunks=3)
-    skipped = _makeResults(output_dir, config, 'file2', n_chunks=3, start_s=60)
+    skipped = _makeResults(output_dir, config, 'file2', n_chunks=1, start_s=60)
     summary_dir = '' if replace else MATCHED_FILTER_DIR
-    for results_dir, summary in [(searched, {'total_frames': 384, 'cloud_detections_removed': 2}),
+    for results_dir, summary in [(searched, {'total_frames': 384, 'cloud_detections_removed': 2,
+                                             'clear_sky_fraction': 0.67}),
                                  (skipped, {'max_stars': 1} if replace else None)]:
         results_path = os.path.join(output_dir, results_dir)
         info = mnr.readDoneFlag(results_path)
@@ -1438,15 +1440,17 @@ def test_night_report_plots_sky_conditions(tmp_path, monkeypatch, replace):
             with open(os.path.join(results_path, DONE_NAME), 'w') as f:
                 json.dump({'total_frames': 384, 'cloud_detections_removed': 5}, f)
 
-    # The conditions of the searched file, of a file of another night with the same name, and of another file
+    # The conditions of the searched file (logged by its path), of a file of another night with the same name, of
+    #   another file, and of an earlier processing of the file which was not searched now
     with open(os.path.join(output_dir, 'sky_conditions_XX0001_{:s}.csv'.format(BEG_TIME.strftime('%Y%m%d'))),
               'w') as f:
         f.write(','.join(CONDITION_COLUMNS) + ',processed_utc\n')
         for i in range(3):
             t = BEG_TIME + datetime.timedelta(seconds=i*128/25.0)
-            f.write('{:s},file1.vid,500,300,{:.3f},0.020,0.950,2025-12-26T00:00:00\n'.format(
+            f.write('{:s},/data/file1.vid,500,300,{:.3f},0.020,0.950,2025-12-26T00:00:00\n'.format(
                 t.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3], 1.0 if i < 2 else 0.0))
         f.write('2025-12-25T00:00:00.000,other.vid,500,300,1.000,0.020,0.950,2025-12-26T00:00:00\n')
+        f.write('2025-12-25T03:01:00.000,/data/file2.vid,500,300,1.000,0.020,0.950,2025-12-25T12:00:00\n')
     with open(os.path.join(output_dir, 'sky_conditions_XX0001_20251226.csv'), 'w') as f:
         f.write(','.join(CONDITION_COLUMNS) + ',processed_utc\n')
         f.write('2025-12-26T03:00:00.000,file1.vid,500,300,1.000,0.020,0.950,2025-12-27T00:00:00\n')
@@ -1461,12 +1465,13 @@ def test_night_report_plots_sky_conditions(tmp_path, monkeypatch, replace):
     with open(os.path.join(night_dir, NIGHT + '_sky_conditions.csv')) as f:
         lines = f.read().splitlines()
     assert lines[0] == ','.join(CONDITION_COLUMNS)
-    assert len(lines) == 4 and all(line.startswith('2025-12-25T03:00') and ',file1.vid,' in line
+    assert len(lines) == 4 and all(line.startswith('2025-12-25T03:00') and ',/data/file1.vid,' in line
                                    for line in lines[1:])
 
-    # The file with too few stars is shown as not searched, from its first to after its last chunk, and the
-    #   removed detections are counted
+    # The file with too few stars is shown as not searched for the time of its chunk, and the removed detections
+    #   are counted
     assert len(plotted['not_searched']) == 1
     start, end, times, stars = plotted['not_searched'][0]
-    assert start == BEG_TIME + datetime.timedelta(seconds=60) and stars == [1, 1, 1]
+    assert start == BEG_TIME + datetime.timedelta(seconds=60) and stars == [1]
+    assert (end - start).total_seconds() == pytest.approx(128/25.0)
     assert plotted['removed_detections'] == 2

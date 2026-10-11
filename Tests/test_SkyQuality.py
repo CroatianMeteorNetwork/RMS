@@ -627,26 +627,43 @@ def _writeConditions(path, rows):
 
 
 def test_read_conditions(tmp_path):
-    """ The conditions of the given inputs are read from the logs of all dates, the newest row of a chunk
-        processed again, sorted by time.
+    """ The conditions of the given inputs are read from the logs of the dates of the given time: the rows of the
+        newest processing of every input (an input processed again has newer rows, and the rows of its earlier
+        processing are not taken even for chunks the newer one doesn't have), sorted by time.
     """
 
     _writeConditions(tmp_path/'sky_conditions_XX0001_20251225.csv', [
-        ('2025-12-25T23:59:58.000', 'a.vid', 1.0, '2025-12-26T01:00:00'),
-        ('2025-12-25T23:59:58.000', 'a.vid', 0.5, '2025-12-26T02:00:00'),
-        ('2025-12-25T23:59:54.000', 'b.vid', 0.0, '2025-12-26T01:00:00')])
+        ('2025-12-25T23:59:54.000', '/data/a.vid', 1.0, '2025-12-26T01:00:00'),
+        ('2025-12-25T23:59:58.000', '/data/a.vid', 1.0, '2025-12-26T01:00:00'),
+        ('2025-12-25T23:59:58.000', '/data/a.vid', 0.5, '2025-12-26T02:00:00'),
+        ('2025-12-25T23:59:54.000', '/data/b.vid', 0.0, '2025-12-26T01:00:00')])
     _writeConditions(tmp_path/'sky_conditions_XX0001_20251226.csv', [
-        ('2025-12-26T00:00:02.000', 'a.vid', 1.0, '2025-12-26T01:00:00')])
+        ('2025-12-26T00:00:02.000', '/data/a.vid', 1.0, '2025-12-26T02:00:00')])
+    _writeConditions(tmp_path/'sky_conditions_XX0001_20251227.csv', [
+        ('2025-12-27T00:00:02.000', '/data/a.vid', 1.0, '2025-12-28T02:00:00')])
     _writeConditions(tmp_path/'sky_conditions_XX0002_20251226.csv', [
-        ('2025-12-26T00:00:06.000', 'a.vid', 1.0, '2025-12-26T01:00:00')])
+        ('2025-12-26T00:00:06.000', '/data/a.vid', 1.0, '2025-12-26T01:00:00')])
 
-    rows = sq.readConditions(str(tmp_path), 'XX0001', inputs={'a.vid'})
+    start, end = datetime.datetime(2025, 12, 25, 12, 0, 0), datetime.datetime(2025, 12, 26, 12, 0, 0)
+    rows = sq.readConditions(str(tmp_path), 'XX0001', inputs={'/data/a.vid'}, start=start, end=end)
     assert [row['chunk_utc'] for row in rows] == ['2025-12-25T23:59:58.000', '2025-12-26T00:00:02.000']
     assert rows[0]['clear_fraction'] == 0.5
     assert rows[0]['time'] == datetime.datetime(2025, 12, 25, 23, 59, 58)
 
-    # All inputs of the camera
-    assert len(sq.readConditions(str(tmp_path), 'XX0001')) == 3
+    # All inputs of the camera in the time
+    assert len(sq.readConditions(str(tmp_path), 'XX0001', start=start, end=end)) == 3
+
+
+def test_conditions_log_quotes_the_input(tmp_path):
+    """ The input is logged by its path, which is quoted if it has a comma. """
+
+    reference = SkyReference(str(tmp_path), 'XX0001')
+    sky_map = _skyMap(reference=reference)
+    sky_map.input_name = '/data/night, 1/a.vid'
+    sky_map.updateReference()
+
+    rows = sq.readConditions(str(tmp_path), 'XX0001')
+    assert len(rows) == N_CHUNKS and all(row['input'] == '/data/night, 1/a.vid' for row in rows)
 
 
 def test_plot_sky_conditions(tmp_path):
@@ -696,7 +713,7 @@ def test_plot_sky_conditions_inputs_at_the_same_times(tmp_path):
 
 def test_plot_sky_conditions_overlapping_inputs(tmp_path):
     """ The time of overlapping inputs is counted once, and the worse state of the sky holds where they
-        overlap.
+        overlap. The running median of the dimming is over a minute of every input.
     """
 
     begin = datetime.datetime(2025, 12, 25, 22, 0, 0)
@@ -711,3 +728,12 @@ def test_plot_sky_conditions_overlapping_inputs(tmp_path):
     assert summary['observed_h'] == pytest.approx(600/3600.0)
     assert summary['clear'] == pytest.approx(200/600.0)
     assert summary['clouded'] == pytest.approx(400/600.0)
+
+
+def test_running_median():
+    """ The running median is over the time window, of the finite values only. """
+
+    times = [0, 10, 20, 30, 100]
+    values = [1.0, 2.0, np.nan, 4.0, 5.0]
+    assert np.allclose(sq._runningMedian(times, values, 15.0), [1.5, 1.5, 3.0, 4.0, 5.0])
+    assert np.isnan(sq._runningMedian([0], [np.nan], 30.0)[0])

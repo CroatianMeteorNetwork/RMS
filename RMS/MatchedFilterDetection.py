@@ -3090,7 +3090,7 @@ def skyQuality(img_handle, config, star_list, platepar, reference_dir=None, inpu
     Keyword arguments:
         reference_dir: [str] Directory of the clear-sky reference of the camera (see SkyReference). None by
             default.
-        input_name: [str] Name of the input, for the log of the conditions. Empty by default.
+        input_name: [str] Name of the input (its path), for the log of the conditions. Empty by default.
 
     Return:
         [SkyQualityMap] The sky quality, or None without the stars or the platepar, or if it failed.
@@ -3164,7 +3164,7 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
             searched and the measurements on it are removed (see RMS.Routines.SkyQuality). None by default.
         reference_dir: [str] Directory of the clear-sky reference of the camera, which is used and updated (see
             skyQuality). None by default (only this input is used).
-        input_name: [str] Name of the input, for the log of the conditions. Empty by default.
+        input_name: [str] Name of the input (its path), for the log of the conditions. Empty by default.
 
     Return:
         [list] Detections as [rho, theta, centroids], or (detections, detector) with return_detector. The
@@ -3393,7 +3393,7 @@ def processFile(file_path, config, output_dir, platepar_path=None, dark_path=Non
     # Detect, save the detections and recalibrate them
     detections, detector = detectMatchedFilter(img_handle, config, mask=mask, dark=dark, flat_struct=flat_struct,
                                                star_list=star_list, return_detector=True, platepar=platepar,
-                                               reference_dir=reference_dir, input_name=os.path.basename(file_path))
+                                               reference_dir=reference_dir, input_name=os.path.abspath(file_path))
 
     ftp_path = saveMatchedFilterResults(detections, star_list, img_handle, config, output_dir,
                                         platepar_path=platepar_path,
