@@ -124,6 +124,27 @@ def _percentiles(values):
             'median': _round(p50), 'p75': _round(p75), 'p90': _round(p90), 'max': _round(values.max())}
 
 
+def _cleanRecord(record):
+    """ A processed file of the history as it is used: its numbers as numbers (None if they aren't), None if
+        the record can't be used (e.g. a damaged line). """
+
+    if (not isinstance(record, dict)) or (_parseTime(record.get('finished_utc')) is None):
+        return None
+
+    record = dict(record)
+    record['file'] = str(record.get('file'))
+    record['outcome'] = str(record.get('outcome'))
+
+    # The numbers, None where they are not numbers (a bool is not taken as a number)
+    for name in ('processing_min', 'size_gb', 'length_min'):
+        value = record.get(name)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not np.isfinite(value):
+            value = None
+        record[name] = value
+
+    return record
+
+
 def _codeVersion():
     """ Commit of the code which runs, None if it is not a git repository. """
 
@@ -409,7 +430,8 @@ class MonitorStatus(object):
                             record = json.loads(line)
                         except ValueError:
                             continue
-                        if isinstance(record, dict) and (_parseTime(record.get('finished_utc')) is not None):
+                        record = _cleanRecord(record)
+                        if record is not None:
                             self.file_records.append(record)
             except OSError as e:
                 log.debug("The history {:s} could not be read: {:s}".format(self.history_path, repr(e)))

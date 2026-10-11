@@ -2183,12 +2183,27 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
             if not (stopped or any(status.enabled and status.due() for status in statuses.values())):
                 return
 
-            # The prediction continues the turn of the cameras where the monitor is
             states = {cam_id: cameraState(cam_id, stopped=stopped) for cam_id in statuses}
-            queue_empty = simulateQueues(nproc, [(cam['id'],) + statuses[cam['id']].openWork(states[cam['id']])
-                                                 for cam in cameras], last_idx=last_assigned_idx)
+
+            # The files of every camera for the prediction. A camera whose files can't be predicted (e.g. a damaged
+            #   history) is left out of it, and isn't predicted
+            work, failed = [], set()
+            for cam in cameras:
+                try:
+                    work.append((cam['id'],) + statuses[cam['id']].openWork(states[cam['id']]))
+                except Exception as e:
+                    log.warning("[{}] The queue could not be predicted: {}".format(cam['id'], repr(e)))
+                    failed.add(cam['id'])
+
+            # The prediction continues the turn of the cameras where the monitor is
+            try:
+                queue_empty = simulateQueues(nproc, work, last_idx=last_assigned_idx)
+            except Exception as e:
+                log.warning("The queues could not be predicted: {}".format(repr(e)))
+                queue_empty = {}
+
             for cam_id, status in statuses.items():
-                states[cam_id]['queue_empty_min'] = queue_empty[cam_id]
+                states[cam_id]['queue_empty_min'] = None if cam_id in failed else queue_empty.get(cam_id)
                 status.update(states[cam_id], force=stopped)
 
         # Main monitoring loop
@@ -2445,8 +2460,12 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
                     log.error("[{}] Night report scheduling failed: {}".format(cam_id, repr(e)))
                     log.error(traceback.format_exc())
 
-            # Update the status of every camera (every interval, and right after a file was processed)
-            updateStatuses()
+            # Update the status of every camera (every interval, and right after a file was processed). The status
+            #   never stops the processing
+            try:
+                updateStatuses()
+            except Exception as e:
+                log.warning("The status could not be updated: {}".format(repr(e)))
 
             time.sleep(poll_interval)
 

@@ -1268,3 +1268,41 @@ def test_writes_continue_when_the_clock_is_set_back(tmp_path, now, monkeypatch):
     clock['wall'] -= 3600 - status.interval
     clock['mono'] += status.interval
     assert status.due()
+
+
+def test_damaged_history_doesnt_stop_the_monitor(tmp_path, monkeypatch):
+    """ A damaged history of processed files (a record with values which aren't numbers) doesn't stop the
+        multi-camera monitor or its status.
+    """
+
+    input_dir = tmp_path/'input'
+    output_dir = tmp_path/'output'
+    input_dir.mkdir()
+    output_dir.mkdir()
+    _makeInput(input_dir, 'dump_6AC5999C_02F.vid', False, minutes_ago=30)
+    with open(str(output_dir/mst.HISTORY_FILE_NAME), 'w') as f:
+        f.write(json.dumps({'file': 'old', 'outcome': 'ok', 'processing_min': 'abc', 'size_gb': 'x',
+                            'finished_utc': mst.RmsDateTime.utcnow().strftime(mnr.JSON_TIME_FORMAT)}) + '\n')
+    ini_path = tmp_path/'multicam.ini'
+    ini_path.write_text('[Global]\nnproc = 1\nfile_type = vid\npoll_interval = 0.01\n\n[CAM1]\ninput_dir = {:s}\n'
+                        'output_dir = {:s}\nconfig = {:s}\nplatepar = {:s}\n'.format(str(input_dir), str(output_dir),
+                                                                                   REPO_CONFIG, TEMPLATE_PLATEPAR))
+
+    # The disk is full (the file waits), and the monitor stops after a few polls
+    monkeypatch.setattr(mon.FreeSpaceGuard, 'ok', lambda self: False)
+    polls = {'n': 0}
+    real_sleep = time.sleep
+    def _sleep(seconds):
+        polls['n'] += 1
+        if polls['n'] > 5:
+            raise KeyboardInterrupt
+        real_sleep(0.01)
+    monkeypatch.setattr(mon.time, 'sleep', _sleep)
+    monkeypatch.setattr(mst.MonitorStatus, 'due', lambda self: True)
+
+    mon.monitorMultipleCameras(str(ini_path), report_mode='none')
+
+    # The monitor ran until it was stopped, and wrote its status
+    assert polls['n'] > 5
+    with open(str(output_dir/mst.STATUS_FILE_NAME)) as f:
+        assert json.load(f)['monitor']['state'] == 'stopped'
