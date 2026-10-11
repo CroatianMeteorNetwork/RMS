@@ -519,7 +519,7 @@ class SkyQualityMap(object):
         """
 
         cf = self.chunk_frames
-        self.trailing_time = None
+        self.trailing_frames = 0
         if len(self.chunk_first) == 0:
             return
 
@@ -545,9 +545,8 @@ class SkyQualityMap(object):
                 firsts.append(int(expected))
                 expected += cf
 
-            # The time of the frames after the last chunk, which are logged with its conditions
-            if expected < total_frames:
-                self.trailing_time = self.begin_time + datetime.timedelta(seconds=expected/self.fps)
+            # The number of frames after the last chunk, which are logged with its conditions
+            self.trailing_frames = int(total_frames - expected)
 
         # Nothing is missing
         if len(firsts) == len(self.chunk_first):
@@ -925,9 +924,12 @@ class SkyQualityMap(object):
                          'transparency_mag': '{:.3f}'.format(self.transparency[i]),
                          'reliable_seen': '{:.3f}'.format(self.reliable_seen[i])})
 
-        # The frames after the last chunk have its conditions, so the time line of the night covers the whole input
-        if rows and (self.trailing_time is not None):
-            rows.append(dict(rows[-1], chunk_utc=self.trailing_time.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]))
+        # The frames after the last chunk have its conditions. They are logged as a chunk which ends with the input
+        #   (from the time of the last chunk, also after a gap in the recording), so the time line of the night
+        #   covers the whole input and not more
+        if rows and (self.trailing_frames > 0):
+            end_time = self.chunk_times[-1] + datetime.timedelta(seconds=self.trailing_frames/self.fps)
+            rows.append(dict(rows[-1], chunk_utc=end_time.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]))
 
         return rows
 

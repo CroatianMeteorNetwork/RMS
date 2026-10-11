@@ -227,12 +227,13 @@ def test_missing_chunks_are_clouded():
     assert sky_map.isClear(x, y, np.array([N_CHUNKS*CHUNK_FRAMES + 10]))[0]
     assert [row['stars'] for row in sky_map.conditions()].count(0) == 0
 
-    # They are logged with the conditions of the last chunk, so the time line of the night covers the whole input
+    # They are logged with the conditions of the last chunk, in a row which ends with the input (a chunk later
+    #   than its time), so the time line of the night covers the whole input and not more
     rows = sky_map.conditions()
     assert len(rows) == N_CHUNKS + 1
     assert {k: v for k, v in rows[-1].items() if k != 'chunk_utc'} \
         == {k: v for k, v in rows[-2].items() if k != 'chunk_utc'}
-    tail_time = sky_map.begin_time + datetime.timedelta(seconds=N_CHUNKS*CHUNK_FRAMES/FPS)
+    tail_time = sky_map.begin_time + datetime.timedelta(seconds=((N_CHUNKS - 1)*CHUNK_FRAMES + 20)/FPS)
     assert rows[-1]['chunk_utc'] == tail_time.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]
 
     # Without frames after the last chunk, nothing is added
@@ -308,6 +309,15 @@ def test_first_frames_after_a_recording_gap():
                             first_frames=first_frames[:N_CHUNKS])
     assert len(sky_map.chunk_first) == N_CHUNKS
     assert sky_map.isClear(np.array([200.0]), np.array([200.0]), np.array([8*CHUNK_FRAMES + 10]))[0]
+
+    # The frames after the last chunk are logged by the time of the last chunk (after the gap), ending with the input
+    sky_map = SkyQualityMap(stars, clear_map.platepar_for_test, clear_map.config, BEGIN, FPS, CHUNK_FRAMES,
+                            matched=clear_map.matched_for_test, total_frames=N_CHUNKS*CHUNK_FRAMES + 20,
+                            first_frames=first_frames[:N_CHUNKS])
+    rows = sky_map.conditions()
+    tail_time = sky_map.chunk_times[-1] + datetime.timedelta(seconds=20/FPS)
+    assert rows[-1]['chunk_utc'] == tail_time.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]
+    assert rows[-1]['chunk_utc'] > rows[-2]['chunk_utc']
 
 
 def _patchCalibration(monkeypatch, catalog, offset):
