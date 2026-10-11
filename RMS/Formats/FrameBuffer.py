@@ -62,15 +62,15 @@ def segmentUnit(config, img_handle):
 
 def segmentMinimum(config, img_handle):
     """ The fewest frames of a segment, in whole units: the slow search of the matched filter compares every block
-        with blocks a few blocks before and after it, and searches nothing in fewer blocks (see
-        MatchedFilterDetector.slowSearch). """
+        with blocks a few blocks before and after it, and can find nothing in fewer blocks (see
+        slowSearchMinBlocks). """
 
     # Imported here, as the matched filter uses this module
-    from RMS.MatchedFilterDetection import matchedFilterBlockFrames, SLOW_REF_BLOCKS
+    from RMS.MatchedFilterDetection import matchedFilterBlockFrames, slowSearchMinBlocks
 
     unit = segmentUnit(config, img_handle)
 
-    return -(-2*SLOW_REF_BLOCKS*matchedFilterBlockFrames(config)//unit)*unit
+    return -(-slowSearchMinBlocks()*matchedFilterBlockFrames(config)//unit)*unit
 
 
 def segmentOverlap(segment_frames, overlap, unit):

@@ -92,34 +92,48 @@ def test_segment_frames():
 
 
 def test_segment_minimum():
-    """ A segment holds the blocks which the slow search of the matched filter compares, a memory which can't hold
-        twice as many is not used, and the last segment is never shorter. """
+    """ A segment holds enough blocks for the slow search of the matched filter to search consecutive blocks, a
+        memory which can't hold twice as many is not used, and the last segment is never shorter. """
+
+    from RMS.MatchedFilterDetection import SLOW_MIN_BLOCKS, slowReferenceBlocks, slowSearchMinBlocks
+
+    # The fewest blocks in which the slow search has SLOW_MIN_BLOCKS consecutive blocks with references
+    def longest_run(n):
+        best = run = 0
+        for k in range(n):
+            run = run + 1 if len(slowReferenceBlocks(k, n)) >= 2 else 0
+            best = max(best, run)
+        return best
+
+    n_min = slowSearchMinBlocks()
+    assert longest_run(n_min) >= SLOW_MIN_BLOCKS
+    assert longest_run(n_min - 1) < SLOW_MIN_BLOCKS
 
     config = cr.Config()
     handle = _Input(size=(512, 512))
     unit = segmentUnit(config, handle)
     minimum = segmentMinimum(config, handle)
-    assert minimum == 6*256
+    assert minimum == n_min*256 == 7*256
 
-    # 1 GB holds 2048 frames, less than twice the minimum, so the input is read whole; 1.5 GB holds 3072
-    assert segmentFrames(handle, config, 1.0) == 0
-    assert segmentFrames(handle, config, 1.5) == 3072
+    # 1.5 GB holds 3072 frames, less than twice the minimum, so the input is read whole; 2 GB holds 4096
+    assert segmentFrames(handle, config, 1.5) == 0
+    assert segmentFrames(handle, config, 2.0) == 4096
 
     # A last segment of 812 frames begins earlier, so it holds the minimum, and still shares frames only with the
     #   segment before it, at most half a segment
-    assert segmentRanges(5932, 3072, 512, unit)[-1] == (5120, 5932)
-    assert segmentRanges(5932, 3072, 512, unit, minimum=minimum) == [(0, 3072), (2560, 5632), (4352, 5932)]
+    assert segmentRanges(4396, 4096, 512, unit)[-1] == (3584, 4396)
+    assert segmentRanges(4396, 4096, 512, unit, minimum=minimum) == [(0, 4096), (2560, 4396)]
 
     # For any input: every segment holds the minimum (or the whole input), begins on a whole unit, shares at most
     #   half a segment with the one before it and nothing with the others, and all frames are covered
-    for total in range(100, 20000, 37):
-        ranges = segmentRanges(total, 3072, 512, unit, minimum=minimum)
+    for total in range(100, 25000, 37):
+        ranges = segmentRanges(total, 4096, 512, unit, minimum=minimum)
         assert ranges[0][0] == 0 and ranges[-1][1] == total
         for k, (first, end) in enumerate(ranges):
-            assert (end - first >= min(minimum, total)) and (end - first <= 3072) and (first % unit == 0)
+            assert (end - first >= min(minimum, total)) and (end - first <= 4096) and (first % unit == 0)
             if k > 0:
                 assert first <= ranges[k - 1][1]
-                assert ranges[k - 1][1] - first <= 3072//2
+                assert ranges[k - 1][1] - first <= 4096//2
             if k > 1:
                 assert first >= ranges[k - 2][1]
 

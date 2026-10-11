@@ -202,6 +202,47 @@ def matchedFilterBlockFrames(config):
     return block_frames
 
 
+def slowReferenceBlocks(k, n):
+    """ The blocks with which the slow search compares the block k of n blocks: SLOW_REF_BLOCKS (and one more)
+        before and after it, those which exist. The nearer blocks are left out, as their medians share frames with
+        the block k (see backgroundPass) and the object has not moved away yet.
+
+    Arguments:
+        k: [int] Index of the block.
+        n: [int] Number of blocks.
+
+    Return:
+        [list] Indices of the reference blocks.
+    """
+
+    return [j for j in (k - SLOW_REF_BLOCKS - 1, k - SLOW_REF_BLOCKS, k + SLOW_REF_BLOCKS, k + SLOW_REF_BLOCKS + 1)
+            if 0 <= j < n]
+
+
+def slowSearchMinBlocks():
+    """ The fewest blocks in which the slow search can find an object: an object has to be seen in
+        SLOW_MIN_BLOCKS consecutive blocks, each compared with at least two reference blocks (see
+        slowReferenceBlocks).
+
+    Return:
+        [int] Number of blocks.
+    """
+
+    n = SLOW_MIN_BLOCKS
+    while True:
+
+        # The longest run of consecutive blocks with two reference blocks
+        run = longest = 0
+        for k in range(n):
+            run = (run + 1) if (len(slowReferenceBlocks(k, n)) >= 2) else 0
+            longest = max(longest, run)
+
+        if longest >= SLOW_MIN_BLOCKS:
+            return n
+
+        n += 1
+
+
 class MatchedFilterOptions(object):
     def __init__(self, config, det_bin=1, fps=None, size=None):
         """ Options of the matched-filter detection, from the config.
@@ -1243,9 +1284,7 @@ class MatchedFilterDetector(object):
         # The reference blocks: SLOW_REF_BLOCKS and one more block before and after (those which exist). The nearer
         #   blocks are left out, as their medians share frames with this block (see backgroundPass) and the object
         #   has not moved away yet
-        n = len(self.block_starts)
-        refs = [j for j in (k - SLOW_REF_BLOCKS - 1, k - SLOW_REF_BLOCKS, k + SLOW_REF_BLOCKS,
-                            k + SLOW_REF_BLOCKS + 1) if (0 <= j < n) and (self.backgrounds[j].raw_median is not None)]
+        refs = [j for j in slowReferenceBlocks(k, len(self.block_starts)) if self.backgrounds[j].raw_median is not None]
         if len(refs) < 2:
             return None, None
 
@@ -1280,9 +1319,9 @@ class MatchedFilterDetector(object):
             [list] Tracks as arrays of hits, rows [frame, x, y, z, vx, vy, run].
         """
 
-        # The comparison needs reference blocks on both sides of most blocks
+        # The comparison needs reference blocks for consecutive blocks
         n = len(self.block_starts)
-        if (n < 2*SLOW_REF_BLOCKS) or (self.backgrounds[0].raw_median is None):
+        if (n < slowSearchMinBlocks()) or (self.backgrounds[0].raw_median is None):
             return []
 
         # Candidates closer to the border than the edge margin plus the PSF are not used
