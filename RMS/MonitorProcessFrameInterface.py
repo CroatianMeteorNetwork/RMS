@@ -384,12 +384,15 @@ def inputState(file_path, file_type):
     """
 
     try:
+
+        # A FITS directory: the newest of its frames and their total size
         if file_type == 'fitsdirs':
             fits_paths = [os.path.join(file_path, f) for f in os.listdir(file_path) if f.lower().endswith('.fits')]
             if not fits_paths:
                 return None
             return max(os.path.getmtime(f) for f in fits_paths), sum(os.path.getsize(f) for f in fits_paths)
 
+        # A file: its own time and size
         return os.path.getmtime(file_path), os.path.getsize(file_path)
 
     except OSError:
@@ -429,6 +432,7 @@ def scanInputs(input_dir, output_dir, config, file_type, recursive):
     else:
         paths = [os.path.join(input_dir, name) for name in os.listdir(input_dir)]
 
+    # Keep the inputs, with the time and the size of their file or directory
     inputs = []
     for path in paths:
         if not isInputPath(path, file_type):
@@ -1466,8 +1470,10 @@ def recordFinished(status, unique_id, proc, file_path, file_type):
         file_type: [str] File type identifier.
     """
 
+    # The outcome from the exit code of the worker (see processFileWorker)
     outcome = {0: 'ok', SKIP_EXIT_CODE: 'skipped', CHANGED_EXIT_CODE: 'changed'}.get(proc.exitcode, 'failed')
 
+    # Record it with how long it ran (on the monotonic clock) and its input
     status.fileFinished(unique_id, outcome, time.monotonic() - proc.start_time,
                         input_name=os.path.basename(file_path) if file_path else None,
                         size_bytes=inputSize(file_path, file_type) if file_path else None)
@@ -1501,6 +1507,7 @@ def statusState(workers, queued, settling, failed_files, space_guard, reporter, 
     in_progress = [(uid, file_path, now_wall - datetime.timedelta(seconds=now_mono - proc.start_time))
                    for uid, (file_path, proc) in sorted(workers.items())]
 
+    # The state, with the waiting files as (path, time of the last change)
     return {'stopped': stopped, 'input_readable': input_readable, 'paused_for_space': space_guard.paused,
             'workers_busy': workers_busy, 'in_progress': in_progress,
             'queued': [(entry[0], entry[1]) for entry in queued], 'settling': list(settling),

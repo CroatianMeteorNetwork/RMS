@@ -144,6 +144,8 @@ def fileDetections(results_path):
 
     detections = None
     for file_name in os.listdir(results_path):
+
+        # Only the main FTPdetectinfo counts (not its backups and other versions)
         if not validDefaultFTPdetectinfo(file_name):
             continue
 
@@ -176,6 +178,7 @@ def fileCalibration(results_path, config, clear_times=None):
             reference platepar of the file). None if there are no recalibrated platepars.
     """
 
+    # Read the platepars which were recalibrated on every chunk, there is nothing to judge without them
     recalibrated_path = os.path.join(results_path, config.platepars_recalibrated_name)
     if not os.path.isfile(recalibrated_path):
         return None
@@ -214,6 +217,7 @@ def fileCalibration(results_path, config, clear_times=None):
         clear = (clear_times is None) or ((chunk_time is not None) and any(abs((chunk_time - t).total_seconds())
                                                                              < 0.5 for t in clear_times))
 
+        # Count the chunk, and whether it was recalibrated, also on clear sky
         recalibrated_ok = bool(pp_dict.get('auto_recalibrated'))
         calibration['chunks'] += 1
         calibration['recalibrated'] += int(recalibrated_ok)
@@ -233,6 +237,7 @@ def fileCalibration(results_path, config, clear_times=None):
                 calibration['residuals_px'].append(plateparResidual(platepar))
                 calibration['matched_stars'].append(len(platepar.star_list))
 
+            # The photometric zero point of the chunk
             calibration['zero_points'].append(float(platepar.mag_lev))
 
             # The difference of the pointing from the reference platepar, in pixels (the plate scale is in px/deg)
@@ -270,6 +275,7 @@ class MonitorStatus(object):
             platepar_path: [str] Path of the platepar given to the monitor, None if not known. None by default.
         """
 
+        # The camera, its directories, how to find its inputs, and its platepar
         self.camera_id = camera_id
         self.output_dir = output_dir
         self.input_dir = input_dir
@@ -279,6 +285,7 @@ class MonitorStatus(object):
         self.input_sizer = input_sizer if input_sizer is not None else os.path.getsize
         self.platepar_path = platepar_path
 
+        # The status file, the history of the processed files, and how often the status is written
         self.path = os.path.join(output_dir, STATUS_FILE_NAME)
         self.history_path = os.path.join(output_dir, HISTORY_FILE_NAME)
         self.interval = getattr(config, 'monitor_status_interval', STATUS_INTERVAL)
@@ -298,6 +305,7 @@ class MonitorStatus(object):
         self.conditions_cache = (None, [])
         self.size_cache = {}
 
+        # The status is written right away the first time
         self.last_write = 0.0
         self.dirty = True
 
@@ -327,6 +335,7 @@ class MonitorStatus(object):
             self._pruneRecords(RmsDateTime.utcnow())
             self._writeHistory()
 
+        # The times when the faults of the previous run were first seen, so a fault which continues keeps its time
         if not os.path.isfile(self.path):
             return
 
@@ -356,6 +365,7 @@ class MonitorStatus(object):
             size_bytes: [int] Size of the input (bytes), None if not known. None by default.
         """
 
+        # Record the file with its input and size, and keep only the files of the last day
         now = RmsDateTime.utcnow()
         record = {'file': unique_id, 'input': input_name, 'outcome': outcome, 'finished_utc': _timeString(now),
                   'processing_min': _round(processing_s/60.0),
@@ -408,6 +418,7 @@ class MonitorStatus(object):
             [bool] True if the status was written.
         """
 
+        # Write only when it is due
         now = time.time()
         if not (force or self.dirty or (now - self.last_write >= self.interval)):
             return False
@@ -450,6 +461,7 @@ class MonitorStatus(object):
         # The night which is current or comes next
         night_name, night_start, night_end = nightInfo(self.config, now)
 
+        # The format, the camera and the time of the status
         status = {
             'schema_version': SCHEMA_VERSION,
             'camera': self.camera_id,
@@ -463,6 +475,8 @@ class MonitorStatus(object):
         failed_sections = []
 
         def _section(name, func, default):
+            """ Make a section, or return its default if it fails. """
+
             try:
                 return func()
             except Exception as e:
@@ -505,6 +519,7 @@ class MonitorStatus(object):
     def _monitor(self, state):
         """ The monitor itself: running or stopped, and its workers. """
 
+        # Stopped, paused while the output disk is full, or running
         if state.get('stopped'):
             monitor_state = 'stopped'
         elif state.get('paused_for_space'):
@@ -542,6 +557,7 @@ class MonitorStatus(object):
         except OSError:
             recording['input_readable'] = False
 
+        # The newest input, and how long ago it was written
         recording['newest_file'] = newest
         recording['newest_file_written_utc'] = _timeString(newest_mtime)
         recording['newest_file_size_gb'] = _round(newest_size/1024**3, 3) if newest_size is not None else None
@@ -621,6 +637,7 @@ class MonitorStatus(object):
         night_dirs = set(results)
         self.file_cache = {k: v for k, v in self.file_cache.items() if k in night_dirs}
 
+        # Sort the files by the time of their first chunk
         files.sort(key=lambda entry: entry[2]['star_chunks'][0][0] if entry[2]['star_chunks']
                    else datetime.datetime.min)
 
@@ -630,6 +647,7 @@ class MonitorStatus(object):
     def _inputSize(self, file_path):
         """ The size of an input (GB), read once per version of the input. None if it can't be read. """
 
+        # An input which changed is read again
         try:
             key = (file_path, os.path.getmtime(file_path))
         except (OSError, TypeError):
@@ -656,6 +674,8 @@ class MonitorStatus(object):
                 predicted).
         """
 
+        # Learn from the processed files of the last hour if there are enough of them, otherwise of the last day.
+        #   Nothing can be predicted before any file was processed
         ok_records = [r for r in self.file_records if (r.get('outcome') == 'ok')
                       and (r.get('processing_min') is not None)]
         hour = [r for r in ok_records if _parseTime(r['finished_utc']) >= now - datetime.timedelta(hours=1)]
@@ -701,6 +721,8 @@ class MonitorStatus(object):
         #   doesn't jump with the clock of the system
         in_progress = []
         for uid, file_path, start in state.get('in_progress', []):
+
+            # How long it has been running, and how long its input is expected to take
             running_min = (now - start).total_seconds()/60.0
             expected_min = predict(self._inputSize(file_path))
             in_progress.append({
@@ -725,11 +747,16 @@ class MonitorStatus(object):
         if not (in_progress or queued):
             queue_empty_min = 0.0
         elif basis is not None:
+
+            # The workers of this camera: its share of the workers by its number of files, at least the ones which
+            #   process its files now
             n_files = len(in_progress) + len(queued)
             other_files = state.get('other_cameras_files', 0)
             workers = self.nproc*n_files/(n_files + other_files) if other_files else self.nproc
             workers = max(int(round(workers)), len(in_progress), 1)
 
+            # When every worker is free: after the rest of its running file, or now. Every waiting file goes to the
+            #   worker which is free first, and the queue is empty when the last worker is done
             free = [entry['remaining_min'] or 0.0 for entry in in_progress] \
                 + [0.0]*(workers - len(in_progress))
             for expected_min in queued_expected:
@@ -764,6 +791,7 @@ class MonitorStatus(object):
         ratios = [r['processing_min']/r['length_min'] for r in ok_records
                   if r.get('processing_min') is not None and r.get('length_min')]
 
+        # The last processed file
         last_done = ok_records[-1] if ok_records else None
 
         # The files which failed and which are not processed any more
@@ -772,6 +800,7 @@ class MonitorStatus(object):
                           if (info.get('count', 0) >= state.get('max_failures', 2))
                           or (info.get('kills', 0) >= state.get('max_kills', 5)))
 
+        # Put the section together
         processing = {
             'progress': progress,
             'in_progress': in_progress,
@@ -815,6 +844,7 @@ class MonitorStatus(object):
         file_results = [(info.get('input_file'), file_result) for _, info, file_result, _ in files]
         not_searched, removed, measured, chunk_seconds = nightSkyResults(file_results, self.config, night_start,
                                                                         night_end)
+        # The conditions of the chunks of the measured files, and the time line of the states of the sky
         rows = self._conditionRows(measured, chunk_seconds, night_start, night_end)
         timeline = nightTimeline(rows, not_searched=not_searched, chunk_seconds=chunk_seconds,
                                  bounds=(night_start, night_end))
@@ -842,6 +872,7 @@ class MonitorStatus(object):
         if self.config.mf_enable and not self.config.mf_replace_detection:
             night['matched_filter_detections'] = sum(file_result['detections'] for _, _, file_result, _ in files)
 
+        # The sky when nothing is known yet
         sky = {'state': 'no_data', 'observed_utc': None, 'age_min': None, 'observable': None}
 
         # The stars of the latest chunk, also without the conditions (e.g. with the normal detection)
@@ -852,6 +883,7 @@ class MonitorStatus(object):
             sky['stars'] = int(latest_stars)
             sky['stars_utc'] = _timeString(latest_time)
 
+        # Without data in the night there is nothing more to say about the sky
         segments = timeline['segments']
         if not segments:
             return night, sky
@@ -916,6 +948,7 @@ class MonitorStatus(object):
                     pass
         key = (tuple(stamps), tuple(sorted(measured)), night_start)
 
+        # Read the conditions again only when the log or the measured files changed
         if self.conditions_cache[0] != key:
             rows = nightConditionRows(self.output_dir, self.config, measured, chunk_seconds, night_start, night_end)
             self.conditions_cache = (key, rows)
@@ -927,6 +960,7 @@ class MonitorStatus(object):
         """ How healthy the calibration is, from the recalibration of the chunks of the processed files. Only the
             chunks on clear sky are judged, as under clouds there are too few stars for any calibration. """
 
+        # The limits of the judgement
         calibration = {'dist_check_threshold_px': self.config.dist_check_threshold,
                        'camera_moved_threshold_px': CAMERA_MOVED_PX}
 
@@ -948,6 +982,8 @@ class MonitorStatus(object):
         for results_dir, info, file_result, _ in files:
             cache = self.file_cache.get(results_dir, (None, None, {}))[2]
             if 'calibration' not in cache:
+
+                # The times of the chunks of the file on clear sky (not known without its conditions)
                 clear_times = None
                 if file_result['measured']:
                     input_file = info.get('input_file')
@@ -959,12 +995,15 @@ class MonitorStatus(object):
             if cache['calibration'] is not None:
                 per_file.append(cache['calibration'])
 
+        # Nothing to judge without recalibrated files
         if not per_file:
             calibration['status'] = 'unknown'
             calibration['reason'] = 'No recalibrated files tonight'
             return calibration
 
         def _stats(cals):
+            """ The calibration of the given files together. """
+
             clear_chunks = sum(c['clear_chunks'] for c in cals)
             clear_ok = sum(c['clear_recalibrated'] for c in cals)
             return {'files': len(cals),
@@ -981,6 +1020,7 @@ class MonitorStatus(object):
                     'median_pointing_shift_px': _round(np.median(sum((c['shifts_px'] for c in cals), [])), 2)
                         if any(c['shifts_px'] for c in cals) else None}
 
+        # The calibration of the last file and of the night
         calibration['last_file'] = _stats(per_file[-1:])
         calibration['tonight'] = _stats(per_file)
 
@@ -994,6 +1034,8 @@ class MonitorStatus(object):
         recent_stats = _stats(recent)
         calibration['recent'] = recent_stats
 
+        # Judge it: too few chunks on clear sky to say, most of them could not be recalibrated (the platepar doesn't
+        #   fit), the pointing moved (the camera may have moved), or fine
         share = recent_stats['clear_recalibrated_share']
         shift = calibration['last_file']['median_pointing_shift_px']
         if (share is None) or (recent_stats['clear_chunks'] < CALIBRATION_MIN_CHUNKS):
@@ -1017,6 +1059,7 @@ class MonitorStatus(object):
     def _detector(self, files):
         """ Which detector runs, and how its latest file went. """
 
+        # The detector from the config
         if self.config.mf_enable and self.config.mf_replace_detection:
             name = 'matched_filter'
         elif self.config.mf_enable:
@@ -1042,11 +1085,13 @@ class MonitorStatus(object):
     def _reports(self, state):
         """ The night reports: the latest one and whether one is running. """
 
+        # The mode of the reports and whether one is running
         reporter = state.get('reporter')
         reports = {'mode': getattr(reporter, 'report_mode', None),
                    'report_running': bool(getattr(reporter, 'active', None)),
                    'last_night': None, 'last_report_utc': None, 'last_report_ok': None, 'failed_steps': []}
 
+        # The states of the reports of the nights
         try:
             nights = readReportStates(self.output_dir).get('nights', {})
         except Exception:
@@ -1069,13 +1114,16 @@ class MonitorStatus(object):
     def _disk(self, state):
         """ The free space of the output and of the staging directory. """
 
+        # The free space of the output directory, and whether the processing is paused for it
         disk = {'output_free_gb': _round(availableSpace(self.output_dir)/1024**3, 1),
                 'paused_for_space': bool(state.get('paused_for_space'))}
 
+        # The free space of the staging directory, if it is used
         staging_dir = getattr(self.config, 'monitor_staging_dir', '')
         if staging_dir and os.path.isdir(staging_dir):
             disk['staging_free_gb'] = _round(availableSpace(staging_dir)/1024**3, 1)
 
+        # When old data was last cleaned up
         reporter = state.get('reporter')
         last_cleanup = getattr(reporter, 'last_cleanup', None)
         disk['last_cleanup_utc'] = _timeString(last_cleanup) if isinstance(last_cleanup, datetime.datetime) \
@@ -1102,6 +1150,8 @@ class MonitorStatus(object):
         faults = []
 
         def _add(code, severity, message):
+            """ Add a fault. """
+
             faults.append({'code': code, 'severity': severity, 'message': message})
 
         # The status itself
