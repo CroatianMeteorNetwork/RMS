@@ -614,3 +614,67 @@ def test_catalog_near_field():
     assert inside.sum() > 100
     assert np.all(near[inside])
     assert near.mean() < 0.5
+
+
+def _writeConditions(path, rows):
+    """ Write a log of the conditions with the given rows (chunk_utc, input, clear_fraction, processed_utc). """
+
+    with open(path, 'w') as f:
+        f.write('# Sky conditions\n')
+        f.write(','.join(sq.CONDITION_COLUMNS) + ',processed_utc\n')
+        for chunk_utc, input_name, clear, processed in rows:
+            f.write('{:s},{:s},500,300,{:.3f},0.010,0.950,{:s}\n'.format(chunk_utc, input_name, clear, processed))
+
+
+def test_read_conditions(tmp_path):
+    """ The conditions of the given inputs are read from the logs of all dates, the newest row of a chunk
+        processed again, sorted by time.
+    """
+
+    _writeConditions(tmp_path/'sky_conditions_XX0001_20251225.csv', [
+        ('2025-12-25T23:59:58.000', 'a.vid', 1.0, '2025-12-26T01:00:00'),
+        ('2025-12-25T23:59:58.000', 'a.vid', 0.5, '2025-12-26T02:00:00'),
+        ('2025-12-25T23:59:54.000', 'b.vid', 0.0, '2025-12-26T01:00:00')])
+    _writeConditions(tmp_path/'sky_conditions_XX0001_20251226.csv', [
+        ('2025-12-26T00:00:02.000', 'a.vid', 1.0, '2025-12-26T01:00:00')])
+    _writeConditions(tmp_path/'sky_conditions_XX0002_20251226.csv', [
+        ('2025-12-26T00:00:06.000', 'a.vid', 1.0, '2025-12-26T01:00:00')])
+
+    rows = sq.readConditions(str(tmp_path), 'XX0001', inputs={'a.vid'})
+    assert [row['chunk_utc'] for row in rows] == ['2025-12-25T23:59:58.000', '2025-12-26T00:00:02.000']
+    assert rows[0]['clear_fraction'] == 0.5
+    assert rows[0]['time'] == datetime.datetime(2025, 12, 25, 23, 59, 58)
+
+    # All inputs of the camera
+    assert len(sq.readConditions(str(tmp_path), 'XX0001')) == 3
+
+
+def test_plot_sky_conditions(tmp_path):
+    """ The plot of the conditions is saved, and the time is split into clear, partly clouded, clouded and not
+        searched.
+    """
+
+    begin = datetime.datetime(2025, 12, 25, 22, 0, 0)
+    rows = []
+    for i in range(100):
+        clear = 1.0 if i < 60 else (0.4 if i < 80 else 0.0)
+        rows.append({'time': begin + datetime.timedelta(seconds=4*i), 'clear_fraction': clear,
+                     'transparency_mag': 0.02 if clear == 1.0 else 0.3, 'reliable_seen': clear,
+                     'stars': 500*clear + 10, 'matched': 300*clear + 5})
+
+    # An input which was not searched for 100 s after a gap
+    ns_times = [begin + datetime.timedelta(seconds=500 + 5*k) for k in range(20)]
+    not_searched = [(ns_times[0], ns_times[-1] + datetime.timedelta(seconds=5), ns_times, [20]*20)]
+
+    plot_path = str(tmp_path/'conditions.png')
+    summary = sq.plotSkyConditions(rows, plot_path, 'Test', not_searched=not_searched,
+                                   detection_times=[begin + datetime.timedelta(seconds=30)], removed_detections=2,
+                                   cloud_max_offset=0.15, min_matched=30)
+
+    assert os.path.getsize(plot_path) > 10000
+    assert summary['observed_h'] == pytest.approx(500/3600.0)
+    assert summary['clear'] == pytest.approx(240/500.0)
+    assert summary['partly'] == pytest.approx(80/500.0)
+    assert summary['clouded'] == pytest.approx(80/500.0)
+    assert summary['not_searched'] == pytest.approx(100/500.0)
+    assert summary['median_dimming'] == pytest.approx(0.02)

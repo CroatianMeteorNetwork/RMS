@@ -26,7 +26,9 @@ time of the observation, so the inputs can be processed in any order and again.
 from __future__ import print_function, division, absolute_import
 
 import os
+import csv
 import copy
+import glob
 import math
 import datetime
 import warnings
@@ -1083,3 +1085,265 @@ def chunkFirstFrames(star_list, img_handle):
         result.append(int(firsts[k]) if abs(times[k] - t) <= 0.5/img_handle.fps + 0.001 else -1)
 
     return result
+
+
+
+### Conditions of a night ###
+
+# Clear fraction of a chunk at and above which it is shown as clear, and below which as partly clouded (a chunk
+#   with no clear grid cell is clouded)
+CLEAR_FRACTION_CLEAR = 0.999
+
+
+def readConditions(dir_path, station_id, inputs=None):
+    """ Read the log of the conditions of the chunks (see SkyReference), the newest row of every chunk.
+
+    Arguments:
+        dir_path: [str] Directory of the log (the output directory of the camera).
+        station_id: [str] Station code.
+
+    Keyword arguments:
+        inputs: [set] Names of the inputs whose chunks are read (as in the log), None for all. None by default.
+
+    Return:
+        [list] Rows sorted by time, dicts with the columns of the log (numbers as floats) and the time of the
+            chunk as a datetime (UTC, naive) in 'time'.
+    """
+
+    rows = {}
+    log_paths = sorted(glob.glob(os.path.join(dir_path, 'sky_conditions_{:s}_*.csv'.format(station_id))))
+    for log_path in log_paths:
+        with open(log_path) as f:
+            lines = [line for line in f if line.strip() and not line.startswith('#')]
+
+        for row in csv.DictReader(lines):
+            if (inputs is not None) and (row['input'] not in inputs):
+                continue
+
+            # A chunk processed again has a newer row, which is the valid one
+            key = (row['chunk_utc'], row['input'])
+            if (key in rows) and (rows[key]['processed_utc'] >= row['processed_utc']):
+                continue
+
+            for name in ('stars', 'matched', 'clear_fraction', 'transparency_mag', 'reliable_seen'):
+                row[name] = float(row[name])
+            row['time'] = datetime.datetime.strptime(row['chunk_utc'], '%Y-%m-%dT%H:%M:%S.%f')
+            rows[key] = row
+
+    return sorted(rows.values(), key=lambda row: row['time'])
+
+
+def _spans(times, labels, max_gap):
+    """ The spans of consecutive chunks with the same label: (label, start, end), where a chunk lasts until the
+        next one (at most max_gap), and a gap longer than max_gap ends a span. """
+
+    spans = []
+    for i, (t, label) in enumerate(zip(times, labels)):
+        end = t + max_gap if i == len(times) - 1 else min(times[i + 1], t + max_gap)
+        if spans and (spans[-1][0] == label) and (spans[-1][2] >= t):
+            spans[-1][2] = end
+        else:
+            spans.append([label, t, end])
+
+    return [tuple(span) for span in spans]
+
+
+def _withGaps(times, values, max_gap):
+    """ The times and the values with a NaN inserted into every gap longer than max_gap, so the lines of a plot
+        are broken there. """
+
+    out_t, out_v = [], []
+    for i, (t, v) in enumerate(zip(times, values)):
+        if i and (t - times[i - 1] > max_gap):
+            out_t.append(times[i - 1] + max_gap)
+            out_v.append(np.nan)
+        out_t.append(t)
+        out_v.append(v)
+
+    return out_t, np.array(out_v, dtype=np.float64)
+
+
+def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(), removed_detections=0,
+                      cloud_max_offset=None, min_matched=None):
+    """ Plot the sky conditions of a night: the dimming of the stars, the clear fraction of the image and the stars
+        through the night, with the time when the sky was clouded and partly clouded shaded, and the times of
+        the detections.
+
+    Arguments:
+        rows: [list] Conditions of the chunks, see readConditions.
+        plot_path: [str] Path of the saved plot.
+        title: [str] Title of the plot.
+
+    Keyword arguments:
+        not_searched: [list] Spans (start, end) of the inputs which were not searched, as they had too few stars,
+            with the stars of their chunks: (start, end, times, stars).
+        detection_times: [list] Times of the detections (datetime, UTC).
+        removed_detections: [int] Number of the detections removed on clouded sky.
+        cloud_max_offset: [float] Dimming above which the sky is clouded (mag), drawn if given.
+        min_matched: [int] Smallest number of matched stars, drawn if given.
+
+    Return:
+        [dict] Summary: the observed time (h), and the fractions of it which were clear, partly clouded and
+            clouded, and the median dimming of the chunks which were not clouded.
+    """
+
+    # Imported here, the plotting is not needed for the processing. A figure without pyplot doesn't depend on
+    #   the backend or the display
+    from matplotlib.figure import Figure
+    from matplotlib.patches import Patch
+    from matplotlib.lines import Line2D
+    import matplotlib.dates as mdates
+    import matplotlib.ticker as mticker
+
+    times = [row['time'] for row in rows]
+    clear = np.array([row['clear_fraction'] for row in rows])
+    dimming = np.array([row['transparency_mag'] for row in rows])
+    seen = np.array([row['reliable_seen'] for row in rows])
+    stars = np.array([row['stars'] for row in rows])
+    matched = np.array([row['matched'] for row in rows])
+
+    # The time between the chunks (the median spacing), a gap of more than a few of them is a gap in the data
+    if len(times) > 1:
+        step = np.median([(b - a).total_seconds() for a, b in zip(times[:-1], times[1:])])
+    else:
+        step = 4.0
+    chunk = datetime.timedelta(seconds=step)
+    max_gap = 3*chunk
+
+    # The state of every chunk
+    labels = np.where(clear >= CLEAR_FRACTION_CLEAR, 'clear', np.where(clear > 0, 'partly', 'clouded'))
+
+    # The summary: the observed time and its fractions in every state, from the chunks and the inputs which were
+    #   not searched
+    n = len(rows)
+    not_searched_s = sum((end - start).total_seconds() for start, end, _, _ in not_searched)
+    observed_s = n*step + not_searched_s
+    summary = {'observed_h': observed_s/3600.0}
+    for state in ('clear', 'partly', 'clouded'):
+        summary[state] = float(np.sum(labels == state))*step/observed_s if observed_s else 0.0
+    summary['not_searched'] = not_searched_s/observed_s if observed_s else 0.0
+    usable = (labels != 'clouded') & np.isfinite(dimming)
+    summary['median_dimming'] = float(np.median(dimming[usable])) if usable.any() else float('nan')
+
+    # Colours of the states and of the values
+    shade = {'partly': ('#f2d7a6', 0.55), 'clouded': ('#9aa7b8', 0.55)}
+    blue, green, grey, red = '#1f5f99', '#2e8b57', '#6b7280', '#c0392b'
+
+    fig = Figure(figsize=(12, 8.2), dpi=110)
+    axes = fig.subplots(4, 1, sharex=True, gridspec_kw={'height_ratios': [3, 2, 2, 0.55], 'hspace': 0.08})
+    ax_dim, ax_clear, ax_stars, ax_det = axes
+
+    # Shade the time when the sky was partly clouded and clouded, and when the inputs were not searched, on all
+    #   panels
+    for ax in axes:
+        for state, start, end in _spans(times, labels, max_gap):
+            if state in shade:
+                ax.axvspan(start, end, color=shade[state][0], alpha=shade[state][1], lw=0, zorder=0)
+        for start, end, _, _ in not_searched:
+            ax.axvspan(start, end, facecolor='none', edgecolor='#9aa7b8', hatch='////', lw=0, zorder=0)
+        ax.grid(True, color='#e5e7eb', lw=0.8, zorder=1)
+        for side in ('top', 'right'):
+            ax.spines[side].set_visible(False)
+
+    # Dimming of the stars relative to clear sky: every chunk, and its running median over about a minute
+    t_dim, v_dim = _withGaps(times, dimming, max_gap)
+    dense = n > 2000
+    ax_dim.plot(t_dim, v_dim, '.', color=blue, ms=2 if dense else 3.5, alpha=0.25 if dense else 0.5, zorder=2)
+    window = max(int(round(60.0/step)), 1)
+    smooth = np.array([np.nanmedian(dimming[max(i - window//2, 0):i + window//2 + 1])
+                       if np.isfinite(dimming[max(i - window//2, 0):i + window//2 + 1]).any() else np.nan
+                       for i in range(n)])
+
+    # No dimming is shown where it was not measured (e.g. no stars behind a thick cloud)
+    smooth[~np.isfinite(dimming)] = np.nan
+    t_sm, v_sm = _withGaps(times, smooth, max_gap)
+    ax_dim.plot(t_sm, v_sm, '-', color=blue, lw=1.6, zorder=3)
+    if cloud_max_offset is not None:
+        ax_dim.axhline(cloud_max_offset, color=red, lw=1, ls='--', zorder=2)
+    ax_dim.axhline(0, color=grey, lw=0.8, zorder=2)
+    finite = dimming[np.isfinite(dimming)]
+    if len(finite):
+        lo, hi = np.percentile(finite, [0.5, 99.5])
+        top = max(hi, (cloud_max_offset or 0)*2, 0.3)
+        ax_dim.set_ylim(min(lo, -0.1), top + 0.05*(top - min(lo, -0.1)))
+    ax_dim.set_ylabel('Dimming of the stars\nvs clear sky (mag)')
+
+    # The clear fraction of the image, and the fraction of the reliably seen stars which are seen
+    t_cl, v_cl = _withGaps(times, 100*clear, max_gap)
+    ax_clear.fill_between(t_cl, 0, v_cl, step='post', color=green, alpha=0.12, lw=0, zorder=2)
+    ax_clear.plot(t_cl, v_cl, '-', drawstyle='steps-post', color=green, lw=1.4, zorder=3)
+    t_se, v_se = _withGaps(times, 100*seen, max_gap)
+    ax_clear.plot(t_se, v_se, '-', color=grey, lw=1.0, zorder=3)
+    ax_clear.set_ylim(0, 105)
+    ax_clear.set_ylabel('Clear (%)')
+
+    # The extracted and the matched stars, also of the inputs which were not searched
+    t_st, v_st = _withGaps(times, stars, max_gap)
+    ax_stars.plot(t_st, v_st, '-', color='#7c3aed', lw=1.0, zorder=3)
+    t_ma, v_ma = _withGaps(times, matched, max_gap)
+    ax_stars.plot(t_ma, v_ma, '-', color='#db2777', lw=1.0, zorder=3)
+    for _, _, ns_times, ns_stars in not_searched:
+        ax_stars.plot(ns_times, ns_stars, '-', color='#7c3aed', lw=1.0, zorder=3)
+    if min_matched is not None:
+        ax_stars.axhline(min_matched, color='#db2777', lw=1, ls='--', zorder=2)
+    ax_stars.set_yscale('log')
+    ax_stars.yaxis.set_major_locator(mticker.LogLocator(subs=(1.0, 2.0, 5.0)))
+    ax_stars.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: '{:g}'.format(v)))
+    ax_stars.yaxis.set_minor_formatter(mticker.NullFormatter())
+    star_counts = np.r_[stars, matched, [c for span in not_searched for c in span[3]]]
+    star_counts = star_counts[np.isfinite(star_counts) & (star_counts > 0)]
+    if len(star_counts):
+        ax_stars.set_ylim(max(min(star_counts.min(), min_matched or star_counts.min())/1.5, 1),
+                          star_counts.max()*1.5)
+    ax_stars.set_ylabel('Stars per chunk')
+
+    # The times of the detections
+    if len(detection_times):
+        ax_det.eventplot([list(detection_times)], colors=red, lineoffsets=0.5, linelengths=0.8, linewidths=0.8)
+    ax_det.set_ylim(0, 1)
+    ax_det.set_yticks([])
+    ax_det.set_ylabel('Detections', rotation=0, ha='right', va='center')
+    ax_det.grid(False)
+
+    # The time axis (UTC), with the seconds for a short time
+    ax_det.set_xlabel('Time (UTC)')
+    all_times = times + [t for span in not_searched for t in span[:2]] + list(detection_times)
+    time_format = '%H:%M'
+    if all_times:
+        ax_det.set_xlim(min(all_times), max(all_times) + chunk)
+        if max(all_times) - min(all_times) < datetime.timedelta(minutes=30):
+            time_format = '%H:%M:%S'
+    ax_det.xaxis.set_major_formatter(mdates.DateFormatter(time_format))
+
+    # The legend of the shading and of the lines, above the plots
+    handles = [Patch(facecolor=shade['partly'][0], alpha=shade['partly'][1],
+                     label='Partly clouded: removed where clouded'),
+               Patch(facecolor=shade['clouded'][0], alpha=shade['clouded'][1], label='Clouded: detections removed'),
+               Patch(facecolor='none', edgecolor='#9aa7b8', hatch='////', label='Too few stars (not searched)'),
+               Line2D([], [], color=blue, lw=1.6, label='Dimming (1 min median)'),
+               Line2D([], [], color=green, lw=1.2, label='Clear part of the image'),
+               Line2D([], [], color=grey, lw=1.0, label='Reliable stars seen'),
+               Line2D([], [], color='#7c3aed', lw=1.0, label='Stars extracted'),
+               Line2D([], [], color='#db2777', lw=1.0, label='Stars matched')]
+    if cloud_max_offset is not None:
+        handles.insert(4, Line2D([], [], color=red, lw=1, ls='--', label='Cloud limit'))
+    fig.legend(handles=handles, loc='upper center', ncol=3 if len(handles) < 9 else 4, frameon=False, fontsize=8.5,
+               bbox_to_anchor=(0.5, 0.935))
+
+    # The title with the summary of the night
+    stats = 'Observed {:.1f} h: clear {:.0f}%, partly clouded {:.0f}%, clouded {:.0f}%'.format(
+        summary['observed_h'], 100*summary['clear'], 100*summary['partly'], 100*summary['clouded'])
+    if not_searched:
+        stats += ', too few stars {:.0f}%'.format(100*summary['not_searched'])
+    if np.isfinite(summary['median_dimming']):
+        stats += ', median dimming {:.2f} mag'.format(summary['median_dimming'])
+    stats += '  |  {:d} detections'.format(len(detection_times))
+    if removed_detections:
+        stats += ', {:d} removed on clouded sky'.format(removed_detections)
+    fig.suptitle(title, fontsize=13, fontweight='bold', y=0.985)
+    fig.text(0.5, 0.952, stats, ha='center', fontsize=9.5, color='#374151')
+    fig.subplots_adjust(left=0.09, right=0.98, top=0.86, bottom=0.07)
+
+    fig.savefig(plot_path)
+
+    return summary

@@ -1391,3 +1391,49 @@ def test_results_of_deleted_nights_are_pruned(tmp_path):
     assert not mnr.isPending(output_dir, config, mnr.readReportStates(output_dir), NIGHT,
                              mnr.scanNights(output_dir, config)[NIGHT])
     assert late_dir in mnr.scanNights(output_dir, config)[NIGHT]
+
+
+def test_night_report_plots_sky_conditions(tmp_path):
+    """ With the matched filter, the night report plots the sky conditions of the files of the night from the log
+        of the conditions, with the files which were not searched, and saves the conditions of the night.
+    """
+
+    from RMS.Routines.SkyQuality import CONDITION_COLUMNS
+
+    config = _config()
+    config.mf_enable = True
+    config.mf_replace_detection = True
+    output_dir = str(tmp_path)
+
+    # A searched file with conditions in the log, and a file which was not searched (too few stars)
+    searched = _makeResults(output_dir, config, 'file1', n_chunks=3)
+    skipped = _makeResults(output_dir, config, 'file2', n_chunks=3, start_s=60)
+    for results_dir, summary in [(searched, {'total_frames': 384, 'cloud_detections_removed': 2}),
+                                 (skipped, {'max_stars': 5})]:
+        results_path = os.path.join(output_dir, results_dir)
+        info = mnr.readDoneFlag(results_path)
+        info['input_file'] = '/data/{:s}.vid'.format(os.path.basename(results_dir))
+        mnr.writeDoneFlag(results_path, info)
+        with open(os.path.join(results_path, DONE_NAME), 'w') as f:
+            json.dump(summary, f)
+
+    with open(os.path.join(output_dir, 'sky_conditions_XX0001_{:s}.csv'.format(BEG_TIME.strftime('%Y%m%d'))),
+              'w') as f:
+        f.write(','.join(CONDITION_COLUMNS) + ',processed_utc\n')
+        for i in range(3):
+            t = BEG_TIME + datetime.timedelta(seconds=i*128/25.0)
+            f.write('{:s},file1.vid,500,300,{:.3f},0.020,0.950,2025-12-26T00:00:00\n'.format(
+                t.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3], 1.0 if i < 2 else 0.0))
+        f.write('2025-12-25T00:00:00.000,other.vid,500,300,1.000,0.020,0.950,2025-12-26T00:00:00\n')
+
+    night_state = mnr.generateNightReport(output_dir, NIGHT, config)
+    assert 'sky_conditions' in night_state['ok_steps']
+
+    night_dir = mnr.nightDirPath(output_dir, NIGHT, config)
+    assert os.path.isfile(os.path.join(night_dir, NIGHT + '_sky_conditions.png'))
+
+    # The conditions of the files of the night only
+    with open(os.path.join(night_dir, NIGHT + '_sky_conditions.csv')) as f:
+        lines = f.read().splitlines()
+    assert lines[0] == ','.join(CONDITION_COLUMNS)
+    assert len(lines) == 4 and all(',file1.vid,' in line for line in lines[1:])
