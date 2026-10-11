@@ -1443,10 +1443,11 @@ def nightTimeline(rows, not_searched=(), chunk_seconds=None, bounds=None, clear_
     for name, idx in input_rows.items():
         spans = _spans([times[i] for i in idx], [labels[i] for i in idx], 3*steps[name], steps[name])
 
-        # The last chunk lasts until the end of the input, if that is less than a chunk after the chunk itself
+        # The last chunk lasts until the end of the input, if that is after its beginning and less than a chunk
+        #   after its own end (it is shorter in an input shorter than a chunk)
         end, last = input_ends.get(name), times[idx[-1]]
         ends[name] = last + steps[name]
-        if spans and (end is not None) and (last + steps[name] < end <= last + 2*steps[name]):
+        if spans and (end is not None) and (last < end <= last + 2*steps[name]):
             spans[-1] = spans[-1][:2] + (end,)
             ends[name] = end
         intervals += spans
@@ -1703,7 +1704,7 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
 
     # Set the time axis (UTC) to the data within the night, with the seconds shown for a short time
     ax_det.set_xlabel('Time (UTC)', fontsize=10)
-    all_times = times + [t for span in not_searched for t in span[:2]] + list(detection_times)
+    all_times = times + [t for span in not_searched for t in span[:2]] + list(detection_times) + removed_times
     time_format = '%H:%M'
     if all_times:
         x_start, x_end = min(all_times), max([max(all_times) + chunk] + list(ends.values()))

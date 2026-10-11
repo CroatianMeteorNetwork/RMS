@@ -989,3 +989,37 @@ def test_plot_until_the_end_of_the_last_input(tmp_path, monkeypatch):
     assert summary['observed_h']*3600 == pytest.approx(42.5)
     x_end = saved['fig'].axes[3].get_xlim()[1]
     assert x_end >= mdates.date2num(end) - 1e-9
+
+
+def test_night_timeline_of_an_input_shorter_than_a_chunk():
+    """ An input shorter than a chunk (its one chunk has fewer frames) lasts until its end. """
+
+    begin = datetime.datetime(2025, 12, 25, 22, 0, 0)
+    rows = [{'time': begin, 'input': 'a.vid', 'clear_fraction': 1.0, 'transparency_mag': 0.0, 'reliable_seen': 1.0,
+             'stars': 500, 'matched': 300}]
+    timeline = sq.nightTimeline(rows, chunk_seconds={'a.vid': 4.0},
+                                input_ends={'a.vid': begin + datetime.timedelta(seconds=2.0)})
+    assert timeline['summary']['observed_h']*3600 == pytest.approx(2.0)
+
+
+def test_plot_until_the_last_removed_detection(tmp_path, monkeypatch):
+    """ The time axis of the plot reaches the detections removed by clouds after the last chunk. """
+
+    import matplotlib.dates as mdates
+    import matplotlib.figure
+
+    begin = datetime.datetime(2025, 12, 25, 22, 0, 0)
+    rows = [{'time': begin + datetime.timedelta(seconds=4*i), 'input': 'a.vid', 'clear_fraction': 0.0,
+             'transparency_mag': 1.0, 'reliable_seen': 0.2, 'stars': 50, 'matched': 30} for i in range(10)]
+    removed = begin + datetime.timedelta(seconds=42.0)
+
+    saved = {}
+    real_save = matplotlib.figure.Figure.savefig
+    def _save(self, *args, **kwargs):
+        saved['fig'] = self
+        return real_save(self, *args, **kwargs)
+    monkeypatch.setattr(matplotlib.figure.Figure, 'savefig', _save)
+
+    sq.plotSkyConditions(rows, str(tmp_path/'conditions.png'), 'Test', chunk_seconds={'a.vid': 4.0},
+                         removed_detections=1, removed_times=[removed])
+    assert saved['fig'].axes[3].get_xlim()[1] >= mdates.date2num(removed) - 1e-9
