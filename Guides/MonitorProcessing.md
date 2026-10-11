@@ -462,6 +462,7 @@ OUTPUT/
     FILES_TO_UPLOAD.inf             upload queue (monitor_upload)
     .night_reports.json             which files of every night were reported, and how
     monitor_status.json             live status of the monitor, see [Live status](#live-status-for-external-monitoring)
+    .monitor_status_files.jsonl     processed files of the last day, for the statistics of the status
     sky_conditions_<station>_<date>.csv   sky conditions of every chunk (matched filter, one file per UTC date)
     sky_reference_<station>.npz     clear-sky brightness of the stars (matched filter)
     .failed_files.json              failed and given up files
@@ -521,8 +522,14 @@ An example (shortened; the processing statistics and the calibration of the nigh
              "started_utc": "2026-10-10T23:57:51.000000", "code_version": "18205a99..."},
  "recording": {"state": "not_recording", "newest_file": "dump_6ACAE5CA_02F.vid",
                "minutes_since_last_write": 18.0, "files_tonight": 4},
- "processing": {"queued": 0, "settling": 0, "in_progress": [], "delay_min": 0.0, "file_length_min": 9.96,
-                "not_keeping_up": false,
+ "processing": {"progress": {"done_tonight": 4, "in_progress": 1, "queued": 1, "being_written": 1,
+                             "percent_done": 66.7},
+                "in_progress": [{"file": "dump_6ACAE372_02F", "input": "dump_6ACAE372_02F.vid",
+                                 "running_min": 4.2, "expected_min": 11.3, "remaining_min": 7.1,
+                                 "expected_done_utc": "2026-10-11T01:43:30.000000"}],
+                "queued": 1, "queued_inputs": ["dump_6ACAE5CA_02F.vid"],
+                "queue_empty_utc": "2026-10-11T01:45:30.000000", "queue_empty_in_min": 9.1,
+                "prediction_basis": "size", "delay_min": 14.5, "file_length_min": 9.96, "not_keeping_up": false,
                 "processing_time_min_last_hour": {"n": 4, "min": 2.0, "median": 12.4, "max": 15.2}},
  "sky": {"state": "clouded", "observed_utc": "2026-10-11T01:28:21.556237", "age_min": 17.6,
          "observable": false, "clear_percent": 0.0, "stars": 0,
@@ -551,12 +558,15 @@ An example (shortened; the processing statistics and the calibration of the nigh
 | | `nproc`, `workers_busy`, `workers_this_camera` | Worker processes: all, busy, and busy with this camera. |
 | `recording` | `state` | `recording` (the newest input was written in the last 5 minutes), `not_recording` (at night, nothing written for 5 minutes), `daytime`, or `unknown` (the input can't be read). |
 | | `newest_file`, `newest_file_written_utc`, `newest_file_size_gb`, `minutes_since_last_write`, `files_tonight` | The newest input and the inputs written tonight, found as the monitor finds them for every input type (a FITS directory counts as one input, written when frames are added; its size is not given). |
-| `processing` | `queued`, `settling`, `in_progress` | Files waiting to be processed, still being written, and being processed (with their running time). |
+| `processing` | `progress` | The files of the night: `done_tonight`, `in_progress`, `queued`, `being_written`, and `percent_done` (done of done, in progress and queued). |
+| | `in_progress` | The files being processed: the ID (`file`), the input (`input`, the file name or the name of the FITS directory), `started_utc`, `running_min`, and the prediction `expected_min`, `remaining_min` and `expected_done_utc`. |
+| | `queued`, `queued_inputs`, `settling` | Files waiting to be processed (with their inputs, in the order they will be processed) and still being written. |
+| | `queue_empty_utc`, `queue_empty_in_min`, `prediction_basis` | When the waiting files are predicted to be done (UTC, and in minutes from `written_utc`), see below. `null` before any file was processed. |
 | | `delay_min` | How long ago the oldest waiting or processed file was recorded; 0 when nothing waits. |
 | | `file_length_min`, `waiting_recording_min` | Length of the input files (from the processed ones), and the recording time which waits. |
 | | `not_keeping_up` | The delay is more than three file lengths. |
-| | `last_done`, `recent_files` | The last processed file, and the latest ones with their outcome, processing time and length. |
-| | `processing_time_min_last_24h`, `processing_time_min_last_hour` | Processing time per file: number, minimum, 10th, 25th, 50th (median), 75th and 90th percentile, maximum. |
+| | `last_done`, `recent_files` | The last processed file, and the latest ones with their outcome, input, size, processing time and length. |
+| | `processing_time_min_last_24h`, `processing_time_min_last_hour` | Processing time per file: number, minimum, 10th, 25th, 50th (median), 75th and 90th percentile, maximum, of all files of the last day and hour. |
 | | `processing_to_file_length_ratio` | Processing time over the length of the file, the same statistics. Above 1 per worker the processing falls behind. |
 | | `files_done_last_24h`, `files_failed_last_24h`, `failed_files`, `given_up` | Processed and failed files, the files which failed and will be retried, and the ones given up. |
 | `sky` | `state` | The sky at the end of the latest processed data: `clear`, `partly_clouded`, `clouded`, `too_few_stars` (not searched), or `no_data`. |
@@ -595,6 +605,18 @@ An example (shortened; the processing statistics and the calibration of the nigh
 | `GPU_NOT_USED` | warning (info with `mf_gpu: auto`) | The matched filter ran on the CPU. |
 | `CANDIDATES_DROPPED` | info | The last file had more candidates than `mf_max_tracks`, the weakest ones were not measured. |
 | `STATUS_INCOMPLETE` | warning | Parts of the status could not be made (they are in the log); the rest of the status is still written. |
+
+**Predicting the processing.** The processing time of a file is predicted from the processing time per GB of
+the input of the recent files (the last hour if it had at least 3 files, otherwise the last day), so short and
+long inputs are both predicted (`prediction_basis: size`; `file` uses the median time per file when the sizes
+are not known). A file being processed has its predicted time minus the time it has run left. The waiting files
+are then given to the workers in their order, every one to the next free worker; in multi-camera mode the
+workers are shared, and a camera gets a share by its number of waiting and running files. The prediction is for
+the files known now: while the input is being recorded, new files keep coming. The start of a file comes from
+the monotonic clock of the monitor, so the times don't jump when the clock of the system is set.
+
+The processed files of the last day are also kept in `.monitor_status_files.jsonl` in the output directory (one
+line per file), so the statistics continue after a restart.
 
 The recording is only reported, never as a fault: it is done by other software, which the monitor doesn't
 communicate with, and which may not record on purpose (e.g. on cloudy nights). The calibration is only judged

@@ -392,6 +392,14 @@ def inputState(file_path, file_type):
         return None
 
 
+def inputSize(file_path, file_type):
+    """ The size of an input (bytes, the total of the frames of a FITS directory), None if it can't be read. """
+
+    input_state = inputState(file_path, file_type)
+
+    return input_state[1] if input_state is not None else None
+
+
 def scanInputs(input_dir, output_dir, config, file_type, recursive):
     """ The inputs in the input directory with the time of their last change and their size, for the status of
         the monitor (MonitorStatus). The inputs are found as by the monitor. For FITS directories only the time
@@ -1443,17 +1451,27 @@ def stopWorker(proc):
     stopProcess(proc, "Worker")
 
 
-def workerOutcome(proc):
-    """ The outcome of a finished worker for the status of the monitor (see MonitorStatus.fileFinished), and how
-        long it ran (s). """
+def recordFinished(status, unique_id, proc, file_path, file_type):
+    """ Record a finished worker in the status of the monitor (see MonitorStatus.fileFinished): its outcome, how
+        long it ran, and its input with its size.
+
+    Arguments:
+        status: [MonitorStatus] Status of the camera of the worker.
+        unique_id: [str] ID of the processed file.
+        proc: [multiprocessing.Process] The finished worker.
+        file_path: [str] Path of its input, None if not known.
+        file_type: [str] File type identifier.
+    """
 
     outcome = {0: 'ok', SKIP_EXIT_CODE: 'skipped', CHANGED_EXIT_CODE: 'changed'}.get(proc.exitcode, 'failed')
 
-    return outcome, time.monotonic() - proc.start_time
+    status.fileFinished(unique_id, outcome, time.monotonic() - proc.start_time,
+                        input_name=os.path.basename(file_path) if file_path else None,
+                        size_bytes=inputSize(file_path, file_type) if file_path else None)
 
 
 def statusState(workers, queued, settling, failed_files, space_guard, reporter, input_readable, workers_busy,
-                stopped=False):
+                other_cameras_files=0, stopped=False):
     """ The state of the monitor for the status of a camera (see MonitorStatus.build).
 
     Arguments:
@@ -1467,6 +1485,8 @@ def statusState(workers, queued, settling, failed_files, space_guard, reporter, 
         workers_busy: [int] Busy workers of the whole monitor.
 
     Keyword arguments:
+        other_cameras_files: [int] Files of the other cameras being processed or waiting, which share the workers.
+            0 by default.
         stopped: [bool] The monitor has stopped. False by default.
 
     Return:
@@ -1482,7 +1502,7 @@ def statusState(workers, queued, settling, failed_files, space_guard, reporter, 
             'workers_busy': workers_busy, 'in_progress': in_progress,
             'queued': [(entry[0], entry[1]) for entry in queued], 'settling': list(settling),
             'failed_files': failed_files, 'max_failures': MAX_FAILURES, 'max_kills': MAX_KILLS,
-            'reporter': reporter}
+            'reporter': reporter, 'other_cameras_files': other_cameras_files}
 
 
 def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_dir, nproc=2,
@@ -1593,7 +1613,7 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
         if reporter.config.monitor_status:
             status = MonitorStatus(reporter.config.stationID, output_dir, input_dir, reporter.config,
                                    lambda: scanInputs(input_dir, output_dir, reporter.config, file_type, recursive),
-                                   nproc)
+                                   nproc, input_sizer=lambda path: inputSize(path, file_type))
 
         # Delete the local copies of input files left behind by workers which were killed
         removeStagedFiles(reporter.config.monitor_staging_dir)
@@ -1635,7 +1655,7 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
 
                     # Record the file in the status
                     if status is not None:
-                        status.fileFinished(uid, *workerOutcome(proc))
+                        recordFinished(status, uid, proc, worker_paths.get(uid), file_type)
 
                     if proc.exitcode == 0:
                         log.info("Successfully processed: {}".format(uid))
@@ -2076,7 +2096,8 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
                     return scanInputs(cam['input_dir'], cam['output_dir'], cam_config, file_type, recursive)
 
                 statuses[cam['id']] = MonitorStatus(cam['id'], cam['output_dir'], cam['input_dir'], cam_config,
-                                                    _scanner, nproc)
+                                                    _scanner, nproc,
+                                                    input_sizer=lambda path: inputSize(path, file_type))
         input_readable = {cam['id']: None for cam in cameras}
 
         # Initialize state tracking dictionaries. Since files from different cameras might have the same name,
@@ -2138,9 +2159,14 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
 
             queued = [entry for entry in waiting_per_cam[cam_id] if (cam_id, entry[2]) not in active_workers]
 
+            # The files of the other cameras which share the workers
+            other_files = sum(1 for c_id, _ in active_workers if c_id != cam_id) \
+                + sum(sum(1 for entry in entries if (c_id, entry[2]) not in active_workers)
+                      for c_id, entries in waiting_per_cam.items() if c_id != cam_id)
+
             return statusState(workers, queued, stability_tracker[cam_id],
                                failed_files[cam_id], space_guards[cam_id], reporters[cam_id], input_readable[cam_id],
-                               len(active_workers), stopped=stopped)
+                               len(active_workers), other_cameras_files=other_files, stopped=stopped)
 
         # Main monitoring loop
         while True:
@@ -2161,7 +2187,7 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
 
                     # Record the file in the status of the camera
                     if cam_id in statuses:
-                        statuses[cam_id].fileFinished(uid, *workerOutcome(proc))
+                        recordFinished(statuses[cam_id], uid, proc, worker_paths.get((cam_id, uid)), file_type)
                     
                     if proc.exitcode == 0:
 

@@ -64,8 +64,16 @@ CALIBRATION_MIN_CHUNKS = 10
 #   normally changes by a fraction of a pixel through the night (refraction, temperature)
 CAMERA_MOVED_PX = 2.0
 
-# Number of the latest processed files kept in the status (for the statistics after a restart)
+# Number of the latest processed files listed in the status
 RECENT_FILES = 50
+
+# History of the processed files of the last day, for the statistics (also after a restart), one line per file
+HISTORY_FILE_NAME = '.monitor_status_files.jsonl'
+HISTORY_HOURS = 24.0
+
+# Smallest number of processed files of the last hour for its processing times to predict the queue (otherwise
+#   the files of the last day are used)
+PREDICTION_MIN_FILES = 3
 
 # Severities of the faults, from the least to the most severe
 SEVERITIES = ['info', 'warning', 'error']
@@ -242,7 +250,7 @@ def fileCalibration(results_path, config, clear_times=None):
 
 
 class MonitorStatus(object):
-    def __init__(self, camera_id, output_dir, input_dir, config, input_scanner, nproc):
+    def __init__(self, camera_id, output_dir, input_dir, config, input_scanner, nproc, input_sizer=None):
         """ Keeps the status file of a camera of the monitor up to date.
 
         Arguments:
@@ -254,6 +262,10 @@ class MonitorStatus(object):
                 mtime, size), see MonitorProcessFrameInterface.scanInputs. It raises OSError if the input
                 directory can't be read.
             nproc: [int] Number of the worker processes of the monitor.
+
+        Keyword arguments:
+            input_sizer: [callable] Function which returns the size of an input (bytes), None if it can't be read
+                (see MonitorProcessFrameInterface.inputState). The size of the file by default.
         """
 
         self.camera_id = camera_id
@@ -262,8 +274,10 @@ class MonitorStatus(object):
         self.config = config
         self.input_scanner = input_scanner
         self.nproc = nproc
+        self.input_sizer = input_sizer if input_sizer is not None else os.path.getsize
 
         self.path = os.path.join(output_dir, STATUS_FILE_NAME)
+        self.history_path = os.path.join(output_dir, HISTORY_FILE_NAME)
         self.interval = getattr(config, 'monitor_status_interval', STATUS_INTERVAL)
 
         # Information about the monitor which doesn't change
@@ -279,6 +293,7 @@ class MonitorStatus(object):
         self.scan_cache = {}
         self.file_cache = {}
         self.conditions_cache = (None, [])
+        self.size_cache = {}
 
         self.last_write = 0.0
         self.dirty = True
@@ -288,7 +303,32 @@ class MonitorStatus(object):
 
 
     def _restore(self):
-        """ Take the processed files and the times of the faults from the status of a previous run. """
+        """ Take the processed files of the last day from the history, and the times of the faults from the status
+            of a previous run. """
+
+        # The processed files of the last day (lines which can't be read are skipped)
+        if os.path.isfile(self.history_path):
+            try:
+                with open(self.history_path) as f:
+                    for line in f:
+                        try:
+                            record = json.loads(line)
+                        except ValueError:
+                            continue
+                        if isinstance(record, dict) and (_parseTime(record.get('finished_utc')) is not None):
+                            self.file_records.append(record)
+            except OSError as e:
+                log.debug("The history {:s} could not be read: {:s}".format(self.history_path, repr(e)))
+
+            # Keep only the last day in the history file
+            self._pruneRecords(RmsDateTime.utcnow())
+            try:
+                with open(self.history_path + '.tmp', 'w') as f:
+                    for record in self.file_records:
+                        f.write(json.dumps(record) + '\n')
+                os.replace(self.history_path + '.tmp', self.history_path)
+            except OSError as e:
+                log.debug("The history {:s} could not be pruned: {:s}".format(self.history_path, repr(e)))
 
         if not os.path.isfile(self.path):
             return
@@ -296,8 +336,6 @@ class MonitorStatus(object):
         try:
             with open(self.path) as f:
                 previous = json.load(f)
-
-            self.file_records = list(previous.get('processing', {}).get('recent_files', []))[-RECENT_FILES:]
 
             for fault in previous.get('faults', []):
                 since = _parseTime(fault.get('since_utc'))
@@ -308,20 +346,42 @@ class MonitorStatus(object):
             log.debug("The previous status {:s} could not be read: {:s}".format(self.path, repr(e)))
 
 
-    def fileFinished(self, unique_id, outcome, processing_s):
-        """ Record a processed file. The status is written at the next update.
+    def fileFinished(self, unique_id, outcome, processing_s, input_name=None, size_bytes=None):
+        """ Record a processed file in the history of the last day. The status is written at the next update.
 
         Arguments:
             unique_id: [str] Unique ID of the file (the name of its results directory).
             outcome: [str] 'ok', 'failed', 'skipped' or 'changed' (still being written, processed again).
             processing_s: [float] Processing time (s).
+
+        Keyword arguments:
+            input_name: [str] Name of the input (file or FITS directory). None by default.
+            size_bytes: [int] Size of the input (bytes), None if not known. None by default.
         """
 
-        self.file_records.append({'file': unique_id, 'outcome': outcome,
-                                  'finished_utc': _timeString(RmsDateTime.utcnow()),
-                                  'processing_min': _round(processing_s/60.0), 'length_min': None})
-        self.file_records = self.file_records[-RECENT_FILES:]
+        now = RmsDateTime.utcnow()
+        record = {'file': unique_id, 'input': input_name, 'outcome': outcome, 'finished_utc': _timeString(now),
+                  'processing_min': _round(processing_s/60.0),
+                  'size_gb': _round(size_bytes/1024**3, 4) if size_bytes else None, 'length_min': None}
+        self.file_records.append(record)
+        self._pruneRecords(now)
+
+        # Append it to the history file, so the statistics continue after a restart
+        try:
+            with open(self.history_path, 'a') as f:
+                f.write(json.dumps(record) + '\n')
+        except OSError as e:
+            log.debug("The history {:s} could not be written: {:s}".format(self.history_path, repr(e)))
+
         self.dirty = True
+
+
+    def _pruneRecords(self, now):
+        """ Keep only the processed files of the last day. """
+
+        oldest = now - datetime.timedelta(hours=HISTORY_HOURS)
+        self.file_records = [r for r in self.file_records if _parseTime(r.get('finished_utc')) is not None
+                             and _parseTime(r['finished_utc']) >= oldest]
 
 
     def update(self, state, force=False):
@@ -377,9 +437,8 @@ class MonitorStatus(object):
 
         now = RmsDateTime.utcnow()
 
-        # The night which is current or comes next, and the results of its files
+        # The night which is current or comes next
         night_name, night_start, night_end = nightInfo(self.config, now)
-        files = self._nightFiles(night_name, night_start, night_end)
 
         status = {
             'schema_version': SCHEMA_VERSION,
@@ -401,6 +460,9 @@ class MonitorStatus(object):
                                                                                     repr(e)))
                 failed_sections.append(name)
                 return default
+
+        # The results of the files of the night, which the following sections use
+        files = _section('results', lambda: self._nightFiles(night_name, night_start, night_end), [])
 
         status['monitor'] = self._monitor(state)
         status['recording'] = _section('recording', lambda: self._recording(state, now, night_start, night_end),
@@ -548,8 +610,55 @@ class MonitorStatus(object):
         return files
 
 
+    def _inputSize(self, file_path):
+        """ The size of an input (GB), read once per version of the input. None if it can't be read. """
+
+        try:
+            key = (file_path, os.path.getmtime(file_path))
+        except (OSError, TypeError):
+            return None
+
+        if key not in self.size_cache:
+            try:
+                size = self.input_sizer(file_path)
+            except Exception:
+                size = None
+            self.size_cache[key] = size/1024**3 if size else None
+
+        return self.size_cache[key]
+
+
+    def _expectedMinutes(self, now):
+        """ How to predict the processing time of a file: from the processing time per GB of the input of the
+            recent files (so short and long inputs are both predicted), or per file if the sizes are not known.
+            The files of the last hour are used if there are enough of them, otherwise the files of the last day.
+
+        Return:
+            (predict, basis): [tuple] Function which returns the expected processing time (min) of an input of a
+                given size (GB, or None), and the basis of the prediction ('size', 'file' or None if it can't be
+                predicted).
+        """
+
+        ok_records = [r for r in self.file_records if (r.get('outcome') == 'ok')
+                      and (r.get('processing_min') is not None)]
+        hour = [r for r in ok_records if _parseTime(r['finished_utc']) >= now - datetime.timedelta(hours=1)]
+        records = hour if len(hour) >= PREDICTION_MIN_FILES else ok_records
+        if not records:
+            return (lambda size_gb: None), None
+
+        # The processing time per GB, and per file for the inputs whose size is not known
+        per_file = float(np.median([r['processing_min'] for r in records]))
+        rates = [r['processing_min']/r['size_gb'] for r in records if r.get('size_gb')]
+        if not rates:
+            return (lambda size_gb: per_file), 'file'
+
+        rate = float(np.median(rates))
+        return (lambda size_gb: rate*size_gb if size_gb else per_file), 'size'
+
+
     def _processing(self, state, now, files):
-        """ Whether the processing keeps up: the waiting files, the delay, and the processing times. """
+        """ Whether the processing keeps up: the files being processed and waiting, the progress of the night, when
+            the waiting files will be done, the delay, and the processing times. """
 
         # The length of the input files (median of the processed files of the night, min)
         lengths = {os.path.basename(results_dir): length for results_dir, _, _, length in files if length}
@@ -559,11 +668,56 @@ class MonitorStatus(object):
         known_lengths = [length for length in lengths.values()]
         file_length_min = float(np.median(known_lengths)) if known_lengths else None
 
-        # The files which are being processed and which wait for it
-        in_progress = [{'file': uid, 'started_utc': _timeString(start),
-                        'running_min': _round((now - start).total_seconds()/60.0, 1)}
-                       for uid, _, start in state.get('in_progress', [])]
+        # The expected processing time of a file, from the recent files
+        predict, basis = self._expectedMinutes(now)
+
+        # The files being processed: the input (file or FITS directory), when it started, and when it is expected
+        #   to be done. The start time comes from the monotonic clock of the monitor (see statusState), so it
+        #   doesn't jump with the clock of the system
+        in_progress = []
+        for uid, file_path, start in state.get('in_progress', []):
+            running_min = (now - start).total_seconds()/60.0
+            expected_min = predict(self._inputSize(file_path))
+            in_progress.append({
+                'file': uid,
+                'input': os.path.basename(file_path) if file_path else None,
+                'started_utc': _timeString(start),
+                'running_min': _round(running_min, 1),
+                'expected_min': _round(expected_min, 1),
+                'expected_done_utc': _timeString(start + datetime.timedelta(minutes=expected_min))
+                    if expected_min is not None else None,
+                'remaining_min': _round(max(expected_min - running_min, 0.0), 1) if expected_min is not None
+                    else None})
+
+        # The files waiting to be processed, in the order they will be processed
         queued = state.get('queued', [])
+        queued_expected = [predict(self._inputSize(path)) for path, _ in queued]
+
+        # Predict when the waiting files will be done: the workers which process the files of this camera finish
+        #   them first, then every waiting file goes to the next free worker. The workers are shared by the cameras
+        #   of the monitor, this camera gets a share by its number of files
+        queue_empty_min = None
+        if not (in_progress or queued):
+            queue_empty_min = 0.0
+        elif basis is not None:
+            n_files = len(in_progress) + len(queued)
+            other_files = state.get('other_cameras_files', 0)
+            workers = self.nproc*n_files/(n_files + other_files) if other_files else self.nproc
+            workers = max(int(round(workers)), len(in_progress), 1)
+
+            free = [entry['remaining_min'] or 0.0 for entry in in_progress] \
+                + [0.0]*(workers - len(in_progress))
+            for expected_min in queued_expected:
+                i = int(np.argmin(free))
+                free[i] += expected_min
+            queue_empty_min = max(free)
+
+        # The progress of the night: the files done, being processed, waiting, and still being written
+        n_done = len(files)
+        n_open = len(in_progress) + len(queued)
+        progress = {'done_tonight': n_done, 'in_progress': len(in_progress), 'queued': len(queued),
+                    'being_written': len(state.get('settling', [])),
+                    'percent_done': _round(100.0*n_done/(n_done + n_open), 1) if (n_done + n_open) else None}
 
         # The delay: how long ago the oldest waiting or processed file was recorded (its last write), zero when
         #   nothing waits
@@ -575,12 +729,12 @@ class MonitorStatus(object):
                 pass
         delay_min = 0.0
         if waiting_mtimes:
-            delay_min = max(0.0, (now - UTCFromTimestamp.utcfromtimestamp(min(waiting_mtimes))).total_seconds()/60.0)
+            oldest = UTCFromTimestamp.utcfromtimestamp(min(waiting_mtimes))
+            delay_min = max(0.0, (now - oldest).total_seconds()/60.0)
 
-        # The files processed tonight and in the last hour, and their processing times
-        night_records = [r for r in self.file_records if (_parseTime(r.get('finished_utc')) is not None)
-                         and (_parseTime(r['finished_utc']) >= now - datetime.timedelta(hours=24))]
-        ok_records = [r for r in night_records if r.get('outcome') == 'ok']
+        # The files processed in the last day and in the last hour, and their processing times
+        day_records = list(self.file_records)
+        ok_records = [r for r in day_records if r.get('outcome') == 'ok']
         hour_records = [r for r in ok_records if _parseTime(r['finished_utc']) >= now - datetime.timedelta(hours=1)]
         ratios = [r['processing_min']/r['length_min'] for r in ok_records
                   if r.get('processing_min') is not None and r.get('length_min')]
@@ -594,9 +748,15 @@ class MonitorStatus(object):
                           or (info.get('kills', 0) >= state.get('max_kills', 5)))
 
         processing = {
-            'queued': len(queued),
-            'settling': len(state.get('settling', [])),
+            'progress': progress,
             'in_progress': in_progress,
+            'queued': len(queued),
+            'queued_inputs': [os.path.basename(path) for path, _ in queued[:RECENT_FILES]],
+            'settling': len(state.get('settling', [])),
+            'queue_empty_in_min': _round(queue_empty_min, 1),
+            'queue_empty_utc': _timeString(now + datetime.timedelta(minutes=queue_empty_min))
+                if queue_empty_min is not None else None,
+            'prediction_basis': basis,
             'file_length_min': _round(file_length_min),
             'waiting_recording_min': _round((len(queued) + len(in_progress))*file_length_min)
                 if file_length_min else None,
@@ -604,7 +764,7 @@ class MonitorStatus(object):
             'not_keeping_up': bool(file_length_min and (delay_min > BEHIND_FILE_LENGTHS*file_length_min)),
             'last_done': last_done,
             'files_done_last_24h': len(ok_records),
-            'files_failed_last_24h': sum(1 for r in night_records if r.get('outcome') == 'failed'),
+            'files_failed_last_24h': sum(1 for r in day_records if r.get('outcome') == 'failed'),
             'failed_files': sorted(failed),
             'given_up': given_up,
             'processing_time_min_last_24h': _percentiles([r.get('processing_min') for r in ok_records]),

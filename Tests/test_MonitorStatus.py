@@ -564,6 +564,9 @@ def test_monitor_loop_with_every_input_type(tmp_path, monkeypatch, file_type, na
     with open(status_path) as f:
         status = json.load(f)
     assert [r['file'] for r in status['processing']['recent_files']] == [mon.uniqueId(name)]
+    assert status['processing']['recent_files'][0]['input'] == name
+    assert status['processing']['recent_files'][0]['size_gb'] == pytest.approx((300 if fits_dir else 100)/1024**3,
+                                                                              abs=1e-4)
     assert status['recording']['newest_file'] == name and status['recording']['input_readable']
 
 
@@ -629,3 +632,138 @@ def test_detections_without_the_matched_filter_replacing(tmp_path, now, mf_enabl
 
     # Without the conditions, the sky has the stars of the latest chunk
     assert built['sky']['stars'] == 1 and built['sky']['state'] in ('no_data', 'too_few_stars')
+
+
+### Progress and prediction ###
+
+def _statusWithSizes(tmp_path, sizes_gb, nproc=2):
+    """ The status of a camera whose inputs have the given sizes (GB) by their names. """
+
+    config = _matchedFilterConfig()
+    (tmp_path/'input').mkdir(parents=True, exist_ok=True)
+    (tmp_path/'output').mkdir(parents=True, exist_ok=True)
+    sizer = lambda path: int(sizes_gb[os.path.basename(path)]*1024**3)
+    scanner = lambda: mon.scanInputs(str(tmp_path/'input'), str(tmp_path/'output'), config, 'vid', False)
+    status = mst.MonitorStatus('XX0001', str(tmp_path/'output'), str(tmp_path/'input'), config, scanner, nproc,
+                               input_sizer=sizer)
+    return status, config
+
+
+def test_queue_prediction(tmp_path, now):
+    """ The time when the waiting files will be done is predicted from the processing time per GB of the recent
+        files: the running files finish first, then every waiting file goes to the next free worker.
+    """
+
+    sizes = {'run.vid': 2.0, 'q1.vid': 1.0, 'q2.vid': 1.0, 'q3.vid': 4.0}
+    status, config = _statusWithSizes(tmp_path, sizes, nproc=2)
+
+    # Recent files took 1 min per GB
+    for i in range(3):
+        status.fileFinished('done{:d}'.format(i), 'ok', 60*2.0, input_name='done.vid', size_bytes=2*1024**3)
+
+    # One file of 2 GB has been running for 0.5 min, three wait
+    run_path, _ = _inputFile(tmp_path, 'run.vid', 5)
+    queued = [_inputFile(tmp_path, name, 3) for name in ('q1.vid', 'q2.vid', 'q3.vid')]
+    start = NOW - datetime.timedelta(minutes=0.5)
+    processing = status.build(_state(in_progress=[('run', run_path, start)], queued=queued))['processing']
+
+    current = processing['in_progress'][0]
+    assert current['input'] == 'run.vid' and current['expected_min'] == 2.0 and current['remaining_min'] == 1.5
+    assert current['expected_done_utc'] == (start + datetime.timedelta(minutes=2)).strftime(mnr.JSON_TIME_FORMAT)
+    assert processing['queued_inputs'] == ['q1.vid', 'q2.vid', 'q3.vid']
+    assert processing['prediction_basis'] == 'size'
+
+    # Workers: [1.5, 0] -> q1 on the second (done at 1), q2 on it (done at 2), q3 on the first (done at 5.5)
+    assert processing['queue_empty_in_min'] == 5.5
+    assert processing['queue_empty_utc'] == (NOW + datetime.timedelta(minutes=5.5)).strftime(mnr.JSON_TIME_FORMAT)
+
+    # The progress: three files wait and one runs, none is done tonight
+    progress = processing['progress']
+    assert (progress['done_tonight'], progress['in_progress'], progress['queued']) == (0, 1, 3)
+    assert progress['percent_done'] == 0.0
+
+    # With the files of another camera waiting as well, this camera gets one of the two workers
+    processing = status.build(_state(in_progress=[('run', run_path, start)], queued=queued,
+                                     other_cameras_files=4))['processing']
+    assert processing['queue_empty_in_min'] == 1.5 + 1 + 1 + 4
+
+
+def test_queue_prediction_without_sizes_or_history(tmp_path, now):
+    """ Without the sizes of the inputs the prediction is per file, without processed files there is none, and
+        nothing waiting is done now.
+    """
+
+    status, config = _status(tmp_path)
+    path, mtime = _inputFile(tmp_path, 'q1.vid', 3)
+
+    # Nothing processed yet: no prediction
+    processing = status.build(_state(queued=[(path, mtime)]))['processing']
+    assert processing['queue_empty_in_min'] is None and processing['prediction_basis'] is None
+
+    # Processed files without their sizes: 3 min per file
+    for i in range(3):
+        status.fileFinished('done{:d}'.format(i), 'ok', 180)
+    processing = status.build(_state(queued=[(path, mtime)]))['processing']
+    assert processing['prediction_basis'] == 'file' and processing['queue_empty_in_min'] == 3.0
+
+    # Nothing waits
+    processing = status.build(_state())['processing']
+    assert processing['queue_empty_in_min'] == 0.0
+    assert processing['queue_empty_utc'] == NOW.strftime(mnr.JSON_TIME_FORMAT)
+
+
+def test_progress_of_the_night(tmp_path, now):
+    """ The files of the night which are done count towards the progress. """
+
+    status, config = _status(tmp_path)
+    _searchedFile(str(tmp_path/'output'), config, 'file1')
+    _searchedFile(str(tmp_path/'output'), config, 'file2', start_s=62)
+    path, mtime = _inputFile(tmp_path, 'q1.vid', 3)
+
+    progress = status.build(_state(queued=[(path, mtime)]))['processing']['progress']
+    assert (progress['done_tonight'], progress['queued']) == (2, 1)
+    assert progress['percent_done'] == pytest.approx(100*2/3, abs=0.1)
+
+
+def test_history_of_the_last_day(tmp_path, monkeypatch):
+    """ All files of the last day are kept for the statistics (also more than the ones listed), also after a
+        restart, and older ones are forgotten.
+    """
+
+    times = {'now': NOW}
+    monkeypatch.setattr(mst.RmsDateTime, 'utcnow', staticmethod(lambda: times['now']))
+    status, config = _status(tmp_path)
+
+    # 100 files, one every 10 minutes (about 16 hours)
+    for i in range(100):
+        times['now'] = NOW + datetime.timedelta(minutes=10*i)
+        status.fileFinished('f{:03d}'.format(i), 'ok', 60)
+    processing = status.build(_state())['processing']
+    assert processing['files_done_last_24h'] == 100 and len(processing['recent_files']) == mst.RECENT_FILES
+
+    # A damaged line in the history is skipped after a restart
+    with open(status.history_path, 'a') as f:
+        f.write('{"broken\n')
+    restarted, _ = _status(tmp_path, config)
+    assert len(restarted.file_records) == 100
+
+    # 20 hours after the last file only the files of the last 24 hours (f075 to f099) are kept, also in the
+    #   history file
+    times['now'] = NOW + datetime.timedelta(minutes=10*99) + datetime.timedelta(hours=20)
+    restarted, _ = _status(tmp_path, config)
+    assert len(restarted.file_records) == 25
+    with open(restarted.history_path) as f:
+        assert len(f.readlines()) == 25
+
+
+def test_a_failing_results_scan_doesnt_stop_the_status(tmp_path, now, monkeypatch):
+    """ The status is written when the results of the night can't be read. """
+
+    status, config = _status(tmp_path)
+    monkeypatch.setattr(mst, 'scanNights', lambda *args, **kwargs: (_ for _ in ()).throw(OSError('stale')))
+
+    assert status.update(_state())
+    with open(status.path) as f:
+        written = json.load(f)
+    assert [fault['code'] for fault in written['faults']] == ['STATUS_INCOMPLETE']
+    assert 'results' in written['faults'][0]['message']
