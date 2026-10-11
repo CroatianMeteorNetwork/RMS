@@ -825,7 +825,7 @@ def test_trails_of_bright_object_removed(config, trail_level, line_concentration
     if (trail_level > 0) or (line_concentration > 0):
         assert len(detections) == 1
         assert np.median(truthError(detections[0][2], obj)) < 0.3
-        assert (len(det.line_rejected) > 0) == (trail_level == 0)
+        assert (det.summary()['linear_structure_rejected'] > 0) == (trail_level == 0)
     else:
         assert len(detections) > 1
 
@@ -864,6 +864,47 @@ def test_extent_line_tells_points_from_lines():
     # Noise alone: the brightest axis is not significant
     significances = [mfd.extentLine(rng.normal(0, 1/np.sqrt(n), xx.shape), PSF_SIGMA, n)[1] for _ in range(50)]
     assert max(significances) < mfd.LINE_MIN_SIGNIFICANCE
+
+
+def test_extent_line_fast_object_not_a_line():
+    """ An object moving fast enough to be a streak in every frame lights the ring along its motion: that axis is
+        left out when the motion is given, so it is not taken for a linear structure, while a line across the
+        motion still is.
+    """
+
+    r = mfd.EXTENT_RADIUS
+    yy, xx = np.mgrid[-r:r + 1, -r:r + 1].astype(float)
+    n = 200
+
+    # A streak of 12 px per frame along the direction 0.5 rad
+    angle = 0.5
+    vx, vy = 12*math.cos(angle), 12*math.sin(angle)
+    streak = sum(0.1*np.exp(-0.5*((xx - vx*d)**2 + (yy - vy*d)**2)/PSF_SIGMA**2) for d in np.linspace(-0.5, 0.5, 41))
+
+    # Without the motion it looks like a line, with it it doesn't
+    assert mfd.extentLine(streak, PSF_SIGMA, n)[0] < 0.5
+    assert mfd.extentLine(streak, PSF_SIGMA, n, motion=(vx, vy))[0] > 0.5
+
+    # A line across the motion (as bright as the streak) is still found
+    across = -xx*math.sin(angle + np.pi/2) + yy*math.cos(angle + np.pi/2)
+    stack = streak + 1.5*streak.max()*np.exp(-0.5*across**2/1.5**2)
+    assert mfd.extentLine(stack, PSF_SIGMA, n, motion=(vx, vy))[0] < 0.5
+
+    # A slow object: the axis along the motion is kept, a line along it is found
+    along = -xx*math.sin(angle) + yy*math.cos(angle)
+    stack = np.exp(-0.5*(xx**2 + yy**2)/PSF_SIGMA**2) + np.exp(-0.5*along**2/1.5**2)
+    assert mfd.extentLine(stack, PSF_SIGMA, n, motion=(0.1*math.cos(angle), 0.1*math.sin(angle)))[0] < 0.5
+
+
+def test_linear_structure_flags_per_track(config):
+    """ The flag of a track rejected on a linear structure belongs to that track, also when another track has the
+        same first and last frame. """
+
+    det = MatchedFilterDetector(_SynthHandle([], total_frames=64), config)
+    det.significances = [(0.0, 100.0, 20.0, 20.0, 21.0, 0.95, True), (0.0, 100.0, 20.0, 20.0, 21.0, 0.95, False)]
+    summary = det.summary()
+    assert [t['linear_structure'] for t in summary['tracks']] == [True, False]
+    assert summary['linear_structure_rejected'] == 1
 
 
 class _LineHandle(_SynthHandle):

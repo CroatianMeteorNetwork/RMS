@@ -531,9 +531,6 @@ class MatchedFilterDetector(object):
         # Significances of the measured tracks: (first frame, last frame, significance, off time, reordered)
         self.significances = []
 
-        # The tracks which would have been detections but were rejected as lying on a thin linear structure
-        #   (first and last frame, see verify)
-        self.line_rejected = set()
 
         # The persistence counts of the segments of the input before this one, {(run, bin): (counts, runs)} (see
         #   removePersistent), and the counts to carry to the next segment: those before the frame where it begins
@@ -2102,11 +2099,10 @@ class MatchedFilterDetector(object):
             'psf_sigma': self.psf_sigma,
             'gpu': bool(self.opts.use_gpu),
             'timing_s': {k: round(v, 2) for k, v in self.timing.items()},
-            'tracks': [{'first_frame': float(f0), 'last_frame': float(f1), 'significance': round(float(sig), 2),
-                        'detected': bool(sig >= self.opts.track_significance),
-                        'linear_structure': (f0, f1) in self.line_rejected}
-                       for f0, f1, sig in (s[:3] for s in self.significances)],
-            'linear_structure_rejected': len(self.line_rejected),
+            'tracks': [{'first_frame': float(s[0]), 'last_frame': float(s[1]), 'significance': round(float(s[2]), 2),
+                        'detected': bool(s[2] >= self.opts.track_significance), 'linear_structure': bool(s[-1])}
+                       for s in self.significances],
+            'linear_structure_rejected': int(sum(bool(s[-1]) for s in self.significances)),
         }
 
 
@@ -2526,11 +2522,14 @@ class MatchedFilterDetector(object):
             span = max(fr[-1] - fr[0], 1)
             velocity = np.array([(xs[-1] - xs[0])/span, (ys[-1] - ys[0])/span])
             concentration = extentConcentration(c['stack']/max(c['stack_n'], 1), self.psf_sigma)
-            line = extentLine(c['stack']/max(c['stack_n'], 1), self.psf_sigma, c['stack_n'])
+            line = extentLine(c['stack']/max(c['stack_n'], 1), self.psf_sigma, c['stack_n'], motion=velocity)
             results.append((cent, c, min(tests), tests, concentration, velocity, line))
 
         kept = []
         for i, (cent, c, significance, tests, concentration, velocity, line) in enumerate(results):
+
+            # Whether the track would have been a detection but lies on a thin linear structure
+            linear = False
 
             # A point source: the light of the frames stacked along the track is concentrated at the centre.
             #   Structures of thin clouds drifting across the field are extended, and several of them move
@@ -2567,14 +2566,12 @@ class MatchedFilterDetector(object):
                                                                                             cent[-1, 0],
                                                                                             significance,
                                                                                             *line))
-                    # Counted if it would have been a detection
-                    if significance >= self.opts.track_significance:
-                        self.line_rejected.add((cent[0, 0], cent[-1, 0]))
+                    linear = significance >= self.opts.track_significance
                     significance = min(significance, 0.0)
 
             # The significance of every candidate is kept for the done file, and the photometry of the kept ones
             #   for the conversion to detections (see run)
-            self.significances.append((cent[0, 0], cent[-1, 0], significance) + tuple(tests) + (concentration,))
+            self.significances.append((cent[0, 0], cent[-1, 0], significance) + tuple(tests) + (concentration, linear))
             log.debug('Matched filter: track {:.0f}-{:.0f} significance {:.1f} (off time {:.1f}, reordered '
                       '{:.1f})'.format(cent[0, 0], cent[-1, 0], significance, *tests))
             if significance >= self.opts.track_significance:
@@ -2672,7 +2669,7 @@ def extentConcentration(stack, psf_sigma):
     return float((core - ring)/core)
 
 
-def extentLine(stack, psf_sigma, n_frames):
+def extentLine(stack, psf_sigma, n_frames, motion=None):
     """ How much of the light of an object is at its centre compared with the brightest axis through it: the
         mean of the stack along its track within 1.5 PSF sigmas of the centre, minus the mean of the ring
         EXTENT_RING px from it along the brightest of LINE_ANGLES axes (within LINE_HALF_WIDTH px of the axis),
@@ -2684,6 +2681,11 @@ def extentLine(stack, psf_sigma, n_frames):
         stack: [ndarray] Mean of the normalized frames along the track, centred on the object.
         psf_sigma: [float] PSF sigma (px).
         n_frames: [int] Number of frames in the stack.
+
+    Keyword arguments:
+        motion: [tuple] Motion of the object (px per frame). An object which moves far enough during a frame is a
+            streak in every frame, which reaches into the ring along its motion: the axes along the streak are
+            then left out. None by default (all axes are used).
 
     Return:
         (concentration, significance): [tuple of floats] The concentration (1 if the centre is not above the
@@ -2697,12 +2699,26 @@ def extentLine(stack, psf_sigma, n_frames):
     d = np.hypot(xx, yy)
     ring = (d >= EXTENT_RING[0]) & (d <= EXTENT_RING[1])
 
+    # The streak of the object in a frame: the pixels within 2 PSF sigmas of the segment it moves along during
+    #   the frame (centred on it), if that reaches the ring
+    streak = None
+    if motion is not None:
+        speed = math.hypot(*motion)
+        if 0.5*speed + 2*psf_sigma >= EXTENT_RING[0]:
+            ux, uy = motion[0]/speed, motion[1]/speed
+            t = np.clip(xx*ux + yy*uy, -0.5*speed, 0.5*speed)
+            streak = np.hypot(xx - t*ux, yy - t*uy) <= 2*psf_sigma
+
     # The mean of the ring along every axis: the pixels of the ring close to the line through the centre in
-    #   that direction (on both sides of the centre)
+    #   that direction (on both sides of the centre). The axes which are mostly on the streak are left out
     axes = []
     for angle in np.arange(LINE_ANGLES)*np.pi/LINE_ANGLES:
         axis = ring & (np.abs(yy*math.cos(angle) - xx*math.sin(angle)) <= LINE_HALF_WIDTH)
+        if (streak is not None) and (np.sum(axis & streak) > 0.25*np.sum(axis)):
+            continue
         axes.append((float(np.mean(stack[axis])), int(np.sum(axis))))
+    if not axes:
+        return 1.0, 0.0
     axis_mean, axis_n = max(axes, key=lambda v: v[0])
 
     # The significance of the brightest axis. The normalized frames have unit noise, so the noise of a pixel of
