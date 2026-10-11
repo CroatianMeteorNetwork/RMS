@@ -1265,6 +1265,7 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     from matplotlib.lines import Line2D
     import matplotlib.dates as mdates
     import matplotlib.ticker as mticker
+    import matplotlib.transforms as mtransforms
 
     times = [row['time'] for row in rows]
     clear = np.array([row['clear_fraction'] for row in rows])
@@ -1312,9 +1313,13 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     summary['median_dimming'] = float(np.median(dimming[usable])) if usable.any() else float('nan')
 
     # Colours of the states and of the values
-    shade = {'partly': ('#f2d7a6', 0.55), 'clouded': ('#9aa7b8', 0.55), 'not_searched': ('#4b5563', 0.4),
-             'no_data': ('#f4b6b6', 0.55)}
-    blue, green, grey, red = '#1f5f99', '#2e8b57', '#6b7280', '#c0392b'
+    # Colours of the states and of the values, from the palette of Okabe and Ito which is distinguishable with
+    #   colour vision deficiencies: the states are told apart by orange and blue, and by brightness (the time
+    #   without stars or data is grey, and named in the plot)
+    shade = {'partly': ('#E69F00', 0.25), 'clouded': ('#0072B2', 0.22), 'not_searched': ('#000000', 0.32),
+             'no_data': ('#000000', 0.07)}
+    cards_bg = {'partly': '#f9e7bf', 'clouded': '#c7e0ee', 'not_searched': '#adadad'}
+    blue, green, grey, red = '#0072B2', '#009E73', '#4b5563', '#D55E00'
 
 
     # The time without data: the gaps in the time line longer than a few chunks (e.g. no recording, or the files
@@ -1379,17 +1384,17 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
         t_cl, v_cl = _withGaps([times[i] for i in idx], 100*clear[idx], max_gap)
         ax_clear.fill_between(t_cl, 0, v_cl, step='post', color=green, alpha=0.12, lw=0, zorder=2)
     _plotInputs(ax_clear, 100*clear, '-', drawstyle='steps-post', color=green, lw=1.4, zorder=3)
-    _plotInputs(ax_clear, 100*seen, '-', color=grey, lw=1.0, zorder=3)
+    _plotInputs(ax_clear, 100*seen, '--', color='#111827', lw=1.0, zorder=3)
     ax_clear.set_ylim(0, 105)
     ax_clear.set_ylabel('%', fontsize=10)
 
     # The extracted and the matched stars, also of the inputs which were not searched
-    _plotInputs(ax_stars, stars, '-', color='#7c3aed', lw=1.0, zorder=3)
-    _plotInputs(ax_stars, matched, '-', color='#db2777', lw=1.0, zorder=3)
+    _plotInputs(ax_stars, stars, '-', color=blue, lw=1.0, zorder=3)
+    _plotInputs(ax_stars, matched, '-', color=red, lw=1.0, zorder=3)
     for _, _, ns_times, ns_stars in not_searched:
-        ax_stars.plot(ns_times, ns_stars, '-', color='#7c3aed', lw=1.0, zorder=3)
+        ax_stars.plot(ns_times, ns_stars, '-', color=blue, lw=1.0, zorder=3)
     if min_matched is not None:
-        ax_stars.axhline(min_matched, color='#db2777', lw=1, ls='--', zorder=2)
+        ax_stars.axhline(min_matched, color=red, lw=1, ls='--', zorder=2)
     ax_stars.set_yscale('log')
     ax_stars.yaxis.set_major_locator(mticker.LogLocator(subs=(1.0, 2.0, 5.0)))
     ax_stars.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: '{:g}'.format(v)))
@@ -1418,6 +1423,19 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
             time_format = '%H:%M:%S'
     ax_det.xaxis.set_major_formatter(mdates.DateFormatter(time_format))
 
+    # The time without stars or data is named in the dimming panel where it is wide enough, so it doesn't depend
+    #   on the colour
+    x0, x1 = ax_det.get_xlim()
+    label_transform = mtransforms.blended_transform_factory(ax_dim.transData, ax_dim.transAxes)
+    named = [(start, end, 'too few stars') for state, start, end in segments if state == 'not_searched'] \
+        + [(start, end, 'no data') for start, end in gaps]
+    for start, end, name in named:
+        a, b = mdates.date2num(start), mdates.date2num(end)
+        if (b - a) > 0.02*(x1 - x0):
+            ax_dim.text(mdates.num2date((a + b)/2), 0.5, name, transform=label_transform, ha='center',
+                        va='center', rotation=90 if (b - a) < 0.05*(x1 - x0) else 0, fontsize=9.5,
+                        color='#111827', alpha=0.8, zorder=4)
+
     # The name of every panel above it
     for ax, name in [(ax_dim, 'Dimming of the stars vs clear sky'), (ax_clear, 'Clear part of the image'),
                      (ax_stars, 'Stars per chunk'), (ax_det, 'Detections')]:
@@ -1435,10 +1453,10 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
                     if cloud_max_offset is not None else [])
                  + [Line2D([], [], color=blue, marker='^', ls='none', ms=5, alpha=0.6, label='Off the scale')]),
         (ax_clear, [Patch(facecolor=green, alpha=0.3, edgecolor=green, label='Clear part of the image'),
-                    Line2D([], [], color=grey, lw=1.0, label='Reliable stars seen')]),
-        (ax_stars, [Line2D([], [], color='#7c3aed', lw=1.0, label='Extracted'),
-                    Line2D([], [], color='#db2777', lw=1.0, label='Matched to the catalog')]
-                   + ([Line2D([], [], color='#db2777', lw=1, ls='--',
+                    Line2D([], [], color='#111827', lw=1.0, ls='--', label='Reliable stars seen')]),
+        (ax_stars, [Line2D([], [], color=blue, lw=1.0, label='Extracted'),
+                    Line2D([], [], color=red, lw=1.0, label='Matched to the catalog')]
+                   + ([Line2D([], [], color=red, lw=1, ls='--',
                               label='Fewest matched ({:d})'.format(int(min_matched)))]
                       if min_matched is not None else [])),
     ]
@@ -1454,47 +1472,42 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
                bbox_to_anchor=(0.53, 0.862), title='Shading of all panels', title_fontsize=9.5)
 
     # The title, and the summary of the night as a row of cards: the value large and its name below it, coloured
-    #   as the shading of the state. The detections and the ones removed on clouded sky are one card of two halves,
-    #   the removed ones coloured as the partly clouded sky they were removed on
+    #   as the shading of the state. The cards of the shares of the states are joined into one, as are the
+    #   detections and the ones removed on clouded sky (coloured as the partly clouded sky they were removed on)
     fig.suptitle(title, fontsize=15, fontweight='bold', y=0.985, x=0.53)
-    cards = [('{:.1f} h'.format(summary['observed_h']), 'observed', '#111827', '#f9fafb'),
-             ('{:.0f}%'.format(100*summary['clear']), 'clear', green, '#ecf6f0'),
-             ('{:.0f}%'.format(100*summary['partly']), 'partly clouded', '#b7791f', '#fbf0dc'),
-             ('{:.0f}%'.format(100*summary['clouded']), 'clouded', '#4b5563', '#e3e7ed')]
+    states = [('{:.0f}%'.format(100*summary['clear']), 'clear', '#007a5a', '#e0f2ec'),
+              ('{:.0f}%'.format(100*summary['partly']), 'partly clouded', '#a36f00', cards_bg['partly']),
+              ('{:.0f}%'.format(100*summary['clouded']), 'clouded', blue, cards_bg['clouded'])]
     if not_searched:
-        cards.append(('{:.0f}%'.format(100*summary['not_searched']), 'too few stars', '#374151', '#d5d8dd'))
-    halves = [('{:d}'.format(len(detection_times)), 'detections', '#111827', '#f3f4f6')]
+        states.append(('{:.0f}%'.format(100*summary['not_searched']), 'too few stars', '#111827',
+                       cards_bg['not_searched']))
+    detections = [('{:d}'.format(len(detection_times)), 'detections', '#111827', '#f3f4f6')]
     if removed_detections:
-        halves.append(('\u2212{:d}'.format(removed_detections), 'removed by clouds', '#b7791f', '#fbf0dc'))
+        detections.append(('\u2212{:d}'.format(removed_detections), 'removed by clouds', '#a36f00',
+                           cards_bg['partly']))
+    groups = [[('{:.1f} h'.format(summary['observed_h']), 'observed', '#111827', '#f9fafb')], states, detections]
 
-    # The cards span the width of the panels, the card of the detections is as wide as two
-    left, right, bottom, height, space = 0.08, 0.98, 0.875, 0.068, 0.008
-    units = len(cards) + 2
-    width = (right - left - space*len(cards))/units
-
-    def _cardText(x, w, value, name, color):
-        fig.text(x + w/2, bottom + 0.62*height, value, ha='center', va='center', fontsize=15, fontweight='bold',
-                 color=color)
-        fig.text(x + w/2, bottom + 0.2*height, name, ha='center', va='center', fontsize=9, color='#4b5563')
-
-    for i, (value, name, color, background) in enumerate(cards):
-        x = left + i*(width + space)
-        fig.patches.append(FancyBboxPatch((x, bottom), width, height, boxstyle='round,pad=0,rounding_size=0.008',
-                                          transform=fig.transFigure, facecolor=background, edgecolor='#e5e7eb',
-                                          lw=0.8))
-        _cardText(x, width, value, name, color)
-
-    x = left + len(cards)*(width + space)
-    box = FancyBboxPatch((x, bottom), 2*width, height, boxstyle='round,pad=0,rounding_size=0.008',
-                         transform=fig.transFigure, facecolor='none', edgecolor='#e5e7eb', lw=0.8, zorder=2)
-    fig.patches.append(box)
-    half = 2*width/len(halves)
-    for i, (value, name, color, background) in enumerate(halves):
-        part = Rectangle((x + i*half, bottom), half, height, transform=fig.transFigure, facecolor=background,
-                         edgecolor='none', zorder=1)
-        part.set_clip_path(box)
-        fig.patches.append(part)
-        _cardText(x + i*half, half, value, name, color)
+    # The cards span the width of the panels, with a space between the groups
+    left, right, bottom, height, space = 0.08, 0.98, 0.875, 0.068, 0.01
+    width = (right - left - space*(len(groups) - 1))/sum(len(group) for group in groups)
+    x = left
+    for group in groups:
+        box = FancyBboxPatch((x, bottom), width*len(group), height, boxstyle='round,pad=0,rounding_size=0.008',
+                             transform=fig.transFigure, facecolor='none', edgecolor='#d1d5db', lw=0.8, zorder=2)
+        fig.patches.append(box)
+        for i, (value, name, color, background) in enumerate(group):
+            part = Rectangle((x + i*width, bottom), width, height, transform=fig.transFigure,
+                             facecolor=background, edgecolor='none', zorder=1)
+            part.set_clip_path(box)
+            fig.patches.append(part)
+            if i:
+                fig.lines.append(Line2D([x + i*width]*2, [bottom, bottom + height], transform=fig.transFigure,
+                                        color='white', lw=1.5, zorder=1.5))
+            fig.text(x + (i + 0.5)*width, bottom + 0.62*height, value, ha='center', va='center', fontsize=15,
+                     fontweight='bold', color=color)
+            fig.text(x + (i + 0.5)*width, bottom + 0.2*height, name, ha='center', va='center', fontsize=9,
+                     color='#374151')
+        x += width*len(group) + space
 
     fig.subplots_adjust(left=0.08, right=0.98, top=0.785, bottom=0.055)
 
