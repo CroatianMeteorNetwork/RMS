@@ -511,13 +511,15 @@ class SkyQualityMap(object):
 
     def addMissingChunks(self, total_frames):
         """ Add empty chunks (no stars, so clouded) where chunks are missing: in the gaps between the chunks,
-            before the first chunk, and after the last one up to total_frames (also for a part of a chunk).
+            before the first chunk, and after the last one up to total_frames (whole chunks only, the frames after
+            the last whole chunk belong to it).
 
         Arguments:
             total_frames: [int] Number of frames of the input, or None.
         """
 
         cf = self.chunk_frames
+        self.trailing_time = None
         if len(self.chunk_first) == 0:
             return
 
@@ -542,6 +544,10 @@ class SkyQualityMap(object):
             while expected + cf <= total_frames:
                 firsts.append(int(expected))
                 expected += cf
+
+            # The time of the frames after the last chunk, which are logged with its conditions
+            if expected < total_frames:
+                self.trailing_time = self.begin_time + datetime.timedelta(seconds=expected/self.fps)
 
         # Nothing is missing
         if len(firsts) == len(self.chunk_first):
@@ -918,6 +924,10 @@ class SkyQualityMap(object):
                          'clear_fraction': '{:.3f}'.format(clear[i]),
                          'transparency_mag': '{:.3f}'.format(self.transparency[i]),
                          'reliable_seen': '{:.3f}'.format(self.reliable_seen[i])})
+
+        # The frames after the last chunk have its conditions, so the time line of the night covers the whole input
+        if rows and (self.trailing_time is not None):
+            rows.append(dict(rows[-1], chunk_utc=self.trailing_time.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]))
 
         return rows
 

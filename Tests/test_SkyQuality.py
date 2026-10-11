@@ -227,6 +227,17 @@ def test_missing_chunks_are_clouded():
     assert sky_map.isClear(x, y, np.array([N_CHUNKS*CHUNK_FRAMES + 10]))[0]
     assert [row['stars'] for row in sky_map.conditions()].count(0) == 0
 
+    # They are logged with the conditions of the last chunk, so the time line of the night covers the whole input
+    rows = sky_map.conditions()
+    assert len(rows) == N_CHUNKS + 1
+    assert {k: v for k, v in rows[-1].items() if k != 'chunk_utc'} \
+        == {k: v for k, v in rows[-2].items() if k != 'chunk_utc'}
+    tail_time = sky_map.begin_time + datetime.timedelta(seconds=N_CHUNKS*CHUNK_FRAMES/FPS)
+    assert rows[-1]['chunk_utc'] == tail_time.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]
+
+    # Without frames after the last chunk, nothing is added
+    assert len(_skyMap(total_frames=N_CHUNKS*CHUNK_FRAMES).conditions()) == N_CHUNKS
+
     # A whole chunk missing at the end is clouded, and the frames after it belong to it
     sky_map = _skyMap(total_frames=(N_CHUNKS + 1)*CHUNK_FRAMES + 20)
     assert len(sky_map.chunk_first) == N_CHUNKS + 1
