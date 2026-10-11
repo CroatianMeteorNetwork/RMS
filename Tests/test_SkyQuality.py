@@ -678,3 +678,16 @@ def test_plot_sky_conditions(tmp_path):
     assert summary['clouded'] == pytest.approx(80/500.0)
     assert summary['not_searched'] == pytest.approx(100/500.0)
     assert summary['median_dimming'] == pytest.approx(0.02)
+
+
+def test_plot_sky_conditions_inputs_at_the_same_times(tmp_path):
+    """ The chunks of two inputs at the same times (e.g. a recording which was copied) don't break the plot. """
+
+    begin = datetime.datetime(2025, 12, 25, 22, 0, 0)
+    rows = [{'time': begin + datetime.timedelta(seconds=4*i), 'input': name, 'clear_fraction': 1.0,
+             'transparency_mag': 0.0, 'reliable_seen': 1.0, 'stars': 500, 'matched': 300}
+            for i in range(50) for name in ('a.vid', 'b.vid')]
+    rows.sort(key=lambda row: row['time'])
+
+    summary = sq.plotSkyConditions(rows, str(tmp_path/'conditions.png'), 'Test')
+    assert summary['clear'] == pytest.approx(1.0)

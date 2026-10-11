@@ -1202,11 +1202,15 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     stars = np.array([row['stars'] for row in rows])
     matched = np.array([row['matched'] for row in rows])
 
-    # The time between the chunks (the median spacing), a gap of more than a few of them is a gap in the data
-    if len(times) > 1:
-        step = np.median([(b - a).total_seconds() for a, b in zip(times[:-1], times[1:])])
-    else:
-        step = 4.0
+    # The time between the chunks (the median spacing of the chunks of every input, as the chunks of different
+    #   inputs can be at the same times), a gap of more than a few of them is a gap in the data
+    by_input = {}
+    for row in rows:
+        by_input.setdefault(row.get('input'), []).append(row['time'])
+    spacing = [(b - a).total_seconds() for input_times in by_input.values()
+               for a, b in zip(input_times[:-1], input_times[1:])]
+    spacing = [dt for dt in spacing if dt > 0]
+    step = float(np.median(spacing)) if spacing else 4.0
     chunk = datetime.timedelta(seconds=step)
     max_gap = 3*chunk
 

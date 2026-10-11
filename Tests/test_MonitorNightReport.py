@@ -1393,30 +1393,46 @@ def test_results_of_deleted_nights_are_pruned(tmp_path):
     assert late_dir in mnr.scanNights(output_dir, config)[NIGHT]
 
 
-def test_night_report_plots_sky_conditions(tmp_path):
+@pytest.mark.parametrize('replace', [True, False])
+def test_night_report_plots_sky_conditions(tmp_path, monkeypatch, replace):
     """ With the matched filter, the night report plots the sky conditions of the files of the night from the log
-        of the conditions, with the files which were not searched, and saves the conditions of the night.
+        of the conditions, with the files which were not searched as they had too few stars, and saves the
+        conditions of the night. When the matched filter is a separate pass, a file with too few stars has no
+        summary of it.
     """
 
+    import RMS.Routines.SkyQuality as sq
     from RMS.Routines.SkyQuality import CONDITION_COLUMNS
 
     config = _config()
     config.mf_enable = True
-    config.mf_replace_detection = True
+    config.mf_replace_detection = replace
     output_dir = str(tmp_path)
 
-    # A searched file with conditions in the log, and a file which was not searched (too few stars)
+    # The arguments of the plot
+    plotted = {}
+    plot = sq.plotSkyConditions
+    def _plot(rows, plot_path, title, **kwargs):
+        plotted.update(kwargs, rows=rows)
+        return plot(rows, plot_path, title, **kwargs)
+    monkeypatch.setattr(sq, 'plotSkyConditions', _plot)
+
+    # A searched file with conditions in the log, and a file which was not searched (one star per chunk)
     searched = _makeResults(output_dir, config, 'file1', n_chunks=3)
     skipped = _makeResults(output_dir, config, 'file2', n_chunks=3, start_s=60)
+    summary_dir = '' if replace else MATCHED_FILTER_DIR
     for results_dir, summary in [(searched, {'total_frames': 384, 'cloud_detections_removed': 2}),
-                                 (skipped, {'max_stars': 5})]:
+                                 (skipped, {'max_stars': 1} if replace else None)]:
         results_path = os.path.join(output_dir, results_dir)
         info = mnr.readDoneFlag(results_path)
         info['input_file'] = '/data/{:s}.vid'.format(os.path.basename(results_dir))
         mnr.writeDoneFlag(results_path, info)
-        with open(os.path.join(results_path, DONE_NAME), 'w') as f:
-            json.dump(summary, f)
+        if summary is not None:
+            os.makedirs(os.path.join(results_path, summary_dir), exist_ok=True)
+            with open(os.path.join(results_path, summary_dir, DONE_NAME), 'w') as f:
+                json.dump(summary, f)
 
+    # The conditions of the searched file, of a file of another night with the same name, and of another file
     with open(os.path.join(output_dir, 'sky_conditions_XX0001_{:s}.csv'.format(BEG_TIME.strftime('%Y%m%d'))),
               'w') as f:
         f.write(','.join(CONDITION_COLUMNS) + ',processed_utc\n')
@@ -1425,6 +1441,9 @@ def test_night_report_plots_sky_conditions(tmp_path):
             f.write('{:s},file1.vid,500,300,{:.3f},0.020,0.950,2025-12-26T00:00:00\n'.format(
                 t.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3], 1.0 if i < 2 else 0.0))
         f.write('2025-12-25T00:00:00.000,other.vid,500,300,1.000,0.020,0.950,2025-12-26T00:00:00\n')
+    with open(os.path.join(output_dir, 'sky_conditions_XX0001_20251226.csv'), 'w') as f:
+        f.write(','.join(CONDITION_COLUMNS) + ',processed_utc\n')
+        f.write('2025-12-26T03:00:00.000,file1.vid,500,300,1.000,0.020,0.950,2025-12-27T00:00:00\n')
 
     night_state = mnr.generateNightReport(output_dir, NIGHT, config)
     assert 'sky_conditions' in night_state['ok_steps']
@@ -1436,4 +1455,12 @@ def test_night_report_plots_sky_conditions(tmp_path):
     with open(os.path.join(night_dir, NIGHT + '_sky_conditions.csv')) as f:
         lines = f.read().splitlines()
     assert lines[0] == ','.join(CONDITION_COLUMNS)
-    assert len(lines) == 4 and all(',file1.vid,' in line for line in lines[1:])
+    assert len(lines) == 4 and all(line.startswith('2025-12-25T03:00') and ',file1.vid,' in line
+                                   for line in lines[1:])
+
+    # The file with too few stars is shown as not searched, from its first to after its last chunk, and the
+    #   removed detections are counted
+    assert len(plotted['not_searched']) == 1
+    start, end, times, stars = plotted['not_searched'][0]
+    assert start == BEG_TIME + datetime.timedelta(seconds=60) and stars == [1, 1, 1]
+    assert plotted['removed_detections'] == 2

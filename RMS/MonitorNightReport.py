@@ -867,9 +867,12 @@ def plotNightSkyConditions(night_dir, night_name, output_dir, results, config, f
     from RMS.MatchedFilterDetection import DONE_NAME, MATCHED_FILTER_DIR
     from RMS.Routines.SkyQuality import CONDITION_COLUMNS, plotSkyConditions, readConditions
 
-    # The conditions of the chunks of the files of the night, which are named by their input file in the log
+    # The conditions of the chunks of the files of the night, which are named by their input file in the log. Only
+    #   the chunks within the night are taken, as the names of the inputs can repeat on other nights
+    night_start, night_end = nightBoundsFromName(config, night_name)
     inputs = set(os.path.basename(info['input_file']) for info in results.values() if info.get('input_file'))
-    rows = readConditions(output_dir, config.stationID, inputs)
+    rows = [row for row in readConditions(output_dir, config.stationID, inputs)
+            if night_start <= row['time'] <= night_end]
 
     # The files which the matched filter did not search, as they had too few stars (clouds, twilight), with the
     #   stars of their chunks, and the detections removed on clouded sky. The summary of the matched filter is in
@@ -878,27 +881,31 @@ def plotNightSkyConditions(night_dir, night_name, output_dir, results, config, f
     removed = 0
     for results_dir in sorted(results):
         results_path = os.path.join(output_dir, results_dir)
+
+        # A file which was searched has the summary of the detector (e.g. its number of frames)
+        searched = False
         for summary_path in [os.path.join(results_path, DONE_NAME),
                              os.path.join(results_path, MATCHED_FILTER_DIR, DONE_NAME)]:
-            if not os.path.isfile(summary_path):
-                continue
+            if os.path.isfile(summary_path):
+                with open(summary_path) as f:
+                    summary = json.load(f)
+                removed += summary.get('cloud_detections_removed', 0)
+                searched = searched or ('total_frames' in summary)
 
-            with open(summary_path) as f:
-                summary = json.load(f)
-            removed += summary.get('cloud_detections_removed', 0)
+        if searched:
+            continue
 
-            # A file which was searched has the summary of the detector (e.g. its number of frames)
-            if 'total_frames' in summary:
-                continue
-
-            star_list = []
-            for calstars_path in glob.glob(os.path.join(results_path, 'CALSTARS_*.txt')):
-                star_list += CALSTARS.readCALSTARS(results_path, os.path.basename(calstars_path))[0]
-            if star_list:
-                star_list = sorted(star_list, key=lambda entry: entry[0])
-                times = [filenameToDatetime(entry[0]) for entry in star_list]
-                step = (times[-1] - times[0])/max(len(times) - 1, 1)
-                not_searched.append((times[0], times[-1] + step, times, [len(entry[1]) for entry in star_list]))
+        # A file which was not searched had too few stars in all its chunks. Without the separate pass of the
+        #   matched filter, such a file has no summary of it, and a file which has enough stars but no summary
+        #   (e.g. the pass failed) is not shown as not searched
+        star_list = []
+        for calstars_path in glob.glob(os.path.join(results_path, 'CALSTARS_*.txt')):
+            star_list += CALSTARS.readCALSTARS(results_path, os.path.basename(calstars_path))[0]
+        if star_list and (max(len(entry[1]) for entry in star_list) < config.ff_min_stars):
+            star_list = sorted(star_list, key=lambda entry: entry[0])
+            times = [filenameToDatetime(entry[0]) for entry in star_list]
+            step = (times[-1] - times[0])/max(len(times) - 1, 1)
+            not_searched.append((times[0], times[-1] + step, times, [len(entry[1]) for entry in star_list]))
 
     if (not rows) and (not not_searched):
         log.info("No sky conditions for night {:s}".format(night_name))
