@@ -737,3 +737,47 @@ def test_running_median():
     values = [1.0, 2.0, np.nan, 4.0, 5.0]
     assert np.allclose(sq._runningMedian(times, values, 15.0), [1.5, 1.5, 3.0, 4.0, 5.0])
     assert np.isnan(sq._runningMedian([0], [np.nan], 30.0)[0])
+
+
+def test_plot_sky_conditions_without_conditions(tmp_path):
+    """ A night of inputs which were all not searched (e.g. clouded all night) has a plot of their stars. """
+
+    begin = datetime.datetime(2025, 12, 25, 22, 0, 0)
+    ns_times = [begin + datetime.timedelta(seconds=5*k) for k in range(20)]
+    not_searched = [(ns_times[0], ns_times[-1] + datetime.timedelta(seconds=5), ns_times, [10]*20)]
+
+    summary = sq.plotSkyConditions([], str(tmp_path/'conditions.png'), 'Test', not_searched=not_searched,
+                                   cloud_max_offset=0.15, min_matched=30)
+    assert os.path.isfile(str(tmp_path/'conditions.png'))
+    assert summary['not_searched'] == pytest.approx(1.0)
+
+
+def test_read_conditions_skips_rows_which_cant_be_read(tmp_path):
+    """ A row which was not written completely or has values which can't be read is skipped. """
+
+    _writeConditions(tmp_path/'sky_conditions_XX0001_20251225.csv', [
+        ('2025-12-25T23:59:50.000', 'a.vid', 1.0, '2025-12-26T01:00:00')])
+    with open(str(tmp_path/'sky_conditions_XX0001_20251225.csv'), 'a') as f:
+        f.write('2025-12-25T23:59:54.000,a.vid,500,300,1.000,0.0\n')
+        f.write('2025-12-25T23:59:58.000,a.vid,500,300,x,0.010,0.950,2025-12-26T01:00:00\n')
+        f.write('not a time,a.vid,500,300,1.000,0.010,0.950,2025-12-26T01:00:00\n')
+        f.write(','.join(sq.CONDITION_COLUMNS) + ',processed_utc\n')
+
+    rows = sq.readConditions(str(tmp_path), 'XX0001')
+    assert [row['chunk_utc'] for row in rows] == ['2025-12-25T23:59:50.000']
+
+
+def test_plot_sky_conditions_inputs_of_different_cadence(tmp_path):
+    """ The time of the chunks of every input is the spacing of its own chunks. """
+
+    begin = datetime.datetime(2025, 12, 25, 22, 0, 0)
+    rows = [{'time': begin + datetime.timedelta(seconds=4*i), 'input': 'a.vid', 'clear_fraction': 1.0,
+             'transparency_mag': 0.0, 'reliable_seen': 1.0, 'stars': 500, 'matched': 300} for i in range(100)]
+    rows += [{'time': begin + datetime.timedelta(seconds=1000 + 20*i), 'input': 'b.vid', 'clear_fraction': 0.0,
+              'transparency_mag': 0.0, 'reliable_seen': 1.0, 'stars': 500, 'matched': 300} for i in range(10)]
+    rows.sort(key=lambda row: row['time'])
+
+    # a.vid 400 s, b.vid 200 s (not 10 gaps of 20 s with chunks of 4 s)
+    summary = sq.plotSkyConditions(rows, str(tmp_path/'conditions.png'), 'Test')
+    assert summary['observed_h'] == pytest.approx(600/3600.0)
+    assert summary['clouded'] == pytest.approx(200/600.0)

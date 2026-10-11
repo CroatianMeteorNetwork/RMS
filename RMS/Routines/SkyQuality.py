@@ -1124,14 +1124,25 @@ def readConditions(dir_path, station_id, inputs=None, start=None, end=None):
         last = end.strftime('%Y%m%d') if end is not None else '99999999'
         log_paths = [path for path in log_paths if first <= path[-12:-4] <= last]
 
-    # The rows of every input by the time of their processing
+    # The rows of every input by the time of their processing. A row which can't be read (e.g. a line which was
+    #   not written completely) is skipped
+    columns = list(CONDITION_COLUMNS) + ['processed_utc']
     processings = {}
     for log_path in log_paths:
-        with open(log_path) as f:
+        with open(log_path, newline='') as f:
             lines = [line for line in f if line.strip() and not line.startswith('#')]
 
-        for row in csv.DictReader(lines):
+        for values in csv.reader(lines):
+            if (len(values) != len(columns)) or (values[0] == columns[0]):
+                continue
+            row = dict(zip(columns, values))
             if (inputs is not None) and (row['input'] not in inputs):
+                continue
+            try:
+                for name in ('stars', 'matched', 'clear_fraction', 'transparency_mag', 'reliable_seen'):
+                    row[name] = float(row[name])
+                row['time'] = datetime.datetime.strptime(row['chunk_utc'], '%Y-%m-%dT%H:%M:%S.%f')
+            except ValueError:
                 continue
             processings.setdefault(row['input'], {}).setdefault(row['processed_utc'], []).append(row)
 
@@ -1139,9 +1150,6 @@ def readConditions(dir_path, station_id, inputs=None, start=None, end=None):
     rows = []
     for by_time in processings.values():
         for row in by_time[max(by_time)]:
-            for name in ('stars', 'matched', 'clear_fraction', 'transparency_mag', 'reliable_seen'):
-                row[name] = float(row[name])
-            row['time'] = datetime.datetime.strptime(row['chunk_utc'], '%Y-%m-%dT%H:%M:%S.%f')
             if ((start is None) or (row['time'] >= start)) and ((end is None) or (row['time'] <= end)):
                 rows.append(row)
 
@@ -1232,6 +1240,48 @@ def _withGaps(times, values, max_gap):
     return out_t, np.array(out_v, dtype=np.float64)
 
 
+def _legendPlace(fig, ax, handles):
+    """ The place of the legend of a panel on its right (upper, center or lower) where it covers the fewest points
+        of the lines of the panel. The upper right if they can't be measured (the place doesn't change the plot
+        otherwise).
+    """
+
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+
+    try:
+        renderer = FigureCanvasAgg(fig).get_renderer()
+
+        # The points of the lines in display coordinates, the lines of few points (e.g. a horizontal line)
+        #   resampled along their length
+        points = []
+        for line in ax.get_lines():
+            xy = np.asarray(line.get_xydata(), dtype=np.float64)
+            if not len(xy):
+                continue
+            if len(xy) < 50:
+                xy = np.column_stack([np.interp(np.linspace(0, len(xy) - 1, 200), np.arange(len(xy)), xy[:, k])
+                                      for k in range(2)])
+            xy = line.get_transform().transform(xy)
+            points.append(xy[np.all(np.isfinite(xy), axis=1)])
+        points = np.concatenate(points) if points else np.zeros((0, 2))
+
+        best = None
+        for loc in ('upper right', 'center right', 'lower right'):
+            legend = ax.legend(handles=handles, loc=loc, fontsize=9, handlelength=2.2)
+            box = legend.get_window_extent(renderer)
+            legend.remove()
+            covered = int(np.sum((points[:, 0] >= box.x0) & (points[:, 0] <= box.x1)
+                                 & (points[:, 1] >= box.y0) & (points[:, 1] <= box.y1)))
+            if (best is None) or (covered < best[0]):
+                best = (covered, loc)
+
+        return best[1]
+
+    except Exception as e:
+        log.debug("The place of the legend could not be found: {:s}".format(repr(e)))
+        return 'upper right'
+
+
 def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(), removed_detections=0,
                       cloud_max_offset=None, min_matched=None):
     """ Plot the sky conditions of a night: the dimming of the stars, the clear fraction of the image and the stars
@@ -1261,7 +1311,6 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     #   the backend or the display
     from matplotlib.figure import Figure
     from matplotlib.patches import FancyBboxPatch, Patch, Rectangle
-    from matplotlib.backends.backend_agg import FigureCanvasAgg
     from matplotlib.lines import Line2D
     import matplotlib.dates as mdates
     import matplotlib.ticker as mticker
@@ -1274,29 +1323,33 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     stars = np.array([row['stars'] for row in rows])
     matched = np.array([row['matched'] for row in rows])
 
-    # The time between the chunks (the median spacing of the chunks of every input, as the chunks of different
-    #   inputs can be at the same times), a gap of more than a few of them is a gap in the data
-    by_input = {}
-    for row in rows:
-        by_input.setdefault(row.get('input'), []).append(row['time'])
-    spacing = [(b - a).total_seconds() for input_times in by_input.values()
-               for a, b in zip(input_times[:-1], input_times[1:])]
-    spacing = [dt for dt in spacing if dt > 0]
-    step = float(np.median(spacing)) if spacing else 4.0
+    # The rows of every input (in time order, as the rows)
+    input_rows = collections.defaultdict(list)
+    for i, row in enumerate(rows):
+        input_rows[row.get('input')].append(i)
+
+    # The time between the chunks of every input (the median spacing of its chunks, the inputs can have different
+    #   frame rates), and of all inputs for those of one chunk. A gap of more than a few chunks is a gap in the data
+    def _spacing(idx):
+        dt = [(times[j] - times[i]).total_seconds() for i, j in zip(idx[:-1], idx[1:])]
+        dt = [d for d in dt if d > 0]
+        return float(np.median(dt)) if dt else None
+
+    steps = {name: _spacing(idx) for name, idx in input_rows.items()}
+    known = [st for st in steps.values() if st is not None]
+    step = float(np.median(known)) if known else 4.0
+    steps = {name: datetime.timedelta(seconds=st if st is not None else step) for name, st in steps.items()}
     chunk = datetime.timedelta(seconds=step)
-    max_gap = 3*chunk
+    max_gap = 3*max(list(steps.values()) + [chunk])
 
     # The state of every chunk
     labels = np.where(clear >= CLEAR_FRACTION_CLEAR, 'clear', np.where(clear > 0, 'partly', 'clouded'))
 
     # The time line of the states: a chunk lasts until the next chunk of its input, and where inputs overlap (e.g.
     #   two recordings of the same time), the worse state holds
-    input_rows = collections.defaultdict(list)
-    for i, row in enumerate(rows):
-        input_rows[row.get('input')].append(i)
     intervals = []
-    for idx in input_rows.values():
-        intervals += _spans([times[i] for i in idx], [labels[i] for i in idx], max_gap, chunk)
+    for name, idx in input_rows.items():
+        intervals += _spans([times[i] for i in idx], [labels[i] for i in idx], 3*steps[name], steps[name])
     intervals += [('not_searched', start, end) for start, end, _, _ in not_searched]
     segments = _stateSegments(intervals, ['clouded', 'not_searched', 'partly', 'clear'])
 
@@ -1346,13 +1399,12 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     def _plotInputs(ax, values, *args, **kwargs):
         """ Plot the values of every input as its own line (the lines of inputs which overlap are not joined),
             broken at the gaps. """
-        for idx in input_rows.values():
-            ax.plot(*_withGaps([times[i] for i in idx], np.asarray(values)[idx], max_gap), *args, **kwargs)
+        for name, idx in input_rows.items():
+            ax.plot(*_withGaps([times[i] for i in idx], np.asarray(values)[idx], 3*steps[name]), *args, **kwargs)
 
     # Dimming of the stars relative to clear sky: every chunk, and its running median over about a minute
-    t_dim, v_dim = _withGaps(times, dimming, max_gap)
     dense = n > 2000
-    ax_dim.plot(t_dim, v_dim, '.', color=blue, ms=2 if dense else 3.5, alpha=0.25 if dense else 0.5, zorder=2)
+    ax_dim.plot(times, dimming, '.', color=blue, ms=2 if dense else 3.5, alpha=0.25 if dense else 0.5, zorder=2)
     # The running median over a minute of every input (inputs which overlap are not mixed)
     smooth = np.full(n, np.nan)
     for idx in input_rows.values():
@@ -1380,8 +1432,8 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     ax_dim.set_ylabel('mag', fontsize=10)
 
     # The clear fraction of the image, and the fraction of the reliably seen stars which are seen
-    for idx in input_rows.values():
-        t_cl, v_cl = _withGaps([times[i] for i in idx], 100*clear[idx], max_gap)
+    for name, idx in input_rows.items():
+        t_cl, v_cl = _withGaps([times[i] for i in idx], 100*clear[idx], 3*steps[name])
         ax_clear.fill_between(t_cl, 0, v_cl, step='post', color=green, alpha=0.12, lw=0, zorder=2)
     _plotInputs(ax_clear, 100*clear, '-', drawstyle='steps-post', color=green, lw=1.4, zorder=3)
     _plotInputs(ax_clear, 100*seen, '--', color='#111827', lw=1.0, zorder=3)
@@ -1432,7 +1484,7 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
     for start, end, name in named:
         a, b = mdates.date2num(start), mdates.date2num(end)
         if (b - a) > 0.02*(x1 - x0):
-            ax_dim.text(mdates.num2date((a + b)/2), 0.5, name, transform=label_transform, ha='center',
+            ax_dim.text((a + b)/2, 0.5, name, transform=label_transform, ha='center',
                         va='center', rotation=90, fontsize=9.5,
                         color='#111827', alpha=0.8, zorder=4)
 
@@ -1513,29 +1565,9 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
 
     # The legend of every panel is on its right, at the height (upper, middle or lower) where it covers the fewest
     #   points of the lines of the panel
-    renderer = FigureCanvasAgg(fig).get_renderer()
     for ax, handles in legends:
-
-        points = []
-        for line in ax.get_lines():
-            xy = np.asarray(line.get_xydata(), dtype=np.float64)
-            if len(xy) < 50:
-                xy = np.column_stack([np.interp(np.linspace(0, len(xy) - 1, 200), np.arange(len(xy)), xy[:, k])
-                                      for k in range(2)])
-            xy = line.get_transform().transform(xy)
-            points.append(xy[np.all(np.isfinite(xy), axis=1)])
-        points = np.concatenate(points) if points else np.zeros((0, 2))
-
-        best = None
-        for loc in ('upper right', 'center right', 'lower right'):
-            legend = ax.legend(handles=handles, loc=loc, fontsize=9, handlelength=2.2, frameon=True,
-                               framealpha=0.92, facecolor='white', edgecolor='#e5e7eb')
-            box = legend.get_window_extent(renderer)
-            covered = int(np.sum((points[:, 0] >= box.x0) & (points[:, 0] <= box.x1)
-                                 & (points[:, 1] >= box.y0) & (points[:, 1] <= box.y1)))
-            if (best is None) or (covered < best[0]):
-                best = (covered, loc)
-        ax.legend(handles=handles, loc=best[1], fontsize=9, handlelength=2.2, frameon=True, framealpha=0.92,
+        loc = _legendPlace(fig, ax, handles)
+        ax.legend(handles=handles, loc=loc, fontsize=9, handlelength=2.2, frameon=True, framealpha=0.92,
                   facecolor='white', edgecolor='#e5e7eb').set_zorder(10)
 
     fig.savefig(plot_path)
