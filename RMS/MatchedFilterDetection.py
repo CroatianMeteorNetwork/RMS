@@ -1307,7 +1307,7 @@ class MatchedFilterDetector(object):
         """ The motion of the stars (px per frame), measured once. """
 
         if getattr(self, '_drift', None) is None:
-            self._drift = self.starDrift(step=max(1, min(SLOW_REF_BLOCKS, len(raw) - 1)))
+            self._drift = self.starDrift(step=max(1, min(SLOW_REF_BLOCKS, len(self.block_starts) - 1)))
 
         return self._drift
 

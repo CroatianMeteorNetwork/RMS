@@ -1008,6 +1008,9 @@ def test_star_drift_from_the_middles_of_the_blocks(config):
     # The pair of blocks 0 and 3 (3 blocks apart): their middles are 704 frames apart, their starts 768
     assert np.allclose(det.starDrift(step=3), drift, rtol=0, atol=0.0006)
 
+    # The drift is also measured on the first use when the backgrounds were set without the background pass
+    assert np.allclose(det.drift(), drift, rtol=0, atol=0.0006)
+
 
 def test_background_around_a_track_aligned_with_the_stars(config):
     """ The background which is estimated again around a track without the object (see maskObjects) takes the
