@@ -1063,6 +1063,46 @@ def test_noise_around_a_track_not_reduced_by_the_alignment(config):
     assert abs(np.median(noise[np.abs(yy - 64) > 5.5])/NOISE - 1) < 0.1
 
 
+def test_star_drift_of_a_short_input(config):
+    """ The drift of the stars, with which the backgrounds of the blocks are aligned, is measured also for an input
+        of fewer blocks than the separation used for longer inputs (e.g. a short segment). """
+
+    handle = _DriftHandle([], total_frames=768, n_stars=60, drift=(0.01, -0.004), seed=8)
+    det = MatchedFilterDetector(handle, config)
+    det.frame_first, det.frame_end = 0, 768
+    det.block_starts, det.block_ends = [0, 256, 512], [256, 512, 768]
+    det.psf_sigma = PSF_SIGMA
+    det.backgroundPass()
+
+    assert np.allclose(det.drift(), (0.01, -0.004), rtol=0, atol=0.001)
+
+
+def test_background_around_a_track_without_the_object(config):
+    """ The region estimated again around a track (see maskObjects) is large enough for the light of the object in
+        the medians of the neighbouring blocks after they are aligned with the motion of the stars, so none of it
+        is left in the background of the block. """
+
+    drift = (0.04, 0.0)
+    obj = linearObject(30.0, 60, 64, 0.0, 0.0, 0, 1280)
+    handle = _DriftHandle([obj], total_frames=1280, n_stars=0, drift=drift, seed=9)
+    det = MatchedFilterDetector(handle, config)
+    det.frame_first, det.frame_end = 0, 1280
+    det.block_starts, det.block_ends = [0, 256, 512, 768, 1024], [256, 512, 768, 1024, 1280]
+    det.psf_sigma = PSF_SIGMA
+
+    # The motion of the stars given (the synthetic frames have no stars to measure it on)
+    det.starDrift = lambda step=mfd.SLOW_REF_BLOCKS: drift
+    det.backgroundPass()
+
+    k = 2
+    track = np.array([[f, *obj['pos'](f)] for f in range(0, 1280, 8)], dtype=np.float64)
+    det.maskObjects([track])
+
+    # No light of the object above the sky anywhere near its path in the background of the block
+    region = det.backgrounds[k].median[50:79, 20:110]
+    assert np.max(region) - SKY < 3*NOISE
+
+
 ### Light curves, bright objects, photometric scale ###
 
 def test_flashes_kept_in_light_curve(config):

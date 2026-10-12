@@ -656,11 +656,12 @@ class MatchedFilterDetector(object):
             raw.append(self.blockBackground(samples))
             self.timing['background'] += time() - t1
 
-        # The motion of the stars, from the shifts between the medians of the blocks (see starDrift)
+        # The motion of the stars, from the shifts between the medians of the blocks (see starDrift), SLOW_REF_BLOCKS
+        #   blocks apart, or fewer in a short input
         for k, bg in enumerate(raw):
             bg.raw_median = bg.median
             self.backgrounds[k] = bg
-        self._drift = self.starDrift()
+        self._drift = self.starDrift(step=max(1, min(SLOW_REF_BLOCKS, len(raw) - 1)))
         drift = np.array(self._drift, dtype=np.float64)
         mids = [(first + last - 1)/2.0 for first, last in zip(self.block_starts, self.block_ends)]
 
@@ -1306,7 +1307,7 @@ class MatchedFilterDetector(object):
         """ The motion of the stars (px per frame), measured once. """
 
         if getattr(self, '_drift', None) is None:
-            self._drift = self.starDrift()
+            self._drift = self.starDrift(step=max(1, min(SLOW_REF_BLOCKS, len(raw) - 1)))
 
         return self._drift
 
@@ -2295,9 +2296,12 @@ class MatchedFilterDetector(object):
                 continue
 
             # A region around every track, and in it the samples masked where any of the tracks is at the time
-            #   of the sample
+            #   of the sample. The samples are aligned with the motion of the stars to the middle of the block (see
+            #   below), which moves the object in them by up to the motion over the neighbouring blocks: the region
+            #   is enlarged by that much
             bg = self.backgrounds[k]
             mid = (self.block_starts[k] + self.block_ends[k] - 1)/2.0
+            pad_x, pad_y = np.abs(drift)*max(mid - lo, hi - mid)
             for c in tracks:
 
                 # The bounding box of the positions of the track during the neighbouring blocks (with a margin of
@@ -2306,10 +2310,10 @@ class MatchedFilterDetector(object):
                 if sel.sum() == 0:
                     continue
                 pos = c[sel, 1:3]
-                x0 = int(max(np.floor(pos[:, 0].min() - radius - 2), 0))
-                x1 = int(min(np.ceil(pos[:, 0].max() + radius + 3), self.width))
-                y0 = int(max(np.floor(pos[:, 1].min() - radius - 2), 0))
-                y1 = int(min(np.ceil(pos[:, 1].max() + radius + 3), self.height))
+                x0 = int(max(np.floor(pos[:, 0].min() - radius - 2 - pad_x), 0))
+                x1 = int(min(np.ceil(pos[:, 0].max() + radius + 3 + pad_x), self.width))
+                y0 = int(max(np.floor(pos[:, 1].min() - radius - 2 - pad_y), 0))
+                y1 = int(min(np.ceil(pos[:, 1].max() + radius + 3 + pad_y), self.height))
                 if (x1 <= x0) or (y1 <= y0):
                     continue
 
