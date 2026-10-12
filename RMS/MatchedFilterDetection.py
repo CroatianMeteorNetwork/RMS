@@ -3730,7 +3730,11 @@ NEAR_TOLERANCE_FACTOR = 4.0
 
 def connectedOver(detectors):
     """ The light between two points in a frame (see MatchedFilterDetector.connectedLight) from the detector of the
-        segment of the input whose blocks contain the frame, for the detections joined over the segments.
+        segment of the input whose blocks contain the frame, for the detections joined over the segments. A frame of
+        a segment no longer held in memory is read again from the input (counted in the frames read outside the
+        segments): at most 5 frames for a pair of detections, and only for the pairs which become duplicates after
+        the segments are joined (see removeDuplicateDetections), as the pairs within a segment are judged while it
+        is in memory.
 
     Arguments:
         detectors: [list] The detector of every segment, None where it was not searched.
