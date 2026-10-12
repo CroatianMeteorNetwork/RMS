@@ -1055,6 +1055,12 @@ def test_line_keep_long_streak(config):
     assert not mfd.lineKeep(frame, lines)[60, 70]
     assert mfd.lineKeep(frame, lines, window=61)[60, 70]
 
+    # A streak which reaches the edge of the image along the line is kept too (the line is not padded with it)
+    edge = rng.normal(0, 1, (SIZE, SIZE)).astype(np.float32)
+    edge[:, 70] += 5
+    edge[0:20, 70] += 60
+    assert mfd.lineKeep(edge, lines, window=61)[5, 70]
+
     # The window of the detector covers the fastest searched streaks
     config.mf_ang_vel_max = 30.0
     det = MatchedFilterDetector(_SynthHandle([], total_frames=64), config)

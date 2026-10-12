@@ -287,15 +287,25 @@ def lineKeep(frame, lines, level=LINE_KEEP_LEVEL, window=LINE_LOCAL):
 
     keep = np.zeros(frame.shape, dtype=bool)
 
+    def lineLevel(sub):
+        """ The running median along the lines (the first axis of sub). Beyond the ends of a line it is padded with
+            the median of the whole line, so a source which reaches the edge of the image doesn't set the level. """
+
+        pad = window//2
+        base = np.median(sub, axis=0, keepdims=True)
+        padded = np.concatenate([np.repeat(base, pad, axis=0), sub, np.repeat(base, pad, axis=0)], axis=0)
+
+        return ndimage.median_filter(padded, size=(window, 1), mode='nearest')[pad:pad + len(sub)]
+
     # The columns and the rows of the lines, and in them the pixels above the running median along the line
     cols = np.flatnonzero(lines.all(axis=0))
     rows = np.flatnonzero(lines.all(axis=1))
     if cols.size:
         sub = frame[:, cols]
-        keep[:, cols] = (sub - ndimage.median_filter(sub, size=(window, 1), mode='nearest')) > level
+        keep[:, cols] = (sub - lineLevel(sub)) > level
     if rows.size:
         sub = frame[rows, :]
-        keep[rows, :] |= (sub - ndimage.median_filter(sub, size=(1, window), mode='nearest')) > level
+        keep[rows, :] |= ((sub - lineLevel(sub.T).T) > level)
 
     # Grown to cover the source and the wings of its PSF
     if keep.any():
