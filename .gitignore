@@ -20,6 +20,9 @@ flat.*
 # Astrometry.net cache files
 share/astrometry_cache/*
 
+# test data
+Tests/ExampleStationData/*
+
 # Eclipse
 .project
 .pydevproject
