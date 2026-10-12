@@ -3,6 +3,7 @@
 from __future__ import print_function, division, absolute_import
 
 import glob
+import logging
 import multiprocessing
 import os
 import signal
@@ -12,7 +13,8 @@ import time
 import pytest
 
 import RMS.ConfigReader as cr
-from RMS.Logger import LoggingManager, getLogger
+import RMS.Logger
+from RMS.Logger import LoggingManager, getLogger, initChildLogging
 
 
 REPO_CONFIG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.config')
@@ -126,3 +128,33 @@ def test_listener_stops_if_the_logging_process_dies_during_its_start(tmp_path, s
     proc.join(30)
 
     assert not alive
+
+
+def test_child_logging_drops_records_when_the_queue_is_full(monkeypatch):
+    """ A child process which logs into a full queue (e.g. the listener is stalled) drops the record. It must not
+        report the error through the logging, which would go into the same full queue (stderr is redirected into
+        the logging when log_stdout is set) and could hang the child. """
+
+    # A queue which is already full
+    queue = multiprocessing.Queue(1)
+    queue.put('record which fills the queue')
+    queue_full_time = time.time() + 5
+    while queue.empty() and (time.time() < queue_full_time):
+        time.sleep(0.01)
+
+    # Record the errors which the handler reports
+    errors = []
+    monkeypatch.setattr(logging.Handler, 'handleError', lambda self, record: errors.append(record))
+
+    # The logging of this process is restored after, as initChildLogging configures the whole process
+    root = logging.getLogger()
+    old_state = (root.handlers[:], root.level, root.propagate, RMS.Logger._global_logging_manager.logging_queue)
+    try:
+        initChildLogging(queue, None)
+        logging.getLogger('rmslogger').info('record into the full queue')
+
+    finally:
+        root.handlers, _, root.propagate, RMS.Logger._global_logging_manager.logging_queue = old_state
+        root.setLevel(old_state[1])
+
+    assert errors == []

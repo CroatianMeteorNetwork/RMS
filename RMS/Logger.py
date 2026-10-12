@@ -1096,7 +1096,10 @@ def initChildLogging(logging_queue, config):
     for handler in root.handlers[:]:
         root.removeHandler(handler)
 
-    qh = logging.handlers.QueueHandler(logging_queue)
+    # Like in the main process, a record is dropped if the bounded queue is full (e.g. the listener is stalled).
+    #   A plain QueueHandler reports the error through the logging, which goes into the same full queue when
+    #   stderr is redirected into the logging, and the process could hang
+    qh = _DroppingQueueHandler(logging_queue)
     qh.setFormatter(logging.Formatter('%(message)s'))
     if config is not None:
         qh.addFilter(InRmsFilter(config))

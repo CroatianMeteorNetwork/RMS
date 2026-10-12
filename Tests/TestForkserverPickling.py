@@ -143,7 +143,7 @@ def test_queuedpool_worker_reattaches_logging():
         results = pool.getResults()
 
         assert results, "worker produced no result"
-        assert 'QueueHandler' in results[0]   # logging was re-attached in the worker
+        assert any(name.endswith('QueueHandler') for name in results[0])   # logging was re-attached in the worker
     finally:
         pool.shutdownManager()
 
