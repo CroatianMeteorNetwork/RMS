@@ -117,6 +117,13 @@ BRIGHT_LINE_LEVEL = 0.2
 
 # A track which stays within SHADOW_RADIUS (px) of a track at least SHADOW_STRENGTH times stronger (the sum of
 #   the significances of the hits over the square root of their number), for at least SHADOW_OVERLAP of its hits,
+# A detection which follows a longer one at a constant offset along the motion of up to DUPLICATE_ALONG PSF
+#   FWHMs (on the same line) is the same object measured twice (e.g. on the wing or the trail of a very bright
+#   object) if the image is above CONNECTED_LEVEL (in the noise of a frame) all the way between them (see
+#   connectedLight); two objects which move together have no light between them
+DUPLICATE_ALONG = 10.0
+CONNECTED_LEVEL = 5.0
+
 #   moving the same way, is not measured (see removeShadows)
 SHADOW_RADIUS = 20.0
 SHADOW_STRENGTH = 3.0
@@ -1889,6 +1896,37 @@ class MatchedFilterDetector(object):
         return getPolarLine(xa, self.height - ya, xb, self.height - yb, self.height, self.width)
 
 
+    def connectedLight(self, frame, x1, y1, x2, y2):
+        """ The fraction of the segment between two points (unbinned px) which is well above the background
+            (CONNECTED_LEVEL in the noise) in a frame, None if the frame has no background (e.g. outside the frames
+            of this detector). See removeDuplicateDetections.
+        """
+
+        # The block of the frame
+        f = int(round(frame))
+        k = next((k for k, (a, b) in enumerate(zip(self.block_starts, self.block_ends)) if a <= f < b), None)
+        if (k is None) or (k not in self.backgrounds) or (self.backgrounds[k].median is None):
+            return None
+
+        # The frame above the background of its block, in its noise
+        bg = self.backgrounds[k]
+        z = (self.readFrames(f, 1)[0] - bg.median)/bg.noise
+
+        # The segment in the binned image, sampled every half pixel
+        b = self.det_bin
+        p1 = np.array([x1 - (b - 1)/2.0, y1 - (b - 1)/2.0])/b
+        p2 = np.array([x2 - (b - 1)/2.0, y2 - (b - 1)/2.0])/b
+        n = max(2, int(np.ceil(2*np.hypot(*(p2 - p1)))) + 1)
+        t = np.linspace(0, 1, n)[:, None]
+        pts = np.round(p1 + t*(p2 - p1)).astype(int)
+        inside = (pts[:, 0] >= 0) & (pts[:, 0] < self.width) & (pts[:, 1] >= 0) & (pts[:, 1] < self.height)
+        if not inside.any():
+            return None
+        pts = pts[inside]
+
+        return float(np.mean(z[pts[:, 1], pts[:, 0]] > CONNECTED_LEVEL))
+
+
     def joinDetections(self, detections):
         """ Join the pieces of tracks (a faint object can be lost for a while, e.g. behind stars) and remove the
             duplicates. An object can be lost for many seconds while moving only a few PSF widths, so pieces
@@ -1909,7 +1947,9 @@ class MatchedFilterDetector(object):
         detections = joinContinuousDetections(detections, max_gap, 15*fwhm, 2*fwhm, self.height, self.width,
                                               bin_factor=self.det_bin)
 
-        return removeDuplicateDetections(detections, fwhm*self.det_bin, 3*fwhm*self.det_bin)
+        return removeDuplicateDetections(detections, fwhm*self.det_bin, 3*fwhm*self.det_bin,
+                                         connected=self.connectedLight,
+                                         max_connected_along=DUPLICATE_ALONG*fwhm*self.det_bin)
 
 
     def run(self):
