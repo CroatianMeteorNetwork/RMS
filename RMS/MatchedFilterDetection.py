@@ -3628,9 +3628,11 @@ def removeDeviatingDetections(detections, fwhm, fwhm_factor, length_factor):
             ones.
     """
 
+    # The test is off, or the PSF is unknown
     if (fwhm_factor <= 0) or (fwhm is None):
         return list(detections), []
 
+    # Every detection judged on its own
     kept, rejected = [], []
     for det in detections:
         cent = det[2]
@@ -3641,6 +3643,7 @@ def removeDeviatingDetections(detections, fwhm, fwhm_factor, length_factor):
             kept.append(det)
             continue
 
+        # Its deviation from the smooth path against the limit for its PSF and its length
         deviation = trackDeviation(cent)
         limit = fwhm_factor*track_fwhm + length_factor*float(np.hypot(*(cent[-1, 1:3] - cent[0, 1:3])))
         if deviation > limit:
@@ -4151,11 +4154,23 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
     measured = [k for k, det in enumerate(detectors) if (det is not None) and (det.psf_sigma is not None)]
 
     def segmentFWHM(cent):
+        """ The FWHM of the PSF of the segment which a detection belongs to.
+
+        Arguments:
+            cent: [ndarray] Rows of the detection, [frame, x, y, ...].
+
+        Return:
+            [float] FWHM (px, unbinned), None if no segment has a measured PSF.
+        """
+
         if not measured:
             return None
+
+        # The segment of the middle frame of the detection, or the nearest one with a measured PSF
         mid = (cent[0, 0] + cent[-1, 0])/2.0
         k = int(np.clip(np.searchsorted(bounds, mid, side='right') - 1, 0, len(detectors) - 1))
         det = detectors[min(measured, key=lambda j: abs(j - k))]
+
         return 2.355*det.psf_sigma*det.det_bin
 
     detections, deviating = removeDeviatingDetections(detections, segmentFWHM, config.mf_track_deviation_fwhm,

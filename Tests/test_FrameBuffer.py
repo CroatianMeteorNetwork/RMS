@@ -472,6 +472,7 @@ def test_segments_each_have_the_track_cap_and_carry_persistence(monkeypatch):
         persistence_carry_frames = 0
         psf_sigma = None
     def detect(img_handle, config, max_tracks=None, persistence_until=None, track_deviation=True, **kwargs):
+        """ The search of a segment: records its options, finds nothing. """
         calls.append((max_tracks, persistence_until, config.mf_max_tracks, track_deviation))
         det = _Detector()
         det.tracks_measured = 300
