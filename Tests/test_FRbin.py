@@ -6,11 +6,18 @@
 import numpy as np
 import glob
 import os
+import pytest
 
 from RMS.Formats.FRbin import read, writeArray, validFRName
 
 frDataDir = f'{os.path.dirname(__file__)}/ExampleStationData/Stations/FR0012'
 ukDataDir = f'{os.path.dirname(__file__)}/ExampleStationData/Stations/UK0006'
+
+
+def checkDataExists():
+    if not os.path.isdir(f'{frDataDir}'):
+        return False
+    return True
 
 
 def createSyntheticClips(srcdir, srcfile):
@@ -31,6 +38,8 @@ def createSyntheticClips(srcdir, srcfile):
 # arr,_ = createSyntheticClips('./ExampleStationData/Stations/UK0006', 'FR_UK0006_20261011_220419_944_0375808.bin')
 
 def test_read_uk():
+    if not checkDataExists():
+        pytest.skip("Test data not available - did you expand the archive?")
     fr = read(ukDataDir,'FR_UK0006_20261011_220419_944_0375808.bin')
     assert fr.lines == 1
     assert len(fr.frames) == 1
@@ -38,6 +47,8 @@ def test_read_uk():
 
 
 def test_read_fr():
+    if not checkDataExists():
+        pytest.skip("Test data not available - did you expand the archive?")
     fr = read(frDataDir,'FR_FR0012_20261011_211813_064_0306688.bin')
     assert fr.lines == 1
     assert len(fr.frames) == 1
@@ -45,6 +56,8 @@ def test_read_fr():
 
 
 def test_writeArray_uk():
+    if not checkDataExists():
+        pytest.skip("Test data not available - did you expand the archive?")
     clips=[]
     origname = 'UK0006_20261011_220419_944_0375808'
     fname = 'UKTEST_20261011_220419_944_0375808'
@@ -61,6 +74,8 @@ def test_writeArray_uk():
 
 
 def test_writeArray_fr():
+    if not checkDataExists():
+        pytest.skip("Test data not available - did you expand the archive?")
     clips=[]
     origname = 'FR0012_20261011_211813_064_0306688'
     fname = 'FRTEST_20261011_211813_064_0306688'
@@ -82,5 +97,9 @@ def test_validFRName():
     assert validFRName('UKtest.bin') is False
     assert validFRName('FR_UKtest.fits') is False
 
+
+def test_canGetValidFRs():
+    if not checkDataExists():
+        pytest.skip("Test data not available - did you expand the archive?")
     fr_list = [fr for fr in os.listdir(frDataDir) if validFRName(fr)]
     assert 'FR_FR0012_20261011_211813_064_0306688.bin' in fr_list

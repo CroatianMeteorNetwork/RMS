@@ -4,6 +4,7 @@
 
 
 import os
+import pytest
 
 from RMS.ArchiveDetections import selectFiles
 import RMS.ConfigReader as cr
@@ -14,7 +15,15 @@ ukDataDir = f'{os.path.dirname(__file__)}/ExampleStationData/Stations/UK0006'
 plDataDir = f'{os.path.dirname(__file__)}/ExampleStationData/Stations/PL000P'
 
 
+def checkDataExists():
+    if not os.path.isdir(f'{frDataDir}'):
+        return False
+    return True
+
+
 def test_selectFiles_fr():
+    if not checkDataExists():
+        pytest.skip("Test data not available - did you expand the archive?")
     ff_detected = ['FF_FR0012_20261011_233326_818_0542976.fits']
     cfg = cr.parse(f'{frDataDir}/.config')
     sel_files = selectFiles(cfg, frDataDir, ff_detected)
@@ -24,6 +33,8 @@ def test_selectFiles_fr():
 
 
 def test_selectFiles_uk():
+    if not checkDataExists():
+        pytest.skip("Test data not available - did you expand the archive?")
     ff_detected = ['FF_PL000P_20260927_004524_976_0651264.fits']
     cfg = cr.parse(f'{plDataDir}/.config')
     sel_files = selectFiles(cfg, plDataDir, ff_detected)
