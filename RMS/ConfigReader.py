@@ -996,6 +996,15 @@ class Config:
         #   crossed the field), is rejected. 0 turns the test off
         self.mf_line_concentration = 0.5
 
+        # Largest RMS distance of a detection across its direction of motion from one smooth path over its whole
+        #   length (a quadratic in time, which follows the curvature of a real track): mf_track_deviation_fwhm PSF
+        #   FWHMs (the scatter of the measurements) plus mf_track_deviation_length times the length of the track
+        #   (the bending of a long track beyond the smooth path, e.g. by the distortion of a wide-field lens). Both
+        #   are dimensionless, so they hold for cameras of other fields of view. A track which wanders sideways
+        #   more is rejected. mf_track_deviation_fwhm 0 turns the test off
+        self.mf_track_deviation_fwhm = 0.6
+        self.mf_track_deviation_length = 0.005
+
         # Stars brighter than this in the median of the frames (in the noise of the sky in one frame) are masked
         self.mf_star_threshold = 3.0
 
@@ -2413,7 +2422,8 @@ def parseMatchedFilter(config, parser):
     for name in ("mf_threshold", "mf_ang_vel_min", "mf_ang_vel_max", "mf_psf_sigma", "mf_max_pos_error",
                  "mf_min_sample_snr", "mf_star_threshold", "mf_persistence", "mf_clip", "mf_trail_level", "mf_min_displacement",
                  "mf_sigma_scale", "mf_track_significance", "mf_tier_speed", "mf_cloud_max_offset",
-                 "mf_buffer_memory", "mf_line_concentration"):
+                 "mf_buffer_memory", "mf_line_concentration", "mf_track_deviation_fwhm",
+                 "mf_track_deviation_length"):
         if parser.has_option(section, name):
             setattr(config, name, parser.getfloat(section, name))
 
