@@ -1275,8 +1275,7 @@ def writeObservationSummary(night_dir, night_name, config, frames_per_file, n_de
     if os.path.exists(db_path):
         os.remove(db_path)
 
-    working_path = os.path.join(night_dir, getRMSStyleFileName(night_dir,
-                                                               obs.OBSERVATION_SUMMARY_WORKING_NAME_JSON))
+    working_path = getRMSStyleFileName(night_dir, obs.OBSERVATION_SUMMARY_WORKING_NAME_JSON)
     if os.path.exists(working_path):
         os.remove(working_path)
 

@@ -1659,7 +1659,8 @@ def getObservationSummaryDict(data_dir, final=False, config=None):
 
     json_name = OBSERVATION_SUMMARY_NAME_JSON if final else OBSERVATION_SUMMARY_WORKING_NAME_JSON
 
-    observation_summary_json_path = os.path.join(data_dir, getRMSStyleFileName(data_dir, json_name))
+    # getRMSStyleFileName returns the path in the directory (joining the directory again duplicates a relative one)
+    observation_summary_json_path = getRMSStyleFileName(data_dir, json_name)
     if os.path.exists(observation_summary_json_path):
         if os.path.isfile(observation_summary_json_path):
             with open(observation_summary_json_path, "r") as f:
@@ -1729,7 +1730,7 @@ def saveObservationSummaryDict(d, night_dir=None):
         log.warning("saveObservationSummaryDict: night_data_dir does not exist, skipping save: {}".format(night_dir))
         return
 
-    observation_summary_json_path = os.path.join(night_dir, getRMSStyleFileName(night_dir, OBSERVATION_SUMMARY_WORKING_NAME_JSON))
+    observation_summary_json_path = getRMSStyleFileName(night_dir, OBSERVATION_SUMMARY_WORKING_NAME_JSON)
     lock_path = observation_summary_json_path + ".lock"
 
     lock_f = open(lock_path, "w")

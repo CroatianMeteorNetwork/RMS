@@ -93,3 +93,21 @@ def test_days_since_last_detection_without_detection_columns(tmp_path, monkeypat
     conn.close()
 
     assert obs.getDaysSinceLastDetection(config, night_dir, d=d) == "Unknown"
+
+
+def test_summary_with_a_relative_night_directory(tmp_path, monkeypatch):
+    """ Reprocess accepts a relative night directory. The working summary is written into it (not into a nested
+        copy of the relative path), and read back from there. """
+
+    monkeypatch.setattr(obs, 'gatherCameraInformation', lambda config: ('sensor', 'firmware', 'date'))
+
+    config, night_dir = _night(tmp_path)
+    monkeypatch.chdir(str(tmp_path))
+    relative_dir = os.path.relpath(night_dir, str(tmp_path))
+
+    obs.startObservationSummaryReport(config, relative_dir, 36000)
+    obs.addObsParam(obs.getObservationSummaryDict(relative_dir), 'time_last_fits_file', '2026-10-12 05:00:00')
+
+    working = [f for f in os.listdir(night_dir) if f.endswith('_working.json')]
+    assert len(working) == 1
+    assert obs.getObservationSummaryDict(relative_dir)['time_last_fits_file'] == '2026-10-12 05:00:00'
