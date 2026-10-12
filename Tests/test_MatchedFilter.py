@@ -1008,12 +1008,15 @@ def test_bright_object_along_a_strong_bright_column(config):
     """ A column bright enough to be above the level of the masked stars in the median is not masked as a star
         along its length (only compact sources on it are), so a bright object moving along it is detected. """
 
-    obj = linearObject(200.0, 60, 5, 0.0, 0.2, 20, 620)
-    _, detections = runDetector(_BrightColumnHandle([obj], total_frames=640, n_stars=6), config)
+    # A column 8 times the noise above the sky, and one 100 times (whose median spreads into the neighbouring
+    #   columns when the brightness of the stars is smoothed)
+    for level in (8.0, 100.0):
+        obj = linearObject(200.0, 60, 5, 0.0, 0.2, 20, 620)
+        _, detections = runDetector(_BrightColumnHandle([obj], level=level, total_frames=640, n_stars=6), config)
 
-    found = [d for d in detections if np.median(truthError(d[2], obj)) < 0.5]
-    assert len(found) == 1
-    assert (found[0][2][0, 0] < 60) and (found[0][2][-1, 0] > 560)
+        found = [d for d in detections if np.median(truthError(d[2], obj)) < 0.5]
+        assert len(found) == 1
+        assert (found[0][2][0, 0] < 60) and (found[0][2][-1, 0] > 560)
 
 
 def test_bright_line_masked_before_the_trails_are_removed(config):

@@ -887,13 +887,18 @@ class MatchedFilterDetector(object):
         level = background.star_level
         lines = self.lineMask(background)
         if lines.any():
-            level = level.copy()
+
+            # The brightness of the sources before the smoothing (see starTemplate), with the level of the lines
+            #   subtracted there, then smoothed: the smoothing of a very bright line would otherwise spread it into
+            #   the neighbouring columns (rows), above the threshold
+            rel = ((background.median - background.sky)/background.sky_noise).astype(np.float32)
             cols = np.flatnonzero(lines.all(axis=0))
             rows = np.flatnonzero(lines.all(axis=1))
             if cols.size:
-                level[:, cols] -= ndimage.median_filter(level[:, cols], size=(LINE_LOCAL, 1), mode='nearest')
+                rel[:, cols] -= ndimage.median_filter(rel[:, cols], size=(LINE_LOCAL, 1), mode='nearest')
             if rows.size:
-                level[rows, :] -= ndimage.median_filter(level[rows, :], size=(1, LINE_LOCAL), mode='nearest')
+                rel[rows, :] -= ndimage.median_filter(rel[rows, :], size=(1, LINE_LOCAL), mode='nearest')
+            level = cv2.GaussianBlur(rel, (0, 0), 1.0)
         static = cv2.dilate((level > self.opts.star_threshold).astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
 
         # The user mask (0 = masked) and the image border
