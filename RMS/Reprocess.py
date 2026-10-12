@@ -1028,7 +1028,7 @@ if __name__ == "__main__":
             log.info("Using all available cores for detection.")
 
     log.info(f"Starting Observation summary report for {cml_args.dir_path[0]}")
-    startObservationSummaryReport(config, cml_args.dir_path[0], None)
+    startObservationSummaryReport(config, cml_args.dir_path[0], None, reprocessing=True)
 
     # Process the night
     night_archive_dir, archive_name, imgdata_archive_name, metadata_archive_name, detector =  \

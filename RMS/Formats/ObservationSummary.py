@@ -621,6 +621,11 @@ def getDaysSinceLastDetection(config, data_dir, d=None, debug=False):
         conn = getObsDBConn(config)
         storeDictInDB(conn,d, debug=False)
 
+        # The columns of the detections are created when the first detections are stored. Without them (e.g. a
+        #   fresh database of a station run with --nodetect) there is no detection to measure to
+        if not {'detections_after_ml', 'time_last_detection'}.issubset(getColumns(conn)):
+            return "Unknown"
+
         cursor = conn.execute(last_detection_time_for_session_sql)
         row = cursor.fetchone()
 
@@ -1765,7 +1770,7 @@ def saveObservationSummaryDict(d, night_dir=None):
                 pass
         lock_f.close()
 
-def startObservationSummaryReport(config, night_data_dir, duration, force_delete=False):
+def startObservationSummaryReport(config, night_data_dir, duration, force_delete=False, reprocessing=False):
     """ Enters the parameters known at the start of observation into the database.
 
     Arguments:
@@ -1774,6 +1779,8 @@ def startObservationSummaryReport(config, night_data_dir, duration, force_delete
 
     Keyword arguments:
         force_delete: [bool] forces deletion of the observation summary database, default False.
+        reprocessing: [bool] The night is reprocessed after it was captured: the start of the session and its
+            duration recorded by the capture are kept. False by default.
 
     Return:
         [str] message about session.
@@ -1783,11 +1790,17 @@ def startObservationSummaryReport(config, night_data_dir, duration, force_delete
 
     d = getObservationSummaryDict(night_data_dir)
 
-    start_time_object = (datetime.datetime.now(datetime.timezone.utc) -
-                         datetime.timedelta(seconds=1)).replace(tzinfo=datetime.timezone.utc)
-    start_time_object_rounded = start_time_object.replace(microsecond=0)
-    addObsParam(d, "start_time", start_time_object_rounded.isoformat())
-    addObsParam(d, "duration_from_start_of_observation", duration)
+    # The start of the session is the current time, except when the night is reprocessed after it was captured:
+    #   the start and the duration of the capture are kept, not replaced by the time of the reprocessing
+    if reprocessing and d.get('start_time'):
+        log.info("Keeping the start of the session recorded by the capture: {}".format(d['start_time']))
+
+    else:
+        start_time_object = (datetime.datetime.now(datetime.timezone.utc) -
+                             datetime.timedelta(seconds=1)).replace(tzinfo=datetime.timezone.utc)
+        start_time_object_rounded = start_time_object.replace(microsecond=0)
+        addObsParam(d, "start_time", start_time_object_rounded.isoformat())
+        addObsParam(d, "duration_from_start_of_observation", duration)
     addObsParam(d, "stationID", sanitise(config.stationID, space_substitution=""))
 
     if isRaspberryPi():
