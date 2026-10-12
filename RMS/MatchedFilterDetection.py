@@ -1004,6 +1004,32 @@ class MatchedFilterDetector(object):
 
     ### Search ###
 
+    def prepareFrame(self, frame, static, lines=None):
+        """ Prepare a normalized frame for the search, in place: the bright columns and rows masked except near the
+            sources which stand out from them (see lineKeep), the trails of the bright sources removed (see
+            removeTrails), and the static sources masked.
+
+        Arguments:
+            frame: [ndarray] Normalized frame, modified in place.
+            static: [ndarray] Mask of the static sources (True = masked).
+
+        Keyword arguments:
+            lines: [ndarray] Mask of the bright columns and rows (see lineMask), None for none.
+        """
+
+        # The bright columns and rows first, except near the sources which stand out from them (e.g. an object
+        #   moving along a column, which lights the column with its own trail): a line above the level of the
+        #   trails would otherwise be taken for a source whose trails cover the whole frame
+        if (lines is not None) and lines.any():
+            frame[lines & ~lineKeep(frame, lines)] = 0
+
+        # The trails of the bright sources (also of those kept on the lines)
+        self.removeTrails(frame, static)
+
+        # The masked pixels don't take part in the stacks of their neighbours either
+        frame[static] = 0
+
+
     def searchBlock(self, z, static, block_first, stackers, lines=None):
         """ Velocity search of a block of normalized frames.
 
@@ -1032,15 +1058,7 @@ class MatchedFilterDetector(object):
         bins = sorted(set(stacker_bin for _, stacker_bin, _ in stackers))
         zbs = {b: np.empty((len(z), z.shape[1]//b, z.shape[2]//b), dtype=np.float32) for b in bins}
         for i in range(len(z)):
-            self.removeTrails(z[i], static)
-
-            # The bright columns and rows, except near the sources which stand out from them (e.g. an object
-            #   moving along a column, which lights the column with its own trail), see lineKeep
-            if (lines is not None) and lines.any():
-                z[i][lines & ~lineKeep(z[i], lines)] = 0
-
-            # The masked pixels don't take part in the stacks of their neighbours either
-            z[i][static] = 0
+            self.prepareFrame(z[i], static, lines)
 
             # The outliers are clipped once, and the clipped frame binned and smoothed for every bin. The smoothing
             #   is the PSF in binned pixels, which is smaller than a pixel for the coarse bins (the binning itself

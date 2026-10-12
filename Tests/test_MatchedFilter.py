@@ -1016,6 +1016,27 @@ def test_bright_object_along_a_strong_bright_column(config):
     assert (found[0][2][0, 0] < 60) and (found[0][2][-1, 0] > 560)
 
 
+def test_bright_line_masked_before_the_trails_are_removed(config):
+    """ A bright line which is above the level of the trail removal in a frame is masked before the trails of the
+        bright sources are removed, so the line is not taken for a source whose trails cover the whole frame: the
+        other pixels of the frame are kept. """
+
+    det = MatchedFilterDetector(_SynthHandle([], total_frames=64), config)
+    rng = np.random.default_rng(1)
+    frame = rng.normal(0, 1, (SIZE, SIZE)).astype(np.float32)
+    lines = np.zeros((SIZE, SIZE), dtype=bool)
+    lines[:, 90] = True
+    static = np.zeros((SIZE, SIZE), dtype=bool)
+
+    # The line 40 sigma above the sky over its whole length, and a faint object elsewhere
+    frame[:, 90] += 40
+    frame[30, 20] += 8
+    det.prepareFrame(frame, static, lines)
+
+    assert frame[30, 20] > 4
+    assert np.all(frame[:, 90] == 0)
+
+
 ### Light curves, bright objects, photometric scale ###
 
 def test_flashes_kept_in_light_curve(config):
