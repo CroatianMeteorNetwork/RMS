@@ -1927,7 +1927,7 @@ class MatchedFilterDetector(object):
         return float(np.mean(z[pts[:, 1], pts[:, 0]] > CONNECTED_LEVEL))
 
 
-    def joinDetections(self, detections):
+    def joinDetections(self, detections, connected=None):
         """ Join the pieces of tracks (a faint object can be lost for a while, e.g. behind stars) and remove the
             duplicates. An object can be lost for many seconds while moving only a few PSF widths, so pieces
             are joined across any gap in which the object moved less than 15 PSF widths, if the second piece
@@ -1935,6 +1935,10 @@ class MatchedFilterDetector(object):
 
         Arguments:
             detections: [list] Detections as [rho, theta, centroids].
+
+        Keyword arguments:
+            connected: [function] The light between two points in a frame (see connectedLight), e.g. over the
+                segments of an input (see connectedOver). None by default (connectedLight of this detector).
 
         Return:
             [list] The joined detections.
@@ -1948,7 +1952,7 @@ class MatchedFilterDetector(object):
                                               bin_factor=self.det_bin)
 
         return removeDuplicateDetections(detections, fwhm*self.det_bin, 3*fwhm*self.det_bin,
-                                         connected=self.connectedLight,
+                                         connected=connected if connected is not None else self.connectedLight,
                                          max_connected_along=DUPLICATE_ALONG*fwhm*self.det_bin)
 
 
@@ -3709,6 +3713,26 @@ def removePersistentDetections(detections, persistence, fraction, det_bin, max_s
 NEAR_TOLERANCE_FACTOR = 4.0
 
 
+def connectedOver(detectors):
+    """ The light between two points in a frame (see MatchedFilterDetector.connectedLight) from the detector of the
+        segment of the input whose blocks contain the frame, for the detections joined over the segments.
+
+    Arguments:
+        detectors: [list] The detector of every segment, None where it was not searched.
+
+    Return:
+        [function] connected(frame, x1, y1, x2, y2), None for a frame of no searched segment.
+    """
+
+    def connected(frame, x1, y1, x2, y2):
+        for det in detectors:
+            if (det is not None) and det.block_starts and (det.block_starts[0] <= frame < det.block_ends[-1]):
+                return det.connectedLight(frame, x1, y1, x2, y2)
+        return None
+
+    return connected
+
+
 def stitchSegments(segment_detections, cuts, overlaps, detector, tolerance, searched=None):
     """ Join the detections of neighbouring segments of an input. Every overlap of two segments is split at its
         middle: the frames before it belong to the first segment, the ones after it to the second one. An object which crosses the middle is found in both segments: its detections are joined
@@ -4055,7 +4079,7 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
         tolerance = 3*2.355*searched[0].psf_sigma*searched[0].det_bin
         detections = stitchSegments(segment_detections, cuts, overlaps, searched[0], tolerance,
                                     searched=[det is not None for det in detectors])
-        detections = searched[0].joinDetections(detections)
+        detections = searched[0].joinDetections(detections, connected=connectedOver(detectors))
 
         # The pieces cut at the middle of an overlap and not joined again may be no detections any more
         detections = removeInvalidDetections(detections, searched[0])

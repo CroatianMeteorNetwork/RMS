@@ -692,7 +692,7 @@ def test_persistence_kept_past_a_segment_too_short_to_search(monkeypatch):
         psf_sigma = 0.7
         tracks_measured = 0
 
-        def joinDetections(self, detections):
+        def joinDetections(self, detections, connected=None):
             return detections
 
     def detect(img_handle, config, frame_range=None, **kwargs):

@@ -994,6 +994,22 @@ def test_connected_light_along_a_trail(config):
     assert det.connectedLight(f, x, y, x + 7, y + 7) < 0.5
 
 
+def test_connected_light_over_the_segments():
+    """ The light between two points in a frame is taken from the detector of the segment of the input whose
+        blocks contain the frame (the detections joined over the segments span several of them). """
+
+    class _Det(object):
+        def __init__(self, first, end, value):
+            self.block_starts, self.block_ends, self.value = [first], [end], value
+        def connectedLight(self, frame, x1, y1, x2, y2):
+            return self.value
+
+    connected = mfd.connectedOver([_Det(0, 1000, 0.1), None, _Det(900, 2000, 0.9)])
+    assert connected(500, 0, 0, 1, 1) == 0.1
+    assert connected(1500, 0, 0, 1, 1) == 0.9
+    assert connected(5000, 0, 0, 1, 1) is None
+
+
 ### Light curves, bright objects, photometric scale ###
 
 def test_flashes_kept_in_light_curve(config):
