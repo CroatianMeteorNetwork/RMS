@@ -316,6 +316,8 @@ def selectPlatepar(output_dir, config, platepar_path):
         [str] Path of the platepar, None if there is none.
     """
 
+    # The platepars which can be used: the given one, and the carried forward and the automatically fitted
+    #   one if they are enabled
     candidates = [platepar_path]
     if config.monitor_update_platepar:
         candidates.append(latestPlateparPath(output_dir, config))
@@ -857,16 +859,19 @@ def newestPlateparRecalibrations(output_dir, results, recalibrated, config):
         [dict] The recalibrated platepars of those files, keyed by the FF name.
     """
 
+    # The times of the platepars the files were calibrated with (without them, nothing can be filtered)
     times = [info.get('platepar_mtime') for info in results.values() if info.get('platepar_mtime') is not None]
     if not times:
         return recalibrated
 
+    # The FF names of the recalibrated platepars of the files calibrated with the newest platepar
     newest = max(times)
     names = set()
     for results_dir, info in results.items():
         if info.get('platepar_mtime') != newest:
             continue
 
+        # The recalibrated platepars of the file (a damaged file is skipped)
         recalibrated_path = os.path.join(output_dir, results_dir, config.platepars_recalibrated_name)
         if os.path.isfile(recalibrated_path):
             try:
@@ -1415,6 +1420,8 @@ def generateNightReport(output_dir, night_name, config, results=None, archive=Tr
                 results = None
 
         except Exception:
+
+            # A failure doesn't stop the report, the files are reported without the calibration
             log.error("Adding the calibration to the files of night {:s} failed:\n{:s}".format(night_name,
                                                                                               traceback.format_exc()))
 
@@ -1557,6 +1564,7 @@ def generateNightReport(output_dir, night_name, config, results=None, archive=Tr
         if os.path.isfile(os.path.join(night_dir, config.mask_file)):
             mask = loadMask(os.path.join(night_dir, config.mask_file))
 
+        # Without a platepar of the night, the products which need it are skipped
         if (platepar is None) and (config.monitor_shower_association or config.monitor_fov_kml
                                    or config.monitor_flux):
             log.info("Night {:s} has no platepar, the products which need it are skipped".format(night_name))

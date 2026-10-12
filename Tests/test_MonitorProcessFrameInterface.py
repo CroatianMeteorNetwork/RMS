@@ -474,6 +474,7 @@ def test_processFile_without_a_platepar_with_auto_calibration(process_file, tmp_
     run, config, seen = process_file
     config.monitor_auto_calibration = True
 
+    # The output directory, and the results of the file in it
     output_dir = tmp_path/'out'
     output_dir.mkdir()
     results_dir = os.path.join(str(output_dir), '2025', '202512', '20251225', 'dummy')
@@ -485,6 +486,7 @@ def test_processFile_without_a_platepar_with_auto_calibration(process_file, tmp_
     with open(results_platepar, 'w') as f:
         f.write('earlier')
 
+    # The file is processed (up to the detection) without a platepar, the earlier one is removed
     run()
     assert 'config' in seen
     assert not os.path.exists(results_platepar)
@@ -493,6 +495,7 @@ def test_processFile_without_a_platepar_with_auto_calibration(process_file, tmp_
     with open(autoPlateparPath(str(output_dir), config), 'w') as f:
         f.write('auto')
 
+    # The file is processed with the fitted platepar
     run()
     with open(results_platepar) as f:
         assert f.read() == 'auto'
@@ -1134,11 +1137,13 @@ def test_platepar_is_not_required_with_auto_calibration(config_path, tmp_path):
     """ With the automatic calibration the camera starts without a platepar (missing or not given), the other
         files are still required. """
 
+    # Enable the automatic calibration in the config file
     with open(config_path) as f:
         text = f.read()
     with open(config_path, 'w') as f:
         f.write(text.replace('monitor_auto_calibration: false', 'monitor_auto_calibration: true'))
 
+    # A missing or not given platepar is not reported, a missing dark is
     assert mon.missingCameraFiles(config_path, str(tmp_path/'pp.cal')) == []
     assert mon.missingCameraFiles(config_path, None) == []
     assert mon.missingCameraFiles(config_path, None, dark_path=str(tmp_path/'dark.png')) == \
@@ -1228,6 +1233,7 @@ def test_auto_calibration_step_recalibrates_with_a_new_platepar(config_path, tmp
     import RMS.Astrometry.AutoCalibration as ac
     from RMS.MonitorNightReport import autoPlateparPath
 
+    # A camera with the automatic calibration, and the path of its fitted platepar
     config = cr.parse(config_path)
     config.monitor_auto_calibration = True
     output_dir = str(tmp_path/'out')
@@ -1235,10 +1241,14 @@ def test_auto_calibration_step_recalibrates_with_a_new_platepar(config_path, tmp
     auto_path = autoPlateparPath(output_dir, config)
 
     def _install(results_dir, config, output_dir, platepar_path, **kwargs):
+        """ Stand-in for autoCalibrateFile which installs a platepar, the given platepar passes. """
+
+        # The automatic calibration installs a platepar
         with open(auto_path, 'w') as f:
             f.write('auto')
         return {'installed': auto_path, 'current': ({'ok': True} if platepar_path else {})}
 
+    # Record the recalibrations and the backfills instead of running them
     calls = {'recalibrated': [], 'backfilled': []}
     monkeypatch.setattr(ac, 'autoCalibrateFile', _install)
     monkeypatch.setattr(mon, 'recalibrateResults',

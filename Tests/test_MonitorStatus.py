@@ -1734,6 +1734,7 @@ def test_status_reports_the_automatic_calibration(tmp_path):
 
     import RMS.Astrometry.AutoCalibration as ac
 
+    # A camera with the automatic calibration and two processed files
     config = _config()
     config.monitor_auto_calibration = True
     output_dir = tmp_path/'output'
@@ -1742,6 +1743,7 @@ def test_status_reports_the_automatic_calibration(tmp_path):
 
     status = mst.MonitorStatus('XX0001', str(output_dir), str(tmp_path/'input'), config, lambda: [], 2)
 
+    # One installed platepar, and the judgements of the files (the platepar failed on the later one)
     state = ac.readState(str(output_dir))
     state['installs'].append({'jd': 2461000.5, 'path': 'auto.cal', 'reason': 'there is no platepar'})
     ac.writeState(str(output_dir), state)
@@ -1749,9 +1751,11 @@ def test_status_reports_the_automatic_calibration(tmp_path):
         with open(str(output_dir/'2025'/name/ac.FILE_RESULT_NAME), 'w') as f:
             json.dump({'action': 'judged', 'current': {'ok': ok, 'reasons': [] if ok else ['zone r75-100']}}, f)
 
+    # The summary of the processed files
     files = [(os.path.join('2025', name), {}, {}, None) for name in ['f1', 'f2']]
     summary = status._autoCalibration(files)
 
+    # The installed platepar, no pending candidate, and the judgement of the latest file
     assert summary['installs'] == 1
     assert summary['last_install'] == {'path': 'auto.cal', 'reason': 'there is no platepar'}
     assert summary['pending'] is False

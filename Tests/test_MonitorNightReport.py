@@ -455,6 +455,7 @@ def test_night_platepar_only_from_the_newest_platepar(tmp_path):
     config = _config()
     output_dir = str(tmp_path)
 
+    # Two files of the night: one calibrated with an older platepar, one with the newest
     results = {}
     for name, mtime in [('old', 1000.0), ('new', 2000.0)]:
         results_dir = os.path.join('2025', name)
@@ -504,10 +505,12 @@ def test_select_platepar_takes_the_newest_enabled(tmp_path, update, auto, newest
     """ The newest of the given platepar, the carried forward one (monitor_update_platepar) and the automatically
         fitted one (monitor_auto_calibration), each only if enabled. """
 
+    # The platepars which are enabled
     config = _config()
     config.monitor_update_platepar = update
     config.monitor_auto_calibration = auto
 
+    # The given, the carried forward and the automatically fitted platepar
     output_dir = str(tmp_path)
     paths = {'given': str(tmp_path/'given.cal'), 'latest': mnr.latestPlateparPath(output_dir, config),
              'auto': mnr.autoPlateparPath(output_dir, config)}
@@ -564,6 +567,7 @@ def test_night_report_without_a_platepar(tmp_path):
         reported, the products which need the platepar are skipped, and the platepar of the night is the one of
         the latest file which has one. """
 
+    # The products which need the platepar are enabled
     config = _config()
     config.monitor_fov_kml = True
     config.monitor_flux = True
@@ -577,6 +581,7 @@ def test_night_report_without_a_platepar(tmp_path):
     night_state = mnr.generateNightReport(output_dir, NIGHT, config)
     night_dir = mnr.nightDirPath(output_dir, NIGHT, config)
 
+    # Reported without failures, the products which need the platepar skipped, no platepar of the night
     assert 'archive' in night_state['ok_steps']
     assert night_state['failed_steps'] == []
     for step in ['fov_kml', 'flux', 'calibration_report', 'calibration_variation']:

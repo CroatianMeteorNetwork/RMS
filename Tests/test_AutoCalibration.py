@@ -15,6 +15,7 @@ import RMS.Astrometry.AutoCalibration as ac
 from RMS.Formats.Platepar import Platepar
 
 
+# The repository config and a platepar template
 REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REPO_CONFIG = os.path.join(REPO_DIR, '.config')
 TEMPLATE_PLATEPAR = os.path.join(REPO_DIR, 'share', 'platepar_templates', 'template_generic_720p_4mm.cal')
@@ -23,6 +24,7 @@ TEMPLATE_PLATEPAR = os.path.join(REPO_DIR, 'share', 'platepar_templates', 'templ
 def _stars(x, y, fwhm=2.0):
     """ CALSTARS rows of stars at the given positions. """
 
+    # Only the positions, the intensity and the width are set
     x, y = np.atleast_1d(x), np.atleast_1d(y)
     rows = np.zeros((len(x), 8))
     rows[:, ac.STAR_Y] = y
@@ -36,6 +38,7 @@ def _stars(x, y, fwhm=2.0):
 def _score(zone_share, zone_stars=50, recalibrated=10, chunks=10, dist=0.2, mag_stddev=0.08, mag_residual=0.0):
     """ A score with the given values of the zones. """
 
+    # The same values in every zone and chunk, apart from the given match shares
     score = ac.CalibrationScore()
     score.zone_share = np.array(zone_share, dtype=np.float64)
     score.zone_stars = np.full(len(score.zones), zone_stars)
@@ -56,6 +59,7 @@ def test_zones_cover_the_image(width, height):
     """ Every position is in one ring, the positions of the outer frame are in one side, and the sides have a similar
         area for any aspect ratio. """
 
+    # A dense grid of positions over the image
     x, y = np.meshgrid(np.arange(0, width, 4) + 0.5, np.arange(0, height, 4) + 0.5)
     membership = ac.zoneMembership(x.ravel(), y.ravel(), width, height)
     rings, sides = membership[:4], membership[4:]
@@ -69,6 +73,7 @@ def test_zones_cover_the_image(width, height):
 
 
 def test_zone_of_the_corner_and_the_centre():
+    """ The zones of the centre, a corner and the middle of the right edge. """
 
     membership = ac.zoneMembership([256, 2, 510], [256, 2, 256], 512, 512)
     names = ac.zoneNames()
@@ -84,6 +89,7 @@ def test_zone_of_the_corner_and_the_centre():
 ### Clear sky ###
 
 def test_coverage_counts_only_unmasked_cells():
+    """ The coverage of the stars counts only the cells which are mostly not masked. """
 
     # Stars only in the left half
     x, y = np.meshgrid(np.linspace(10, 250, 8), np.linspace(10, 500, 8))
@@ -99,6 +105,7 @@ def test_coverage_counts_only_unmasked_cells():
 def test_clear_chunks():
     """ A chunk is clear if it has enough stars compared to the clearest chunks, which cover the image. """
 
+    # A clear chunk, one with few stars, and one with stars in only a part of the image
     rng = np.random.default_rng(1)
     full = _stars(rng.uniform(0, 512, 200), rng.uniform(0, 512, 200))
     cloudy = full[:40]
@@ -114,12 +121,14 @@ def test_clear_chunks():
 ### Judgement ###
 
 def test_judge_passes_a_platepar_which_fits_everywhere():
+    """ A platepar which fits the stars in all zones passes. """
 
     ok, reasons = ac.judgeScore(_score([0.95]*8))
     assert ok, reasons
 
 
 @pytest.mark.parametrize('kwargs, reason', [
+    # A bad outer ring, few recalibrated chunks, stars far from the catalog, and bad photometry
     ({'zone_share': [0.95, 0.95, 0.95, 0.2, 0.95, 0.95, 0.95, 0.95]}, 'zone r75-100'),
     ({'zone_share': [0.95]*8, 'recalibrated': 5}, 'recalibrated'),
     ({'zone_share': [0.95]*8, 'dist': 0.6}, 'distance'),
@@ -128,13 +137,16 @@ def test_judge_passes_a_platepar_which_fits_everywhere():
     ({'zone_share': [0.95]*8, 'mag_residual': -0.3}, 'photometric residual'),
 ])
 def test_judge_fails(kwargs, reason):
+    """ A platepar fails if a zone, the recalibration, the distances or the photometry are bad. """
 
+    # The platepar fails for the given reason
     ok, reasons = ac.judgeScore(_score(**kwargs))
     assert not ok
     assert any(reason in r for r in reasons), reasons
 
 
 def test_zones_without_enough_stars_are_not_judged():
+    """ A zone with too few stars doesn't fail the platepar. """
 
     score = _score([0.95, 0.95, 0.95, 0.0, 0.95, 0.95, 0.95, 0.95])
     score.zone_stars[3] = ac.MIN_ZONE_STARS - 1
@@ -143,6 +155,7 @@ def test_zones_without_enough_stars_are_not_judged():
 
 
 def test_candidate_comparison():
+    """ A candidate is used only if it passes and is clearly better without being worse in any zone. """
 
     good = _score([0.95]*8)
     edge = _score([0.95, 0.95, 0.9, 0.3, 0.8, 0.8, 0.8, 0.8])
@@ -171,6 +184,7 @@ def _platepar():
     """ A platepar without distortion, so its forward and reverse mappings agree exactly (the forward and reverse
         distortion of the templates are not fitted to each other). """
 
+    # The template without the distortion
     platepar = Platepar()
     assert platepar.read(TEMPLATE_PLATEPAR) is not False
     for name in ['x_poly_fwd', 'y_poly_fwd', 'x_poly_rev', 'y_poly_rev']:
@@ -193,11 +207,13 @@ def test_section_difference_ignores_the_pointing():
 
     assert ac.sectionDifference(platepar, platepar, jd, 2.0)[1] < 0.01
 
+    # A different pointing (rotation and position)
     pointed = copy.deepcopy(platepar)
     pointed.pos_angle_ref += 0.5
     pointed.RA_d += 0.2
     assert ac.sectionDifference(platepar, pointed, jd, 2.0)[1] < 0.2
 
+    # A different distortion
     distorted = copy.deepcopy(platepar)
     distorted.x_poly_rev = distorted.x_poly_rev.copy()
     distorted.y_poly_rev = distorted.y_poly_rev.copy()
@@ -207,7 +223,9 @@ def test_section_difference_ignores_the_pointing():
 
 
 def test_agreeing_subset():
+    """ The largest group of sections which all agree with each other. """
 
+    # Sections 0, 1 and 3 agree with each other, 2 with none
     agree = [[True, True, False, True],
              [True, True, False, True],
              [False, False, True, False],
@@ -223,6 +241,7 @@ def camera(tmp_path, monkeypatch):
     """ A camera with an output directory, and a file whose clear chunks are given directly. The fit and the scoring
         of platepars are replaced: the platepars carry their score in their mag_lev (the worst zone share). """
 
+    # A 512x512 camera with the automatic calibration
     config = cr.parse(REPO_CONFIG)
     config.width, config.height = 512, 512
     config.monitor_auto_calibration = True
@@ -233,27 +252,39 @@ def camera(tmp_path, monkeypatch):
     state = {'jd': 2461000.5, 'candidate_share': 0.95, 'fits': 0}
 
     def _readChunks(results_dir, config):
+        """ The chunks of a file at the current time of the state. """
+
+        # Ten chunks of 150 stars, a minute apart, from the time of the file
         jd = state['jd']
         return [('FF_XX0001_{:d}'.format(i), jd + i/1440.0, _stars(rng.uniform(0, 512, 150),
                                                                    rng.uniform(0, 512, 150)))
                 for i in range(10)], 256
 
     def _scorePlatepar(platepar, chunks, catalog_stars, config, **kwargs):
+        """ The score of the share stored in the mag_lev of the platepar, in the outer ring. """
+
         share = platepar.mag_lev
         return _score([share, 0.95, 0.95, share, 0.95, 0.95, 0.95, 0.95])
 
     def _fitCandidate(chunk_dirs, section_chunks, held_out, catalog_stars, config, **kwargs):
+        """ A candidate with the share of state['candidate_share']. """
+
+        # The fits are counted, the candidate has the share of state['candidate_share']
         state['fits'] += 1
         platepar = _platepar()
         platepar.mag_lev = state['candidate_share']
         return platepar, {'sections': []}
 
+    # Replace the reading of the stars, the fit, the scoring and the catalog
     monkeypatch.setattr(ac, 'readChunks', _readChunks)
     monkeypatch.setattr(ac, 'scorePlatepar', _scorePlatepar)
     monkeypatch.setattr(ac, 'fitCandidate', _fitCandidate)
     monkeypatch.setattr(ac, '_loadCatalog', lambda config, jd: None)
 
     def _process(name, platepar_path=None):
+        """ Run the automatic calibration on the next file, return its judgement. """
+
+        # The results of the file, and the time moves 10 minutes to the next file
         results_dir = str(tmp_path/name)
         os.makedirs(results_dir, exist_ok=True)
         result = ac.autoCalibrateFile(results_dir, config, output_dir, platepar_path)
@@ -264,7 +295,9 @@ def camera(tmp_path, monkeypatch):
 
 
 def _writePlatepar(path, share):
+    """ Write a platepar which scores the given share in the camera fixture, return its path. """
 
+    # The share the platepar scores is stored in its mag_lev
     platepar = _platepar()
     platepar.mag_lev = share
     platepar.write(path)
@@ -273,11 +306,13 @@ def _writePlatepar(path, share):
 
 
 def test_first_platepar_is_installed(camera):
+    """ Without a platepar, a candidate which passes is installed right away. """
 
     from RMS.MonitorNightReport import autoPlateparPath
 
     config, output_dir, state, process = camera
 
+    # The candidate fitted on the first file is installed
     result = process('file1')
     assert result['action'] == 'installed the first platepar'
     assert result['installed'] == autoPlateparPath(output_dir, config)
@@ -290,6 +325,7 @@ def test_first_platepar_is_installed(camera):
 
 
 def test_good_platepar_is_kept_and_checked_periodically(camera, tmp_path):
+    """ A good platepar is kept, and a better one is looked for every interval. """
 
     config, output_dir, state, process = camera
     good = _writePlatepar(str(tmp_path/'good.cal'), 0.95)
@@ -306,6 +342,7 @@ def test_good_platepar_is_kept_and_checked_periodically(camera, tmp_path):
 
 
 def test_failing_platepar_is_replaced_after_confirmation(camera, tmp_path):
+    """ A failing platepar is replaced by a candidate confirmed on later chunks. """
 
     from RMS.MonitorNightReport import autoPlateparPath
 
@@ -324,12 +361,14 @@ def test_failing_platepar_is_replaced_after_confirmation(camera, tmp_path):
     assert result['action'] == 'candidate waits for the confirmation'
     assert state['fits'] == 1
 
+    # Confirmed on the second file after the fit
     result = process('file3', bad)
     assert result['action'] == 'installed the confirmed candidate'
     assert os.path.isfile(autoPlateparPath(output_dir, config))
 
 
 def test_unconfirmed_candidate_is_dropped(camera, tmp_path, monkeypatch):
+    """ A candidate which isn't better on the later chunks is dropped. """
 
     config, output_dir, state, process = camera
     bad = _writePlatepar(str(tmp_path/'bad.cal'), 0.2)
@@ -347,21 +386,25 @@ def test_unconfirmed_candidate_is_dropped(camera, tmp_path, monkeypatch):
 
 
 def test_dry_run_installs_nothing(camera):
+    """ A dry run saves the candidate only, the camera keeps running without a platepar. """
 
     from RMS.MonitorNightReport import autoPlateparPath
 
     config, output_dir, state, process = camera
 
+    # A file processed in a dry run, without a platepar
     results_dir = os.path.join(os.path.dirname(output_dir), 'file1')
     os.makedirs(results_dir)
     result = ac.autoCalibrateFile(results_dir, config, output_dir, None, dry_run=True)
 
+    # Nothing is installed, the candidate is saved only
     assert result['installed'] is None
     assert not os.path.isfile(autoPlateparPath(output_dir, config))
     assert os.path.isfile(os.path.join(output_dir, 'auto_candidate_' + config.platepar_name))
 
 
 def test_not_enough_clear_sky(camera, monkeypatch):
+    """ Without enough clear chunks nothing is judged or fitted. """
 
     config, output_dir, state, process = camera
     monkeypatch.setattr(ac, 'clearChunks', lambda *args, **kwargs: [])
@@ -371,6 +414,7 @@ def test_not_enough_clear_sky(camera, monkeypatch):
 
 
 def test_installing_keeps_the_replaced_platepar(tmp_path):
+    """ Installing a platepar keeps the one it replaces. """
 
     from RMS.MonitorNightReport import autoPlateparPath
 
@@ -385,6 +429,7 @@ def test_installing_keeps_the_replaced_platepar(tmp_path):
 
 
 def test_damaged_state_starts_over(tmp_path):
+    """ A damaged state file is replaced by a new state. """
 
     with open(ac.statePath(str(tmp_path)), 'w') as f:
         f.write('{damaged')
@@ -405,10 +450,14 @@ def test_failed_first_attempt_is_retried_with_more_clear_sky(camera, monkeypatch
 
     # Files of a minute: 4 clear chunks each, the window grows by 4 per file
     def _short(name):
+        """ Process a file of a minute. """
+
+        # The next file begins a minute later
         result = process(name)
         state['jd'] -= 9/1440.0
         return result
 
+    # The first attempt is made with 8 clear chunks, and fails
     assert _short('file1')['action'] == 'not enough clear sky'
     assert _short('file2')['action'].startswith('candidate not better')
     assert state['fits'] == 1
@@ -423,10 +472,12 @@ def test_failed_first_attempt_is_retried_with_more_clear_sky(camera, monkeypatch
 
 
 def test_candidate_with_worse_photometry_is_not_used():
+    """ A candidate whose photometry is worse in a zone is not used. """
 
     current = _score([0.95, 0.95, 0.95, 0.8, 0.95, 0.95, 0.95, 0.95], mag_residual=0.05)
     candidate = _score([0.95]*8, mag_residual=0.2)
 
+    # The candidate is better in the worst zone but its photometry is worse
     better, reason = ac.candidateIsBetter(candidate, current)
     assert not better
     assert 'photometry' in reason

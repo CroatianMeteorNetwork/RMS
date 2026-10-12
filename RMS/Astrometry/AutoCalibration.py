@@ -164,8 +164,19 @@ def chunkCoverage(stars, width, height, mask=None, n_grid=4):
 
 
 def _catalogInFOV(platepar, jd, catalog_stars, lim_mag):
-    """ The catalog stars brighter than the limiting magnitude which are in the field of view. """
+    """ The catalog stars brighter than the limiting magnitude which are in the field of view.
 
+    Arguments:
+        platepar: [Platepar] Platepar.
+        jd: [float] Julian date.
+        catalog_stars: [ndarray] Catalog stars (ra, dec, mag).
+        lim_mag: [float] Limiting magnitude.
+
+    Return:
+        [ndarray] Catalog stars (ra, dec, mag) in the field of view.
+    """
+
+    # The catalog stars within the radius of the field of view around the centre of the image
     fov_radius = getFOVSelectionRadius(platepar)
     _, ra_c, dec_c, _ = xyToRaDecPP([jd2Date(jd)], [platepar.X_res/2], [platepar.Y_res/2], [1], platepar,
                                     extinction_correction=False)
@@ -191,11 +202,13 @@ def matchChunk(platepar, jd, stars, catalog_stars, lim_mag, match_radius):
             nearest catalog star (px, inf without catalog stars) and that catalog star.
     """
 
+    # Without a catalog star nearby, a detected star is at an infinite distance
     stars = np.asarray(stars, dtype=np.float64)
     n = len(stars)
     dist = np.full(n, np.inf)
     cat_ra, cat_dec, cat_mag = np.zeros(n), np.zeros(n), np.zeros(n)
 
+    # The catalog stars brighter than the limiting magnitude in the field of view
     catalog_fov = _catalogInFOV(platepar, jd, catalog_stars, lim_mag)
     if (n == 0) or (len(catalog_fov) == 0):
         return dist, cat_ra, cat_dec, cat_mag
@@ -249,9 +262,12 @@ def recalibrateChunk(platepar, chunk_name, jd, stars, catalog_stars, config, ff_
                                            ff_frames=ff_frames)
 
     finally:
+
+        # The logging is restored also if the recalibration fails
         log.setLevel(previous_level)
         rms_log.setLevel(previous_rms_level)
 
+    # If the recalibration failed, the given platepar is used as it is
     recalibrated = result.get(chunk_name)
     if (recalibrated is not None) and getattr(recalibrated, 'auto_recalibrated', False):
         return recalibrated, True
@@ -281,7 +297,9 @@ class CalibrationScore(object):
     """
 
     def __init__(self):
+        """ An empty score, see the class docstring for the attributes. """
 
+        # The score of every zone, and over all zones and chunks (nan until it is measured)
         self.zones = zoneNames()
         n_zones = len(self.zones)
         self.zone_stars = np.zeros(n_zones, dtype=int)
@@ -301,14 +319,23 @@ class CalibrationScore(object):
 
 
     def judged(self):
-        """ Zones with enough stars to be judged. """
+        """ Zones with enough stars to be judged.
+
+        Return:
+            [ndarray] Boolean array, one value per zone.
+        """
 
         return self.zone_stars >= MIN_ZONE_STARS
 
 
     def worstZoneShare(self):
-        """ The lowest match share of the zones which can be judged, nan if none can be. """
+        """ The lowest match share of the zones which can be judged.
 
+        Return:
+            [float] The share, nan if no zone can be judged.
+        """
+
+        # Only the zones with enough stars are compared
         judged = self.judged()
         if not np.any(judged):
             return np.nan
@@ -317,7 +344,11 @@ class CalibrationScore(object):
 
 
     def magLevScatter(self):
-        """ Scatter of the photometric offset between the chunks (mag), nan with fewer than 2 chunks. """
+        """ Scatter of the photometric offset between the chunks.
+
+        Return:
+            [float] Standard deviation of the offsets (mag), nan with fewer than 2 chunks.
+        """
 
         if len(self.mag_lev) < 2:
             return np.nan
@@ -326,15 +357,22 @@ class CalibrationScore(object):
 
 
     def toDict(self):
-        """ The score as a dictionary which can be saved as JSON (nan as None). """
+        """ The score as a dictionary which can be saved as JSON.
+
+        Return:
+            [dict] The score, with nan as None.
+        """
 
         def _value(v):
+            """ A value which can be saved as JSON. """
+            # Non-finite numbers are saved as None, numpy numbers as Python numbers
             if isinstance(v, (float, np.floating)):
                 return None if not np.isfinite(v) else round(float(v), 4)
             if isinstance(v, (int, np.integer)):
                 return int(v)
             return v
 
+        # The score of every zone, the totals and the photometry of the chunks
         return {
             'zones': {name: {'stars': _value(n), 'share': _value(s), 'dist_fwhm': _value(d),
                              'mag_residual': _value(m)}
@@ -389,10 +427,13 @@ def scorePlatepar(platepar, chunks, catalog_stars, config, ff_frames=256, recali
     vignetting = platepar.vignetting_coeff if platepar.vignetting_coeff is not None else 0.0
     score.vignetting_coeff = vignetting
 
+    # Positions, matches, distances (FWHM) and photometric residuals of the stars of all chunks, and the
+    #   photometry of every chunk
     xs, ys, matched, dists, mag_residuals = [], [], [], [], []
     mag_levs, mag_lev_stddevs = [], []
     for name, jd, stars in chunks:
 
+        # Chunks without stars are skipped
         stars = np.asarray(stars, dtype=np.float64)
         if len(stars) == 0:
             continue
@@ -406,6 +447,7 @@ def scorePlatepar(platepar, chunks, catalog_stars, config, ff_frames=256, recali
         dist, cat_ra, cat_dec, cat_mag = matchChunk(pp, jd, stars, catalog_stars, lim_mag, match_radius)
         is_matched = dist <= match_radius
 
+        # The stars of the chunk, whether they are matched, and their distance from the catalog (FWHM)
         xs.append(stars[:, STAR_X])
         ys.append(stars[:, STAR_Y])
         matched.append(is_matched)
@@ -420,6 +462,7 @@ def scorePlatepar(platepar, chunks, catalog_stars, config, ff_frames=256, recali
             apparent_mags = extinctionCorrectionTrueToApparent(cat_mag[good], cat_ra[good], cat_dec[good], jd, pp)
             radius = np.hypot(stars[good, STAR_X] - pp.X_res/2, stars[good, STAR_Y] - pp.Y_res/2)
 
+            # Fit the photometric offset robustly (with the vignetting coefficient if asked)
             try:
                 params, fit_stddev, _, _, _, _ = photometryFitRobust(
                     stars[good, STAR_INTENSITY], radius, apparent_mags,
@@ -441,6 +484,7 @@ def scorePlatepar(platepar, chunks, catalog_stars, config, ff_frames=256, recali
     if not xs:
         return score
 
+    # The stars of all chunks together
     xs, ys = np.concatenate(xs), np.concatenate(ys)
     matched, dists = np.concatenate(matched), np.concatenate(dists)
     mag_residuals = np.concatenate(mag_residuals)
@@ -459,10 +503,12 @@ def scorePlatepar(platepar, chunks, catalog_stars, config, ff_frames=256, recali
         if score.zone_stars[i] == 0:
             continue
 
+        # Share of the stars of the zone which are matched, and the distance of the matched ones
         score.zone_share[i] = float(np.mean(matched[in_zone]))
         if np.any(matched[in_zone]):
             score.zone_dist[i] = float(np.median(dists[in_zone & matched]))
 
+        # Median photometric residual of the stars of the zone
         zone_residuals = mag_residuals[in_zone & np.isfinite(mag_residuals)]
         if len(zone_residuals):
             score.zone_mag_residual[i] = float(np.median(zone_residuals))
@@ -529,6 +575,7 @@ def judgeScore(score):
         reasons.append('no zone has enough stars')
 
     else:
+        # The share of the worst zone compared to the median zone
         median_share = float(np.nanmedian(score.zone_share[judged]))
         worst = score.worstZoneShare()
         if (median_share <= 0) or (worst < MIN_WORST_ZONE_RATIO*median_share):
@@ -544,10 +591,12 @@ def judgeScore(score):
         reasons.append('no photometric fit')
 
     else:
+        # The scatter of the photometric fits of the chunks
         mag_stddev = float(np.median(score.mag_lev_stddev))
         if mag_stddev > MAX_MAG_STDDEV:
             reasons.append('photometric scatter {:.2f} mag'.format(mag_stddev))
 
+        # The photometric residual of every zone
         residuals = np.abs(score.zone_mag_residual[judged])
         if np.any(residuals > MAX_ZONE_MAG_RESIDUAL):
             worst_zone = score.zones[int(np.nanargmax(np.where(judged, np.abs(score.zone_mag_residual), np.nan)))]
@@ -569,6 +618,7 @@ def candidateIsBetter(candidate, current):
         (better, reason): [tuple] True if the candidate is better, and why (str).
     """
 
+    # The candidate has to pass the judgement itself
     candidate_ok, candidate_reasons = judgeScore(candidate)
     if not candidate_ok:
         return False, 'the candidate fails: ' + '; '.join(candidate_reasons)
@@ -576,6 +626,7 @@ def candidateIsBetter(candidate, current):
     if current is None:
         return True, 'there is no platepar'
 
+    # A failing current platepar is replaced by any candidate which passes
     current_ok, current_reasons = judgeScore(current)
     if not current_ok:
         return True, 'the current platepar fails: ' + '; '.join(current_reasons)
@@ -586,6 +637,7 @@ def candidateIsBetter(candidate, current):
     if np.any(worse):
         return False, 'zone {:s} is worse'.format(candidate.zones[int(np.argmax(worse))])
 
+    # The photometry of the worst zone may not be worse than now
     if np.any(judged):
         candidate_mag = np.nanmax(np.abs(candidate.zone_mag_residual[judged]))
         current_mag = np.nanmax(np.abs(current.zone_mag_residual[judged]))
@@ -638,10 +690,12 @@ def clearChunks(chunks, width, height, mask=None, reference_stars=None, min_star
     if not chunks:
         return []
 
+    # Without a reference of the camera, the clearest of these chunks are the reference
     counts = np.array([len(stars) for _, _, stars in chunks])
     if reference_stars is None:
         reference_stars = np.percentile(counts, CLEAR_REFERENCE_PERCENTILE)
 
+    # Enough stars, which cover the image
     clear = []
     for (name, jd, stars), n in zip(chunks, counts):
         if (n >= max(min_stars, CLEAR_STARS_SHARE*reference_stars)) \
@@ -652,8 +706,17 @@ def clearChunks(chunks, width, height, mask=None, reference_stars=None, min_star
 
 
 def spreadChunks(chunks, n):
-    """ Pick n chunks spread evenly over the given ones (sorted in time). """
+    """ Pick n chunks spread evenly over the given ones.
 
+    Arguments:
+        chunks: [list] Chunks as (name, jd, stars).
+        n: [int] Number of chunks to pick.
+
+    Return:
+        [list] The picked chunks, sorted in time (all of them if there are at most n).
+    """
+
+    # Sorted in time, an even spread is picked only if there are more chunks than wanted
     chunks = sorted(chunks, key=lambda chunk: chunk[1])
     if len(chunks) <= n:
         return chunks
@@ -706,6 +769,7 @@ def sectionDifference(platepar_a, platepar_b, jd, fwhm):
 
     from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
 
+    # A grid of image positions (without the outermost edge) mapped to the sky with the first platepar
     w, h = platepar_a.X_res, platepar_a.Y_res
     gx, gy = np.meshgrid(np.linspace(0.03*w, 0.97*w, 25), np.linspace(0.03*h, 0.97*h, 15))
     gx, gy = gx.ravel(), gy.ravel()
@@ -718,6 +782,8 @@ def sectionDifference(platepar_a, platepar_b, jd, fwhm):
     p0 = np.array([platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref, platepar.F_scale])
 
     def _residuals(params):
+        """ Differences between the grid and the sky positions mapped back with the given pointing (px). """
+
         platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref, platepar.F_scale = params
         x2, y2 = raDecToXYPP(ra, dec, jd, platepar)
         return np.concatenate([x2 - gx, y2 - gy])
@@ -780,6 +846,13 @@ def _jointVignetting(platepar, chunks, catalog_stars, config, ff_frames):
         photometric offset for every chunk (the transparency changes), minimizing the robust scatter of the
         magnitudes. The coefficient is constrained only if the stars reach far enough from the centre.
 
+    Arguments:
+        platepar: [Platepar] Platepar, recalibrated on every chunk first.
+        chunks: [list] Chunks as (name, jd, stars).
+        catalog_stars: [ndarray] Catalog stars (ra, dec, mag).
+        config: [Config] Configuration.
+        ff_frames: [int] Number of frames of a chunk.
+
     Return:
         (coefficient, reason): [tuple] The coefficient (rad/px), or None and the reason why it wasn't fitted.
     """
@@ -790,12 +863,14 @@ def _jointVignetting(platepar, chunks, catalog_stars, config, ff_frames):
     intensities, radii, mags, chunk_index = [], [], [], []
     for k, (name, jd, stars) in enumerate(chunks):
 
+        # Chunks without stars are skipped
         stars = np.asarray(stars, dtype=np.float64)
         if len(stars) == 0:
             continue
 
         pp, _ = recalibrateChunk(platepar, name, jd, stars, catalog_stars, config, ff_frames)
 
+        # The matched stars which are not saturated, the chunk is used only with enough of them
         match_radius = max(1.0, MATCH_RADIUS_FWHM*np.median(stars[:, STAR_FWHM]))
         dist, cat_ra, cat_dec, cat_mag = matchChunk(pp, jd, stars, catalog_stars, config.catalog_mag_limit,
                                                     match_radius)
@@ -804,6 +879,7 @@ def _jointVignetting(platepar, chunks, catalog_stars, config, ff_frames):
         if np.sum(good) < config.min_matched_stars:
             continue
 
+        # Intensity, distance from the centre and apparent catalog magnitude of every star, and its chunk
         intensities.append(stars[good, STAR_INTENSITY])
         radii.append(np.hypot(stars[good, STAR_X] - pp.X_res/2, stars[good, STAR_Y] - pp.Y_res/2))
         mags.append(extinctionCorrectionTrueToApparent(cat_mag[good], cat_ra[good], cat_dec[good], jd, pp))
@@ -823,8 +899,17 @@ def _jointVignetting(platepar, chunks, catalog_stars, config, ff_frames):
     chunk_ids = np.unique(chunk_index)
 
     def _scatter(coefficient):
-        """ Robust scatter of the magnitude residuals, with the median offset of every chunk removed. """
+        """ Robust scatter of the magnitude residuals, with the median offset of every chunk removed.
 
+        Arguments:
+            coefficient: [float] Vignetting coefficient (rad/px).
+
+        Return:
+            [float] Median absolute residual (mag).
+        """
+
+        # The residuals without the photometric offset, then the median of every chunk (its transparency) is
+        #   removed
         residuals = photomLine((intensities, radii), 0.0, coefficient) - mags
         for k in chunk_ids:
             residuals[chunk_index == k] -= np.median(residuals[chunk_index == k])
@@ -840,10 +925,19 @@ def _jointVignetting(platepar, chunks, catalog_stars, config, ff_frames):
 
 
 def _agreeingSubset(n, agree):
-    """ The largest subset of the sections in which every pair agrees (brute force, there are few sections). """
+    """ The largest subset of the sections in which every pair agrees (brute force, there are few sections).
+
+    Arguments:
+        n: [int] Number of sections.
+        agree: [list] n x n list, whether every pair of sections agrees.
+
+    Return:
+        [list] Indices of the sections of the subset.
+    """
 
     import itertools
 
+    # The largest subsets are tried first
     for size in range(n, 0, -1):
         for subset in itertools.combinations(range(n), size):
             if all(agree[i][j] for i, j in itertools.combinations(subset, 2)):
@@ -891,6 +985,7 @@ def fitCandidate(chunk_dirs, section_chunks, held_out, catalog_stars, config, ma
     fits = []
     for name, jd, stars in spreadChunks(section_chunks, N_SECTIONS):
 
+        # Fit the section from scratch
         section = {'chunk': name, 'stars': len(stars)}
         try:
             with contextlib.redirect_stdout(io.StringIO()):
@@ -898,9 +993,12 @@ def fitCandidate(chunk_dirs, section_chunks, held_out, catalog_stars, config, ma
                                                             mask=mask, use_flat=use_flat, verbose=False)
 
         except Exception as e:
+
+            # A section which fails is recorded, the other sections are still fitted
             platepar, paired_stars = None, None
             section['error'] = repr(e)
 
+        # The section is used only if its fit matched enough stars
         section['matched'] = len(paired_stars) if paired_stars else 0
         section['fitted'] = (platepar is not None) and (section['matched'] >= MIN_SECTION_STARS)
         info['sections'].append(section)
@@ -908,6 +1006,7 @@ def fitCandidate(chunk_dirs, section_chunks, held_out, catalog_stars, config, ma
         if section['fitted']:
             fits.append((name, jd, platepar, section))
 
+    # Enough sections are needed to compare them
     if len(fits) < MIN_SECTIONS:
         info['reason'] = 'only {:d} sections could be fitted'.format(len(fits))
         return None, info
@@ -922,6 +1021,7 @@ def fitCandidate(chunk_dirs, section_chunks, held_out, catalog_stars, config, ma
         agree[i][j] = agree[j][i] = (p95 <= MAX_SECTION_DIFF_P95) and (dmax <= MAX_SECTION_DIFF_MAX)
         fits[i][3].setdefault('differences_fwhm', {})[fits[j][0]] = [round(p95, 3), round(dmax, 3)]
 
+    # The largest group of sections which agree with each other
     subset = _agreeingSubset(len(fits), agree)
     info['agreeing_sections'] = [fits[i][0] for i in subset]
     if len(subset) < MIN_SECTIONS:
@@ -988,7 +1088,14 @@ MAX_HISTORY = 200
 
 
 def statePath(output_dir):
-    """ Path of the state file of the automatic calibration of a camera. """
+    """ Path of the state file of the automatic calibration of a camera.
+
+    Arguments:
+        output_dir: [str] Output directory of the camera.
+
+    Return:
+        [str] Path of the state file.
+    """
 
     return os.path.join(output_dir, STATE_NAME)
 
@@ -998,27 +1105,41 @@ class _StateLock(object):
         files in parallel judge and fit one at a time and see each other's results. """
 
     def __init__(self, output_dir):
+        """ The lock of the camera with the given output directory. """
+
         self.path = os.path.join(output_dir, STATE_NAME + '.lock')
         self.fd = None
 
     def __enter__(self):
+        """ Wait for the lock and take it. """
+
         import fcntl
         self.fd = open(self.path, 'w')
         fcntl.flock(self.fd, fcntl.LOCK_EX)
         return self
 
     def __exit__(self, *args):
+        """ Release the lock. """
+
         import fcntl
         fcntl.flock(self.fd, fcntl.LOCK_UN)
         self.fd.close()
 
 
 def readState(output_dir):
-    """ Read the state of the automatic calibration of a camera (a new state if there is none or it is damaged). """
+    """ Read the state of the automatic calibration of a camera.
+
+    Arguments:
+        output_dir: [str] Output directory of the camera.
+
+    Return:
+        [dict] The state, a new state if there is none or it is damaged.
+    """
 
     state = {'files': [], 'star_counts': [], 'last_attempt_jd': None, 'pending': None, 'installs': [],
              'history': []}
 
+    # The saved state replaces the defaults
     path = statePath(output_dir)
     if os.path.isfile(path):
         try:
@@ -1026,6 +1147,8 @@ def readState(output_dir):
                 state.update(json.load(f))
 
         except Exception as e:
+
+            # A damaged state is not fatal, the camera starts over
             log.warning("The state of the automatic calibration can't be read ({:s}), starting over".format(
                 repr(e)))
 
@@ -1033,8 +1156,14 @@ def readState(output_dir):
 
 
 def writeState(output_dir, state):
-    """ Write the state of the automatic calibration atomically. """
+    """ Write the state of the automatic calibration atomically.
 
+    Arguments:
+        output_dir: [str] Output directory of the camera.
+        state: [dict] The state.
+    """
+
+    # Written to a temporary file first, so a reader never sees a partial state
     path = statePath(output_dir)
     with open(path + '.tmp', 'w') as f:
         json.dump(state, f, indent=4, sort_keys=True, default=_jsonDefault)
@@ -1042,8 +1171,16 @@ def writeState(output_dir, state):
 
 
 def _jsonDefault(value):
-    """ JSON conversion of numpy values. """
+    """ JSON conversion of numpy values.
 
+    Arguments:
+        value: A value json can't convert itself.
+
+    Return:
+        A value json can convert.
+    """
+
+    # numpy numbers as Python numbers (non-finite as None), arrays as lists, anything else as text
     if isinstance(value, np.integer):
         return int(value)
     if isinstance(value, np.floating):
@@ -1057,6 +1194,10 @@ def _jsonDefault(value):
 def readChunks(results_dir, config):
     """ The chunks of a file from the CALSTARS file in its results directory.
 
+    Arguments:
+        results_dir: [str] Results directory of the file.
+        config: [Config] Configuration.
+
     Return:
         (chunks, ff_frames): [tuple] Chunks as (name, jd, stars) sorted in time, and the frames of a chunk.
     """
@@ -1065,10 +1206,12 @@ def readChunks(results_dir, config):
     from RMS.Formats import CALSTARS
     from RMS.Formats.FFfile import filenameToDatetime
 
+    # The CALSTARS file of the file
     names = [name for name in os.listdir(results_dir) if name.startswith('CALSTARS') and name.endswith('.txt')]
     if not names:
         return [], 256
 
+    # The chunks with their times (a chunk whose name has no time is skipped)
     calstars, ff_frames = CALSTARS.readCALSTARS(results_dir, sorted(names)[0])
     chunks = []
     for name, stars in calstars:
@@ -1081,13 +1224,22 @@ def readChunks(results_dir, config):
 
 
 def _platepar(path, use_flat):
-    """ Read a platepar, None if there is none. """
+    """ Read a platepar.
+
+    Arguments:
+        path: [str] Path of the platepar, None if there is none.
+        use_flat: [bool] Whether the images are flat fielded.
+
+    Return:
+        [Platepar] The platepar, None if there is none or it can't be read.
+    """
 
     from RMS.Formats.Platepar import Platepar
 
     if (path is None) or (not os.path.isfile(path)):
         return None
 
+    # A platepar which can't be read is none
     platepar = Platepar()
     if platepar.read(path, use_flat=use_flat) is False:
         return None
@@ -1117,14 +1269,18 @@ def installPlatepar(platepar, output_dir, config, reason, dry_run=False):
 
     from RMS.MonitorNightReport import _writePlatepar, autoPlateparPath
 
+    # In a dry run the platepar is saved as a candidate, which is not used
     path = autoPlateparPath(output_dir, config)
     if dry_run:
         path = os.path.join(output_dir, 'auto_candidate_' + config.platepar_name)
 
     elif os.path.isfile(path):
+
+        # The replaced platepar is kept with the time it was replaced
         stamp = datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S')
         os.replace(path, os.path.join(output_dir, 'auto_replaced_{:s}_{:s}'.format(stamp, config.platepar_name)))
 
+    # Written atomically, as the workers may be reading it
     _writePlatepar(platepar, path)
     log.info("Automatic calibration: {:s} platepar saved to {:s} ({:s})".format(
         'candidate' if dry_run else 'new', path, reason))
@@ -1159,6 +1315,7 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
             newly installed platepar.
     """
 
+    # The chunks of the file, without them there is nothing to judge
     use_flat = config.use_flat
     chunks, ff_frames = readChunks(results_dir, config)
     result = {'results_dir': results_dir, 'platepar': platepar_path, 'action': None}
@@ -1186,12 +1343,14 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
                                'clear': clear_names})
         state['files'] = sorted(state['files'], key=lambda entry: entry['end_jd'])[-MAX_HISTORY:]
 
+        # The clear chunks of the files in the window, with the directories of their CALSTARS files
         window, chunk_dirs = [], {}
         for entry in state['files']:
             if (entry['end_jd'] > end_jd) or (entry['end_jd'] < end_jd - WINDOW_MINUTES/1440.0) \
                     or (not entry['clear']) or (not os.path.isdir(entry['results_dir'])):
                 continue
 
+            # The chunks of this file are already read
             file_chunks = chunks if (entry['results_dir'] == results_dir) else readChunks(entry['results_dir'],
                                                                                          config)[0]
             for chunk in file_chunks:
@@ -1202,6 +1361,7 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
         result['clear_chunks'] = len(clear_names)
         result['window_clear_chunks'] = len(window)
 
+        # Without enough clear sky, nothing is judged or fitted
         if len(window) < MIN_CLEAR_CHUNKS:
             result['action'] = 'not enough clear sky'
             writeState(output_dir, state)
@@ -1236,12 +1396,15 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
 
         if pending:
 
+            # The chunks later than the ones the candidate was fitted on, it waits until they span
+            #   CONFIRM_MINUTES
             later = [chunk for chunk in window if chunk[1] > pending['fitted_jd']]
             if (not later) or (later[-1][1] - pending['fitted_jd'] < CONFIRM_MINUTES/1440.0):
                 result['action'] = 'candidate waits for the confirmation'
                 writeState(output_dir, state)
                 return _saveFileResult(results_dir, result)
 
+            # Both platepars are scored on the same later chunks
             confirm_chunks = spreadChunks(later, MAX_HELD_OUT)
             candidate = _platepar(pending['path'], use_flat)
             candidate_score = scorePlatepar(candidate, confirm_chunks, catalog_stars, config, ff_frames=ff_frames)
@@ -1251,6 +1414,7 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
             result['pending'] = {'better': better, 'reason': reason, 'score': candidate_score.toDict()}
             state['pending'] = None
 
+            # A confirmed candidate is installed
             if better:
                 path = installPlatepar(candidate, output_dir, config, 'confirmed: ' + reason, dry_run=dry_run)
                 state['installs'].append({'jd': end_jd, 'path': path, 'reason': 'confirmed: ' + reason,
@@ -1273,6 +1437,7 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
             writeState(output_dir, state)
             return _saveFileResult(results_dir, result)
 
+        # Record the attempt, then fit the candidate
         state['last_attempt_jd'] = end_jd
         state['last_attempt_clear'] = len(window)
         candidate, info = fitCandidate(chunk_dirs, pool, held_out, catalog_stars, config, mask=mask,
@@ -1281,12 +1446,14 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
                                        ff_frames=ff_frames)
         result['candidate'] = info
 
+        # Without a candidate (e.g. too few sections agree), the next attempt is made later
         if candidate is None:
             result['action'] = 'no candidate: ' + info.get('reason', '')
             log.info("Automatic calibration: no candidate platepar ({:s})".format(info.get('reason', '')))
             writeState(output_dir, state)
             return _saveFileResult(results_dir, result)
 
+        # Judge the candidate on the held-out chunks, against the current platepar
         candidate_score = scorePlatepar(candidate, held_out, catalog_stars, config, ff_frames=ff_frames)
         better, reason = candidateIsBetter(candidate_score, current_score)
         result['candidate']['better'] = better
@@ -1322,7 +1489,15 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
 
 
 def _loadCatalog(config, jd):
-    """ The catalog stars down to the limiting magnitude of the config, with the proper motion at the given time. """
+    """ The catalog stars down to the limiting magnitude of the config, with the proper motion at the given time.
+
+    Arguments:
+        config: [Config] Configuration.
+        jd: [float] Julian date.
+
+    Return:
+        [ndarray] Catalog stars (ra, dec, mag).
+    """
 
     from RMS.Astrometry.AutoPlatepar import loadCatalogStars
 
@@ -1330,9 +1505,19 @@ def _loadCatalog(config, jd):
 
 
 def _saveFileResult(results_dir, result):
-    """ Save the judgement of the calibration of a file to its results directory, and return it. """
+    """ Save the judgement of the calibration of a file to its results directory.
+
+    Arguments:
+        results_dir: [str] Results directory of the file.
+        result: [dict] The judgement.
+
+    Return:
+        [dict] The judgement.
+    """
 
     try:
+
+        # Written to a temporary file first, so the status never reads a partial result
         with open(os.path.join(results_dir, FILE_RESULT_NAME + '.tmp'), 'w') as f:
             json.dump(result, f, indent=4, sort_keys=True, default=_jsonDefault)
         os.replace(os.path.join(results_dir, FILE_RESULT_NAME + '.tmp'), os.path.join(results_dir, FILE_RESULT_NAME))

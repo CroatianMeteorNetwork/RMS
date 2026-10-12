@@ -1183,10 +1183,20 @@ class MonitorStatus(object):
 
 
     def _autoCalibration(self, files):
-        """ The state of the automatic calibration of the camera, see RMS.Astrometry.AutoCalibration. """
+        """ The state of the automatic calibration of the camera, see RMS.Astrometry.AutoCalibration.
+
+        Arguments:
+            files: [list] Processed files of the night as (results_dir, info, file_result, _), results_dir
+                relative to the output directory.
+
+        Return:
+            [dict] The number of installed platepars, the last one, whether a candidate waits for the
+                confirmation, and the judgement of the latest judged file.
+        """
 
         from RMS.Astrometry.AutoCalibration import FILE_RESULT_NAME, readState
 
+        # The installed platepars and a pending candidate, from the state of the camera
         state = readState(self.output_dir)
         summary = {'installs': len(state['installs']), 'pending': state.get('pending') is not None}
         if state['installs']:
@@ -1198,6 +1208,7 @@ class MonitorStatus(object):
             if not os.path.isfile(result_path):
                 continue
 
+            # A damaged judgement is skipped
             try:
                 with open(result_path) as f:
                     result = json.load(f)
@@ -1205,6 +1216,7 @@ class MonitorStatus(object):
             except ValueError:
                 continue
 
+            # What was done, and whether the platepar passed
             summary['latest'] = {'results_dir': results_dir, 'action': result.get('action'),
                                  'platepar_ok': result.get('current', {}).get('ok'),
                                  'reasons': result.get('current', {}).get('reasons', [])}
