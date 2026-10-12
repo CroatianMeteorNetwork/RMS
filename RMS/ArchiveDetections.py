@@ -14,6 +14,7 @@ from RMS.Routines import MaskImage
 from Utils.GenerateThumbnails import generateThumbnails
 from Utils.StackFFs import stackFFs
 from Utils.LogArchiver import makeLogArchives
+from RMS.Formats.FRbin import validFRName
 
 
 # Get the logger from the main module
@@ -78,7 +79,7 @@ def selectFiles(config, dir_path, ff_detected):
 
 
         # Take all FR bin files, and their parent FF bin files
-        if upload_frs and ('FR' in file_name) and ('.bin' in file_name):
+        if upload_frs and validFRName(file_name):
 
             fr_split = file_name.split('_')
 
@@ -280,8 +281,8 @@ def archiveDetections(captured_path, archived_path, ff_detected, config, extra_f
             os.path.basename(captured_path))
 
         # Create the imgdata set which is the union of the sets of FF files and FR files
-        imgdata_set = (set([item for item in file_list if item.startswith("FF") and item.endswith(".fits")]) |
-                       set([item for item in file_list if item.startswith("FR") and item.endswith(".bin")]))
+        imgdata_set = (set([item for item in file_list if validFFName(item)]) |
+                       set([item for item in file_list if validFRName(item)]))
 
         # Create the metadata set which is all the files from _detected excluding the files in imgdata_set,
         # (*.fits and *.bin)
@@ -416,4 +417,3 @@ if __name__ == "__main__":
     archive_name, metadata_name, imgdata_name = archiveDetections(captured_path, archived_path, ff_detected, config)
 
     print(archive_name, metadata_name, imgdata_name)
-
