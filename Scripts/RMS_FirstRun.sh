@@ -187,13 +187,20 @@ read -n1 -r -p 'Press ENTER to generate the SSH key (recommended), or Q to skip 
 
 if [[ "$key" = "" ]]; then
   echo ""
-  echo "Generating a new SSH key..."
 
-  # Generate an SSH key without a passphrase
-  yes y | ssh-keygen -t rsa -m PEM -N "" -f ~/.ssh/id_rsa >/dev/null
+  # Keep an existing key (e.g. the first run is repeated after an interruption): the server only knows the
+  # public key which was sent, so replacing it would stop the uploads
+  if [[ -f ~/.ssh/id_rsa ]]; then
+    echo "An SSH key already exists, it is kept: ~/.ssh/id_rsa"
+  else
+    echo "Generating a new SSH key..."
+
+    # Generate an SSH key without a passphrase
+    ssh-keygen -t rsa -m PEM -N "" -f ~/.ssh/id_rsa >/dev/null
+  fi
 
   # Link the public SSH key to desktop
-  ln -s ~/.ssh/id_rsa.pub ~/Desktop/id_rsa.pub
+  ln -sf ~/.ssh/id_rsa.pub ~/Desktop/id_rsa.pub
 
   echo ""
   echo "A file called id_rsa.pub appeared on Desktop, please send this file to Denis "
