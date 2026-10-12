@@ -6,12 +6,12 @@
 # Usage: sudo ./Scripts/UpdateBuffers.sh
 #
 # This script checks and optionally updates UDP buffer sizes to handle
-# GStreamer's UDP source requirements (512KB per camera). Default Linux
-# settings are often too small, causing GStreamer warnings.
+# GStreamer's UDP source requirements (rtspsrc udp-buffer-size, default 16MB).
+# Default Linux settings are often too small, causing dropped frames.
 #
 # The script will:
 # - Show current buffer sizes
-# - Warn if below recommended values (512KB min, 1MB recommended)
+# - Warn if below recommended values (1MB min, 16MB recommended)
 # - Create backup of original settings
 # - Update settings if confirmed
 # - Show before/after comparison
@@ -24,8 +24,8 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # Configuration
-RECOMMENDED_SIZE=1048576  # 1MB in bytes
-MIN_RECOMMENDED=524288    # 512KB in bytes (GStreamer requested size)
+RECOMMENDED_SIZE=16777216  # 16MB in bytes - must be >= rtspsrc udp-buffer-size in BufferedCapture.py
+MIN_RECOMMENDED=1048576    # 1MB in bytes (old default; below this UDP RtspSrc bursts overflow)
 
 # Function to convert bytes to human readable format
 human_readable() {
@@ -51,11 +51,11 @@ show_settings() {
     # Check if buffers are below recommended size
     local update_needed=false
     if [ $current_rmem_max -lt $MIN_RECOMMENDED ] || [ $current_wmem_max -lt $MIN_RECOMMENDED ]; then
-        echo -e "WARNING: Current buffer sizes are below the minimum recommended size (512KB)"
+        echo -e "WARNING: Current buffer sizes are below the minimum recommended size ($(human_readable $MIN_RECOMMENDED))"
         echo "This may cause issues with GStreamer UDP buffer allocation."
         update_needed=true
     elif [ $current_rmem_max -lt $RECOMMENDED_SIZE ] || [ $current_wmem_max -lt $RECOMMENDED_SIZE ]; then
-        echo -e "NOTE: Current buffer sizes are below the recommended size (1MB)"
+        echo -e "NOTE: Current buffer sizes are below the recommended size ($(human_readable $RECOMMENDED_SIZE))"
         echo "Increasing them would provide more headroom for UDP operations."
         update_needed=true
     fi
@@ -97,7 +97,7 @@ echo "Creating sysctl drop-in file: $SYSCTL_DROP_IN"
 cat > "$SYSCTL_DROP_IN" << EOF
 # RMS UDP Buffer Configuration
 # Created by UpdateBuffers.sh on $(date)
-# Required for GStreamer UDP streaming (512KB min per camera)
+# Required for GStreamer UDP streaming (rtspsrc udp-buffer-size, default 16MB)
 
 net.core.rmem_max=$RECOMMENDED_SIZE
 net.core.wmem_max=$RECOMMENDED_SIZE
@@ -106,6 +106,16 @@ EOF
 echo "Created $SYSCTL_DROP_IN with:"
 echo "  net.core.rmem_max=$RECOMMENDED_SIZE"
 echo "  net.core.wmem_max=$RECOMMENDED_SIZE"
+
+# Comment out any rmem_max/wmem_max lines left in /etc/sysctl.conf.
+# It loads after our drop-in at boot and would otherwise override it.
+SYSCTL_CONF="/etc/sysctl.conf"
+if [ -f "$SYSCTL_CONF" ] && grep -Eq '^[[:space:]]*net\.core\.(rmem|wmem)_max[[:space:]]*=' "$SYSCTL_CONF"; then
+    echo -e "\nFound conflicting UDP buffer settings in $SYSCTL_CONF; disabling them so the drop-in wins at boot."
+    cp -n "$SYSCTL_CONF" "${SYSCTL_CONF}.rms.bak" && echo "Backed up to ${SYSCTL_CONF}.rms.bak"
+    sed -i -E 's@^([[:space:]]*net\.core\.(rmem|wmem)_max[[:space:]]*=.*)@# Disabled by UpdateBuffers.sh: \1@' "$SYSCTL_CONF"
+    echo "Commented out stale rmem_max/wmem_max lines in $SYSCTL_CONF"
+fi
 
 # Apply changes immediately
 echo "Applying changes..."

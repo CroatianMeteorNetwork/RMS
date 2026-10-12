@@ -27,7 +27,7 @@ import time
 import datetime
 import copy
 import os.path
-from multiprocessing import Process, Event, Value, Array
+from multiprocessing import Process, Value, Array
 import threading
 from collections import deque
 import os
@@ -42,17 +42,24 @@ import json
 
 from RMS.Misc import obfuscatePassword
 from RMS.Routines.GstreamerCapture import GstVideoFile, getStructureValue
-from RMS.Formats.ObservationSummary import getObsDBConn, addObsParam
+from RMS.Formats.ObservationSummary import addObsParam, getObservationSummaryDict
 from RMS.RawFrameSave import RawFrameSaver
-from RMS.Misc import RmsDateTime, mkdirP, UTCFromTimestamp
+from RMS.Misc import RmsDateTime, mkdirP, UTCFromTimestamp, frameBufferShape, runWithTimeout, AtomicFlag
 from RMS.Formats import FTfile, FTStruct
-from RMS.Logger import LoggingManager, getLogger, gstDebugLogger
+from RMS.Logger import LoggingManager, getLogger, gstDebugLogger, getLoggingQueue, initChildProcess
 from RMS.CaptureModeSwitcher import switchCameraMode
 from RMS.RealtimeVideoDetection import RealtimeVideoDetector
 import Utils.CameraControl as cc
 
 # Get the logger from the main module
 log = getLogger("rmslogger")
+
+# Hard cap (seconds) on a single GStreamer set_state(NULL) during teardown. A wedged
+# rtspsrc (camera connected but unresponsive) can make set_state(NULL) block far longer
+# than its own teardown-timeout, freezing the capture loop's heartbeat until the watchdog
+# force-kills the process. Bounding it well under the watchdog timeout (180 s) lets a
+# stuck teardown be abandoned so capture keeps its heartbeat and is never force-killed.
+GST_TEARDOWN_TIMEOUT = 10
 
 if sys.version_info[0] < 3:
     # py2
@@ -98,6 +105,26 @@ class RtspProbeResult:
     UNKNOWN_ERROR = "UNKNOWN_ERROR"        # Other connection errors
 
 
+def validVideoCrop(crop_str):
+    """ Validate a video_crop string of the form 'top=N bottom=N left=N right=N'
+        (any subset of sides; values must be non-negative integers).
+
+    Arguments:
+        crop_str: [str] The video_crop value from the config.
+
+    Return:
+        [bool] True if the string is a well-formed videocrop spec, False otherwise.
+    """
+
+    valid_keys = {"top", "bottom", "left", "right"}
+    for token in crop_str.split():
+        key, sep, val = token.partition("=")
+        if not sep or key not in valid_keys or not val.isdigit():
+            return False
+
+    return True
+
+
 class BufferedCapture(Process):
     """ Capture from device to buffer in memory.
     """
@@ -109,9 +136,10 @@ class BufferedCapture(Process):
         """ Populate arrays with (startTime, frames) after startCapture is called.
         
         Arguments:
-            array1: numpy array in shared memory that is going to be filled with frames
+            array1: multiprocessing.Array base for the frame buffer that is going to be
+                filled with frames (numpy views are rebuilt per-process)
             start_time1: float in shared memory that holds time of first frame in array1
-            array2: second numpy array in shared memory
+            array2: multiprocessing.Array base for the second frame buffer
             start_time2: float in shared memory that holds time of first frame in array2
 
         Keyword arguments:
@@ -134,19 +162,24 @@ class BufferedCapture(Process):
 
         # make sure the flags are always real shared Values
         if daytime_mode is None:
-            self.daytime_mode = Value(ctypes.c_bool, False)       # default: "night"
+            self.daytime_mode = Value(ctypes.c_bool, False, lock=False)       # default: "night"
         else:
             self.daytime_mode = daytime_mode
 
         if camera_mode_switch_trigger is None:
-            self.camera_mode_switch_trigger = Value(ctypes.c_bool, False)
+            self.camera_mode_switch_trigger = Value(ctypes.c_bool, False, lock=False)
         else:
             self.camera_mode_switch_trigger = camera_mode_switch_trigger
 
-        # Store shared memory arrays and values for compressor (these are designed for multiprocessing)
-        self.array1 = array1
+        # Store shared memory arrays and values for compressor (these are designed for multiprocessing).
+        # array1/array2 are multiprocessing.Array BASE objects (picklable across forkserver/spawn).
+        # The numpy views over them are rebuilt in run() so they stay backed by shared memory; a
+        # numpy view passed here would pickle by value and disconnect this process from the buffer.
+        self.array1_base = array1
+        self.array2_base = array2
+        self.array1 = None
+        self.array2 = None
         self.start_time1 = start_time1
-        self.array2 = array2
         self.start_time2 = start_time2
         self.start_time1.value = 0
         self.start_time2.value = 0
@@ -163,21 +196,29 @@ class BufferedCapture(Process):
             # Frame saving block size - these many raw frames are written to buffer before saving to disk
             self.num_raw_frames = 10
 
-            self.start_raw_time1 = Value('d', 0.0)
-            self.start_raw_time2 = Value('d', 0.0)
+            self.start_raw_time1 = Value('d', 0.0, lock=False)
+            self.start_raw_time2 = Value('d', 0.0, lock=False)
             self.shared_timestamps_base = Array(ctypes.c_double, self.num_raw_frames)
             self.shared_timestamps_base2 = Array(ctypes.c_double, self.num_raw_frames)
 
         # Initialize shared counter for dropped frames
-        self.dropped_frames = Value('i', 0)
+        # lock=False: the capture child is the only writer (increments), the
+        # main process only reads - and stopCapture() SIGKILLs the child before
+        # reading, so a locked Value could be orphaned mid-increment and wedge
+        # the read forever (same class as the Compressor.stop() deadlock).
+        # A 32-bit int store/load is single-copy atomic on all supported
+        # platforms, including ARMv7.
+        self.dropped_frames = Value('i', 0, lock=False)
         self.last_daytime_mode = None  # Track day/night transitions
         self.dropped_frames_timestamps = deque()  # Track when frames were dropped for 10-min window
 
         # Flag for process control
-        self.exit = Event()
+        self.exit = AtomicFlag()
 
         # Heartbeat timestamp for watchdog - updated every frame block to detect hangs
-        self.heartbeat = Value('d', 0.0)
+        # lock=False: single writer, and a locked Value can deadlock the watchdog if this
+        # process is killed while holding the lock
+        self.heartbeat = Value('d', 0.0, lock=False)
 
         # Initialize sync tick
         self.last_sync_tick = -1
@@ -190,6 +231,10 @@ class BufferedCapture(Process):
         # handle for the Gst bus-poller thread
         self._bus_should_exit = False
         self._bus_thread = None
+
+        # Grab the logging queue on the parent side so the child can re-attach logging
+        # under the 'forkserver'/'spawn' start methods (handlers are not inherited there)
+        self.logging_queue = getLoggingQueue()
 
         # The real-time-video detector if so enabled
         self.realtime_video_detector = None
@@ -261,7 +306,7 @@ class BufferedCapture(Process):
         """
         
         self.cameraID = cameraID
-        self.exit = Event()
+        self.exit = AtomicFlag()
 
         self.start()
     
@@ -1165,19 +1210,43 @@ class BufferedCapture(Process):
 
         # Define the source up to the point where we want to branch off
         source_to_tee = (
-            "rtspsrc name=src buffer-mode=1 {:s} "
+            # udp-buffer-size: per-socket RTP receive buffer. rtspsrc defaults to
+            # 512KB, which can overflow during bitrate bursts and shows
+            # up as UDP RcvbufErrors -> dropped frames. The configured size
+            # (default 16MB) gives bursts room.
+            # NOTE: net.core.rmem_max must be >= this value (see Scripts/UpdateBuffers.sh)
+            # or the kernel clamps it back. Only affects the UDP transport path.
+            "rtspsrc name=src buffer-mode=1 udp-buffer-size={:d} {:s} "
             "location=\"{:s}\" ! "
             "rtph264depay ! h264parse ! tee name=t"
-            ).format(protocol_str, device_url)
+            ).format(self.config.udp_buffer_size, protocol_str, device_url)
+
+        # Optionally scale and/or crop the source video before further processing.
+        # videoscale/videocrop run on raw decoded frames, ahead of videoconvert.
+        video_scale = ''
+        if self.config.video_scale_width is not None and self.config.video_scale_height is not None:
+            video_scale = "videoscale ! video/x-raw,width={:d},height={:d} ! ".format(
+                self.config.video_scale_width, self.config.video_scale_height)
+        elif (self.config.video_scale_width is not None) or (self.config.video_scale_height is not None):
+            log.warning("video_scale ignored: both video_scale_width and video_scale_height must be set")
+
+        video_crop = ''
+        if self.config.video_crop is not None:
+            if validVideoCrop(self.config.video_crop):
+                video_crop = "videocrop {:s} ! ".format(self.config.video_crop)
+            else:
+                log.warning("video_crop ignored: malformed value %r (expected e.g. "
+                            "'top=N bottom=N left=N right=N', non-negative ints)", self.config.video_crop)
 
         # Branch for processing
+        queue_size = self.config.gst_queue_size
         processing_branch = (
             "t. ! queue ! {:s} ! "
-            "queue leaky=downstream max-size-buffers=100 max-size-bytes=0 max-size-time=0 ! "
+            "queue leaky=downstream max-size-buffers={:d} max-size-bytes=0 max-size-time=0 ! {:s}{:s}"
             "videoconvert ! video/x-raw,format={:s} ! "
-            "queue max-size-buffers=100 max-size-bytes=0 max-size-time=0 ! "
-            "appsink max-buffers=100 drop=true sync=0 name=appsink"
-            ).format(gst_decoder, video_format)
+            "queue max-size-buffers={:d} max-size-bytes=0 max-size-time=0 ! "
+            "appsink max-buffers={:d} drop=true sync=0 name=appsink"
+            ).format(gst_decoder, queue_size, video_scale, video_crop, video_format, queue_size, queue_size)
         
          # Branch for storage - if video_file_dir is not None, save the raw stream to a file
         if video_file_dir is not None:
@@ -1265,10 +1334,20 @@ class BufferedCapture(Process):
             
             except Exception as e:
                 log.error("Attempt {} failed: {}".format(attempt + 1, str(e)))
-                # Clean up any partial pipeline that was created
+                # Clean up any partial pipeline that was created. Time-bound like the
+                # releaseResources teardowns: in the reconnect case the frame savers are
+                # already running, so an unbounded hang here would freeze the heartbeat
+                # and recreate the watchdog-kill -> orphan scenario.
                 if hasattr(self, 'pipeline') and self.pipeline:
                     try:
-                        self.pipeline.set_state(Gst.State.NULL)
+                        ok, _, _ = runWithTimeout(
+                            self.pipeline.set_state, args=(Gst.State.NULL,),
+                            timeout=GST_TEARDOWN_TIMEOUT,
+                            on_late_completion=lambda: log.info(
+                                "createGstreamDevice: abandoned cleanup set_state(NULL) finally unwound"))
+                        if not ok:
+                            log.warning("createGstreamDevice: cleanup set_state(NULL) hung >%ds - "
+                                        "abandoning partial pipeline", GST_TEARDOWN_TIMEOUT)
                         self.pipeline = None
                     except Exception as cleanup_e:
                         log.error("Error cleaning up failed pipeline: {}".format(cleanup_e))
@@ -1483,6 +1562,19 @@ class BufferedCapture(Process):
                     width = getStructureValue(structure, 'width')
                     height = getStructureValue(structure, 'height')
 
+                    # Based on camera settings and optional video_scale/video_crop parameters, the decoded frame size is what
+                    # gets written into the fixed-size capture arrays (sized to config
+                    # width/height). Warn if they disagree: a smaller frame is silently
+                    # zero-padded into the top-left of the array, while a larger one may cause overflows
+                    # and may abort the capture block. (ROI is applied separately and may
+                    # legitimately shrink the frame further, so only warn, never abort.)
+                    if width != self.config.width or height != self.config.height:
+                        log.warning("video output is {:d}x{:d} but config "
+                                    "width/height is {:d}x{:d}; set width/height to match the "
+                                    "source video/scaled+cropped size (smaller frames are zero-padded, larger "
+                                    "ones abort capture)".format(width, height,
+                                                                 self.config.width, self.config.height))
+
                     if self.config.gst_colorspace == 'GRAY8':
                         self.frame_shape = (height, width)
                     else:
@@ -1503,11 +1595,11 @@ class BufferedCapture(Process):
                     # Set the video device type
                     self.video_device_type = "gst"
 
-                    conn = getObsDBConn(self.config)
-                    try:
-                        addObsParam(conn, "media_backend", self.video_device_type)
-                    finally:
-                        conn.close()
+                    if self.night_data_dir is not None and os.path.isdir(self.night_data_dir):
+                        try:
+                            addObsParam(getObservationSummaryDict(self.night_data_dir), "media_backend", "gst")
+                        except Exception as e:
+                            log.warning("Could not record media_backend in observation summary: {}".format(e))
 
                     return True
 
@@ -1516,17 +1608,23 @@ class BufferedCapture(Process):
                     self.media_backend_override = True
                     self.releaseResources()
 
-                    conn = getObsDBConn(self.config)
-                    try:
-                        addObsParam(conn, "media_backend", self.video_device_type)
-                    finally:
-                        conn.close()
+
+
 
             if self.config.media_backend == 'v4l2':
                 try:
                     log.info("Initialize OpenCV Device with v4l2.")
                     self.device = cv2.VideoCapture(self.config.deviceID, cv2.CAP_V4L2)
                     self.device.set(cv2.CAP_PROP_CONVERT_RGB, 0)
+
+                    # Note: video_device_type stays "cv2" - downstream logic (isOpened check,
+                    # first-frame skipping) treats v4l2 as an OpenCV device. Only the recorded
+                    # media_backend label is "v4l2".
+                    if self.night_data_dir is not None and os.path.isdir(self.night_data_dir):
+                        try:
+                            addObsParam(getObservationSummaryDict(self.night_data_dir), "media_backend", "v4l2")
+                        except Exception as e:
+                            log.warning("Could not record media_backend in observation summary: {}".format(e))
 
                     return True
                 
@@ -1540,6 +1638,12 @@ class BufferedCapture(Process):
             elif (self.config.media_backend == 'cv2') or self.media_backend_override:
                 log.info("Initialize OpenCV Device.")
                 self.device = cv2.VideoCapture(self.config.deviceID)
+
+                if self.night_data_dir is not None and os.path.isdir(self.night_data_dir):
+                    try:
+                        addObsParam(getObservationSummaryDict(self.night_data_dir), "media_backend", "cv2")
+                    except Exception as e:
+                        log.warning("Could not record media_backend in observation summary: {}".format(e))
 
                 return True
 
@@ -1565,14 +1669,6 @@ class BufferedCapture(Process):
         # Reset timestamp correction whenever resources are released
         self.last_pts_correction_ns = 0
         self.last_running_time_ns = None
-
-        def _timedCall(fn, timeout_s=2):
-            """Run *fn()* in a daemon thread and wait *timeout_s*.
-            Returns True if the call finished in time."""
-            th = threading.Thread(target=fn, daemon=True)
-            th.start()
-            th.join(timeout_s)
-            return not th.is_alive()
 
         # stop frame-saver children
         log.debug("releaseResources: Calling releaseRawArrays()")
@@ -1605,27 +1701,53 @@ class BufferedCapture(Process):
                                     Gst.MessageType.EOS | Gst.MessageType.ERROR)
                 log.debug(f"releaseResources: timed_pop_filtered returned: {msg}")
 
-                log.debug("releaseResources: Setting pipeline to NULL state")
-                ret = self.pipeline.set_state(Gst.State.NULL)
-                log.debug(f"releaseResources: set_state returned: {ret}")
-                
-                log.debug("releaseResources: Getting pipeline state (2 second timeout)")
-                ret, state, pending = self.pipeline.get_state(2*Gst.SECOND)
-                log.debug(f"releaseResources: get_state returned: ret={ret}, state={state}, pending={pending}")
-                
-                # Check if we actually reached NULL state
-                if state != Gst.State.NULL:
-                    log.warning("releaseResources: Graceful shutdown failed, pipeline stuck in state %s", state)
-                    raise Exception("Pipeline stuck, forcing shutdown")
-                    
-                log.debug("releaseResources: Graceful shutdown successful")
-                
+                # set_state(NULL) can block indefinitely when rtspsrc is wedged on a
+                # connected-but-unresponsive camera (TEARDOWN never completes). Run it with
+                # a hard timeout so a stuck teardown can't freeze the heartbeat and trip the
+                # watchdog into a force-kill (which orphans children and leaks memory).
+                log.debug("releaseResources: Setting pipeline to NULL state (timeout %ds)", GST_TEARDOWN_TIMEOUT)
+                ok, ret, exc = runWithTimeout(self.pipeline.set_state,
+                                              args=(Gst.State.NULL,),
+                                              timeout=GST_TEARDOWN_TIMEOUT,
+                                              on_late_completion=lambda: log.info(
+                                                  "releaseResources: abandoned set_state(NULL) finally unwound"))
+                if not ok:
+                    # Teardown hung. Abandon it (the call keeps running in a daemon thread,
+                    # holding the old pipeline until it eventually unwinds) and drop our
+                    # reference below. Do NOT retry/verify - keeping capture alive matters
+                    # more than a clean teardown of an already-dead camera.
+                    log.warning("releaseResources: set_state(NULL) did not return within %ds - "
+                                "abandoning teardown to keep capture alive (pipeline left to GC)",
+                                GST_TEARDOWN_TIMEOUT)
+                else:
+                    if exc is not None:
+                        raise exc
+                    log.debug(f"releaseResources: set_state returned: {ret}")
+
+                    log.debug("releaseResources: Getting pipeline state (2 second timeout)")
+                    ret, state, pending = self.pipeline.get_state(2*Gst.SECOND)
+                    log.debug(f"releaseResources: get_state returned: ret={ret}, state={state}, pending={pending}")
+
+                    # Check if we actually reached NULL state
+                    if state != Gst.State.NULL:
+                        log.warning("releaseResources: Graceful shutdown failed, pipeline stuck in state %s", state)
+                        raise Exception("Pipeline stuck, forcing shutdown")
+
+                    log.debug("releaseResources: Graceful shutdown successful")
+
             except Exception as e:
                 log.warning("releaseResources: Graceful shutdown failed (%s), forcing pipeline shutdown", e)
-                
-                # Force shutdown - just set to NULL without waiting
-                log.debug("releaseResources: Force setting pipeline to NULL state")
-                self.pipeline.set_state(Gst.State.NULL)
+
+                # Force shutdown - also time-bounded so the force path can't hang either.
+                log.debug("releaseResources: Force setting pipeline to NULL state (timeout %ds)", GST_TEARDOWN_TIMEOUT)
+                fok, _, _ = runWithTimeout(self.pipeline.set_state,
+                                           args=(Gst.State.NULL,),
+                                           timeout=GST_TEARDOWN_TIMEOUT,
+                                           on_late_completion=lambda: log.info(
+                                               "releaseResources: abandoned forced set_state(NULL) finally unwound"))
+                if not fok:
+                    log.warning("releaseResources: forced set_state(NULL) also hung >%ds - abandoning",
+                                GST_TEARDOWN_TIMEOUT)
                 # Don't wait for state change - just proceed with cleanup
 
             # wake poller
@@ -1666,7 +1788,8 @@ class BufferedCapture(Process):
 
             try:
                 if hasattr(self.device, "release"):                      # OpenCV branch
-                    if not _timedCall(self.device.release):
+                    rok, _, _ = runWithTimeout(self.device.release, timeout=2)
+                    if not rok:
                         log.warning("releaseResources: cap.release() hung - fd dropped")
 
                 # For GStreamer devices (AppSink), cleanup happens automatically when
@@ -1765,8 +1888,9 @@ class BufferedCapture(Process):
 
             # Store current array configuration
             self.current_raw_frame_shape = frame_shape
+            self.raw_array_shape = array_shape
             self.current_mode = self.daytime_mode.value if self.daytime_mode is not None else False
-            
+
             return True
 
         except Exception as e:
@@ -1779,6 +1903,16 @@ class BufferedCapture(Process):
         """ Main process function - initializes all process-specific resources and runs capture loop.
         """
         try:
+            # Re-establish logging and signal handling in the child (no-op under 'fork')
+            initChildProcess(self.logging_queue, self.config)
+
+            # Rebuild numpy views over the shared frame buffers in this process. Under
+            # forkserver/spawn the views cannot be inherited, so build them here from the
+            # shared multiprocessing.Array base objects (same shared memory the Compressor maps).
+            frame_buffer_shape = frameBufferShape(self.config)
+            self.array1 = np.ctypeslib.as_array(self.array1_base.get_obj()).reshape(frame_buffer_shape)
+            self.array2 = np.ctypeslib.as_array(self.array2_base.get_obj()).reshape(frame_buffer_shape)
+
             log.debug("Initializing process-specific resources...")
 
             # Initialize heartbeat for watchdog
@@ -2194,13 +2328,17 @@ class BufferedCapture(Process):
 
                         else:
                             # Initialize new frame saver
+                            # Pass the multiprocessing.Array base objects (not numpy views), so the
+                            # saver rebuilds its own views over the same shared memory under
+                            # forkserver/spawn (a view would pickle by value and disconnect it).
                             self.raw_frame_saver = RawFrameSaver(
                                 self.saved_frames_dir,
-                                self.shared_raw_array, self.start_raw_time1,
-                                self.shared_raw_array2, self.start_raw_time2,
-                                self.sharedTimestamps, self.sharedTimestamps2,
+                                self.shared_raw_array_base, self.start_raw_time1,
+                                self.shared_raw_array_base2, self.start_raw_time2,
+                                self.shared_timestamps_base, self.shared_timestamps_base2,
                                 self.daytime_mode.value,
-                                self.config
+                                self.config,
+                                self.raw_array_shape
                             )
                             self.raw_frame_saver.start()
                             self.raw_frame_count = 0
@@ -2348,14 +2486,16 @@ class BufferedCapture(Process):
                             # Force device re-initialization by releasing and reconnecting
                             log.info("Releasing resources to re-initialize video device with GStreamer")
                             self.releaseResources()
+
                             wait_for_reconnect = True
                             break
 
                         self.last_daytime_mode = current_daytime
 
                         # Calculate buffer fill percentage based on max frame age
-                        # The appsink has max-buffers=100, so at fps rate, max capacity is ~100/fps seconds
-                        max_buffer_time = 100.0 / self.config.fps  # Theoretical max buffer time in seconds
+                        # The appsink has max-buffers=gst_queue_size, so at fps rate, max
+                        # capacity is ~gst_queue_size/fps seconds
+                        max_buffer_time = float(self.config.gst_queue_size) / self.config.fps  # Theoretical max buffer time in seconds
                         buffer_fill_percent = min(100, (max_frame_age_seconds / max_buffer_time) * 100)
 
                         # Calculate dropped frames in last 10 minutes
@@ -2537,10 +2677,13 @@ if __name__ == "__main__":
     print('Media backend: {}'.format(config.media_backend))
 
 
-    # Init dummy shared memory
-    sharedArrayBase = multiprocessing.Array(ctypes.c_uint8, 256*(config.width)*(config.height))
-    sharedArray = np.ctypeslib.as_array(sharedArrayBase.get_obj())
-    sharedArray = sharedArray.reshape(256, (config.height), (config.width))
+    # Init dummy shared memory. Pass the multiprocessing.Array base (not a numpy view) to
+    # BufferedCapture, which rebuilds its own view in run() - matching the production path and
+    # keeping it working under the forkserver/spawn start methods.
+    frame_buffer_shape = frameBufferShape(config)
+    frame_buffer_len = frame_buffer_shape[0]*frame_buffer_shape[1]*frame_buffer_shape[2]
+    sharedArrayBase = multiprocessing.Array(ctypes.c_uint8, frame_buffer_len)
+    sharedArray = sharedArrayBase
     startTime = multiprocessing.Value('d', 0.0)
 
 
@@ -2559,7 +2702,7 @@ if __name__ == "__main__":
         # Initialize the realtime video detector if enabled
         bc.createRealtimeVideoDetector()
         bc.initVideoDevice()
-        
+
 
         # Read at least 256 frames from the first video file
         for i in range(256):

@@ -27,7 +27,8 @@ from RMS.Formats.Showers import FluxShowers, loadRadiantShowers
 from Utils.Flux import calculatePopulationIndex, calculateMassIndex, computeFlux, detectClouds, fluxParser, \
     calculateFixedBins, calculateZHR, massVerniani, loadShower
 from RMS.Routines.SolarLongitude import unwrapSol
-from RMS.Misc import formatScientific, roundToSignificantDigits, SegmentedScale, mkdirP
+from RMS.Misc import formatScientific, roundToSignificantDigits, SegmentedScale, mkdirP, \
+    setMultiprocessingStartMethod
 from RMS.QueuedPool import QueuedPool
 
 # Map FileNotFoundError to IOError in Python 2 as it does not exist
@@ -1821,6 +1822,10 @@ def saveBatchFluxCSV(fbr, dir_path, output_filename):
 
 
 if __name__ == "__main__":
+
+    # Pin the multiprocessing start method for consistent behavior across Python versions
+    # (3.6-3.14). Must be done before any Process/Pool is created.
+    setMultiprocessingStartMethod()
 
     import argparse
 

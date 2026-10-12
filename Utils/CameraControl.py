@@ -964,16 +964,18 @@ def dvripCall(cam, cmd, opts, camera_settings_path='./camera_settings.json'):
         return
 
 
-def cameraControl(camera_ip, cmd, opts='', camera_settings_path='./camera_settings.json'):
+def cameraControl(camera_ip, camera_user, camera_pwd, cmd, opts='', camera_settings_path='./camera_settings.json'):
     """CameraControl - main entry point to the module
 
     Args:
         camera_ip (string): IPAddress of camera in dotted form eg 192.168.1.10
+        camera_user: username to login
+        camera_pwd: password of user
         cmd (string): Command to be executed
         opts (array of strings): Optional array of field, subfield and value for the SetParam command
     """
     # Process the IP camera control command
-    cam = dvr.DVRIPCam(camera_ip)
+    cam = dvr.DVRIPCam(camera_ip, user=camera_user, password=camera_pwd)
     if cam.login():
         try:
             dvripCall(cam, cmd, opts, camera_settings_path)
@@ -985,8 +987,13 @@ def cameraControl(camera_ip, cmd, opts='', camera_settings_path='./camera_settin
     cam.close()
 
 
-def cameraControlV2(config, cmd, opts=''):
-    """High-level entry point that uses config to figure out IP and path."""
+def cameraControlV2(config, cmd, opts='', camera_user=None, camera_pwd=None):
+    """High-level entry point that uses config to figure out IP and path.
+
+    The camera credentials are taken from the device URL in the config by default
+    (e.g. rtsp://192.168.42.10:554/user=admin&password=&channel=1&stream=0.sdp).
+    The camera_user/camera_pwd arguments, if given, override the config values.
+    """
 
     if str(config.deviceID).isdigit():
         log.info('Error: this utility only works with IP cameras')
@@ -994,8 +1001,19 @@ def cameraControlV2(config, cmd, opts=''):
     # extract IP from config file
     camera_ip = re.findall(r"[0-9]+(?:\.[0-9]+){3}", config.deviceID)[0]
 
+    # Extract credentials from the device URL, falling back to DVRIPCam's defaults
+    # (admin / empty password) when the URL does not contain them
+    def extractField(pattern, text, default):
+        matches = re.findall(pattern, text)
+        return matches[0] if matches else default
+
+    if camera_user is None:
+        camera_user = extractField(r'user=([^&]*)', config.deviceID, 'admin')
+    if camera_pwd is None:
+        camera_pwd = extractField(r'password=([^&]*)', config.deviceID, '')
+
     # camera_settings_path is sanity checked in ConfigReader so no checks needed here
-    cameraControl(camera_ip, cmd, opts, camera_settings_path=config.camera_settings_path)
+    cameraControl(camera_ip, camera_user, camera_pwd, cmd, opts, camera_settings_path=config.camera_settings_path)
 
 
 if __name__ == '__main__':
@@ -1046,6 +1064,20 @@ if __name__ == '__main__':
         help="Path to a config file which will be used instead of the default one."
     )
 
+    parser.add_argument(
+        '-u', '--user',
+        type=str,
+        default=None,
+        help="Camera username (overrides the user in the config device URL)."
+    )
+
+    parser.add_argument(
+        '-p', '--password',
+        type=str,
+        default=None,
+        help="Camera password (overrides the password in the config device URL)."
+    )
+
     cml_args = parser.parse_args()
     cmd = cml_args.command[0]
     if cml_args.options is not None:
@@ -1060,7 +1092,7 @@ if __name__ == '__main__':
         log.info('Error: command "%s" not supported', cmd)
         exit(1)
 
-    cameraControlV2(config, cmd, opts)
+    cameraControlV2(config, cmd, opts, camera_user=cml_args.user, camera_pwd=cml_args.password)
 
 
 """Known Field mappings

@@ -6,6 +6,9 @@ from time import time
 
 import numpy as np
 cimport numpy as np
+
+# Initialize the NumPy C API (explicit for clarity: Cython 3 (required to build against NumPy 2) emits it itself)
+np.import_array()
 cimport cython
 
 
@@ -195,7 +198,7 @@ def getAllPoints(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y
     point1_index = np.where(np.all(point_list == np.array((x1, y1, z1)), axis=1))[0]
 
     # Check if the first point exists, if not start from the point closes to the given point
-    if not point1_index:
+    if point1_index.size == 0:
 
         best_distance = np.inf
 
@@ -484,8 +487,11 @@ def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=3] frames, \
 
             max_val = compressed[0, y, x]
 
-            # Compute the threshold limit
-            avg_std = int(float(compressed[2, y, x]) + k1*float(compressed[3, y, x])) + j1
+            # Keep the original truncation order while making both narrowing conversions explicit.
+            avg_std = <unsigned int> (
+                <int> (<double> compressed[2, y, x] + k1*<double> compressed[3, y, x])
+                + <double> j1
+            )
 
             # Make sure the threshold limit is not above the maximum possible value
             if avg_std > 255:

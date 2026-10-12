@@ -260,6 +260,11 @@ class FrameDisplay:
             self._mpl_ready = False
 
 
+# On-screen key legend, toggled with the 'h' key while viewing
+KEY_LEGEND = "Keys: SPACE pause | 1 prev file | 2 next line | q quit | h hide keys"
+show_key_legend = True
+
+
 def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=None, hide=False,
         avg_background=False, split=False, add_timestamp=False, add_frame_number=False, append_ff_to_video=False,
          add_shower_name=False, associations={}):
@@ -283,6 +288,8 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
         append_ff_to_video: [bool] Append image with meteor to video
 
     """
+
+    global show_key_legend
 
     if extract_format is None:
         extract_format = 'png'
@@ -459,6 +466,10 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
 
                 # Resize large frames so they fit comfortably on screen.
                 display_image = resizeImageIfNeed(img)
+
+                # Draw the key legend
+                if show_key_legend:
+                    addTextToImage(display_image, KEY_LEGEND, 10, 40)
                 # Abort preview if the backend fails so we can continue processing.
                 if not display or not display.showFrame(display_image):
                     if display:
@@ -483,6 +494,7 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
                 # Space key: pause display.
                 # 1: previous file.
                 # 2: next line.
+                # h: toggle the key legend.
                 # q: Quit.
                 key = display.waitKey(wait_time)
 
@@ -491,13 +503,18 @@ def view(dir_path, ff_path, fr_path, config, save_frames=False, extract_format=N
                         display.destroyWindow()
                     return -1
 
-                elif key == ord("2"): 
+                elif key == ord("2"):
                     break
 
-                elif key == ord(" "): 
-                    
+                elif key == ord(" "):
+
                     # Pause/unpause video
                     pause_flag = not pause_flag
+
+                elif key == ord("h"):
+
+                    # Toggle the on-screen key legend
+                    show_key_legend = not show_key_legend
 
                 elif key == ord("q"):
                     os._exit(0)
@@ -673,6 +690,7 @@ if __name__ == "__main__":
             Space: pause display.
             1: previous file.
             2: next line.
+            h: toggle the on-screen key legend.
             q: Quit.
             """, formatter_class=argparse.RawTextHelpFormatter)
 

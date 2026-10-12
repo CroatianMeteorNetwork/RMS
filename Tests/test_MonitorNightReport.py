@@ -619,6 +619,59 @@ def test_report_scales_thumbnail_stacking(tmp_path, monkeypatch):
     assert config.thumb_stack == 5
 
 
+def test_report_writes_the_observation_summary(tmp_path):
+    """ With monitor_observation_summary, the night report writes the observation summary of the night. """
+
+    config = _config()
+    config.monitor_observation_summary = True
+    output_dir = str(tmp_path)
+    _makeResults(output_dir, config, 'file1')
+
+    night_state = mnr.generateNightReport(output_dir, NIGHT, config, archive=False)
+
+    assert 'observation_summary' in night_state['ok_steps']
+    night_dir = mnr.nightDirPath(output_dir, NIGHT, config)
+    summary_names = [f for f in os.listdir(night_dir) if f.endswith('observation_summary.json')]
+    assert len(summary_names) == 1
+
+    # The parameters filled in by the monitor are in the summary
+    with open(os.path.join(night_dir, summary_names[0])) as f:
+        summary = json.load(f)
+    assert summary['camera_information'] == 'Processed from recorded data'
+    assert 'detections_after_ml' in summary
+
+
+def test_observation_summaries_of_the_nights_are_kept(tmp_path):
+    """ The observation database keeps the summaries of the previous nights, which e.g. the days since the last
+        detection are computed from. """
+
+    import sqlite3
+
+    import RMS.Formats.ObservationSummary as obs
+
+    config = _config()
+    config.monitor_observation_summary = True
+    config.data_dir = str(tmp_path)
+    output_dir = str(tmp_path)
+
+    # The summary of an earlier night is in the database
+    conn = obs.getObsDBConn(config)
+    obs.storeDictInDB(conn, {'night_data_dir': 'XX0001_20251223_222000_000000', 'detections_after_ml': '3',
+                             'time_last_detection': '2025-12-24 05:00:00'})
+    conn.close()
+
+    _makeResults(output_dir, config, 'file1')
+    night_state = mnr.generateNightReport(output_dir, NIGHT, config, archive=False)
+    assert 'observation_summary' in night_state['ok_steps']
+
+    conn = sqlite3.connect(os.path.join(output_dir, 'observation.db'))
+    nights = [row[0] for row in conn.execute("SELECT night_data_dir FROM {:s}".format(obs.OBSERVATIONS_TABLE_NAME))]
+    conn.close()
+
+    assert 'XX0001_20251223_222000_000000' in nights
+    assert len(nights) == 2
+
+
 def test_observation_summary_counts_image_pairs(tmp_path):
 
     from RMS.Formats.ObservationSummary import nightSummaryData
