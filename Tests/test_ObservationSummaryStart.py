@@ -1,5 +1,6 @@
 """ The start of the observation session in the observation summary, also when a night is reprocessed. """
 
+import json
 import os
 
 import RMS.ConfigReader as cr
@@ -111,3 +112,23 @@ def test_summary_with_a_relative_night_directory(tmp_path, monkeypatch):
     working = [f for f in os.listdir(night_dir) if f.endswith('_working.json')]
     assert len(working) == 1
     assert obs.getObservationSummaryDict(relative_dir)['time_last_fits_file'] == '2026-10-12 05:00:00'
+
+
+def test_reprocessing_a_finalized_night_keeps_its_start(tmp_path, monkeypatch):
+    """ At the end of the observation the working summary is replaced by the final summary. Reprocessing the night
+        later takes the start and the duration of the session from the final summary. """
+
+    from RMS.Misc import getRMSStyleFileName
+
+    monkeypatch.setattr(obs, 'gatherCameraInformation', lambda config: ('sensor', 'firmware', 'date'))
+
+    config, night_dir = _night(tmp_path)
+    final = {'start_time': '2026-10-11T23:00:00+00:00', 'duration_from_start_of_observation': '36000'}
+    with open(getRMSStyleFileName(night_dir, obs.OBSERVATION_SUMMARY_NAME_JSON), 'w') as f:
+        json.dump(final, f)
+
+    obs.startObservationSummaryReport(config, night_dir, None, reprocessing=True)
+
+    summary = _summary(night_dir)
+    assert summary['start_time'] == final['start_time']
+    assert summary['duration_from_start_of_observation'] == '36000'

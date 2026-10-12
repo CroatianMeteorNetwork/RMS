@@ -1791,6 +1791,21 @@ def startObservationSummaryReport(config, night_data_dir, duration, force_delete
 
     d = getObservationSummaryDict(night_data_dir)
 
+    # When a finalized night is reprocessed, the working summary was replaced by the final summary, which has the
+    #   start and the duration of the capture
+    final_path = getRMSStyleFileName(night_data_dir, OBSERVATION_SUMMARY_NAME_JSON)
+    if reprocessing and (not d.get('start_time')) and os.path.isfile(final_path):
+        try:
+            with open(final_path) as f:
+                final = json.load(f)
+
+            for key in ["start_time", "duration_from_start_of_observation"]:
+                if final.get(key) is not None:
+                    addObsParam(d, key, final[key])
+
+        except (ValueError, AttributeError) as e:
+            log.warning("The final observation summary can't be read: {}".format(repr(e)))
+
     # The start of the session is the current time, except when the night is reprocessed after it was captured:
     #   the start and the duration of the capture are kept, not replaced by the time of the reprocessing
     if reprocessing and d.get('start_time'):
