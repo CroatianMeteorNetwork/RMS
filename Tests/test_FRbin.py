@@ -81,3 +81,6 @@ def test_validFRName():
     assert validFRName('FR_UKtest.bin')
     assert validFRName('UKtest.bin') is False
     assert validFRName('FR_UKtest.fits') is False
+
+    fr_list = [fr for fr in os.listdir(frDataDir) if validFRName(fr)]
+    assert 'FR_FR0012_20261011_211813_064_0306688.bin' in fr_list
