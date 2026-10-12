@@ -93,12 +93,12 @@ def testDefaultOverLimitRejectionDoesNotPlot(monkeypatch):
 def testCandidateDisplayProcessesFfFilesSequentially(monkeypatch, tmp_path):
     extraction_calls = []
 
-    config = SimpleNamespace(stationID='XX0001', height=32, width=32)
+    config = SimpleNamespace(stationID='XX0001', height=32, width=32, fps=25.0)
 
     monkeypatch.setattr(ExtractStars, 'loadImageCalibration', lambda *args: (None, None, None))
     monkeypatch.setattr(ExtractStars.os, 'listdir', lambda path: ['FF_b.bin', 'FF_a.bin'])
     monkeypatch.setattr(ExtractStars.FFfile, 'validFFName', lambda name: True)
-    monkeypatch.setattr(ExtractStars.CALSTARS, 'writeCALSTARS', lambda *args: None)
+    monkeypatch.setattr(ExtractStars.CALSTARS, 'writeCALSTARS', lambda *args, **kwargs: None)
 
     class UnexpectedPool(object):
         def __init__(self, *args, **kwargs):

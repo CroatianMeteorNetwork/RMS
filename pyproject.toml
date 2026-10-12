@@ -6,3 +6,6 @@ requires = [
     "numpy"          # satisfies the guarded import above
 ]
 build-backend = "setuptools.build_meta"
+[tool.pytest.ini_options]
+# The tests are in files named test_*.py and Test*.py
+python_files = ["test_*.py", "Test*.py"]

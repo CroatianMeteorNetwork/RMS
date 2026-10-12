@@ -31,9 +31,12 @@ def test_check_white_ratio_rejection_is_debug_only(monkeypatch):
 
     assert not Detection.checkWhiteRatio(rejected_image, ff, 0.05)
     assert not warning_messages
-    assert len(debug_messages) == 1
-    assert "White ratio is 0.0510" in debug_messages[0]
-    assert "max_white_ratio threshold: 0.0500" in debug_messages[0]
+
+    # The rejection is reported once at debug level (the white ratio of every check is logged at debug level too)
+    rejections = [message for message in debug_messages if "Too many threshold passers" in message]
+    assert len(rejections) == 1
+    assert "White ratio is 0.0510" in rejections[0]
+    assert "max_white_ratio threshold: 0.0500" in rejections[0]
 
 
 def test_check_white_ratio_records_diagnostics():
