@@ -656,16 +656,35 @@ class MatchedFilterDetector(object):
             raw.append(self.blockBackground(samples))
             self.timing['background'] += time() - t1
 
+        # The motion of the stars, from the shifts between the medians of the blocks (see starDrift)
+        for k, bg in enumerate(raw):
+            bg.raw_median = bg.median
+            self.backgrounds[k] = bg
+        self._drift = self.starDrift()
+        drift = np.array(self._drift, dtype=np.float64)
+        mids = [(first + last - 1)/2.0 for first, last in zip(self.block_starts, self.block_ends)]
+
         # The median of every block is the mean of the medians of the block and of its neighbours (only one
-        #   neighbour at the ends), which reduces its noise by sqrt(3). The noise is the one of the block alone, as
-        #   it changes less from block to block, and its estimate doesn't add to the background of the frames.
-        #   The median of the block alone is kept for the search of objects which stay on the same pixels (see
-        #   slowSearch)
+        #   neighbour at the ends), which reduces its noise by sqrt(3). The medians of the neighbours are shifted by
+        #   the motion of the stars to the middle of the block first, so the stars of the mean are where they are
+        #   in the block (also at the ends, where the only neighbour is on one side). The noise is the one of the
+        #   block alone, as it changes less from block to block, and its estimate doesn't add to the background of
+        #   the frames. The median of the block alone is kept for the search of objects which stay on the same
+        #   pixels (see slowSearch)
         for k in range(len(raw)):
-            near = raw[max(k - 1, 0):k + 2]
-            median = np.mean([bg.median for bg in near], axis=0).astype(np.float32)
+            near = []
+            for j in range(max(k - 1, 0), min(k + 2, len(raw))):
+                dx, dy = drift*(mids[k] - mids[j])
+                if (j == k) or (abs(dx) + abs(dy) < 1e-3):
+                    near.append(raw[j].median)
+                else:
+                    M = np.float32([[1, 0, dx], [0, 1, dy]])
+                    near.append(cv2.warpAffine(raw[j].median, M, (self.width, self.height), flags=cv2.INTER_CUBIC,
+                                               borderMode=cv2.BORDER_REPLICATE))
+            median = np.mean(near, axis=0).astype(np.float32)
             noise = raw[k].noise
-            bg = BlockBackground(median, noise, sum(bg.n_samples for bg in near))
+            n_samples = sum(raw[j].n_samples for j in range(max(k - 1, 0), min(k + 2, len(raw))))
+            bg = BlockBackground(median, noise, n_samples)
             bg.raw_median = raw[k].median
             self.starTemplate(bg)
             self.backgrounds[k] = bg
@@ -769,10 +788,14 @@ class MatchedFilterDetector(object):
         # Subtract the background of every frame: the median of this block, plus the linear interpolation towards
         #   the median of the neighbouring block on the side of the frame. With the middle frames m_k and m_j of
         #   the two blocks, the background of the frame f is median_k + (f - m_k)/(m_j - m_k)*(median_j - median_k),
-        #   so the background changes continuously from block to block
+        #   so the background changes continuously from block to block. Beyond the middle of the first and the last
+        #   block, where there is no block on the side of the frame, the line through the neighbour on the other
+        #   side is extrapolated, so the background follows the motion of the stars to the ends of the input
         for i in range(i0, i1):
             f = first + i
             j = k - 1 if f < mid else k + 1
+            if j not in self.backgrounds:
+                j = k + 1 if f < mid else k - 1
             z[i] -= bg.median
             if j in self.backgrounds:
                 mid_j = (self.block_starts[j] + self.block_ends[j] - 1)/2.0
@@ -1262,8 +1285,8 @@ class MatchedFilterDetector(object):
         shifts = []
         for k in range(0, n - step, max(1, (n - step)//8)):
             a, b = self.backgrounds[k], self.backgrounds[k + step]
-            img_a = np.clip(a.raw_median - a.sky, 0, None).astype(np.float32)
-            img_b = np.clip(b.raw_median - b.sky, 0, None).astype(np.float32)
+            img_a = np.clip(a.raw_median - self.skyLevel(a.raw_median), 0, None).astype(np.float32)
+            img_b = np.clip(b.raw_median - self.skyLevel(b.raw_median), 0, None).astype(np.float32)
             (dx, dy), response = cv2.phaseCorrelate(img_a, img_b, window)
             dt = self.block_starts[k + step] - self.block_starts[k]
             if response > 0.05:

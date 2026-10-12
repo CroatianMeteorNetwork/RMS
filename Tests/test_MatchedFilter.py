@@ -20,6 +20,7 @@ import os
 import math
 import datetime
 
+import cv2
 import numpy as np
 import pytest
 from astropy.io import fits
@@ -948,6 +949,39 @@ def test_tracks_on_a_drifting_line_rejected(config, line_concentration):
     else:
         assert len(detections) > 1
         assert det.summary()['linear_structure_rejected'] == 0
+
+
+class _DriftHandle(_SynthHandle):
+    """ Synthetic frames whose stars drift across the field by the given px per frame (e.g. the diurnal motion
+        for a fixed camera). """
+
+    def __init__(self, objects, drift=(0.008, 0.003), **kwargs):
+
+        super(_DriftHandle, self).__init__(objects, **kwargs)
+        self.drift = drift
+        self.base_stars = self.stars.astype(np.float32)
+
+    def loadFrame(self, avepixel=False):
+
+        # The stars of this frame, shifted by the drift (with subpixel interpolation)
+        f = self.current_frame
+        M = np.float32([[1, 0, self.drift[0]*f], [0, 1, self.drift[1]*f]])
+        self.stars = cv2.warpAffine(self.base_stars, M, (SIZE, SIZE), flags=cv2.INTER_CUBIC)
+
+        return super(_DriftHandle, self).loadFrame(avepixel)
+
+
+def test_drifting_faint_stars_make_no_tracks(config):
+    """ Faint stars (below the masking of the stars) which drift with the sky leave no residuals which make tracks:
+        the medians of the neighbouring blocks are aligned with the motion of the stars before they are averaged,
+        and the background is extrapolated with that motion beyond the middle of the first and the last block. """
+
+    det, detections = runDetector(_DriftHandle([], total_frames=1100, n_stars=20, n_faint_stars=200, seed=2),
+                                  config)
+
+    # The motion of the stars is measured, and nothing is detected
+    assert np.allclose(det.drift(), (0.008, 0.003), atol=0.001)
+    assert len(detections) == 0
 
 
 ### Light curves, bright objects, photometric scale ###
