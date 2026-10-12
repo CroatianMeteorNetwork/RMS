@@ -877,8 +877,20 @@ class MatchedFilterDetector(object):
         """
 
         # Brightness of the static sources relative to the noise of the sky in one frame: the sources above
-        #   star_threshold are masked, grown by a pixel to cover their wings
+        #   star_threshold are masked, grown by a pixel to cover their wings. On the bright columns and rows (see
+        #   lineMask) the brightness is taken above the running median along the line, so a line bright enough to
+        #   be above the threshold is not masked along its length as a source (it is masked as a line in the
+        #   search, except near the sources which stand out from it), while the compact sources on it are
         level = background.star_level
+        lines = self.lineMask(background)
+        if lines.any():
+            level = level.copy()
+            cols = np.flatnonzero(lines.all(axis=0))
+            rows = np.flatnonzero(lines.all(axis=1))
+            if cols.size:
+                level[:, cols] -= ndimage.median_filter(level[:, cols], size=(LINE_LOCAL, 1), mode='nearest')
+            if rows.size:
+                level[rows, :] -= ndimage.median_filter(level[rows, :], size=(1, LINE_LOCAL), mode='nearest')
         static = cv2.dilate((level > self.opts.star_threshold).astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
 
         # The user mask (0 = masked) and the image border

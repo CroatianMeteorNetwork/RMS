@@ -988,6 +988,34 @@ def test_line_keep_only_sources_above_the_line():
     assert keep[80, 70] and keep[80 + mfd.TRAIL_KEEP, 70] and not keep[80 + mfd.TRAIL_KEEP + 2, 70]
 
 
+class _BrightColumnHandle(_SynthHandle):
+    """ Synthetic frames with a column brighter than the sky by a constant level (e.g. a bad column). """
+
+    def __init__(self, objects, column=60, level=8.0, **kwargs):
+
+        super(_BrightColumnHandle, self).__init__(objects, **kwargs)
+        self.column, self.level = column, level
+
+    def loadFrame(self, avepixel=False):
+
+        img = super(_BrightColumnHandle, self).loadFrame(avepixel)
+        img[:, self.column] += np.float32(self.level*NOISE)
+
+        return img
+
+
+def test_bright_object_along_a_strong_bright_column(config):
+    """ A column bright enough to be above the level of the masked stars in the median is not masked as a star
+        along its length (only compact sources on it are), so a bright object moving along it is detected. """
+
+    obj = linearObject(200.0, 60, 5, 0.0, 0.2, 20, 620)
+    _, detections = runDetector(_BrightColumnHandle([obj], total_frames=640, n_stars=6), config)
+
+    found = [d for d in detections if np.median(truthError(d[2], obj)) < 0.5]
+    assert len(found) == 1
+    assert (found[0][2][0, 0] < 60) and (found[0][2][-1, 0] > 560)
+
+
 ### Light curves, bright objects, photometric scale ###
 
 def test_flashes_kept_in_light_curve(config):
