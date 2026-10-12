@@ -3618,7 +3618,8 @@ def removeDeviatingDetections(detections, fwhm, fwhm_factor, length_factor):
 
     Arguments:
         detections: [list] Detections as [rho, theta, centroids] (unbinned).
-        fwhm: [float] FWHM of the PSF (px, unbinned).
+        fwhm: [float or function] FWHM of the PSF (px, unbinned), or a function which gives it for the rows of a
+            detection (e.g. the PSF of the segment of the input which the detection belongs to).
         fwhm_factor: [float] Deviation allowed for the scatter of the measurements (FWHMs), 0 to keep all.
         length_factor: [float] Deviation allowed per pixel of the length of the track.
 
@@ -3633,8 +3634,15 @@ def removeDeviatingDetections(detections, fwhm, fwhm_factor, length_factor):
     kept, rejected = [], []
     for det in detections:
         cent = det[2]
+
+        # The FWHM of the detection (a detection without a known PSF is kept)
+        track_fwhm = fwhm(cent) if callable(fwhm) else fwhm
+        if track_fwhm is None:
+            kept.append(det)
+            continue
+
         deviation = trackDeviation(cent)
-        limit = fwhm_factor*fwhm + length_factor*float(np.hypot(*(cent[-1, 1:3] - cent[0, 1:3])))
+        limit = fwhm_factor*track_fwhm + length_factor*float(np.hypot(*(cent[-1, 1:3] - cent[0, 1:3])))
         if deviation > limit:
             rejected.append((float(cent[0, 0]), deviation, limit))
             log.info('Matched filter: detection {:.0f}-{:.0f} wanders sideways from a smooth path by {:.2f} px '
@@ -4136,9 +4144,21 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
             log.info('Matched filter: {:d} frames of detections and {:d} detections on sky clouded in the whole '
                      'input removed'.format(len(removed_rows), len(removed_first)))
 
-    # The whole tracks (joined over the segments) which wander sideways from one smooth path are no objects
-    detections, deviating = removeDeviatingDetections(detections, 2.355*searched[0].psf_sigma*searched[0].det_bin
-                                                      if searched else None, config.mf_track_deviation_fwhm,
+    # The whole tracks (joined over the segments) which wander sideways from one smooth path are no objects. A track
+    #   is judged with the PSF of the segment which its middle frame belongs to (the segments are split at the
+    #   middle of their overlaps), or of the nearest segment with a measured PSF
+    bounds = [0] + cuts + [img_handle.total_frames]
+    measured = [k for k, det in enumerate(detectors) if (det is not None) and (det.psf_sigma is not None)]
+
+    def segmentFWHM(cent):
+        if not measured:
+            return None
+        mid = (cent[0, 0] + cent[-1, 0])/2.0
+        k = int(np.clip(np.searchsorted(bounds, mid, side='right') - 1, 0, len(detectors) - 1))
+        det = detectors[min(measured, key=lambda j: abs(j - k))]
+        return 2.355*det.psf_sigma*det.det_bin
+
+    detections, deviating = removeDeviatingDetections(detections, segmentFWHM, config.mf_track_deviation_fwhm,
                                                       config.mf_track_deviation_length)
 
     timing['segments_total'] = time() - t0

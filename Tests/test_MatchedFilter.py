@@ -988,6 +988,22 @@ def test_track_deviation_from_one_smooth_curve():
     assert len(mfd.removeDeviatingDetections([[0, 0, long_wandering]], 1.6, 0.6, 0.005)[0]) == 1
 
 
+def test_track_deviation_with_the_fwhm_of_each_track():
+    """ The FWHM which the deviation of a track is scaled with can be given per track (e.g. the PSF of the segment
+        of an input which the track belongs to). """
+
+    t = np.arange(0, 600, 1.0)
+    wandering = np.c_[t, 100 + 0.3*t + 1.5*np.sin(2*np.pi*t/200), 50 + 0.1*t + 1.5*np.cos(2*np.pi*t/170)]
+    late = wandering.copy()
+    late[:, 0] += 5000
+    dets = [[0, 0, wandering], [0, 0, late]]
+
+    # A narrow PSF early in the input and a wide one later: only the early track is rejected
+    fwhm = lambda cent: 1.0 if cent[0, 0] < 5000 else 4.0
+    kept, rejected = mfd.removeDeviatingDetections(dets, fwhm, 0.6, 0.0)
+    assert (len(kept) == 1) and (kept[0][2] is late) and (len(rejected) == 1)
+
+
 @pytest.mark.parametrize('deviation_fwhm', [0.3, 0.0])
 def test_wandering_track_rejected(config, deviation_fwhm):
     """ A track which wanders sideways from one smooth path (by 4 px back and forth) is rejected by the whole detector,
