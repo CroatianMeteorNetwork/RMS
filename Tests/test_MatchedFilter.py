@@ -1117,6 +1117,89 @@ def test_background_around_a_track_without_the_object(config):
     assert np.max(region) - SKY < 3*NOISE
 
 
+def test_track_deviation_from_one_smooth_curve():
+    """ The deviation of a track across its motion from one smooth path (a quadratic in time) over its whole
+        length: about 0 for a straight or a uniformly curved track, also with a little noise or a changing speed
+        along the path, and large for a track which wanders sideways. """
+
+    # Straight, curved, curved with noise, and wandering tracks
+    t = np.arange(0, 600, 1.0)
+    rng = np.random.default_rng(2)
+    straight = np.c_[t, 100 + 0.3*t, 50 + 0.1*t]
+    curved = np.c_[t, 100 + 0.3*t + 2e-4*t**2, 50 + 0.1*t - 1e-4*t**2]
+    noisy = curved.copy()
+    noisy[:, 1:3] += rng.normal(0, 0.1, (len(t), 2))
+    wandering = np.c_[t, 100 + 0.3*t + 3*np.sin(2*np.pi*t/200), 50 + 0.1*t + 3*np.cos(2*np.pi*t/170)]
+
+    # The speed along a straight path changing more than a quadratic follows (e.g. a long pass)
+    speeding = np.c_[t, 100 + 0.3*t + 20*np.sin(2*np.pi*t/600)*0.3, 50 + 0.1*t + 20*np.sin(2*np.pi*t/600)*0.1]
+
+    # Only the wandering track deviates
+    assert mfd.trackDeviation(straight) < 0.01
+    assert mfd.trackDeviation(speeding) < 0.01
+    assert mfd.trackDeviation(curved) < 0.01
+    assert mfd.trackDeviation(noisy) < 0.15
+    assert mfd.trackDeviation(wandering) > 2
+
+    # Too few rows to judge: no deviation
+    assert mfd.trackDeviation(wandering[:4]) == 0.0
+
+    # The detections deviating more than the limit (a fraction of the FWHM plus of the length) are removed, none
+    #   with the fraction of the FWHM 0
+    dets = [[0, 0, straight], [0, 0, wandering]]
+    kept, rejected = mfd.removeDeviatingDetections(dets, 1.6, 0.6, 0.005)
+    assert (len(kept) == 1) and (kept[0][2] is straight) and (len(rejected) == 1)
+    assert len(mfd.removeDeviatingDetections(dets, 1.6, 0.0, 0.005)[0]) == 2
+
+    # The allowed deviation grows with the length of the track: the same wander on a track 10 times longer (as a
+    #   long track across a wide field bends) is kept
+    long_wandering = np.c_[t, 100 + 3.0*t + 3*np.sin(2*np.pi*t/200), 50 + 1.0*t + 3*np.cos(2*np.pi*t/170)]
+    assert len(mfd.removeDeviatingDetections([[0, 0, long_wandering]], 1.6, 0.6, 0.005)[0]) == 1
+
+
+def test_track_deviation_with_the_fwhm_of_each_track():
+    """ The FWHM which the deviation of a track is scaled with can be given per track (e.g. the PSF of the segment
+        of an input which the track belongs to). """
+
+    # The same wandering track early and late in the input
+    t = np.arange(0, 600, 1.0)
+    wandering = np.c_[t, 100 + 0.3*t + 1.5*np.sin(2*np.pi*t/200), 50 + 0.1*t + 1.5*np.cos(2*np.pi*t/170)]
+    late = wandering.copy()
+    late[:, 0] += 5000
+    dets = [[0, 0, wandering], [0, 0, late]]
+
+    # A narrow PSF early in the input and a wide one later: only the early track is rejected
+    fwhm = lambda cent: 1.0 if cent[0, 0] < 5000 else 4.0
+    kept, rejected = mfd.removeDeviatingDetections(dets, fwhm, 0.6, 0.0)
+    assert (len(kept) == 1) and (kept[0][2] is late) and (len(rejected) == 1)
+
+
+@pytest.mark.parametrize('deviation_fwhm', [0.3, 0.0])
+def test_wandering_track_rejected(config, deviation_fwhm):
+    """ A track which wanders sideways from one smooth path (by 4 px back and forth) is rejected by the whole detector,
+        a straight object at the same time is kept; with the test off both are detected. """
+
+    # A straight object, and one which wanders sideways at the same time
+    straight = linearObject(4.0, 20, 30, 0.2, 0.05, 40, 470)
+    wander = {'snr': 4.0, 'f0': 40, 'f1': 470,
+              'pos': lambda f: (60 + 4*np.sin(2*np.pi*(f - 40)/200), 110 - 0.2*(f - 40))}
+
+    # The PSF of the synthetic frames is wide (FWHM 2.4 px), and the measured wander about 1.4 px RMS, so the test
+    #   is run with a smaller fraction of the FWHM than the default
+    config.mf_track_deviation_fwhm = deviation_fwhm
+    det, detections = runDetector(_SynthHandle([straight, wander], n_stars=4), config)
+
+    # The straight object is always found, the wandering one only with the test off
+    found_straight = [d for d in detections if np.median(truthError(d[2], straight)) < 1.5]
+    found_wander = [d for d in detections if np.median(truthError(d[2], wander)) < 3]
+    assert len(found_straight) == 1
+    if deviation_fwhm > 0:
+        assert len(found_wander) == 0
+        assert det.summary()['deviation_rejected'] >= 1
+    else:
+        assert len(found_wander) >= 1
+
+
 ### Light curves, bright objects, photometric scale ###
 
 def test_flashes_kept_in_light_curve(config):
