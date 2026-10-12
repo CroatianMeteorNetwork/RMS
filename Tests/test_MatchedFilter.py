@@ -950,6 +950,21 @@ def test_tracks_on_a_drifting_line_rejected(config, line_concentration):
         assert det.summary()['linear_structure_rejected'] == 0
 
 
+def test_bright_object_along_a_column_detected(config):
+    """ A bright object moving along a pixel column lights the column with its own trail, which makes the column
+        bright in the median of a block and masked as a bright line: the line is not masked near the object, so
+        it is detected over its whole passage. """
+
+    obj = linearObject(200.0, 60, 20, 0.0, 0.12, 20, 620)
+    obj['trail'] = 1.0
+    _, detections = runDetector(_SynthHandle([obj], total_frames=640, n_stars=6), config)
+
+    assert len(detections) == 1
+    cent = detections[0][2]
+    assert np.median(truthError(cent, obj)) < 0.3
+    assert (cent[0, 0] < 60) and (cent[-1, 0] > 580)
+
+
 ### Light curves, bright objects, photometric scale ###
 
 def test_flashes_kept_in_light_curve(config):
