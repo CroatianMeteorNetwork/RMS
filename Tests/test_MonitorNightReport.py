@@ -619,6 +619,28 @@ def test_report_scales_thumbnail_stacking(tmp_path, monkeypatch):
     assert config.thumb_stack == 5
 
 
+def test_report_writes_the_observation_summary(tmp_path):
+    """ With monitor_observation_summary, the night report writes the observation summary of the night. """
+
+    config = _config()
+    config.monitor_observation_summary = True
+    output_dir = str(tmp_path)
+    _makeResults(output_dir, config, 'file1')
+
+    night_state = mnr.generateNightReport(output_dir, NIGHT, config, archive=False)
+
+    assert 'observation_summary' in night_state['ok_steps']
+    night_dir = mnr.nightDirPath(output_dir, NIGHT, config)
+    summary_names = [f for f in os.listdir(night_dir) if f.endswith('observation_summary.json')]
+    assert len(summary_names) == 1
+
+    # The parameters filled in by the monitor are in the summary
+    with open(os.path.join(night_dir, summary_names[0])) as f:
+        summary = json.load(f)
+    assert summary['camera_information'] == 'Processed from recorded data'
+    assert 'detections_after_ml' in summary
+
+
 def test_observation_summary_counts_image_pairs(tmp_path):
 
     from RMS.Formats.ObservationSummary import nightSummaryData

@@ -59,7 +59,7 @@ from RMS.Formats import FTPdetectinfo
 from RMS.Formats.FFfile import filenameToDatetime, validFFName
 from RMS.Formats.Platepar import Platepar
 from RMS.Logger import getLogger, LoggingManager
-from RMS.Misc import RmsDateTime
+from RMS.Misc import RmsDateTime, getRMSStyleFileName
 from RMS.Routines.MaskImage import loadMask
 
 
@@ -1270,20 +1270,25 @@ def writeObservationSummary(night_dir, night_name, config, frames_per_file, n_de
     else:
         obs_start, obs_end = nightBoundsFromName(config, night_name)
 
-    # Start a new summary for every night
+    # Start a new summary for every night (the database and the working summary of a previous report)
     db_path = os.path.join(config.data_dir, "observation.db")
     if os.path.exists(db_path):
         os.remove(db_path)
 
-    conn = obs.getObsDBConn(config)
-    obs.addObsParam(conn, "start_time", obs_start.replace(tzinfo=datetime.timezone.utc))
-    obs.addObsParam(conn, "duration_from_start_of_observation", round((obs_end - obs_start).total_seconds()))
-    obs.addObsParam(conn, "stationID", config.stationID)
-    obs.addObsParam(conn, "hardware_version", platform.machine())
-    obs.addObsParam(conn, "camera_information", "Processed from recorded data")
-    obs.addObsParam(conn, "detections_after_ml", n_detections)
-    obs.addObsParam(conn, "photometry_good", str(photometry_good))
-    conn.close()
+    working_path = os.path.join(night_dir, getRMSStyleFileName(night_dir,
+                                                               obs.OBSERVATION_SUMMARY_WORKING_NAME_JSON))
+    if os.path.exists(working_path):
+        os.remove(working_path)
+
+    # The parameters are collected in the summary of the night, which the end of the observation stores
+    summary = obs.getObservationSummaryDict(night_dir)
+    obs.addObsParam(summary, "start_time", obs_start.replace(tzinfo=datetime.timezone.utc))
+    obs.addObsParam(summary, "duration_from_start_of_observation", round((obs_end - obs_start).total_seconds()))
+    obs.addObsParam(summary, "stationID", config.stationID)
+    obs.addObsParam(summary, "hardware_version", platform.machine())
+    obs.addObsParam(summary, "camera_information", "Processed from recorded data")
+    obs.addObsParam(summary, "detections_after_ml", n_detections)
+    obs.addObsParam(summary, "photometry_good", str(photometry_good))
 
     return obs.finalizeObservationSummary(config, night_dir, frames_per_file=frames_per_file)
 
