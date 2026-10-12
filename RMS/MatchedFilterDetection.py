@@ -675,6 +675,8 @@ class MatchedFilterDetector(object):
         for k in range(len(raw)):
             near = []
             for j in range(max(k - 1, 0), min(k + 2, len(raw))):
+
+                # The median of the block itself as it is, the ones of the neighbours shifted to its middle
                 dx, dy = drift*(mids[k] - mids[j])
                 if (j == k) or (abs(dx) + abs(dy) < 1e-3):
                     near.append(raw[j].median)
@@ -682,6 +684,7 @@ class MatchedFilterDetector(object):
                     M = np.float32([[1, 0, dx], [0, 1, dy]])
                     near.append(cv2.warpAffine(raw[j].median, M, (self.width, self.height), flags=cv2.INTER_CUBIC,
                                                borderMode=cv2.BORDER_REPLICATE))
+            # The mean of the aligned medians, with the noise of the block alone
             median = np.mean(near, axis=0).astype(np.float32)
             noise = raw[k].noise
             n_samples = sum(raw[j].n_samples for j in range(max(k - 1, 0), min(k + 2, len(raw))))
@@ -2337,6 +2340,7 @@ class MatchedFilterDetector(object):
                         ax, ay = sx - np.floor(sx), sy - np.floor(sy)
                         smoothing.append(math.sqrt(((1 - ax)**2 + ax**2)*((1 - ay)**2 + ay**2)))
 
+                        # The region of the sample where the stars were at its time, and the tracks masked in it
                         src = img if img.dtype == np.float32 else img.astype(np.float32)
                         crop = cv2.getRectSubPix(src, (x1 - x0, y1 - y0),
                                                  (centre[0] + sx, centre[1] + sy)).astype(np.float64)
