@@ -1280,7 +1280,7 @@ class MatchedFilterDetector(object):
         window = cv2.createHanningWindow((self.width, self.height), cv2.CV_32F)
 
         # The shift between the stars (median minus sky, negative values clipped) of the blocks k and k + step, for
-        #   up to 8 pairs of blocks over the input, divided by the time between them. A weak peak of the
+        #   up to 8 pairs of blocks over the input, divided by the time between their middles. A weak peak of the
         #   correlation (response) means no reliable shift, e.g. too few stars
         shifts = []
         for k in range(0, n - step, max(1, (n - step)//8)):
@@ -1288,7 +1288,10 @@ class MatchedFilterDetector(object):
             img_a = np.clip(a.raw_median - self.skyLevel(a.raw_median), 0, None).astype(np.float32)
             img_b = np.clip(b.raw_median - self.skyLevel(b.raw_median), 0, None).astype(np.float32)
             (dx, dy), response = cv2.phaseCorrelate(img_a, img_b, window)
-            dt = self.block_starts[k + step] - self.block_starts[k]
+
+            # The medians are of the middles of the blocks (the last block can be longer or shorter)
+            dt = ((self.block_starts[k + step] + self.block_ends[k + step]) - (self.block_starts[k]
+                                                                             + self.block_ends[k]))/2.0
             if response > 0.05:
                 shifts.append((dx/dt, dy/dt))
 

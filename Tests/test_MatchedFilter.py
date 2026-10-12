@@ -984,6 +984,31 @@ def test_drifting_faint_stars_make_no_tracks(config):
     assert len(detections) == 0
 
 
+def test_star_drift_from_the_middles_of_the_blocks(config):
+    """ The drift of the stars is the shift between the medians of two blocks over the time between their middles
+        (which the medians represent), also when the last block is shorter than the others. """
+
+    det = MatchedFilterDetector(_SynthHandle([], total_frames=896), config)
+    det.block_starts = [0, 256, 512, 768]
+    det.block_ends = [256, 512, 768, 896]
+
+    # The medians of a field of stars shifted by the drift to the middle of every block
+    rng = np.random.default_rng(5)
+    field = np.zeros((SIZE, SIZE), dtype=np.float32)
+    for _ in range(60):
+        renderObject(field, rng.uniform(10, SIZE - 10), rng.uniform(10, SIZE - 10), rng.uniform(5, 30)*NOISE)
+    drift = (0.01, -0.004)
+    for k, (first, last) in enumerate(zip(det.block_starts, det.block_ends)):
+        mid = (first + last - 1)/2.0
+        M = np.float32([[1, 0, drift[0]*mid], [0, 1, drift[1]*mid]])
+        bg = mfd.BlockBackground(np.zeros_like(field), np.ones_like(field), 1)
+        bg.raw_median = SKY + cv2.warpAffine(field, M, (SIZE, SIZE), flags=cv2.INTER_CUBIC)
+        det.backgrounds[k] = bg
+
+    # The pair of blocks 0 and 3 (3 blocks apart): their middles are 704 frames apart, their starts 768
+    assert np.allclose(det.starDrift(step=3), drift, rtol=0, atol=0.0006)
+
+
 ### Light curves, bright objects, photometric scale ###
 
 def test_flashes_kept_in_light_curve(config):
