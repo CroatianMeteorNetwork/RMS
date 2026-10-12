@@ -421,6 +421,10 @@ class Config:
         # scaled-down WB gains; OpenIPC cameras with podcontrol's WB rung). See RMS.HighlightRebuild.
         self.day_highlight_rebuild = False
 
+        # How: 'chroma' (any camera) or 'invert' (cameras at ISP saturation 255, with the RMSP
+        # exposure record; undoes the x1.99 saturation, rebuilds green, re-applies it)
+        self.day_highlight_method = 'chroma'
+
         # Embed each saved frame's exposure record (RMSP SEI: capture time, exposure, gains, WB,
         # temperature) as a JSON line in the PNG/JPEG. See RMS.FrameMetadata.
         self.save_frame_metadata = False
@@ -1422,6 +1426,13 @@ def parseCapture(config, parser):
     # Rebuild the green of raw-saturated highlights in saved day frames
     if parser.has_option(section, "day_highlight_rebuild"):
         config.day_highlight_rebuild = parser.getboolean(section, "day_highlight_rebuild")
+
+    if parser.has_option(section, "day_highlight_method"):
+        config.day_highlight_method = parser.get(section, "day_highlight_method").strip().lower()
+        if config.day_highlight_method not in ("chroma", "invert"):
+            log.warning("day_highlight_method must be 'chroma' or 'invert', not '{0}'. "
+                        "It has been reset to 'chroma'!".format(config.day_highlight_method))
+            config.day_highlight_method = "chroma"
 
     # Embed per-frame exposure metadata in saved frames
     if parser.has_option(section, "save_frame_metadata"):

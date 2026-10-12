@@ -45,3 +45,10 @@ def testCapturePreservesCanonicalGstColorspaceCase(monkeypatch, tmp_path, gst_co
     })
 
     assert config.gst_colorspace == gst_colorspace
+
+
+@pytest.mark.parametrize('value, expected', [(' Invert ', 'invert'), ('chroma', 'chroma'), ('lut', 'chroma')])
+def testCaptureDayHighlightMethod(monkeypatch, tmp_path, value, expected):
+    config = _parseCaptureOptions(monkeypatch, tmp_path, {'day_highlight_method': value})
+
+    assert config.day_highlight_method == expected

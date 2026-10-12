@@ -28,7 +28,7 @@ import numpy as np
 
 from RMS.Logger import getLogger, getLoggingQueue, initChildProcess
 from RMS.Misc import mkdirP, setParentDeathSignal, AtomicFlag, stableDoubleRead
-from RMS.HighlightRebuild import rebuildGreen
+from RMS.HighlightRebuild import rebuildGreen, rebuildGreenInvert
 from RMS.FrameMetadata import NFIELDS as META_FIELDS, rowToDict, writeImage, greenCeiling
 
 # Get the logger from the main module
@@ -136,8 +136,10 @@ class RawFrameSaver(multiprocessing.Process):
         # Daytime highlight rebuild (config.day_highlight_rebuild, off by default): frames whose
         # green sits on a clip plateau below full scale (WB gains scaled down by podcontrol's WB
         # rung) get green rebuilt from red/blue, so raw-saturated areas are not magenta.
-        # Counted per block and logged once.
+        # config.day_highlight_method: 'chroma' (any camera) or 'invert' (cameras at satu 255,
+        # needs the frame's exposure record). Counted per block and logged once.
         rebuild = daytime_mode and getattr(self.config, 'day_highlight_rebuild', False)
+        invert = getattr(self.config, 'day_highlight_method', 'chroma') == 'invert'
         rebuilt = []
 
         embed = getattr(self.config, 'save_frame_metadata', False)
@@ -166,7 +168,10 @@ class RawFrameSaver(multiprocessing.Process):
 
             if rebuild:
                 try:
-                    frame, info = rebuildGreen(frame, ceiling=greenCeiling(meta_row))
+                    if invert:
+                        frame, info = rebuildGreenInvert(frame, rowToDict(meta_row))
+                    else:
+                        frame, info = rebuildGreen(frame, ceiling=greenCeiling(meta_row))
                     if info is not None:
                         rebuilt.append(info)
                         frame_info = info
@@ -224,12 +229,8 @@ class RawFrameSaver(multiprocessing.Process):
                 meta = rowToDict(meta_row) if embed else None
                 if embed and frame_info is not None:
                     meta = dict(meta or {})
-                    meta["highlight_rebuild"] = {"plateau": frame_info["plateau"],
-                                                 "clipped": round(frame_info["clipped"], 4),
-                                                 "ratios": frame_info["ratios"],
-                                                 "ceiling": frame_info.get("ceiling"),
-                                                 "k_r": round(frame_info["k_r"], 3),
-                                                 "k_b": round(frame_info["k_b"], 3)}
+                    meta["highlight_rebuild"] = {k: (round(v, 4) if isinstance(v, float) else v)
+                                                 for k, v in frame_info.items()}
                 if meta:
                     meta["saved_utc"] = round(float(timestamp), 6)
                     n_meta += 1
@@ -248,9 +249,14 @@ class RawFrameSaver(multiprocessing.Process):
             log.debug("Frame metadata embedded in %d of %d frames (no exposure record for the rest)", n_meta, frame_count)
 
         if rebuilt:
-            log.info("Highlight rebuild: %d of %d frames (green plateau %d, %.1f%% clipped max, ratios %s kR %.2f kB %.2f)",
-                     len(rebuilt), frame_count, rebuilt[-1]["plateau"], 100*max(r["clipped"] for r in rebuilt),
-                     rebuilt[-1]["ratios"], rebuilt[-1]["k_r"], rebuilt[-1]["k_b"])
+            last = rebuilt[-1]
+            if last.get("method") == "invert":
+                detail = "plane G = %.2f R + %.2f B, record ceiling %d" % (last["k_r"], last["k_b"], last["ceiling"])
+            else:
+                detail = "ratios %s kR %.2f kB %.2f" % (last["ratios"], last["k_r"], last["k_b"])
+            log.info("Highlight rebuild (%s): %d of %d frames (green plateau %d, %.1f%% clipped max, %s)",
+                     last.get("method", "chroma"), len(rebuilt), frame_count, last["plateau"],
+                     100*max(r["clipped"] for r in rebuilt), detail)
 
 
     @staticmethod
