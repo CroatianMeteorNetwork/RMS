@@ -330,6 +330,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
                     fwhm_mult=DEFAULT_BLEND_FWHM_MULT,
                     wide_fov_search=False,
                     final_catalog_stars=None,
+                    mask=None, use_flat=False,
                     verbose=True):
     """
     Automatically create a platepar from CALSTARS data in a directory.
@@ -366,6 +367,9 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
 
         wide_fov_search: [bool] If True, use a wide FOV search range (2° to 200°) instead of
                          the config-based range. Used as fallback when the tight search fails.
+        mask: [MaskStructure] Mask of the camera, None to look for the mask file in dir_path (default).
+        use_flat: [bool] The stars were measured on flat fielded images, so the vignetting is already
+                  corrected and the vignetting coefficient is 0. False by default.
         verbose: [bool] Print progress information
 
     Returns:
@@ -479,9 +483,8 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
         platepar.Y_res = config.height
         platepar.station_code = config.stationID
 
-    # Initialize vignetting coefficient with resolution-scaled default
-    # We don't apply flat during platepar creation, so photometry needs vignetting correction
-    platepar.addVignettingCoeff(use_flat=False)
+    # Initialize the vignetting coefficient: 0 for flat fielded images, otherwise the resolution-scaled default
+    platepar.addVignettingCoeff(use_flat=use_flat)
 
     # Get time from FF filename
     ff_dt = filenameToDatetime(best_ff)
@@ -503,8 +506,9 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
         # Tight search range based on config (0.75x to 1.5x)
         fov_w_range = [0.75 * fov_w_hint, 1.5 * fov_w_hint]
 
-    # Load mask if available
-    mask = getMaskFile(dir_path, config)
+    # Load the mask from the directory if it is not given
+    if mask is None:
+        mask = getMaskFile(dir_path, config)
 
     # Extract star coordinates (CALSTARS format: y, x, ...)
     y_data = star_data[:, 0]
@@ -550,6 +554,8 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
                 photometric_sigma=photometric_sigma,
                 fwhm_mult=fwhm_mult,
                 wide_fov_search=True,
+                final_catalog_stars=final_catalog_stars,
+                mask=mask, use_flat=use_flat,
                 verbose=verbose
             )
 
