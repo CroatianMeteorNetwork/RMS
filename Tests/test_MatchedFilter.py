@@ -1041,6 +1041,28 @@ def test_background_around_a_track_aligned_with_the_stars(config):
     assert np.std((after[region] - truth[region])[away]) < NOISE
 
 
+def test_noise_around_a_track_not_reduced_by_the_alignment(config):
+    """ The noise of the background estimated again around a track (see maskObjects) is the noise of the frames,
+        although the samples are shifted with subpixel interpolation, which smooths their noise. """
+
+    handle = _DriftHandle([], total_frames=1280, n_stars=0, drift=(0.0031, 0.0023), seed=6)
+    det = MatchedFilterDetector(handle, config)
+    det.frame_first, det.frame_end = 0, 1280
+    det.block_starts, det.block_ends = [0, 256, 512, 768, 1024], [256, 512, 768, 1024, 1280]
+    det.psf_sigma = PSF_SIGMA
+    det.backgroundPass()
+    det._drift = (0.0031, 0.0023)
+
+    k = 2
+    track = np.array([[f, 30 + 0.05*(f - 512), 64.0] for f in range(512, 768, 8)], dtype=np.float64)
+    det.maskObjects([track])
+
+    # The noise in the region estimated again, away from the object, is the noise of the frames
+    noise = det.backgrounds[k].noise[57:72, 23:48]
+    yy = np.mgrid[57:72, 23:48][0]
+    assert abs(np.median(noise[np.abs(yy - 64) > 5.5])/NOISE - 1) < 0.1
+
+
 ### Light curves, bright objects, photometric scale ###
 
 def test_flashes_kept_in_light_curve(config):

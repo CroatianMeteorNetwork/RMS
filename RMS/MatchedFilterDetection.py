@@ -2322,10 +2322,17 @@ class MatchedFilterDetector(object):
                 yy, xx = np.mgrid[y0:y1, x0:x1]
                 centre = ((x0 + x1 - 1)/2.0, (y0 + y1 - 1)/2.0)
                 crops = []
+                smoothing = []
                 for j in near:
                     fr, frames = blockSamples(j)
                     for f, img in zip(fr, frames):
                         sx, sy = drift*(f - mid)
+
+                        # The bilinear interpolation of the shift averages neighbouring pixels, which reduces the
+                        #   standard deviation of their independent noise by this factor (1 for whole pixels)
+                        ax, ay = sx - np.floor(sx), sy - np.floor(sy)
+                        smoothing.append(math.sqrt(((1 - ax)**2 + ax**2)*((1 - ay)**2 + ay**2)))
+
                         src = img if img.dtype == np.float32 else img.astype(np.float32)
                         crop = cv2.getRectSubPix(src, (x1 - x0, y1 - y0),
                                                  (centre[0] + sx, centre[1] + sy)).astype(np.float64)
@@ -2341,8 +2348,11 @@ class MatchedFilterDetector(object):
 
                 # The noise too: the pixels which the object crosses during the block vary between the sky and the
                 #   object, and their noise would weigh down the object itself in the fits. It is the MAD of the
-                #   unmasked samples, scaled by 1.4826 to the standard deviation of Gaussian noise
-                mad = 1.4826*nanMedian(np.abs(crops - masked))
+                #   unmasked samples, scaled by 1.4826 to the standard deviation of Gaussian noise. The deviations of
+                #   every sample are divided by the smoothing of its interpolation, so the noise is the one of the
+                #   frames, which are normalized with it
+                smoothing = np.array(smoothing)[:, None, None]
+                mad = 1.4826*nanMedian(np.abs(crops - masked)/smoothing)
 
                 # A very slow object covers some pixels in most of the samples of three blocks: there, the
                 #   background of blocks further away, aligned on the stars, is used
