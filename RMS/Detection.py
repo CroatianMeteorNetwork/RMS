@@ -46,7 +46,6 @@ from RMS.Formats.FrameInterface import detectInputType
 from RMS.Formats.AST import loadAST
 from RMS.Logger import LoggingManager, getLogger
 from RMS.Misc import mkdirP
-from RMS.Routines import Kht
 from RMS.Routines.LineFinder3D import find3DLines, getAllPoints, stitch3DLines
 from RMS.Routines.CompareLines import compareLines
 from RMS.Routines import MaskImage
@@ -1900,6 +1899,10 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
             lines = np.array(ransac_lines)
 
         else:
+
+            # The compiled KHT module is imported only when it is used (after pyximport is registered at the top of
+            #   the module, so it can be rebuilt), the RANSAC line finder works without it
+            from RMS.Routines import Kht
 
             # Call the KHT line finding
             # Parameters: cluster_min_size (px), cluster_min_deviation, delta, kernel_min_height, n_sigmas
