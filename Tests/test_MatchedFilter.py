@@ -1009,6 +1009,38 @@ def test_star_drift_from_the_middles_of_the_blocks(config):
     assert np.allclose(det.starDrift(step=3), drift, rtol=0, atol=0.0006)
 
 
+def test_background_around_a_track_aligned_with_the_stars(config):
+    """ The background which is estimated again around a track without the object (see maskObjects) takes the
+        samples of the neighbouring blocks shifted by the motion of the stars, as the rest of the background of
+        the block, so the stars in it are where they are at the middle of the block. """
+
+    drift = (0.01, 0.0)
+    handle = _DriftHandle([], total_frames=1280, n_stars=400, drift=drift, seed=4)
+    det = MatchedFilterDetector(handle, config)
+    det.frame_first, det.frame_end = 0, 1280
+    det.block_starts, det.block_ends = [0, 256, 512, 768, 1024], [256, 512, 768, 1024, 1280]
+    det.psf_sigma = PSF_SIGMA
+    det.backgroundPass()
+
+    # A track across the middle block, and the background around it estimated again
+    k = 2
+    mid = (det.block_starts[k] + det.block_ends[k] - 1)/2.0
+    track = np.array([[f, 30 + 0.05*(f - 512), 64.0] for f in range(512, 768, 8)], dtype=np.float64)
+    det.maskObjects([track])
+    after = det.backgrounds[k].median
+
+    # The stars at the middle of the block
+    M = np.float32([[1, 0, drift[0]*mid], [0, 1, drift[1]*mid]])
+    truth = SKY + cv2.warpAffine(handle.base_stars, M, (SIZE, SIZE), flags=cv2.INTER_CUBIC)
+
+    # In the region estimated again, away from the object, the background is the stars at the middle of the block
+    #   within the noise of the median (unaligned samples blur the stars by the motion over three blocks)
+    region = (slice(57, 72), slice(23, 48))
+    yy, xx = np.mgrid[region[0], region[1]]
+    away = np.abs(yy - 64) > 5.5
+    assert np.std((after[region] - truth[region])[away]) < NOISE
+
+
 ### Light curves, bright objects, photometric scale ###
 
 def test_flashes_kept_in_light_curve(config):

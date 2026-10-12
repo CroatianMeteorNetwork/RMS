@@ -2266,6 +2266,9 @@ class MatchedFilterDetector(object):
         radius = 4*self.psf_sigma + 1
         n_blocks = len(self.block_starts)
 
+        # The motion of the stars (px per frame), which the samples are aligned with
+        drift = np.array(self.drift(), dtype=np.float64)
+
         # The sampled frames of the blocks (read once, kept while they are needed), the blocks whose background
         #   was changed, and the reference backgrounds of the blocks (see referenceBackground)
         samples = {}
@@ -2294,6 +2297,7 @@ class MatchedFilterDetector(object):
             # A region around every track, and in it the samples masked where any of the tracks is at the time
             #   of the sample
             bg = self.backgrounds[k]
+            mid = (self.block_starts[k] + self.block_ends[k] - 1)/2.0
             for c in tracks:
 
                 # The bounding box of the positions of the track during the neighbouring blocks (with a margin of
@@ -2311,16 +2315,22 @@ class MatchedFilterDetector(object):
 
                 # The region in every sample of the neighbouring blocks, with the pixels near any of the tracks at
                 #   the time of the sample set to NaN (the positions are interpolated between the measurements, and
-                #   the tracks are masked up to 8 frames beyond their ends)
+                #   the tracks are masked up to 8 frames beyond their ends). The region of a sample is taken where
+                #   the stars were at its time (shifted by the motion of the stars from the middle of the block, with
+                #   subpixel interpolation), so the stars of all samples are where they are in the block, as in the
+                #   rest of its background (see backgroundPass); the positions of the objects are shifted the same way
                 yy, xx = np.mgrid[y0:y1, x0:x1]
+                centre = ((x0 + x1 - 1)/2.0, (y0 + y1 - 1)/2.0)
                 crops = []
                 for j in near:
                     fr, frames = blockSamples(j)
                     for f, img in zip(fr, frames):
-                        crop = img[y0:y1, x0:x1].astype(np.float64)
+                        sx, sy = drift*(f - mid)
+                        crop = cv2.getRectSubPix(img.astype(np.float32), (x1 - x0, y1 - y0),
+                                                 (centre[0] + sx, centre[1] + sy)).astype(np.float64)
                         for t in tracks:
                             if t[0, 0] - 8 <= f <= t[-1, 0] + 8:
-                                px, py = np.interp(f, t[:, 0], t[:, 1]), np.interp(f, t[:, 0], t[:, 2])
+                                px, py = np.interp(f, t[:, 0], t[:, 1]) - sx, np.interp(f, t[:, 0], t[:, 2]) - sy
                                 crop[(xx - px)**2 + (yy - py)**2 <= radius**2] = np.nan
                         crops.append(crop)
 
