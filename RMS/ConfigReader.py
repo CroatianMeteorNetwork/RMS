@@ -1020,9 +1020,11 @@ class Config:
         #   local quadratic fit of the track), which reduces their errors 2 to 5 times; 0 disables it
         self.mf_smooth_frames = 64
 
-        # Largest number of candidate tracks measured per file (the strongest ones), which bounds the processing
-        #   time in bad conditions (e.g. thin clouds, very bright stars)
-        self.mf_max_tracks = 300
+        # Largest number of candidate tracks measured per file, or per segment of a file read in segments (the
+        #   strongest ones), a safety limit of the processing time in bad conditions (e.g. thin clouds, very bright
+        #   stars). The measurement of more candidates costs little, and the strength of a candidate tells little
+        #   whether it is real
+        self.mf_max_tracks = 1000
 
         # Largest gap (frames) between the hits of a track, e.g. between the flashes of a flashing object
         self.mf_link_max_gap = 96

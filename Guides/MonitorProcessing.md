@@ -438,8 +438,8 @@ all steps of the matched filter take the frames from memory:
   file, and the clouded sky of the whole file, remove the detections and measurements on them as without segments.
   A segment only knows the file so far, so it may take sky as clouded which the whole file shows as clear; its
   measurements there are then not kept, unlike without segments.
-- The candidate tracks measured per file are at most `mf_max_tracks`, shared by the segments: every segment has a
-  share by its length, and what a segment doesn't use is left to the next ones.
+- Every segment measures at most `mf_max_tracks` candidate tracks of its own, so a busy part of a file doesn't take
+  the measurements of the rest.
 - The search of very slow objects compares every block of frames with blocks a few blocks before and after it,
   so a segment holds at least 7 blocks: a memory too small for 14 (1.75 GB for 512x512 frames) is not used,
   and a short last segment begins earlier.

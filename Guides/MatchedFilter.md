@@ -207,8 +207,9 @@ the motion of the best stack.
   median distance of these hits from the stronger track is at most 20 px, and it moves the same way (within 20% of
   the motion of the stronger track, plus twice the smallest motion of the search).
 - **Acceptance.** A track needs `mf_min_hits` (3) hits, a motion within the range, and a displacement of at least
-  `mf_min_displacement` (3) FWHMs (the residuals of variable stars don't move). At most `mf_max_tracks` (300) tracks
-  are measured, the strongest ones, so an input in bad conditions can't take much longer than usual.
+  `mf_min_displacement` (3) FWHMs (the residuals of variable stars don't move). At most `mf_max_tracks` (1000) tracks
+  are measured (per segment of a file read in segments), the strongest ones, so an input in bad conditions can't take
+  much longer than usual.
 
 ### 6. Measurement
 
@@ -404,7 +405,7 @@ On a night with patchy clouds (above), the clouds are flagged where the matched 
 | Frames | All frames, in blocks of 256; the frames of the chunks on clouded sky are masked region by region |
 | Pixels | Not on bright stars, bright rows and columns, trails, the border, the user mask or clouded regions |
 | Motions | Up to `mf_ang_vel_max` (in degrees per second, converted to px per frame); larger motions on coarser bins |
-| Candidate tracks | The 300 strongest (`mf_max_tracks`), with at least 3 hits and a displacement of 3 FWHMs |
+| Candidate tracks | At most the 1000 strongest (`mf_max_tracks`), with at least 3 hits and a displacement of 3 FWHMs |
 | Detections | Significance of at least 12 in both tests, a point source, at least 20 frames, at least 6 measurements on clear sky |
 | Measurements | On clear sky, with an amplitude of at least 3 times its error and a position error within the limit |
 
@@ -562,7 +563,7 @@ All settings are in the `[MatchedFilter]` section, see the comments in `.config`
 | `mf_link_max_gap` | 96 | Largest gap (frames) between strong hits of a track |
 | `mf_tier_speed`, `mf_max_bin` | 2.0, 8 | Tiers of the search: larger motions on coarser bins (the motions per tier in binned px per frame), 0 disables them |
 | `mf_trail_level` | 25 | Rows and columns of sources brighter than this in a frame (in the noise of a pixel) are left out of the search, 0 disables it |
-| `mf_max_tracks` | 300 | Most candidate tracks measured per file (the strongest), bounds the time in bad conditions |
+| `mf_max_tracks` | 1000 | Most candidate tracks measured per file or segment (the strongest), bounds the time in bad conditions |
 | `mf_cloud_filter` | true | Leave out the clouded sky (needs the stars and the platepar) |
 | `mf_cloud_max_offset` | 0.15 | Largest local dimming of the stars on clear sky (mag) |
 | `mf_cloud_min_matched` | 30 | Smallest number of matched stars of the chunk the platepar is fitted on, for the sky quality |

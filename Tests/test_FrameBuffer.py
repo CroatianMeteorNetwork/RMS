@@ -445,11 +445,10 @@ def test_persistence_carried_without_the_overlap():
     assert runs == 10 and counts.max() == 1
 
 
-def test_segments_share_the_track_cap_and_carry_persistence(monkeypatch):
-    """ The segments share mf_max_tracks: every segment has a share by the frames which belong to it, which is kept
-        for it, and measures at most what the segments before it left minus the shares of the segments after it. A
-        file measures at most mf_max_tracks candidate tracks, all of them while it has fewer, and a later segment
-        always has its share. The persistence is carried from before the next segment. """
+def test_segments_each_have_the_track_cap_and_carry_persistence(monkeypatch):
+    """ Every segment measures at most mf_max_tracks candidate tracks of its own, whatever the other segments
+        measured (a busy part of a file doesn't take the measurements of the rest, nor the rest those of a busy
+        part). The persistence is carried from before the next segment. """
 
     import RMS.MatchedFilterDetection as mfd
 
@@ -465,17 +464,16 @@ def test_segments_share_the_track_cap_and_carry_persistence(monkeypatch):
         return [[constructFFName('XX0001', handle.currentFrameTime(frame_no=c*128, dt_obj=True)), [(1.0,)*8]*5]
                 for c in range(*chunk_range)]
 
-    # The segments measure 0, 200, 80 and all the rest of the tracks they may
-    measured = iter([0, 200, 80, 999])
+    # Every segment is detected with the cap of the config (max_tracks not lowered)
     calls = []
     class _Detector(object):
         persistence_carry = {}
         persistence_carry_frames = 0
         psf_sigma = None
     def detect(img_handle, config, max_tracks=None, persistence_until=None, **kwargs):
-        calls.append((max_tracks, persistence_until))
+        calls.append((max_tracks, persistence_until, config.mf_max_tracks))
         det = _Detector()
-        det.tracks_measured = min(next(measured), max_tracks)
+        det.tracks_measured = 300
         return [], det
 
     monkeypatch.setattr(mfd, 'extractStarsFrameInterface', stars)
@@ -484,7 +482,8 @@ def test_segments_share_the_track_cap_and_carry_persistence(monkeypatch):
     monkeypatch.setattr(mfd, 'SegmentedRun', lambda *args, **kwargs: None)
 
     mfd.detectMatchedFilterSegments(handle, config, 768)
-    assert [c[0] for c in calls] == [94, 169, 75, 56]
+    assert [c[0] for c in calls] == [None]*4
+    assert [c[2] for c in calls] == [300]*4
     assert [c[1] for c in calls] == [512, 1024, 1536, None]
 
 
@@ -541,17 +540,6 @@ def test_clouded_rows_removed_with_the_sky_of_the_whole_input():
     assert len(detections) == 1 and detections[0][2][-1, 0] == 149
     assert rows == [float(f) for f in range(150, 200)] + [float(f) for f in range(300, 400)]
     assert removed == [300]
-
-
-def test_track_shares_sum_to_the_cap():
-    """ The shares of the track cap add up to the cap exactly, so no segment is left without one by the rounding
-        (e.g. a cap of 3 for 4 equal segments). """
-
-    from RMS.MatchedFilterDetection import apportion
-
-    assert sum(apportion(3, [1, 1, 1, 1])) == 3
-    assert apportion(300, [640, 512, 512, 384]) == [94, 75, 75, 56]
-    assert apportion(10, [0, 5]) == [0, 10]
 
 
 def test_persistence_carried_past_a_segment_not_searched(monkeypatch):

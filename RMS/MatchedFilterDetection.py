@@ -3482,8 +3482,8 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
         persistence_until: [int] First frame of the next segment, before which the persistence counts are kept to
             carry to it (see MatchedFilterDetector.persistenceCheckpoint). None by default.
         persistence_prior_frames: [int] Number of frames of the counts of persistence_prior. 0 by default.
-        max_tracks: [int] Largest number of candidate tracks which are measured, e.g. what the segments before this
-            one left of mf_max_tracks. None by default (mf_max_tracks).
+        max_tracks: [int] Largest number of candidate tracks which are measured. None by default
+            (mf_max_tracks).
 
     Return:
         [list] Detections as [rho, theta, centroids], or (detections, detector) with return_detector. The
@@ -3539,30 +3539,6 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
 
     return (detections, detector) if return_detector else detections
 
-
-
-def apportion(total, weights):
-    """ Split a whole number into whole shares proportional to the weights which add up to it exactly (the largest
-        remainders get the units which the rounding down leaves).
-
-    Arguments:
-        total: [int] Number to split.
-        weights: [list] Weights of the shares.
-
-    Return:
-        [list] The shares.
-    """
-
-    weights = np.asarray(weights, dtype=np.float64)
-    if weights.sum() <= 0:
-        return [0]*len(weights)
-
-    exact = total*weights/weights.sum()
-    shares = np.floor(exact).astype(int)
-    for i in np.argsort(-(exact - shares), kind='stable')[:total - shares.sum()]:
-        shares[i] += 1
-
-    return shares.tolist()
 
 
 def isValidDetection(cent, detector):
@@ -3966,14 +3942,6 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
     cuts = [(ranges[k + 1][0] + ranges[k][1])//2 for k in range(len(ranges) - 1)]
     overlaps = [(ranges[k + 1][0], ranges[k][1]) for k in range(len(ranges) - 1)]
 
-    # The segments share mf_max_tracks: every segment has a share by the frames which belong to it, which is kept
-    #   for it, and measures at most what the segments before it left minus the shares of the segments after it.
-    #   The input measures at most mf_max_tracks candidate tracks, all of them while it has fewer, and a busy
-    #   early part of it can't leave nothing for a later one
-    bounds = [0] + cuts + [img_handle.total_frames]
-    shares = apportion(int(config.mf_max_tracks), [bounds[k + 1] - bounds[k] for k in range(len(ranges))])
-    remaining = int(config.mf_max_tracks)
-
     timing = collections.defaultdict(float)
     star_list, star_firsts, detectors, segment_detections = [], [], [], []
     done_chunks = 0
@@ -4022,7 +3990,6 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
 
         # The segment is searched, with the sky quality from the stars of all chunks read so far (the intensities
         #   are scaled to the stars of the segment itself, see apertureCorrection)
-        max_tracks = max(remaining - sum(shares[k + 1:]), 0)
         detections, detector = detectMatchedFilter(buffer, config, mask=mask, dark=dark, flat_struct=flat_struct,
                                                    star_list=list(star_list), return_detector=True,
                                                    platepar=platepar, reference_dir=reference_dir,
@@ -4030,11 +3997,8 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
                                                    persistence_prior=persistence,
                                                    persistence_prior_frames=persistence_frames, sky_range=(0, end),
                                                    persistence_until=(ranges[k + 1][0] if k + 1 < len(ranges)
-                                                                      else None),
-                                                   max_tracks=max_tracks)
+                                                                      else None))
         detectors.append(detector)
-        if detector is not None:
-            remaining = max(remaining - detector.tracks_measured, 0)
 
         # The persistent pixels are judged over all segments so far (the runs of every overlap once), as over the
         #   whole input. A segment which was too short to be searched has no counts, those so far are kept
