@@ -7305,7 +7305,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Block panning while the mask tab is open, as drags are used for polygon and brush editing
         if hasattr(self, 'tab') and hasattr(self.tab, 'mask'):
-            if self.tab.currentIndex() == self.tab.indexOf(self.tab.mask):
+            if self.tab.currentIndex() == self.tab.tabIndexOf(self.tab.mask):
                 block_panning = True
 
         # Block panning while the mask brush is active
