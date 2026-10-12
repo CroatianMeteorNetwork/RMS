@@ -17,6 +17,8 @@ ukDataDir = f'{os.path.dirname(__file__)}/ExampleStationData/Stations/UK0006'
 def checkDataExists():
     if not os.path.isdir(f'{frDataDir}'):
         return False
+    if not os.path.isdir(f'{ukDataDir}'):
+        return False
     return True
 
 

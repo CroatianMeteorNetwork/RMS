@@ -18,6 +18,8 @@ plDataDir = f'{os.path.dirname(__file__)}/ExampleStationData/Stations/PL000P'
 def checkDataExists():
     if not os.path.isdir(f'{frDataDir}'):
         return False
+    if not os.path.isdir(f'{plDataDir}'):
+        return False
     return True
 
 
@@ -32,7 +34,7 @@ def test_selectFiles_fr():
     assert 'mask.bmp' in sel_files
 
 
-def test_selectFiles_uk():
+def test_selectFiles_other():
     if not checkDataExists():
         pytest.skip("Test data not available - did you expand the archive?")
     ff_detected = ['FF_PL000P_20260927_004524_976_0651264.fits']

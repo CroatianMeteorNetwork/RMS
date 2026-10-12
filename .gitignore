@@ -21,7 +21,7 @@ flat.*
 share/astrometry_cache/*
 
 # test data
-Tests/ExampleStationData/*
+Tests/ExampleStationData/Stations/*
 
 # Eclipse
 .project
