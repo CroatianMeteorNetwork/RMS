@@ -197,11 +197,16 @@ def detectStarsAndMeteors(ff_directory, ff_name, config, flat_struct=None, dark=
         mask: [MaskStruct]
 
     Return:
-        [ff_name, star_list, meteor_list] detected stars and meteors
+        [ff_name, star_list, meteor_list, diagnostics] detected stars and meteors, and the detection
+            diagnostics dict (white ratio checks, see Detection.getLines), empty if meteor detection
+            did not run.
 
     """
 
     log.info('Running detection on file: ' + ff_name)
+
+    # Detection diagnostics, filled in by the meteor detection
+    diagnostics = {}
 
 
     # Construct the image handle for the detection
@@ -214,7 +219,7 @@ def detectStarsAndMeteors(ff_directory, ff_name, config, flat_struct=None, dark=
 
         # If the FF file could not be loaded, skip it
         if img_handle.ff is None:
-            return ff_name, [[], [], [], []], []
+            return ff_name, [[], [], [], []], [], diagnostics
 
 
 
@@ -237,7 +242,8 @@ def detectStarsAndMeteors(ff_directory, ff_name, config, flat_struct=None, dark=
         log.info('At least ' + str(config.ff_min_stars) + ' stars, detecting meteors...')
 
         # Run the detection
-        meteor_list = detectMeteors(img_handle, config, flat_struct=flat_struct, dark=dark, mask=mask)
+        meteor_list = detectMeteors(img_handle, config, flat_struct=flat_struct, dark=dark, mask=mask, \
+            diagnostics=diagnostics)
 
         log.info(ff_name + ' detected meteors: ' + str(len(meteor_list)))
 
@@ -246,7 +252,76 @@ def detectStarsAndMeteors(ff_directory, ff_name, config, flat_struct=None, dark=
 
 
 
-    return ff_name, star_list, meteor_list
+    return ff_name, star_list, meteor_list, diagnostics
+
+
+
+# Fraction of the night's meteor detection runs skipped by the white ratio check above which the night is
+# reported as a threshold fault. A healthy station skips a few images a night at most (measured ~7 in
+# 90,000 FFs across 20 stations), even in bad weather, since bright sky raises stdpixel together with
+# the signal and cloudy images rarely have enough stars for meteor detection to run at all. A station
+# whose threshold sits below its noise floor skips nearly every clear image and is blind to meteors.
+WHITE_RATIO_SKIP_WARN_FRACTION = 0.5
+
+# Minimum number of meteor detection runs before the fraction above is judged, so a handful of twilight
+# images at the start or end of a night cannot trip it
+WHITE_RATIO_SKIP_MIN_IMAGES = 10
+
+
+def reportWhiteRatioSkips(detection_results):
+    """ Warn once for the night if meteor detection was skipped by the white ratio check on most images
+        it ran on. A single skipped image is normal and stays at debug level in the detection; only a
+        night that is mostly skipped is a fault worth an operator's attention.
+
+    Arguments:
+        detection_results: [list] Outputs of detectStarsAndMeteors, with the diagnostics dict.
+
+    Return:
+        skipped: [int] Number of images on which meteor detection was skipped.
+        checked: [int] Number of images on which meteor detection ran.
+    """
+
+    checked = 0
+    skipped = 0
+    white_ratios = []
+    excess_medians = []
+    std_medians = []
+
+    for _, _, _, diagnostics in detection_results:
+
+        # Only count images on which meteor detection ran (enough stars), so cloudy images stay out of
+        # the denominator
+        checks = diagnostics.get('white_ratio_checks', 0)
+        if checks == 0:
+            continue
+
+        checked += 1
+
+        # An image is skipped when every one of its checks failed (one per FF, one per time window for
+        # other inputs)
+        if diagnostics.get('white_ratio_rejections', 0) == checks:
+
+            skipped += 1
+            white_ratios.append(diagnostics['white_ratio_max'])
+            excess_medians.append(diagnostics['maxpixel_excess_median'])
+            std_medians.append(diagnostics['stdpixel_median'])
+
+
+    if (checked >= WHITE_RATIO_SKIP_MIN_IMAGES) and (skipped > WHITE_RATIO_SKIP_WARN_FRACTION*checked):
+
+        log.warning(("Meteor detection was skipped on {:d} of {:d} images with enough stars ({:.0f}%) "
+            "because more than max_white_ratio of the frame passed the k1/j1 threshold (median white "
+            "ratio {:.2f}). The k1*stdpixel + j1 threshold sits below the maxpixel noise floor, so the "
+            "station is blind to meteors on clear sky. Bright sky does not do this, as it raises "
+            "stdpixel with the signal. On the skipped images the median maxpixel - avepixel is {:.1f} "
+            "ADU against a median stdpixel of {:.1f} ADU: if the excess is many times the stdpixel, "
+            "the video path smooths per-pixel temporal noise (software re-encoded or some IP camera "
+            "streams), otherwise k1/j1 are too low for this camera. Raise j1 (or k1).").format(
+            skipped, checked, 100.0*skipped/checked, np.median(white_ratios), np.median(excess_medians),
+            np.median(std_medians)))
+
+
+    return skipped, checked
 
 
 
@@ -278,21 +353,28 @@ def saveDetections(detection_results, ff_dir, config, output_suffix=''):
     # Remove all 'None' results, which were errors
     detection_results = [res for res in detection_results if res is not None]
 
+    # Results restored from detection backups written before the diagnostics were added have three
+    # elements
+    detection_results = [tuple(res) + ({},) if len(res) == 3 else tuple(res) for res in detection_results]
+
     # Sort by FF name
     detection_results = sorted(detection_results, key=lambda x: x[0])
 
 
     # Count the number of detected meteors
     meteors_num = 0
-    for _, _, meteor_data in detection_results:
+    for _, _, meteor_data, _ in detection_results:
         for meteor in meteor_data:
             meteors_num += 1
 
     log.info('TOTAL: ' + str(meteors_num) + ' detected meteors.')
 
+    # Report a night on which the white ratio check skipped most of the meteor detection
+    reportWhiteRatioSkips(detection_results)
+
 
     # Save the detections to a file
-    for ff_name, star_data, meteor_data in detection_results:
+    for ff_name, star_data, meteor_data, _ in detection_results:
 
 
         if len(star_data) == 4:

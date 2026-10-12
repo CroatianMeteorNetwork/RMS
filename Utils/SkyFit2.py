@@ -6437,6 +6437,37 @@ class PlateTool(QtWidgets.QMainWindow):
         self.mask_brush_last_pos = None
         self.brush_cursor.hide()
         self.tab.mask.setBrushMode(False)
+        self.updatePanningEnabled()
+
+    def updatePanningEnabled(self):
+        """ Enable or disable panning the image frame with a mouse drag.
+
+        Panning has to be disabled whenever a mouse drag is used for painting instead of navigating,
+        i.e. when editing the mask or when coloring photometry pixels in the manual reduction mode.
+
+        Disabling panning is done by setting the panning_enabled flag on the custom ViewBox, which
+        makes it accept the mouse press itself. The press is then never handed to pyqtgraph's drag
+        machinery, so neither the left-drag pan nor the right-drag zoom is generated.
+        """
+
+        block_panning = False
+
+        # Block panning while the mask tab is open, as drags are used for polygon and brush editing
+        if hasattr(self, 'tab') and hasattr(self.tab, 'mask'):
+            if self.tab.currentIndex() == self.tab.indexOf(self.tab.mask):
+                block_panning = True
+
+        # Block panning while the mask brush is active
+        if getattr(self, 'mask_brush_mode', False):
+            block_panning = True
+
+        # Block panning while coloring photometry pixels in the manual reduction mode (SHIFT held
+        #   down puts the cursor into mode 2)
+        cursor = getattr(self, 'cursor', None)
+        if (self.mode == 'manualreduction') and (cursor is not None) and (cursor.mode == 2):
+            block_panning = True
+
+        self.img_frame.panning_enabled = not block_panning
 
     def addMaskPoint(self, x, y):
         """Add a point to the current polygon being drawn."""
@@ -10308,6 +10339,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def onMousePressed(self, event):
 
+        # Decide whether this drag should pan the view or paint. This is called from
+        #   ViewBox.mousePressEvent before it checks the flag, so it applies to this press already.
+        self.updatePanningEnabled()
+
         if event.button() == QtCore.Qt.MouseButton.LeftButton:
             self.clicked = 1
         elif event.button() == QtCore.Qt.MouseButton.MiddleButton:
@@ -11135,6 +11170,9 @@ class PlateTool(QtWidgets.QMainWindow):
             if (qmodifiers & QtCore.Qt.KeyboardModifier.ShiftModifier):
                 self.cursor.setMode(2)
 
+                # Don't pan the image while the photometry is being colored
+                self.updatePanningEnabled()
+
             if event.key() == QtCore.Qt.Key.Key_P:
                 self.showLightcurve()
 
@@ -11869,6 +11907,9 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             if qmodifiers != QtCore.Qt.KeyboardModifier.ShiftModifier:
                 self.cursor.setMode(0)
+
+                # Re-enable panning after the photometry coloring is done
+                self.updatePanningEnabled()
 
 
     def wheelEvent(self, event, axis=None):
