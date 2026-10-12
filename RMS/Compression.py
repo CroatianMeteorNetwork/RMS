@@ -21,6 +21,7 @@ import traceback
 import time
 import datetime
 import multiprocessing
+import ctypes
 import signal
 from math import floor
 import numpy as np
@@ -30,8 +31,8 @@ import cv2
 from RMS.VideoExtraction import Extractor
 from RMS.Formats import FFfile, FFStruct
 from RMS.Formats import FieldIntensities
-from RMS.Logger import getLogger
-from RMS.Misc import UTCFromTimestamp
+from RMS.Logger import getLogger, getLoggingQueue, initChildProcess
+from RMS.Misc import UTCFromTimestamp, frameBufferShape, AtomicFlag, stableDoubleRead
 from RMS.Routines.Image import saveImage
 
 # Import Cython functions
@@ -58,9 +59,10 @@ class Compressor(multiprocessing.Process):
         """
 
         Arguments:
-            array1: first numpy array in shared memory of grayscale video frames
+            array1: multiprocessing.Array base for the first frame buffer (the numpy
+                view is rebuilt per-process via frameBufferShape - see RMS.Misc)
             start_time1: float in shared memory that holds time of first frame in array1
-            array2: second numpy array in shared memory
+            array2: multiprocessing.Array base for the second frame buffer
             start_time2: float in shared memory that holds time of first frame in array2
             config: configuration class
 
@@ -73,18 +75,30 @@ class Compressor(multiprocessing.Process):
         super(Compressor, self).__init__()
         
         self.data_dir = data_dir
-        self.array1 = array1
+        # array1/array2 are multiprocessing.Array BASE objects (picklable across forkserver/spawn).
+        # The numpy views over them are rebuilt in run() so they stay backed by the same shared
+        # memory the capture process writes into; a numpy view passed here would pickle by value.
+        self.array1_base = array1
+        self.array2_base = array2
+        self.array1 = None
+        self.array2 = None
         self.start_time1 = start_time1
-        self.array2 = array2
         self.start_time2 = start_time2
         self.config = config
 
         self.detector = detector
 
-        self.exit = multiprocessing.Event()
+        # Lock-free flags: these are set/polled across processes and must never be able to
+        # deadlock, even if a process sharing them is killed (see AtomicFlag)
+        self.exit = AtomicFlag()
 
-        self.run_exited = multiprocessing.Event()
-    
+        # Lock-free flag: an mp.Event deadlocks if a process sharing it is OOM-killed while
+        # holding its internal semaphore (see AtomicFlag). Only .set()/.is_set() are used here.
+        self.run_exited = AtomicFlag()
+
+        # Grab the logging queue on the parent side so the child can re-attach logging
+        # under the 'forkserver'/'spawn' start methods (handlers are not inherited there)
+        self.logging_queue = getLoggingQueue()
 
 
     def compress(self, frames):
@@ -227,16 +241,32 @@ class Compressor(multiprocessing.Process):
                     self.terminate()
                 else:
                     log.info("Compression process exited gracefully after interrupt")
-                    
+
             except ProcessLookupError:
                 log.info("Compression process already terminated")
             except Exception as e:
                 log.error("Error during graceful compression shutdown: {}".format(e))
                 log.info("Falling back to terminate()")
                 self.terminate()
-            
+
+            # A bare join() would hang forever on a process that ignores SIGTERM -
+            # bound the wait and escalate to SIGKILL (review finding)
+            self.join(5)
+
+            if self.is_alive():
+                log.warning("Compression process survived terminate, sending SIGKILL...")
+                try:
+                    os.kill(self.pid, signal.SIGKILL)
+                except (OSError, AttributeError):
+                    pass
+
             # Always join to reap zombie (returns instantly if already dead)
             self.join()
+
+        else:
+            # Process is not alive but may not have been joined yet - reap it
+            log.debug("Compression process not alive, joining to reap resources")
+            self.join(timeout=5)
 
         # Return the detector and live viewer objects because they were updated in this namespace
         return self.detector
@@ -254,7 +284,17 @@ class Compressor(multiprocessing.Process):
     def run(self):
         """ Retrieve frames from list, convert, compress and save them.
         """
-        
+
+        # Re-establish logging and signal handling in the child (no-op under 'fork')
+        initChildProcess(self.logging_queue, self.config)
+
+        # Rebuild numpy views over the shared frame buffers in this process. Under forkserver/spawn
+        # the views cannot be inherited, so build them here from the shared multiprocessing.Array
+        # base objects - this is the same shared memory the capture process writes frames into.
+        frame_buffer_shape = frameBufferShape(self.config)
+        self.array1 = np.ctypeslib.as_array(self.array1_base.get_obj()).reshape(frame_buffer_shape)
+        self.array2 = np.ctypeslib.as_array(self.array2_base.get_obj()).reshape(frame_buffer_shape)
+
         n = 0
         exit_wait_start = None
         
@@ -283,9 +323,9 @@ class Compressor(multiprocessing.Process):
                 if self.exit.is_set():
 
                     log.debug('Compression run exit')
-                    self.run_exited.set()
 
-                    return None
+                    self.run_exited.set()
+                    os._exit(0)
 
                 time.sleep(0.1)
 
@@ -295,10 +335,17 @@ class Compressor(multiprocessing.Process):
 
             
             buffer_one = True
-            if self.start_time1.value > 0:
+
+            # Stable reads: the 0 -> t transition of these lock-free doubles can
+            # tear on 32-bit ARM and a torn value passes the > 0 gate with a
+            # timestamp wrong by up to ~1024 s (review finding)
+            start_time1_val = stableDoubleRead(self.start_time1)
+            start_time2_val = stableDoubleRead(self.start_time2)
+
+            if start_time1_val > 0:
 
                 # Retrieve time of first frame
-                startTime = float(self.start_time1.value)
+                startTime = float(start_time1_val)
 
                 # Copy frames
                 frames = self.array1
@@ -307,10 +354,10 @@ class Compressor(multiprocessing.Process):
                 self.start_time1.value = -1
                 buffer_one = True
 
-            elif self.start_time2.value > 0:
+            elif start_time2_val > 0:
 
                 # Retrieve time of first frame
-                startTime = float(self.start_time2.value)
+                startTime = float(start_time2_val)
 
                 # Copy frames
                 frames = self.array2
@@ -336,7 +383,6 @@ class Compressor(multiprocessing.Process):
             # Run the compression
             compressed, field_intensities = self.compress(frames)
 
-            
             # Once the compression is done, tell the capture thread to keep filling the buffer
             if buffer_one:
                 self.start_time1.value = 0
@@ -367,10 +413,24 @@ class Compressor(multiprocessing.Process):
             # Save the extracted intensities per every field
             FieldIntensities.saveFieldIntensitiesBin(field_intensities, self.data_dir, filename_micros)
 
-            # Run the extractor
+            # Run the extractor on the LIVE ping-pong buffer (fixed memory: no per-block
+            # copy). With two buffers the extractor has at most about one block before
+            # capture, having filled the other buffer, wraps back and starts overwriting
+            # this one - and less than that in practice, since the handshake was released
+            # (start_time -> 0) and the FF/JPG/intensities saved above before we get here.
+            # A normal-night extraction finishes inside that window; a slow one (noisy sky,
+            # long find3DLines) can outrun it, and then capture overwrites the block
+            # mid-read and that single FR clip is corrupted. That is the original pre-#935
+            # behavior, kept deliberately: on memory-limited Raspberry Pis a rare lost
+            # fireball clip is cheaper than a per-block snapshot copy, and FF files and
+            # detection are unaffected. Pass the mp.Array BASE, not a numpy view - the base
+            # crosses the process boundary by handle under 'fork' and 'forkserver'/'spawn'
+            # alike, while a view would be pickled by value (~236 MB, stalling compression
+            # and spiking RSS).
             if self.config.enable_fireball_detection:
+                frames_base = self.array1_base if buffer_one else self.array2_base
                 extractor = Extractor(self.config, self.data_dir)
-                extractor.start(frames, compressed, filename_millis)
+                extractor.start(frames_base, frames.shape, compressed, filename_millis)
 
                 log.debug('Extractor started for: ' + filename_millis)
 
@@ -390,7 +450,14 @@ class Compressor(multiprocessing.Process):
 
 
         log.debug('Compression run exit')
+
         time.sleep(1.0)
         self.run_exited.set()
+
+        # Force-exit the process. The forked QueuedPool Manager proxy threads
+        # hold open socket connections that survive even after dropping all
+        # Python references. os._exit() is the only reliable way to terminate
+        # the process without waiting for those threads.
+        os._exit(0)
 
 

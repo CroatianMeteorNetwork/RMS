@@ -11,6 +11,7 @@ import json
 import os
 import shutil
 import sys
+import traceback
 import logging
 from collections import OrderedDict
 
@@ -111,6 +112,7 @@ def recalibrateFF(
     ignore_max_stars=False,
     debug=False,
     ff_name=None,
+    min_match_fraction=None,
 ):
     """Given the platepar and a list of stars on one image, try to recalibrate the platepar to achieve
         the best match by brute force star matching.
@@ -124,13 +126,18 @@ def recalibrateFF(
     Keyword arguments:
         max_match_radius: [float] Maximum radius used for star matching. None by default, which uses all 
             hardcoded values.
-        force_platepar_save: [bool] Skip the goodness of fit check and save the platepar.
+        force_platepar_save: [bool] Skip the goodness of fit check and save the platepar. Note that
+            the star coverage gate (min_match_fraction) still applies, so a fit that matched only a
+            small fraction of the detected stars is rejected even when this is True.
         ignore_distance_threshold: [bool] Don't consider the recalib as failed if the median distance
             is larger than the threshold.
         ignore_max_stars: [bool] Ignore the maximum number of image stars for recalibration.
         debug: [bool] If True, show a debug plot after each successful fit iteration showing catalog
             stars, calstars, and matched stars.
         ff_name: [str] Name of the FF file being processed. Used for debug plot labels. None by default.
+        min_match_fraction: [float] Minimum fraction of the detected stars that the fit must match
+            to be accepted. None by default, which uses config.recalibration_min_match_fraction.
+            Set to 0 to disable the coverage gate (e.g. for interactive use).
 
     Return:
         result: [?] A Platepar instance if refinement is successful, None if it failed.
@@ -138,6 +145,10 @@ def recalibrateFF(
     """
 
     working_platepar = copy.deepcopy(working_platepar)
+
+    # Resolve the coverage gate threshold from the config unless explicitly given
+    if min_match_fraction is None:
+        min_match_fraction = config.recalibration_min_match_fraction
 
     # If there more stars than a set limit, sample them randomly using the same seed for reproducibility
     if not ignore_max_stars and len(star_dict_ff[jd]) > config.recalibration_max_stars:
@@ -234,6 +245,7 @@ def recalibrateFF(
 
     # Go through all radii and match the stars
     min_match_radius = None
+    matched_stars_good = None
     for match_radius in radius_list:
 
         # Skip radiuses that are too small if the radius filter is on
@@ -347,6 +359,11 @@ def recalibrateFF(
             # Keep track of the minimum match radius
             min_match_radius = match_radius
 
+            # Keep the matched stars from this successful iteration - a later iteration that fails
+            #   overwrites matched_stars with matches of a platepar that was never accepted, and
+            #   those must not feed the coverage gate or the photometry fit below
+            matched_stars_good = matched_stars
+
             log.info('{:g}/{:g} match with avg distance {:.2f} px within radius {:.2f} px!'.format(
                 n_matched, len(star_dict_ff[jd]), dist, match_radius
             ))
@@ -369,13 +386,38 @@ def recalibrateFF(
         or force_platepar_save
     ):
 
+        # If no fit iteration succeeded, there is no matched star set consistent with the platepar,
+        #   so neither the coverage gate nor the photometry fit can run - reject the platepar (the
+        #   caller will fall back to the previous one)
+        if matched_stars_good is None:
+            log.info('Rejecting refined platepar, no successful fit iteration to take matched '
+                     'stars from')
+            return None, min_match_radius
+
+        # Get a list of matched image and catalog stars, taken from the last successful fit
+        #   iteration so that they are consistent with the platepar being saved
+        image_stars, matched_catalog_stars, _ = matched_stars_good[jd]
+
+        # Coverage gate: reject a fit that only matched a small fraction of the detected stars.
+        # The goodness check above only weighs the residuals of the stars that matched, so a
+        # sparse spurious subset (e.g. 29 of 308 detections aligned at a wrong pointing) can pass
+        # it. When such a fit is stamped auto_recalibrated and chained forward as the seed for the
+        # next FF, the pointing walks away over a marginal/cloudy night. Requiring a real coverage
+        # fraction rejects those fits (the frame keeps the previous good platepar) while accepting
+        # genuine fits - including after a real camera move, which re-matches the whole field at
+        # the new pointing.
+        n_detected = len(star_dict_ff[jd])
+        match_fraction = len(image_stars)/n_detected if n_detected > 0 else 0.0
+
+        if match_fraction < min_match_fraction:
+            log.info('Rejecting refined platepar, only {:d}/{:d} = {:.2f} of detected stars '
+                     'matched within {:.2f} px (< {:.2f})'.format(len(image_stars), n_detected,
+                                                                  match_fraction, min_match_radius,
+                                                                  min_match_fraction))
+            return None, min_match_radius
+
         ### PHOTOMETRY FIT ###
 
-        # Get a list of matched image and catalog stars
-        matched_val = matched_stars[jd]
-        if not isinstance(matched_val, (list, tuple)) or len(matched_val) != 3:
-             log.error("matched_stars[jd] is not a 3-tuple! Value: {}, type: {}".format(matched_val, type(matched_val)))
-        image_stars, matched_catalog_stars, _ = matched_val
         star_intensities = image_stars[:, 2]
         # Ensure it's a numpy array with at least 3 columns for unpacking
         matched_catalog_stars = np.array(matched_catalog_stars)
@@ -1063,12 +1105,30 @@ def plotCalibrationVariation(recalibrated_platepars, platepar, config, dir_path,
 
     ### Plot the photometric offset variation ###
 
+    # Skip the plot if there are not enough points (platepars which failed the fit are skipped above, so
+    #   fewer points can remain than there are recalibrated platepars)
+    if len(dt_list) < 2:
+
+        log.info('Less than 2 photometric offsets available, skipping the photometry plot...')
+
+        return True
+
+    # Sanitize the error bars. Non-finite values break the error bar plotting in older versions of matplotlib
+    #   (they raise a StopIteration), so replace them with zeros and omit the error bars completely if none of
+    #   the values are usable
+    photom_offset_std_arr = np.array(photom_offset_std_list, dtype=np.float64)
+    if np.any(np.isfinite(photom_offset_std_arr)):
+        yerr = np.where(np.isfinite(photom_offset_std_arr), photom_offset_std_arr, 0.0)
+
+    else:
+        yerr = None
+
     plt.figure()
 
     plt.errorbar(
         dt_list,
         photom_offset_list,
-        yerr=photom_offset_std_list,
+        yerr=yerr,
         fmt="o",
         ecolor='lightgray',
         elinewidth=2,
@@ -1384,9 +1444,25 @@ def recalibrateIndividualFFsAndApplyAstrometry(
                         if ff_name_tmp in recalibrated_platepars:
 
                             # Get the computed photometric offset and stddev
-                            photom_offset_tmp_list.append(recalibrated_platepars[ff_name_tmp].mag_lev)
-                            photom_offset_std_tmp_list.append(recalibrated_platepars[ff_name_tmp].mag_lev_stddev)
+                            mag_lev_tmp = recalibrated_platepars[ff_name_tmp].mag_lev
+                            mag_lev_stddev_tmp = recalibrated_platepars[ff_name_tmp].mag_lev_stddev
+
+                            # Only use neighbours with a usable photometric solution. Averaging in a
+                            #   non-finite value would make the average non-finite and, as the average is
+                            #   written back to all neighbours, the non-finite value would spread to all
+                            #   FF files of the night through overlapping neighbourhoods
+                            if not (np.isfinite(mag_lev_tmp) and np.isfinite(mag_lev_stddev_tmp)):
+                                continue
+
+                            photom_offset_tmp_list.append(mag_lev_tmp)
+                            photom_offset_std_tmp_list.append(mag_lev_stddev_tmp)
                             neighboring_ffs.append(ff_name_tmp)
+
+                # If no neighbour had a usable photometric solution, keep the individual values as they are
+                if len(photom_offset_tmp_list) == 0:
+                    log.warning('No finite photometric offsets among the neighbours of {:s}, skipping the '
+                                'photometric offset averaging!'.format(ff_name))
+                    continue
 
                 # Compute the new photometric offset and improved standard deviation (assume equal sample size)
                 #   Source: https://stats.stackexchange.com/questions/55999/is-it-possible-to-find-the-combined-standard-deviation
@@ -1524,11 +1600,23 @@ def recalibrateIndividualFFsAndApplyAstrometry(
 
     if generate_plot:
 
-        # Generate the name the plots
-        plot_name = os.path.basename(ftpdetectinfo_path).replace('FTPdetectinfo_', '').replace('.txt', '')
+        # The plots are only informative, so a failure to generate them must never abort the processing of
+        #   the night (the astrometry has already been applied and the recalibrated platepars written out)
+        try:
 
-        plotCalibrationVariation(recalibrated_platepars_all, platepar, config, dir_path, plot_name,
-                                 ff_frames=calstars_ff_frames)
+            # Generate the name the plots
+            plot_name = os.path.basename(ftpdetectinfo_path).replace('FTPdetectinfo_', '').replace('.txt', '')
+
+            plotCalibrationVariation(recalibrated_platepars_all, platepar, config, dir_path, plot_name,
+                                     ff_frames=calstars_ff_frames)
+
+        except Exception as e:
+
+            log.warning('Generating the recalibration plots failed with the message:\n' + repr(e))
+            log.debug(repr(traceback.format_exception(*sys.exc_info())))
+
+            # Close any half-built figure so that it doesn't leak into the plots generated later
+            plt.close('all')
 
     ### ###
 

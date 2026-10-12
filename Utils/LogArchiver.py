@@ -1,5 +1,5 @@
 # RPi Meteor Station
-# Copyright (C) 2025 David Rollinson
+# Copyright (C) 2026 David Rollinson
 # 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -21,7 +21,6 @@ import json
 import tempfile
 import argparse
 import datetime
-import re
 import shutil
 import RMS.ConfigReader as cr
 from RMS.Logger import getLogger
@@ -31,44 +30,7 @@ import sys
 LATEST_LOG_UPLOADS_FILE_NAME = ".latestloguploads.json"
 ISO_DATE_2000 = datetime.datetime(int(2000), int(1), int(1), int(0), int(0), int(0)).isoformat()
 
-# The time at the beginning of a log entry
-LOG_ENTRY_TIME = re.compile(r"^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}-")
-
 log = getLogger("rmslogger")
-
-
-def getTimeOfLastLogEntry(config, log_file):
-    """Get the time in python date time format of the last entry in a log file
-
-    Args:
-        log_file_path: [path] path to the log file
-
-    Returns:
-        [datetime.datetime] time of the last entry in the log file
-    """
-
-    log_file_path = os.path.join(config.data_dir, config.log_dir, log_file)
-
-    # The last line which is a log entry (it begins with its time): the file can end with lines which are not
-    #   entries, e.g. the continuation of a multi-line warning. The file is read line by line, which uses less
-    #   memory than reading it whole
-    last_log_entry_time_object = datetime.datetime.strptime("2000/01/01 00:00", "%Y/%m/%d %H:%M")
-    last_line = None
-    with open(log_file_path, "r") as f:
-        for line in f:
-            if LOG_ENTRY_TIME.match(line):
-                last_line = line
-
-    # The time of the last entry, if there is one
-    if last_line is not None:
-        try:
-            last_log_entry_time_object = datetime.datetime.strptime(last_line.split("-")[0], "%Y/%m/%d %H:%M:%S")
-        except ValueError:
-            log.error("".join(traceback.format_exception(*sys.exc_info())))
-
-    return last_log_entry_time_object
-
-
 
 def getLogTypes(config):
     """ Scan the log directory given in the config file, return a list of unique log types
@@ -270,8 +232,7 @@ def makeLogArchives(config, dest_dir, update_tracker=True):
     for log_file_type, log_file_list in zip(log_type_list, log_list_of_lists):
         newest_log_file_for_this_type = sorted(log_file_list, reverse=True)[0]
 
-        last_log_entry_time = getTimeOfLastLogEntry(config, newest_log_file_for_this_type)
-        log.info(f"For log file type {log_file_type} the newest file is {newest_log_file_for_this_type}, last entry is {last_log_entry_time}")
+        log.info(f"For log file type {log_file_type} the newest file is {newest_log_file_for_this_type}")
         last_log_file_timestamp = extractDateFromLogName(config, newest_log_file_for_this_type)
         log_file_type_list.append(log_file_type)
         last_log_file_timestamp_list.append(last_log_file_timestamp)

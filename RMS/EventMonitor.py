@@ -64,7 +64,7 @@ from RMS.Formats.CALSTARS import readCALSTARS
 from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm, raDec2Vector, raDec2AltAz
 from RMS.Astrometry.Conversions import latLonAlt2ECEF, AER2LatLonAlt, AEH2Range, ECEF2AltAz, ecef2LatLonAlt, jd2Date
 from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
-from RMS.Logger import getLogger
+from RMS.Logger import getLogger, getLoggingQueue, initChildProcess
 from RMS.Math import angularSeparationVect, angularSeparationDeg
 from RMS.Formats.FFfile import convertFRNameToFF
 from RMS.Formats.Platepar import Platepar
@@ -73,7 +73,7 @@ from Utils.StackFFs import stackFFs
 from Utils.FRbinViewer import view
 from Utils.BatchFFtoImage import batchFFtoImage
 from RMS.CaptureDuration import captureDuration
-from RMS.Misc import sanitise, RmsDateTime, getRmsRootDir, mkdirP
+from RMS.Misc import sanitise, RmsDateTime, getRmsRootDir, mkdirP, AtomicFlag
 from RMS.Formats.FFfile import read
 from matplotlib.dates import DateFormatter
 
@@ -765,12 +765,31 @@ class EventMonitor(multiprocessing.Process):
         self.db_conn = self.getConnectionToEventMonitorDB()
         self.upgradeDB(self.db_conn)
         self.check_interval = self.syscon.event_monitor_check_interval
-        self.exit = multiprocessing.Event()
+        self.exit = AtomicFlag()
+
+        # Grab the logging queue on the parent side so the child can re-attach logging
+        # under the 'forkserver'/'spawn' start methods (handlers are not inherited there)
+        self.logging_queue = getLoggingQueue()
 
         log.info("EventMonitor is starting")
         log.info("Monitoring {} ".format(self.syscon.event_monitor_webpage))
         log.info("At {:05.1f} minute intervals".format(self.syscon.event_monitor_check_interval))
         log.info("Reporting data to {}/{}".format(self.syscon.hostname, self.syscon.event_monitor_remote_dir))
+
+    def __getstate__(self):
+        """ Return a picklable representation of the monitor.
+
+        Required under the 'forkserver'/'spawn' start methods (the default on Linux from
+        Python 3.14), where .start() pickles self and sends it to the child. A
+        sqlite3.Connection is not picklable (and must not be shared across processes
+        anyway), so the connections are dropped here; run() opens fresh connections on the
+        child side. Under 'fork' no pickling occurs, so this is never called and the child
+        inherits the connections as before.
+        """
+        state = self.__dict__.copy()
+        state['conn'] = None
+        state['db_conn'] = None
+        return state
 
     def createDB(self):
 
@@ -2439,19 +2458,6 @@ class EventMonitor(multiprocessing.Process):
 
         return None
 
-    def __getstate__(self):
-        """ The database connections can't be pickled (e.g. to start the process with the spawn or forkserver
-            start method), and must not be shared with another process anyway. The process opens its own.
-        """
-
-        state = self.__dict__.copy()
-        for name in ['db_conn', 'conn']:
-            if name in state:
-                state[name] = None
-
-        return state
-
-
     def start(self):
         """ Starts the EventMonitor """
 
@@ -2468,7 +2474,10 @@ class EventMonitor(multiprocessing.Process):
     def stop(self):
         """ Stops the EventMonitor. """
 
-        self.db_conn.close()
+        # The parent may not hold a live connection (the child owns its own under
+        # 'forkserver'/'spawn'); guard the close accordingly.
+        if getattr(self, 'db_conn', None) is not None:
+            self.db_conn.close()
         time.sleep(2)
         self.exit.set()
         self.join()
@@ -2525,7 +2534,13 @@ class EventMonitor(multiprocessing.Process):
 
         """
 
-        # Open the database connection of this process, the connection of the parent is not shared
+        # Re-establish logging and signal handling in the child (no-op under 'fork')
+        initChildProcess(self.logging_queue, self.config)
+
+        # Open a sqlite connection owned by this (child) process. Under 'forkserver'/'spawn'
+        # the connection from __init__ is not inherited (it was dropped during pickling);
+        # under 'fork' this replaces the inherited connection with a process-local one,
+        # avoiding a connection shared across the fork.
         self.db_conn = self.getConnectionToEventMonitorDB()
 
         # Delay to allow capture to check existing folders - keep the logs tidy

@@ -71,7 +71,16 @@ if __name__ == '__main__':
     config = cr.Config()
     config.data_dir = sys.argv[1]
     event_monitor = EventMonitor(config)
-    context.set_spawning_popen(object())
+
+    # Stand-in for the process being started: shared memory (e.g. a multiprocessing.Value) passes its file
+    #   descriptor to the child through it
+    class _Popen(object):
+        def duplicate_for_child(self, fd):
+            return fd
+        def DupFd(self, fd):
+            return fd
+
+    context.set_spawning_popen(_Popen())
     reduction.ForkingPickler.dumps(event_monitor)
     context.set_spawning_popen(None)
     event_monitor.db_conn.close()

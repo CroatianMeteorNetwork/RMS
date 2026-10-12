@@ -20,12 +20,10 @@ import argparse
 from time import time
 import datetime
 import sys, os
-import ctypes
 import traceback
 import logging
 
 import numpy as np
-import numpy.ctypeslib as npct
 import cv2
 import scipy.optimize as opt
 import scipy.special
@@ -48,6 +46,7 @@ from RMS.Formats.FrameInterface import detectInputType
 from RMS.Formats.AST import loadAST
 from RMS.Logger import LoggingManager, getLogger
 from RMS.Misc import mkdirP
+from RMS.Routines import Kht
 from RMS.Routines.LineFinder3D import find3DLines, getAllPoints, stitch3DLines
 from RMS.Routines.CompareLines import compareLines
 from RMS.Routines import MaskImage
@@ -1631,36 +1630,69 @@ def merge3DLines(line_list, img_w, img_h, dist_thresh_factor=2.0, last_count=0, 
 
 
 
-def checkWhiteRatio(img_thres, ff, max_white_ratio):
-    """ Checks if there are too many threshold passers on an image. """
+def checkWhiteRatio(img_thres, ff, max_white_ratio, diagnostics=None):
+    """ Checks if there are too many threshold passers on an image.
 
-    # Check if the image is too "white" and any further processing makes no sense
-    # Compute the radio between the number of threshold passers and all pixels
-    white_ratio = np.count_nonzero(img_thres)/float(ff.nrows*ff.ncols)
+    Arguments:
+        img_thres: [ndarray] Thresholded image.
+        ff: [FF object] FF whose planes were thresholded.
+        max_white_ratio: [float] Maximum allowed ratio between threshold passers and all pixels.
+
+    Keyword arguments:
+        diagnostics: [dict] If given, the outcome of the check is recorded in it (see getLines) so the
+            caller can report a night whose images were mostly skipped. None by default.
+
+    Return:
+        [bool] True if the image passed the check, False if it should be skipped.
+    """
+
+    # Compute the ratio between the number of threshold passers and all pixels
+    white_ratio = float(np.count_nonzero(img_thres))/(ff.nrows*ff.ncols)
 
     logDebug('white ratio: {:.6f}'.format(white_ratio))
 
-    if white_ratio > max_white_ratio:
+    passed = white_ratio <= max_white_ratio
 
-        log.debug(("Too many threshold passers! White ratio is {:.2f}, which is higher than the "\
-            "max_white_ratio threshold: {:.2f}").format(white_ratio, max_white_ratio))
+    if diagnostics is not None:
+        diagnostics['white_ratio_checks'] = diagnostics.get('white_ratio_checks', 0) + 1
+        diagnostics['white_ratio_max'] = max(white_ratio, diagnostics.get('white_ratio_max', 0.0))
 
-        return False
+    if not passed:
+
+        # A single skipped image is normal (bright, cloudy or twilight sky where the maxpixel runs far
+        # above the average over a large area), so it is only logged at debug level. A station whose
+        # images are mostly skipped is reported once for the whole night by the caller of detection,
+        # from the diagnostics recorded here
+        log.debug(("Too many threshold passers! White ratio is {:.4f}, which is higher than the "
+            "max_white_ratio threshold: {:.4f}, skipping the image.").format(white_ratio, max_white_ratio))
+
+        if diagnostics is not None:
+
+            diagnostics['white_ratio_rejections'] = diagnostics.get('white_ratio_rejections', 0) + 1
+
+            # Measure how far the maxpixel noise floor sits above the temporal noise the threshold is
+            # built from. On a healthy camera the median maxpixel excess over avepixel is a few
+            # stdpixel. Video paths that smooth per-pixel temporal noise (software re-encoded or some
+            # IP camera streams) shrink stdpixel far below the excess, which puts the k1*stdpixel + j1
+            # threshold under the noise floor on every clear image
+            if 'maxpixel_excess_median' not in diagnostics:
+                excess = ff.maxpixel.astype(np.float64) - ff.avepixel.astype(np.float64)
+                diagnostics['maxpixel_excess_median'] = float(np.median(excess))
+                diagnostics['stdpixel_median'] = float(np.median(ff.stdpixel))
+
+    return passed
 
 
-    return True
 
 
-
-
-def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_white_ratio, kht_lib_path, \
+def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_white_ratio, \
     mask=None, flat_struct=None, dark=None, debug=False, kht_cluster_min_size=9, kht_cluster_min_deviation=2, \
     kht_delta=0.1, kht_kernel_min_height=0.004, kht_n_sigmas=1, kht_morph_ops=[1, 2, 3, 4, 1], \
     line_finder_algorithm='kht', ransac_max_lines=10, ransac_min_pixels=10, ransac_distance_thresh=2.0, \
     ransac_min_line_length=20.0, ransac_max_gap=20.0, frame_range=None, border=5, config=None,
-    window_points=None):
+    window_points=None, diagnostics=None):
     """ Get (rho, phi) pairs for each meteor present on the image using KHT.
-        
+
     Arguments:
         img_handle: [FrameInterface instance] Object with common interface to various input formats.
         k1: [float] weight parameter for the standard deviation during thresholding
@@ -1669,7 +1701,6 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
         time_window_size: [int] size of the time window which will be slided over the time axis
         max_lines: [int] maximum number of lines to find by KHT
         max_white_ratio: [float] max ratio between write and all pixels after thresholding
-        kht_lib_path: [string] path to the compiled KHT library
 
     Keyword arguments:
         mask: [MaskStruct] Mask structure.
@@ -1697,27 +1728,16 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
         window_points: [list] If a list is given and the input is not an FF file, the threshold passers of
             every time window are appended to it as WindowPoints, with the frame in which each pixel peaked.
             They are used to search for lines in 3D without reading the frames again.
+        diagnostics: [dict] If given, the white ratio checks are recorded in it: 'white_ratio_checks'
+            and 'white_ratio_rejections' count the checks and the skipped images (one check per FF, or
+            one per time window for other inputs), 'white_ratio_max' is the largest ratio seen, and
+            'maxpixel_excess_median' and 'stdpixel_median' describe the noise floor of the first
+            skipped image. None by default.
 
     Return:
         [list] A list of all found lines. Each entry is [rho, theta, frame_min, frame_max] for KHT,
             or [rho, theta, frame_min, frame_max, x_start, y_start, x_end, y_end] for RANSAC.
     """
-
-    # Load the KHT library only when KHT is used. RANSAC is common for video detection and does not need it.
-    kht = None
-    if line_finder_algorithm != 'ransac':
-        kht = ctypes.cdll.LoadLibrary(kht_lib_path)
-        kht.kht_wrapper.argtypes = [npct.ndpointer(dtype=np.double, ndim=2),
-                                    npct.ndpointer(dtype=np.byte, ndim=1),
-                                    ctypes.c_size_t,
-                                    ctypes.c_size_t,
-                                    ctypes.c_size_t,
-                                    ctypes.c_size_t,
-                                    ctypes.c_double,
-                                    ctypes.c_double,
-                                    ctypes.c_double,
-                                    ctypes.c_double]
-        kht.kht_wrapper.restype = ctypes.c_size_t
 
     line_results = []
 
@@ -1732,7 +1752,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
         # showImage("thresholded ALL", ff_thresh, convert_to_uint8=True)
 
         # Check if there are too many threshold passers, if so report that no lines were found
-        if not checkWhiteRatio(ff_thresh, img_handle.ff, max_white_ratio):
+        if not checkWhiteRatio(ff_thresh, img_handle.ff, max_white_ratio, diagnostics=diagnostics):
             return line_results
 
 
@@ -1799,7 +1819,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
             img_thresh = thresholdFF(img_handle.ff, k1, j1, mask=mask, mask_ave_bright=True, border=border)
 
             # Check if there are too many threshold passers, if so report that no lines were found
-            if not checkWhiteRatio(img_thresh, img_handle.ff, max_white_ratio):
+            if not checkWhiteRatio(img_thresh, img_handle.ff, max_white_ratio, diagnostics=diagnostics):
                 continue
 
             # Keep the threshold passers with the frame in which they peaked, as the points of an FF file
@@ -1857,14 +1877,13 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
         # Get image shape
         w, h = img_morph.shape[1], img_morph.shape[0]
 
-        # Convert the image to feed it into the KHT
-        img_flatten = (img_morph.flatten().astype(np.int16)*255).astype(np.byte)
-        
+        # Convert the image to feed it into the KHT (C-contiguous uint8, 0 or 255)
+        img_flatten = np.ascontiguousarray((img_morph.flatten().astype(np.int16)*255).astype(np.uint8))
+
         # Predefine the line output
         lines = np.empty((max_lines, 2), np.double)
-        
-        # Parameter checking to ensure types are correct
-        # ctypes needs specific types
+
+        # Parameter checking to ensure types are correct, the KHT module needs specific types
         kht_cluster_min_size = int(kht_cluster_min_size)
         kht_cluster_min_deviation = float(kht_cluster_min_deviation)
         kht_delta = float(kht_delta)
@@ -1884,7 +1903,8 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
 
             # Call the KHT line finding
             # Parameters: cluster_min_size (px), cluster_min_deviation, delta, kernel_min_height, n_sigmas
-            length = kht.kht_wrapper(lines, img_flatten, w, h, max_lines, kht_cluster_min_size, kht_cluster_min_deviation, kht_delta, kht_kernel_min_height, kht_n_sigmas)
+            length = Kht.khtLineDetection(lines, img_flatten, w, h, max_lines, kht_cluster_min_size, \
+                kht_cluster_min_deviation, kht_delta, kht_kernel_min_height, kht_n_sigmas)
             
             # Cut the line array to the number of found lines
             lines = lines[:length]
@@ -3100,7 +3120,7 @@ def removeDuplicateDetections(meteor_detections, max_dist, max_along_dist, x_col
 
 
 def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, asgard=False, debug=False, \
-    frame_range=None):
+    frame_range=None, diagnostics=None):
     """ Detect meteors on the given image. Here are the steps in the detection:
             - input image (FF bin format file) is thresholded (converted to black and white)
             - several morphological operations are applied to clean the image
@@ -3124,6 +3144,8 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
             default, in which case only the frame number will be in the centroids.
         debug: [bool] If True, graphs for testing the detection settings will be shown. False by default.
         frame_range: [tuple] Optional (start_frame, end_frame) to restrict detection to a range of frames.
+        diagnostics: [dict] If given, the white ratio checks are recorded in it (see getLines). None by
+            default.
     
     Return:
         meteor_detections: [list] a list of detected meteors, with these elements:
@@ -3169,7 +3191,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
     # Get lines on the image
     line_list = getLines(img_handle, config.k1_det, config.j1_det, config.time_slide, config.time_window_size, 
-        config.max_lines_det, config.max_white_ratio, config.kht_lib_path, mask=mask, \
+        config.max_lines_det, config.max_white_ratio, mask=mask, \
         flat_struct=flat_struct, dark=dark, debug=debug, kht_cluster_min_size=config.kht_cluster_min_size, \
         kht_cluster_min_deviation=config.kht_cluster_min_deviation, kht_delta=config.kht_delta, \
         kht_kernel_min_height=config.kht_kernel_min_height, kht_n_sigmas=config.kht_n_sigmas, \
@@ -3177,7 +3199,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
         ransac_max_lines=config.ransac_max_lines, ransac_min_pixels=config.ransac_min_pixels, \
         ransac_distance_thresh=config.ransac_distance_thresh, ransac_min_line_length=config.ransac_min_line_length, \
         ransac_max_gap=config.ransac_max_gap, frame_range=frame_range, border=config.detection_border, \
-        config=config, window_points=window_points)
+        config=config, window_points=window_points, diagnostics=diagnostics)
 
     # logDebug('List of lines:', line_list)
 

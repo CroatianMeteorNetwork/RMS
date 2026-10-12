@@ -184,10 +184,10 @@ def read(dir_path, filename):
         frames = []
 
         for z in range(frameNum):
-            yc.append(int(np.fromfile(fid, dtype=np.uint32, count=1)))
-            xc.append(int(np.fromfile(fid, dtype=np.uint32, count=1)))
-            t.append(int(np.fromfile(fid, dtype=np.uint32, count=1)))
-            size.append(int(np.fromfile(fid, dtype=np.uint32, count=1)))
+            yc.append(int(np.fromfile(fid, dtype=np.uint32, count=1)[0]))
+            xc.append(int(np.fromfile(fid, dtype=np.uint32, count=1)[0]))
+            t.append(int(np.fromfile(fid, dtype=np.uint32, count=1)[0]))
+            size.append(int(np.fromfile(fid, dtype=np.uint32, count=1)[0]))
             frames.append(np.reshape(np.fromfile(fid, dtype=np.uint8, count=size[-1]**2), (size[-1], size[-1])))
 
         fr.frameNum.append(frameNum)
