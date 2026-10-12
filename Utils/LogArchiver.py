@@ -21,6 +21,7 @@ import json
 import tempfile
 import argparse
 import datetime
+import re
 import shutil
 import RMS.ConfigReader as cr
 from RMS.Logger import getLogger
@@ -29,6 +30,9 @@ import sys
 
 LATEST_LOG_UPLOADS_FILE_NAME = ".latestloguploads.json"
 ISO_DATE_2000 = datetime.datetime(int(2000), int(1), int(1), int(0), int(0), int(0)).isoformat()
+
+# The time at the beginning of a log entry
+LOG_ENTRY_TIME = re.compile(r"^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}-")
 
 log = getLogger("rmslogger")
 
@@ -45,22 +49,24 @@ def getTimeOfLastLogEntry(config, log_file):
 
     log_file_path = os.path.join(config.data_dir, config.log_dir, log_file)
 
-    # It is quicker to open the whole file using readlines, and pick the last line; but this uses less memory
+    # The last line which is a log entry (it begins with its time): the file can end with lines which are not
+    #   entries, e.g. the continuation of a multi-line warning. The file is read line by line, which uses less
+    #   memory than reading it whole
+    last_log_entry_time_object = datetime.datetime.strptime("2000/01/01 00:00", "%Y/%m/%d %H:%M")
+    last_line = None
     with open(log_file_path, "r") as f:
-        line = ""
         for line in f:
-            pass
-    last_log_time_string = line.split("-")[0]
-    if last_log_time_string:
-        try:
-            last_log_entry_time_object = datetime.datetime.strptime(last_log_time_string, "%Y/%m/%d %H:%M:%S")
-        except Exception as e:
-            log.error("".join(traceback.format_exception(*sys.exc_info())))
-            last_log_entry_time_object = datetime.datetime.strptime("2000/01/01 00:00", "%Y/%m/%d %H:%M")
-    else:
-        last_log_entry_time_object = datetime.datetime.strptime("2000/01/01 00:00", "%Y/%m/%d %H:%M")
+            if LOG_ENTRY_TIME.match(line):
+                last_line = line
 
-    return  last_log_entry_time_object
+    # The time of the last entry, if there is one
+    if last_line is not None:
+        try:
+            last_log_entry_time_object = datetime.datetime.strptime(last_line.split("-")[0], "%Y/%m/%d %H:%M:%S")
+        except ValueError:
+            log.error("".join(traceback.format_exception(*sys.exc_info())))
+
+    return last_log_entry_time_object
 
 
 

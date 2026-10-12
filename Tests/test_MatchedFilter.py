@@ -1019,6 +1019,133 @@ def test_connected_light_over_the_segments():
     assert connected(5000, 0, 0, 1, 1) is None
 
 
+def test_bright_object_along_a_column_detected(config):
+    """ A bright object moving along a pixel column lights the column with its own trail, which makes the column
+        bright in the median of a block and masked as a bright line: the line is not masked near the object, so
+        it is detected over its whole passage. """
+
+    # A bright object with a trail, moving along a column
+    obj = linearObject(200.0, 60, 20, 0.0, 0.12, 20, 620)
+    obj['trail'] = 1.0
+    _, detections = runDetector(_SynthHandle([obj], total_frames=640, n_stars=6), config)
+
+    # One detection, accurate, over the whole passage
+    assert len(detections) == 1
+    cent = detections[0][2]
+    assert np.median(truthError(cent, obj)) < 0.3
+    assert (cent[0, 0] < 60) and (cent[-1, 0] > 580)
+
+
+def test_line_keep_only_sources_above_the_line():
+    """ On a bright column which flickers as a whole above the level, no pixel is kept; a compact source on it is
+        kept with its surroundings, also on a column brighter near one end (e.g. near the star of its trail). """
+
+    # A frame of noise, and a bright column
+    rng = np.random.default_rng(3)
+    frame = rng.normal(0, 1, (SIZE, SIZE)).astype(np.float32)
+    lines = np.zeros((SIZE, SIZE), dtype=bool)
+    lines[:, 70] = True
+
+    # The whole column 15 sigma above the sky: nothing is kept
+    frame[:, 70] += 15
+    assert not mfd.lineKeep(frame, lines).any()
+
+    # The column brighter towards its top end (a trail), still nothing
+    frame[:, 70] += np.linspace(20, 0, SIZE).astype(np.float32)
+    assert not mfd.lineKeep(frame, lines).any()
+
+    # A compact source of 60 sigma on it is kept, with TRAIL_KEEP px around it
+    frame[80, 70] += 60
+    keep = mfd.lineKeep(frame, lines)
+    assert keep[80, 70] and keep[80 + mfd.TRAIL_KEEP, 70] and not keep[80 + mfd.TRAIL_KEEP + 2, 70]
+
+
+class _BrightColumnHandle(_SynthHandle):
+    """ Synthetic frames with a column brighter than the sky by a constant level (e.g. a bad column). """
+
+    def __init__(self, objects, column=60, level=8.0, **kwargs):
+        """ The frames of _SynthHandle with the column brighter by level times the noise. """
+
+        super(_BrightColumnHandle, self).__init__(objects, **kwargs)
+        self.column, self.level = column, level
+
+    def loadFrame(self, avepixel=False):
+        """ The current frame, with the bright column. """
+
+        img = super(_BrightColumnHandle, self).loadFrame(avepixel)
+        img[:, self.column] += np.float32(self.level*NOISE)
+
+        return img
+
+
+def test_bright_object_along_a_strong_bright_column(config):
+    """ A column bright enough to be above the level of the masked stars in the median is not masked as a star
+        along its length (only compact sources on it are), so a bright object moving along it is detected. """
+
+    # A column 8 times the noise above the sky, and one 100 times (whose median spreads into the neighbouring
+    #   columns when the brightness of the stars is smoothed)
+    for level in (8.0, 100.0):
+        obj = linearObject(200.0, 60, 5, 0.0, 0.2, 20, 620)
+        _, detections = runDetector(_BrightColumnHandle([obj], level=level, total_frames=640, n_stars=6), config)
+
+        # The object is found over its whole passage
+        found = [d for d in detections if np.median(truthError(d[2], obj)) < 0.5]
+        assert len(found) == 1
+        assert (found[0][2][0, 0] < 60) and (found[0][2][-1, 0] > 560)
+
+
+def test_bright_line_masked_before_the_trails_are_removed(config):
+    """ A bright line which is above the level of the trail removal in a frame is masked before the trails of the
+        bright sources are removed, so the line is not taken for a source whose trails cover the whole frame: the
+        other pixels of the frame are kept. """
+
+    # A frame of noise with a bright column, and no static sources
+    det = MatchedFilterDetector(_SynthHandle([], total_frames=64), config)
+    rng = np.random.default_rng(1)
+    frame = rng.normal(0, 1, (SIZE, SIZE)).astype(np.float32)
+    lines = np.zeros((SIZE, SIZE), dtype=bool)
+    lines[:, 90] = True
+    static = np.zeros((SIZE, SIZE), dtype=bool)
+
+    # The line 40 sigma above the sky over its whole length, and a faint object elsewhere
+    frame[:, 90] += 40
+    frame[30, 20] += 8
+    det.prepareFrame(frame, static, lines)
+
+    # The object is kept, the line masked
+    assert frame[30, 20] > 4
+    assert np.all(frame[:, 90] == 0)
+
+
+def test_line_keep_long_streak(config):
+    """ The streak of a fast object along a bright column is kept when the running median along the line is longer
+        than twice the streak (see lineWindow), not when the streak sets the level of the line. """
+
+    # A bright column with a streak of 20 px along it
+    rng = np.random.default_rng(4)
+    frame = rng.normal(0, 1, (SIZE, SIZE)).astype(np.float32)
+    lines = np.zeros((SIZE, SIZE), dtype=bool)
+    lines[:, 70] = True
+    frame[:, 70] += 5
+    frame[50:70, 70] += 60
+
+    # A window of the default length is mostly the streak, a long enough one is not
+    assert not mfd.lineKeep(frame, lines)[60, 70]
+    assert mfd.lineKeep(frame, lines, window=61)[60, 70]
+
+    # A streak which reaches the edge of the image along the line is kept too (the line is not padded with it)
+    edge = rng.normal(0, 1, (SIZE, SIZE)).astype(np.float32)
+    edge[:, 70] += 5
+    edge[0:20, 70] += 60
+    assert mfd.lineKeep(edge, lines, window=61)[5, 70]
+
+    # The window of the detector covers the fastest searched streaks
+    config.mf_ang_vel_max = 30.0
+    det = MatchedFilterDetector(_SynthHandle([], total_frames=64), config)
+    det.psf_sigma = PSF_SIGMA
+    assert det.lineWindow() > 2*(det.opts.speed_max + 2*PSF_SIGMA)
+
+
 class _DriftHandle(_SynthHandle):
     """ Synthetic frames whose stars drift across the field by the given px per frame (e.g. the diurnal motion
         for a fixed camera). """

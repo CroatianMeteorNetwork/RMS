@@ -115,6 +115,17 @@ SPILL_MIN_SNR = 100.0
 #   sky in one frame, and 10 times the scatter of the columns or rows) are masked (see staticMask)
 BRIGHT_LINE_LEVEL = 0.2
 
+# The bright columns and rows (see lineMask) are not masked in a frame within TRAIL_KEEP px of the pixels which are
+#   LINE_KEEP_LEVEL (in the noise of a frame) above the line: an object much brighter than such a line is kept on it.
+#   An object moving along a column (or row) for most of a block lights the column with its own trail, which makes
+#   the column bright in the median of the block, and its path would be masked
+LINE_KEEP_LEVEL = 10.0
+
+# A pixel of a bright column (or row) is a source above its line if it is LINE_KEEP_LEVEL above the running median
+#   of LINE_LOCAL px along the line (in the frame): a line which flickers as a whole (or brighter near the star of
+#   its trail) is not a source, a compact source on it is
+LINE_LOCAL = 31
+
 # A track which stays within SHADOW_RADIUS (px) of a track at least SHADOW_STRENGTH times stronger (the sum of
 #   the significances of the hits over the square root of their number), for at least SHADOW_OVERLAP of its hits,
 #   moving the same way, is not measured (see removeShadows)
@@ -259,6 +270,64 @@ def slowSearchMinBlocks():
             return n
 
         n += 1
+
+
+def lineKeep(frame, lines, level=LINE_KEEP_LEVEL, window=LINE_LOCAL):
+    """ The pixels of the bright columns and rows (see MatchedFilterDetector.lineMask) near the sources which stand
+        out from the line itself in a frame: LINE_KEEP_LEVEL above the running median of LINE_LOCAL px along the
+        line, grown by TRAIL_KEEP px. A line which flickers as a whole, or which is brighter near the star of its
+        trail, has no such pixels.
+
+    Arguments:
+        frame: [ndarray] Normalized frame (unit noise).
+        lines: [ndarray] Mask of the bright columns and rows (whole columns and rows are True).
+
+    Keyword arguments:
+        level: [float] Level above the line (in the noise of a frame). LINE_KEEP_LEVEL by default.
+        window: [int] Length of the running median along the line (px), longer than twice the longest source along
+            it (e.g. the streak of a fast object in a frame), so the source doesn't set the level of the line.
+            LINE_LOCAL by default.
+
+    Return:
+        [ndarray] Boolean mask of the pixels to keep.
+    """
+
+    keep = np.zeros(frame.shape, dtype=bool)
+
+    def lineLevel(sub):
+        """ The running median along the lines. Beyond the ends of a line it is padded with the median of the whole
+            line, so a source which reaches the edge of the image doesn't set the level.
+
+        Arguments:
+            sub: [ndarray] The pixels of the lines, along the first axis.
+
+        Return:
+            [ndarray] The level of the lines at every pixel, of the shape of sub.
+        """
+
+        # The lines padded with their medians at both ends, and the running median along them
+        pad = window//2
+        base = np.median(sub, axis=0, keepdims=True)
+        padded = np.concatenate([np.repeat(base, pad, axis=0), sub, np.repeat(base, pad, axis=0)], axis=0)
+
+        return ndimage.median_filter(padded, size=(window, 1), mode='nearest')[pad:pad + len(sub)]
+
+    # The columns and the rows of the lines, and in them the pixels above the running median along the line
+    cols = np.flatnonzero(lines.all(axis=0))
+    rows = np.flatnonzero(lines.all(axis=1))
+    if cols.size:
+        sub = frame[:, cols]
+        keep[:, cols] = (sub - lineLevel(sub)) > level
+    if rows.size:
+        sub = frame[rows, :]
+        keep[rows, :] |= ((sub - lineLevel(sub.T).T) > level)
+
+    # Grown to cover the source and the wings of its PSF
+    if keep.any():
+        box = np.ones((2*TRAIL_KEEP + 1, 2*TRAIL_KEEP + 1), np.uint8)
+        keep = cv2.dilate(keep.astype(np.uint8), box) > 0
+
+    return keep
 
 
 class MatchedFilterOptions(object):
@@ -549,6 +618,9 @@ class MatchedFilterDetector(object):
         # The background (BlockBackground) and the mask of the static sources of every block, by block index
         self.backgrounds = {}
         self.static_masks = {}
+
+        # The bright columns and rows of every block (see lineMask), masked in the search except near bright sources
+        self.line_masks = {}
 
         # Factor of the intensities from the stars (see apertureCorrection), None if not applied
         self.aperture_correction = None
@@ -865,29 +937,26 @@ class MatchedFilterDetector(object):
         """
 
         # Brightness of the static sources relative to the noise of the sky in one frame: the sources above
-        #   star_threshold are masked, grown by a pixel to cover their wings
+        #   star_threshold are masked, grown by a pixel to cover their wings. On the bright columns and rows (see
+        #   lineMask) the brightness is taken above the running median along the line, so a line bright enough to
+        #   be above the threshold is not masked along its length as a source (it is masked as a line in the
+        #   search, except near the sources which stand out from it), while the compact sources on it are
         level = background.star_level
-        static = cv2.dilate((level > self.opts.star_threshold).astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
+        lines = self.lineMask(background)
+        if lines.any():
 
-        # Columns and rows brighter than their neighbours (the trails of very bright stars along their row and
-        #   column, also of stars outside the image, and bad columns) flicker as a whole with the scintillation,
-        #   which the stacks along them add up
-        #   The median over a column (or row) of the median image above the sky, in the noise of the sky, is its
-        #   profile; its excess over the median of the 15 neighbouring columns is compared with the robust scatter
-        #   of the excess of all columns, and the columns above max(BRIGHT_LINE_LEVEL, 10*scatter) are masked,
-        #   with one column on each side
-        sky_rel = (background.median - background.sky)/background.sky_noise
-        m = max(self.opts.edge_margin, 1)
-        for axis in (0, 1):
-            profile = np.median(sky_rel[m:-m, :] if axis == 0 else sky_rel[:, m:-m], axis=axis)
-            excess = profile - ndimage.median_filter(profile, size=15, mode='nearest')
-            scatter = 1.4826*np.median(np.abs(excess))
-            bright = excess > max(BRIGHT_LINE_LEVEL, 10*scatter)
-            bright = ndimage.binary_dilation(bright, iterations=1)
-            if axis == 0:
-                static[:, bright] = True
-            else:
-                static[bright, :] = True
+            # The brightness of the sources before the smoothing (see starTemplate), with the level of the lines
+            #   subtracted there, then smoothed: the smoothing of a very bright line would otherwise spread it into
+            #   the neighbouring columns (rows), above the threshold
+            rel = ((background.median - background.sky)/background.sky_noise).astype(np.float32)
+            cols = np.flatnonzero(lines.all(axis=0))
+            rows = np.flatnonzero(lines.all(axis=1))
+            if cols.size:
+                rel[:, cols] -= ndimage.median_filter(rel[:, cols], size=(LINE_LOCAL, 1), mode='nearest')
+            if rows.size:
+                rel[rows, :] -= ndimage.median_filter(rel[rows, :], size=(1, LINE_LOCAL), mode='nearest')
+            level = cv2.GaussianBlur(rel, (0, 0), 1.0)
+        static = cv2.dilate((level > self.opts.star_threshold).astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
 
         # The user mask (0 = masked) and the image border
         if self.mask is not None:
@@ -899,6 +968,40 @@ class MatchedFilterDetector(object):
             static[:, :m] = static[:, -m:] = True
 
         return static
+
+
+    def lineMask(self, background):
+        """ Mask of the columns and rows brighter than their neighbours (the trails of very bright stars along their
+            row and column, also of stars outside the image, and bad columns): they flicker as a whole with the
+            scintillation, which the stacks along them add up. They are masked in the search, except near sources
+            much brighter than their flicker (see searchBlock). True means masked.
+
+        Arguments:
+            background: [BlockBackground] Background of the block.
+
+        Return:
+            [ndarray] Boolean mask.
+        """
+
+        # The median over a column (or row) of the median image above the sky, in the noise of the sky, is its
+        #   profile; its excess over the median of the 15 neighbouring columns is compared with the robust scatter
+        #   of the excess of all columns, and the columns above max(BRIGHT_LINE_LEVEL, 10*scatter) are masked,
+        #   with one column on each side
+        lines = np.zeros(background.median.shape, dtype=bool)
+        sky_rel = (background.median - background.sky)/background.sky_noise
+        m = max(self.opts.edge_margin, 1)
+        for axis in (0, 1):
+            profile = np.median(sky_rel[m:-m, :] if axis == 0 else sky_rel[:, m:-m], axis=axis)
+            excess = profile - ndimage.median_filter(profile, size=15, mode='nearest')
+            scatter = 1.4826*np.median(np.abs(excess))
+            bright = excess > max(BRIGHT_LINE_LEVEL, 10*scatter)
+            bright = ndimage.binary_dilation(bright, iterations=1)
+            if axis == 0:
+                lines[:, bright] = True
+            else:
+                lines[bright, :] = True
+
+        return lines
 
 
     def removeTrails(self, frame, static):
@@ -966,7 +1069,48 @@ class MatchedFilterDetector(object):
 
     ### Search ###
 
-    def searchBlock(self, z, static, block_first, stackers):
+    def lineWindow(self):
+        """ The length of the running median along a bright line (see lineKeep): at least LINE_LOCAL, and longer
+            than twice the streak of the fastest searched object in a frame (with its PSF), so such a streak along
+            the line is kept.
+
+        Return:
+            [int] Length of the running median (px, odd).
+        """
+
+        # The PSF before it is measured is taken as 1 px
+        psf = self.psf_sigma if self.psf_sigma is not None else 1.0
+
+        return max(LINE_LOCAL, 2*int(math.ceil(self.opts.speed_max + 6*psf)) + 1)
+
+
+    def prepareFrame(self, frame, static, lines=None):
+        """ Prepare a normalized frame for the search, in place: the bright columns and rows masked except near the
+            sources which stand out from them (see lineKeep), the trails of the bright sources removed (see
+            removeTrails), and the static sources masked.
+
+        Arguments:
+            frame: [ndarray] Normalized frame, modified in place.
+            static: [ndarray] Mask of the static sources (True = masked).
+
+        Keyword arguments:
+            lines: [ndarray] Mask of the bright columns and rows (see lineMask), None for none.
+        """
+
+        # The bright columns and rows first, except near the sources which stand out from them (e.g. an object
+        #   moving along a column, which lights the column with its own trail): a line above the level of the
+        #   trails would otherwise be taken for a source whose trails cover the whole frame
+        if (lines is not None) and lines.any():
+            frame[lines & ~lineKeep(frame, lines, window=self.lineWindow())] = 0
+
+        # The trails of the bright sources (also of those kept on the lines)
+        self.removeTrails(frame, static)
+
+        # The masked pixels don't take part in the stacks of their neighbours either
+        frame[static] = 0
+
+
+    def searchBlock(self, z, static, block_first, stackers, lines=None):
         """ Velocity search of a block of normalized frames.
 
         Arguments:
@@ -974,6 +1118,10 @@ class MatchedFilterDetector(object):
             static: [ndarray] Mask of static sources (True = masked).
             block_first: [int] Index of the first frame of the block.
             stackers: [list] (run_frames, bin, VelocityStacker) to run.
+
+        Keyword arguments:
+            lines: [ndarray] Mask of the bright columns and rows (see lineMask), None for none. Their pixels are
+                masked in every frame except near the sources which stand out from them (see lineKeep).
 
         Return:
             [list] Hits.
@@ -992,10 +1140,7 @@ class MatchedFilterDetector(object):
         bins = sorted(set(stacker_bin for _, stacker_bin, _ in stackers))
         zbs = {b: np.empty((len(z), z.shape[1]//b, z.shape[2]//b), dtype=np.float32) for b in bins}
         for i in range(len(z)):
-            self.removeTrails(z[i], static)
-
-            # The masked pixels don't take part in the stacks of their neighbours either
-            z[i][static] = 0
+            self.prepareFrame(z[i], static, lines)
 
             # The outliers are clipped once, and the clipped frame binned and smoothed for every bin. The smoothing
             #   is the PSF in binned pixels, which is smaller than a pixel for the coarse bins (the binning itself
@@ -1199,12 +1344,13 @@ class MatchedFilterDetector(object):
             bg.mean = frames.mean(axis=0)
             static = self.blockMask(k, bg)
             self.static_masks[k] = static
+            self.line_masks[k] = self.lineMask(bg)
             z = self.normalize(frames, k)
             del frames
             self.timing['background'] += time() - t1
 
             t1 = time()
-            hits += self.searchBlock(z, static, first, stackers)
+            hits += self.searchBlock(z, static, first, stackers, lines=self.line_masks[k])
             self.timing['search'] += time() - t1
 
         if not psf_measured:
