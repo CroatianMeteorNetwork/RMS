@@ -693,6 +693,7 @@ def test_persistence_kept_past_a_segment_too_short_to_search(monkeypatch):
         tracks_measured = 0
 
         def joinDetections(self, detections, connected=None):
+            """ No joining: the detections as they are. """
             return detections
 
     def detect(img_handle, config, frame_range=None, **kwargs):

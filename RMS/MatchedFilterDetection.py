@@ -117,17 +117,17 @@ BRIGHT_LINE_LEVEL = 0.2
 
 # A track which stays within SHADOW_RADIUS (px) of a track at least SHADOW_STRENGTH times stronger (the sum of
 #   the significances of the hits over the square root of their number), for at least SHADOW_OVERLAP of its hits,
+#   moving the same way, is not measured (see removeShadows)
+SHADOW_RADIUS = 20.0
+SHADOW_STRENGTH = 3.0
+SHADOW_OVERLAP = 0.8
+
 # A detection which follows a longer one at a constant offset along the motion of up to DUPLICATE_ALONG PSF
 #   FWHMs (on the same line) is the same object measured twice (e.g. on the wing or the trail of a very bright
 #   object) if the image is above CONNECTED_LEVEL (in the noise of a frame) all the way between them (see
 #   connectedLight); two objects which move together have no light between them
 DUPLICATE_ALONG = 10.0
 CONNECTED_LEVEL = 5.0
-
-#   moving the same way, is not measured (see removeShadows)
-SHADOW_RADIUS = 20.0
-SHADOW_STRENGTH = 3.0
-SHADOW_OVERLAP = 0.8
 
 # Shape of the detections (see extentConcentration): the frames are stacked along the track (every EXTENT_STEP-th
 #   frame) within EXTENT_RADIUS px, and the concentration of the light at the centre tells a point source from an
@@ -1897,9 +1897,19 @@ class MatchedFilterDetector(object):
 
 
     def connectedLight(self, frame, x1, y1, x2, y2):
-        """ The fraction of the segment between two points (unbinned px) which is well above the background
-            (CONNECTED_LEVEL in the noise) in a frame, None if the frame has no background (e.g. outside the frames
-            of this detector). See removeDuplicateDetections.
+        """ The fraction of the segment between two points which is well above the background (CONNECTED_LEVEL in
+            the noise) in a frame. See removeDuplicateDetections.
+
+        Arguments:
+            frame: [float] Frame of the input.
+            x1: [float] X of the first point (unbinned px).
+            y1: [float] Y of the first point (unbinned px).
+            x2: [float] X of the second point (unbinned px).
+            y2: [float] Y of the second point (unbinned px).
+
+        Return:
+            [float] The fraction of the segment above the level, None if the frame has no background (e.g. outside
+                the frames of this detector) or the segment is outside the image.
         """
 
         # The block of the frame
@@ -1919,11 +1929,14 @@ class MatchedFilterDetector(object):
         n = max(2, int(np.ceil(2*np.hypot(*(p2 - p1)))) + 1)
         t = np.linspace(0, 1, n)[:, None]
         pts = np.round(p1 + t*(p2 - p1)).astype(int)
+
+        # Only the part of the segment inside the image is judged
         inside = (pts[:, 0] >= 0) & (pts[:, 0] < self.width) & (pts[:, 1] >= 0) & (pts[:, 1] < self.height)
         if not inside.any():
             return None
         pts = pts[inside]
 
+        # The fraction of the samples above the level
         return float(np.mean(z[pts[:, 1], pts[:, 0]] > CONNECTED_LEVEL))
 
 
@@ -1951,6 +1964,8 @@ class MatchedFilterDetector(object):
         detections = joinContinuousDetections(detections, max_gap, 15*fwhm, 2*fwhm, self.height, self.width,
                                               bin_factor=self.det_bin)
 
+        # The duplicates: detections of the same object close to a longer one, also further along the motion when
+        #   the light between them is connected (the same bright object measured twice)
         return removeDuplicateDetections(detections, fwhm*self.det_bin, 3*fwhm*self.det_bin,
                                          connected=connected if connected is not None else self.connectedLight,
                                          max_connected_along=DUPLICATE_ALONG*fwhm*self.det_bin)
@@ -3725,9 +3740,24 @@ def connectedOver(detectors):
     """
 
     def connected(frame, x1, y1, x2, y2):
+        """ The light between two points in a frame from the detector of its segment (see connectedLight).
+
+        Arguments:
+            frame: [float] Frame of the input.
+            x1: [float] X of the first point (unbinned px).
+            y1: [float] Y of the first point (unbinned px).
+            x2: [float] X of the second point (unbinned px).
+            y2: [float] Y of the second point (unbinned px).
+
+        Return:
+            [float] The fraction of the segment above the level, None for a frame of no searched segment.
+        """
+
+        # The first searched segment whose blocks contain the frame
         for det in detectors:
             if (det is not None) and det.block_starts and (det.block_starts[0] <= frame < det.block_ends[-1]):
                 return det.connectedLight(frame, x1, y1, x2, y2)
+
         return None
 
     return connected

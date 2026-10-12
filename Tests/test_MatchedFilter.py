@@ -957,6 +957,7 @@ def test_duplicate_along_the_motion_removed_when_the_light_is_connected():
 
     from RMS.Detection import removeDuplicateDetections
 
+    # Two detections moving the same way, the second one 7 px behind the first along the motion and shorter
     frames = np.arange(100, 300, 1.0)
     first = np.c_[frames, 10 + 1.0*(frames - 100), 50 + 0.0*frames]
     second = first.copy()
@@ -964,6 +965,7 @@ def test_duplicate_along_the_motion_removed_when_the_light_is_connected():
     second = second[5:]
     dets = [[0, 0, first], [0, 0, second]]
 
+    # The light between them: all lit, or none
     lit = lambda frame, x1, y1, x2, y2: 1.0
     dark = lambda frame, x1, y1, x2, y2: 0.0
 
@@ -981,11 +983,13 @@ def test_connected_light_along_a_trail(config):
     """ The fraction of a segment which is lit (well above the background) in a frame: along the trail of a very
         bright object from its position it is lit, towards the empty sky it is not. """
 
+    # A very bright object with a trail, searched
     obj = linearObject(400.0, 64, 50, 0.0, 0.1, 0, 512)
     obj['trail'] = 5.0
     det = MatchedFilterDetector(_SynthHandle([obj], total_frames=512, n_stars=2), config)
     det.run()
 
+    # Its position in a frame
     f = 300
     x, y = obj['pos'](f)
 
@@ -1000,11 +1004,17 @@ def test_connected_light_over_the_segments():
 
     class _Det(object):
         def __init__(self, first, end, value):
+            """ A detector of the frames first .. end, whose light between any two points is value. """
             self.block_starts, self.block_ends, self.value = [first], [end], value
+
         def connectedLight(self, frame, x1, y1, x2, y2):
+            """ The light between two points, the same everywhere. """
             return self.value
 
+    # Three segments, the second one not searched
     connected = mfd.connectedOver([_Det(0, 1000, 0.1), None, _Det(900, 2000, 0.9)])
+
+    # Every frame from the first segment which contains it, none outside them
     assert connected(500, 0, 0, 1, 1) == 0.1
     assert connected(1500, 0, 0, 1, 1) == 0.9
     assert connected(5000, 0, 0, 1, 1) is None
