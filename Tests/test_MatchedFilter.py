@@ -975,28 +975,36 @@ def test_track_deviation_from_one_smooth_curve():
     # Too few rows to judge: no deviation
     assert mfd.trackDeviation(wandering[:4]) == 0.0
 
-    # The detections deviating more than the limit are removed, none with the limit 0
+    # The detections deviating more than the limit (a fraction of the FWHM plus of the length) are removed, none
+    #   with the fraction of the FWHM 0
     dets = [[0, 0, straight], [0, 0, wandering]]
-    kept, rejected = mfd.removeDeviatingDetections(dets, 1.0)
+    kept, rejected = mfd.removeDeviatingDetections(dets, 1.6, 0.6, 0.005)
     assert (len(kept) == 1) and (kept[0][2] is straight) and (len(rejected) == 1)
-    assert len(mfd.removeDeviatingDetections(dets, 0.0)[0]) == 2
+    assert len(mfd.removeDeviatingDetections(dets, 1.6, 0.0, 0.005)[0]) == 2
+
+    # The allowed deviation grows with the length of the track: the same wander on a track 10 times longer (as a
+    #   long track across a wide field bends) is kept
+    long_wandering = np.c_[t, 100 + 3.0*t + 3*np.sin(2*np.pi*t/200), 50 + 1.0*t + 3*np.cos(2*np.pi*t/170)]
+    assert len(mfd.removeDeviatingDetections([[0, 0, long_wandering]], 1.6, 0.6, 0.005)[0]) == 1
 
 
-@pytest.mark.parametrize('max_deviation', [1.0, 0.0])
-def test_wandering_track_rejected(config, max_deviation):
+@pytest.mark.parametrize('deviation_fwhm', [0.3, 0.0])
+def test_wandering_track_rejected(config, deviation_fwhm):
     """ A track which wanders sideways from one smooth path (by 4 px back and forth) is rejected by the whole detector,
         a straight object at the same time is kept; with the test off both are detected. """
 
     straight = linearObject(4.0, 20, 30, 0.2, 0.05, 40, 470)
     wander = {'snr': 4.0, 'f0': 40, 'f1': 470,
               'pos': lambda f: (60 + 4*np.sin(2*np.pi*(f - 40)/200), 110 - 0.2*(f - 40))}
-    config.mf_max_track_deviation = max_deviation
+    # The PSF of the synthetic frames is wide (FWHM 2.4 px), and the measured wander about 1.4 px RMS, so the test
+    #   is run with a smaller fraction of the FWHM than the default
+    config.mf_track_deviation_fwhm = deviation_fwhm
     det, detections = runDetector(_SynthHandle([straight, wander], n_stars=4), config)
 
     found_straight = [d for d in detections if np.median(truthError(d[2], straight)) < 1.5]
     found_wander = [d for d in detections if np.median(truthError(d[2], wander)) < 3]
     assert len(found_straight) == 1
-    if max_deviation > 0:
+    if deviation_fwhm > 0:
         assert len(found_wander) == 0
         assert det.summary()['deviation_rejected'] >= 1
     else:

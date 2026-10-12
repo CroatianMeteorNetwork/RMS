@@ -448,7 +448,8 @@ def test_persistence_carried_without_the_overlap():
 def test_segments_each_have_the_track_cap_and_carry_persistence(monkeypatch):
     """ Every segment measures at most mf_max_tracks candidate tracks of its own, whatever the other segments
         measured (a busy part of a file doesn't take the measurements of the rest, nor the rest those of a busy
-        part). The persistence is carried from before the next segment. """
+        part). The persistence is carried from before the next segment, and the smooth path of the detections is
+        judged only after the segments are joined. """
 
     import RMS.MatchedFilterDetection as mfd
 
@@ -470,8 +471,8 @@ def test_segments_each_have_the_track_cap_and_carry_persistence(monkeypatch):
         persistence_carry = {}
         persistence_carry_frames = 0
         psf_sigma = None
-    def detect(img_handle, config, max_tracks=None, persistence_until=None, **kwargs):
-        calls.append((max_tracks, persistence_until, config.mf_max_tracks))
+    def detect(img_handle, config, max_tracks=None, persistence_until=None, track_deviation=True, **kwargs):
+        calls.append((max_tracks, persistence_until, config.mf_max_tracks, track_deviation))
         det = _Detector()
         det.tracks_measured = 300
         return [], det
@@ -485,6 +486,9 @@ def test_segments_each_have_the_track_cap_and_carry_persistence(monkeypatch):
     assert [c[0] for c in calls] == [None]*4
     assert [c[2] for c in calls] == [300]*4
     assert [c[1] for c in calls] == [512, 1024, 1536, None]
+
+    # The smooth path is judged only on the whole tracks after the segments are joined, not on their pieces
+    assert [c[3] for c in calls] == [False]*4
 
 
 def test_persistence_of_a_segment_judged_over_the_whole_input():

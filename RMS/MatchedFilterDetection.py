@@ -289,7 +289,8 @@ class MatchedFilterOptions(object):
         self.sigma_scale = config.mf_sigma_scale
         self.track_significance = config.mf_track_significance
         self.line_concentration = config.mf_line_concentration
-        self.max_track_deviation = config.mf_max_track_deviation
+        self.track_deviation_fwhm = config.mf_track_deviation_fwhm
+        self.track_deviation_length = config.mf_track_deviation_length
         self.edge_margin = max(config.detection_border, config.mf_edge_margin)
         self.gpu = config.mf_gpu
         self.smooth_frames = config.mf_smooth_frames
@@ -2035,7 +2036,10 @@ class MatchedFilterDetector(object):
 
         # The whole tracks which wander sideways from one smooth path are no objects (e.g. pieces of diffuse
         #   light)
-        detections, rejected = removeDeviatingDetections(detections, self.opts.max_track_deviation)
+        detections, rejected = removeDeviatingDetections(detections, 2.355*self.psf_sigma*self.det_bin
+                                                         if self.psf_sigma is not None else None,
+                                                         self.opts.track_deviation_fwhm,
+                                                         self.opts.track_deviation_length)
         self.deviation_rejected += len(rejected)
 
         self.timing['total'] = time() - t0
@@ -3461,7 +3465,7 @@ def skyQuality(img_handle, config, star_list, platepar, reference_dir=None, inpu
 def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=None, star_list=None,
                         return_detector=False, platepar=None, reference_dir=None, input_name='', frame_range=None,
                         persistence_prior=None, sky_range=None, persistence_until=None, max_tracks=None,
-                        persistence_prior_frames=0):
+                        persistence_prior_frames=0, track_deviation=True):
     """ Run the matched-filter detection on an image handle.
 
     Arguments:
@@ -3494,6 +3498,9 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
         persistence_prior_frames: [int] Number of frames of the counts of persistence_prior. 0 by default.
         max_tracks: [int] Largest number of candidate tracks which are measured. None by default
             (mf_max_tracks).
+        track_deviation: [bool] Whether the detections which wander from a smooth path are removed (see
+            removeDeviatingDetections). False for the segments of an input, whose whole tracks are judged after
+            they are joined. True by default.
 
     Return:
         [list] Detections as [rho, theta, centroids], or (detections, detector) with return_detector. The
@@ -3523,6 +3530,8 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
     detector.persistence_prior_frames = persistence_prior_frames
     if max_tracks is not None:
         detector.opts.max_tracks = max_tracks
+    if not track_deviation:
+        detector.opts.track_deviation_fwhm = 0.0
     detector.sky_map = skyQuality(img_handle, config, star_list, platepar, reference_dir=reference_dir,
                                   input_name=input_name, frame_range=(sky_range or frame_range),
                                   update=(frame_range is None))
@@ -3600,28 +3609,36 @@ def trackDeviation(cent):
     return float(np.sqrt(np.mean(across**2)))
 
 
-def removeDeviatingDetections(detections, max_deviation):
+def removeDeviatingDetections(detections, fwhm, fwhm_factor, length_factor):
     """ Remove the detections which wander sideways from one smooth path by more than the limit (see
-        trackDeviation).
+        trackDeviation): fwhm_factor PSF FWHMs (the scatter of the measurements, which scales with the size of the
+        PSF) plus length_factor times the length of the track (the bending of a long track beyond the smooth path,
+        e.g. by the distortion of a wide-field lens, which is the same fraction of the length in pixels as in
+        degrees). Both factors are dimensionless, so the same values hold for cameras of other fields of view.
 
     Arguments:
         detections: [list] Detections as [rho, theta, centroids] (unbinned).
-        max_deviation: [float] Largest RMS distance across the path (px), 0 to keep all.
+        fwhm: [float] FWHM of the PSF (px, unbinned).
+        fwhm_factor: [float] Deviation allowed for the scatter of the measurements (FWHMs), 0 to keep all.
+        length_factor: [float] Deviation allowed per pixel of the length of the track.
 
     Return:
-        (detections, rejected): [tuple] The detections kept, and (first frame, deviation) of the removed ones.
+        (detections, rejected): [tuple] The detections kept, and (first frame, deviation, limit) of the removed
+            ones.
     """
 
-    if max_deviation <= 0:
+    if (fwhm_factor <= 0) or (fwhm is None):
         return list(detections), []
 
     kept, rejected = [], []
     for det in detections:
-        deviation = trackDeviation(det[2])
-        if deviation > max_deviation:
-            rejected.append((float(det[2][0, 0]), deviation))
+        cent = det[2]
+        deviation = trackDeviation(cent)
+        limit = fwhm_factor*fwhm + length_factor*float(np.hypot(*(cent[-1, 1:3] - cent[0, 1:3])))
+        if deviation > limit:
+            rejected.append((float(cent[0, 0]), deviation, limit))
             log.info('Matched filter: detection {:.0f}-{:.0f} wanders sideways from a smooth path by {:.2f} px '
-                     'RMS, rejected'.format(det[2][0, 0], det[2][-1, 0], deviation))
+                     'RMS (more than {:.2f} px), rejected'.format(cent[0, 0], cent[-1, 0], deviation, limit))
         else:
             kept.append(det)
 
@@ -4063,7 +4080,8 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
             continue
 
         # The segment is searched, with the sky quality from the stars of all chunks read so far (the intensities
-        #   are scaled to the stars of the segment itself, see apertureCorrection)
+        #   are scaled to the stars of the segment itself, see apertureCorrection). The smooth path of the
+        #   detections is judged on the whole tracks, after the segments are joined
         detections, detector = detectMatchedFilter(buffer, config, mask=mask, dark=dark, flat_struct=flat_struct,
                                                    star_list=list(star_list), return_detector=True,
                                                    platepar=platepar, reference_dir=reference_dir,
@@ -4071,7 +4089,8 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
                                                    persistence_prior=persistence,
                                                    persistence_prior_frames=persistence_frames, sky_range=(0, end),
                                                    persistence_until=(ranges[k + 1][0] if k + 1 < len(ranges)
-                                                                      else None))
+                                                                      else None),
+                                                   track_deviation=False)
         detectors.append(detector)
 
         # The persistent pixels are judged over all segments so far (the runs of every overlap once), as over the
@@ -4118,7 +4137,9 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
                      'input removed'.format(len(removed_rows), len(removed_first)))
 
     # The whole tracks (joined over the segments) which wander sideways from one smooth path are no objects
-    detections, deviating = removeDeviatingDetections(detections, config.mf_max_track_deviation)
+    detections, deviating = removeDeviatingDetections(detections, 2.355*searched[0].psf_sigma*searched[0].det_bin
+                                                      if searched else None, config.mf_track_deviation_fwhm,
+                                                      config.mf_track_deviation_length)
 
     timing['segments_total'] = time() - t0
     log.info('Matched filter: {:d} detections in {:d} segments, {:d} frames read once ({:d} outside the '

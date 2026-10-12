@@ -276,12 +276,15 @@ trails). The number of rejected detections is in the done file (`linear_structur
 
 **Smooth path.** A whole detection (after the pieces of a track are joined) must follow one smooth path: x and y
 are fitted with a quadratic in time over the whole track, and the RMS distance of its rows across the direction of
-motion must be at most `mf_max_track_deviation` (1 px of the input frames). Real objects follow straight or
-smoothly curved paths, also over long passes (on recorded data up to ~0.9 px across, mostly below 0.1 px), while
-tracks along diffuse light wander sideways by up to several px. The distance along the motion is not used: the
-angular speed of a real object changes over a long pass more than the quadratic follows. The number of rejected
-detections is in the done file (`deviation_rejected`); the limit depends on the pixel scale and the seeing of the
-camera, 0 turns the test off.
+motion must be at most `mf_track_deviation_fwhm` (0.6) PSF FWHMs plus `mf_track_deviation_length` (0.005) times the
+length of the track. The first part allows for the scatter of the measurements, which scales with the size of the
+PSF; the second for the bending of a long track beyond the smooth path (e.g. by the distortion of a wide-field
+lens), which is the same fraction of the length in pixels as in degrees. Both are dimensionless, so the same values
+hold for cameras of other fields of view. On recorded data, real objects are below 0.75 FWHM across the motion
+(long passes below 0.6 FWHM), while tracks along diffuse light wander sideways by up to several px. The distance
+along the motion is not used: the angular speed of a real object changes over a long pass more than the quadratic
+follows. The number of rejected detections is in the done file (`deviation_rejected`); `mf_track_deviation_fwhm` 0
+turns the test off.
 
 ### 8. Clear sky
 
@@ -563,7 +566,8 @@ All settings are in the `[MatchedFilter]` section, see the comments in `.config`
 | `mf_threshold` | 5.0 | Threshold of the search (sigma of the maximum over the motions) |
 | `mf_track_significance` | 12.0 | Minimum significance of a detection |
 | `mf_line_concentration` | 0.5 | Minimum concentration against the brightest axis (linear structures), 0 off |
-| `mf_max_track_deviation` | 1.0 | Largest RMS distance across the motion from one smooth path (px), 0 off |
+| `mf_track_deviation_fwhm` | 0.6 | Sideways deviation from one smooth path allowed for the measurements (PSF FWHMs), 0 off |
+| `mf_track_deviation_length` | 0.005 | Sideways deviation allowed per pixel of track length (bending of long tracks) |
 | `mf_min_frames` | 20 | Minimum duration of a detection (frames) |
 | `mf_min_centroids` | 6 | Minimum number of measurements of a detection (on clear sky) |
 | `mf_max_pos_error` | 0.5 | Target position error of a measurement (px): sets the frames per position; measurements up to twice this are accepted |
