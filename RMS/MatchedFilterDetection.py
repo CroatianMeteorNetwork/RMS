@@ -265,7 +265,7 @@ def slowSearchMinBlocks():
         n += 1
 
 
-def lineKeep(frame, lines, level=LINE_KEEP_LEVEL):
+def lineKeep(frame, lines, level=LINE_KEEP_LEVEL, window=LINE_LOCAL):
     """ The pixels of the bright columns and rows (see MatchedFilterDetector.lineMask) near the sources which stand
         out from the line itself in a frame: LINE_KEEP_LEVEL above the running median of LINE_LOCAL px along the
         line, grown by TRAIL_KEEP px. A line which flickers as a whole, or which is brighter near the star of its
@@ -277,6 +277,9 @@ def lineKeep(frame, lines, level=LINE_KEEP_LEVEL):
 
     Keyword arguments:
         level: [float] Level above the line (in the noise of a frame). LINE_KEEP_LEVEL by default.
+        window: [int] Length of the running median along the line (px), longer than twice the longest source along
+            it (e.g. the streak of a fast object in a frame), so the source doesn't set the level of the line.
+            LINE_LOCAL by default.
 
     Return:
         [ndarray] Boolean mask of the pixels to keep.
@@ -289,10 +292,10 @@ def lineKeep(frame, lines, level=LINE_KEEP_LEVEL):
     rows = np.flatnonzero(lines.all(axis=1))
     if cols.size:
         sub = frame[:, cols]
-        keep[:, cols] = (sub - ndimage.median_filter(sub, size=(LINE_LOCAL, 1), mode='nearest')) > level
+        keep[:, cols] = (sub - ndimage.median_filter(sub, size=(window, 1), mode='nearest')) > level
     if rows.size:
         sub = frame[rows, :]
-        keep[rows, :] |= (sub - ndimage.median_filter(sub, size=(1, LINE_LOCAL), mode='nearest')) > level
+        keep[rows, :] |= (sub - ndimage.median_filter(sub, size=(1, window), mode='nearest')) > level
 
     # Grown to cover the source and the wings of its PSF
     if keep.any():
@@ -1004,6 +1007,16 @@ class MatchedFilterDetector(object):
 
     ### Search ###
 
+    def lineWindow(self):
+        """ The length of the running median along a bright line (see lineKeep): at least LINE_LOCAL, and longer
+            than twice the streak of the fastest searched object in a frame (with its PSF), so such a streak along
+            the line is kept. """
+
+        psf = self.psf_sigma if self.psf_sigma is not None else 1.0
+
+        return max(LINE_LOCAL, 2*int(math.ceil(self.opts.speed_max + 6*psf)) + 1)
+
+
     def prepareFrame(self, frame, static, lines=None):
         """ Prepare a normalized frame for the search, in place: the bright columns and rows masked except near the
             sources which stand out from them (see lineKeep), the trails of the bright sources removed (see
@@ -1021,7 +1034,7 @@ class MatchedFilterDetector(object):
         #   moving along a column, which lights the column with its own trail): a line above the level of the
         #   trails would otherwise be taken for a source whose trails cover the whole frame
         if (lines is not None) and lines.any():
-            frame[lines & ~lineKeep(frame, lines)] = 0
+            frame[lines & ~lineKeep(frame, lines, window=self.lineWindow())] = 0
 
         # The trails of the bright sources (also of those kept on the lines)
         self.removeTrails(frame, static)

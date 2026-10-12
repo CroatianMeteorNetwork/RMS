@@ -1037,6 +1037,28 @@ def test_bright_line_masked_before_the_trails_are_removed(config):
     assert np.all(frame[:, 90] == 0)
 
 
+def test_line_keep_long_streak(config):
+    """ The streak of a fast object along a bright column is kept when the running median along the line is longer
+        than twice the streak (see lineWindow), not when the streak sets the level of the line. """
+
+    rng = np.random.default_rng(4)
+    frame = rng.normal(0, 1, (SIZE, SIZE)).astype(np.float32)
+    lines = np.zeros((SIZE, SIZE), dtype=bool)
+    lines[:, 70] = True
+    frame[:, 70] += 5
+    frame[50:70, 70] += 60
+
+    # A window of the default length is mostly the streak, a long enough one is not
+    assert not mfd.lineKeep(frame, lines)[60, 70]
+    assert mfd.lineKeep(frame, lines, window=61)[60, 70]
+
+    # The window of the detector covers the fastest searched streaks
+    config.mf_ang_vel_max = 30.0
+    det = MatchedFilterDetector(_SynthHandle([], total_frames=64), config)
+    det.psf_sigma = PSF_SIGMA
+    assert det.lineWindow() > 2*(det.opts.speed_max + 2*PSF_SIGMA)
+
+
 ### Light curves, bright objects, photometric scale ###
 
 def test_flashes_kept_in_light_curve(config):
