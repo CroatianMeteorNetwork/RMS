@@ -20,6 +20,7 @@ import os
 import math
 import datetime
 
+import cv2
 import numpy as np
 import pytest
 from astropy.io import fits
@@ -1016,6 +1017,172 @@ def test_connected_light_over_the_segments():
     assert connected(500, 0, 0, 1, 1) == 0.1
     assert connected(1500, 0, 0, 1, 1) == 0.9
     assert connected(5000, 0, 0, 1, 1) is None
+
+
+class _DriftHandle(_SynthHandle):
+    """ Synthetic frames whose stars drift across the field by the given px per frame (e.g. the diurnal motion
+        for a fixed camera). """
+
+    def __init__(self, objects, drift=(0.008, 0.003), **kwargs):
+        """ The frames of _SynthHandle with the stars drifting by drift (px per frame, x and y). """
+
+        # The stars at frame 0, which are shifted for every frame
+        super(_DriftHandle, self).__init__(objects, **kwargs)
+        self.drift = drift
+        self.base_stars = self.stars.astype(np.float32)
+
+    def loadFrame(self, avepixel=False):
+        """ The current frame, with its stars shifted by the drift. """
+
+        # The stars of this frame, shifted by the drift (with subpixel interpolation)
+        f = self.current_frame
+        M = np.float32([[1, 0, self.drift[0]*f], [0, 1, self.drift[1]*f]])
+        self.stars = cv2.warpAffine(self.base_stars, M, (SIZE, SIZE), flags=cv2.INTER_CUBIC)
+
+        return super(_DriftHandle, self).loadFrame(avepixel)
+
+
+def test_drifting_faint_stars_make_no_tracks(config):
+    """ Faint stars (below the masking of the stars) which drift with the sky leave no residuals which make tracks:
+        the medians of the neighbouring blocks are aligned with the motion of the stars before they are averaged,
+        and the background is extrapolated with that motion beyond the middle of the first and the last block. """
+
+    det, detections = runDetector(_DriftHandle([], total_frames=1100, n_stars=20, n_faint_stars=200, seed=2),
+                                  config)
+
+    # The motion of the stars is measured, and nothing is detected
+    assert np.allclose(det.drift(), (0.008, 0.003), atol=0.001)
+    assert len(detections) == 0
+
+
+def test_star_drift_from_the_middles_of_the_blocks(config):
+    """ The drift of the stars is the shift between the medians of two blocks over the time between their middles
+        (which the medians represent), also when the last block is shorter than the others. """
+
+    # Four blocks, the last one shorter
+    det = MatchedFilterDetector(_SynthHandle([], total_frames=896), config)
+    det.block_starts = [0, 256, 512, 768]
+    det.block_ends = [256, 512, 768, 896]
+
+    # The medians of a field of stars shifted by the drift to the middle of every block
+    rng = np.random.default_rng(5)
+    field = np.zeros((SIZE, SIZE), dtype=np.float32)
+    for _ in range(60):
+        renderObject(field, rng.uniform(10, SIZE - 10), rng.uniform(10, SIZE - 10), rng.uniform(5, 30)*NOISE)
+    drift = (0.01, -0.004)
+    for k, (first, last) in enumerate(zip(det.block_starts, det.block_ends)):
+        mid = (first + last - 1)/2.0
+        M = np.float32([[1, 0, drift[0]*mid], [0, 1, drift[1]*mid]])
+        bg = mfd.BlockBackground(np.zeros_like(field), np.ones_like(field), 1)
+        bg.raw_median = SKY + cv2.warpAffine(field, M, (SIZE, SIZE), flags=cv2.INTER_CUBIC)
+        det.backgrounds[k] = bg
+
+    # The pair of blocks 0 and 3 (3 blocks apart): their middles are 704 frames apart, their starts 768
+    assert np.allclose(det.starDrift(step=3), drift, rtol=0, atol=0.0006)
+
+    # The drift is also measured on the first use when the backgrounds were set without the background pass
+    assert np.allclose(det.drift(), drift, rtol=0, atol=0.0006)
+
+
+def test_background_around_a_track_aligned_with_the_stars(config):
+    """ The background which is estimated again around a track without the object (see maskObjects) takes the
+        samples of the neighbouring blocks shifted by the motion of the stars, as the rest of the background of
+        the block, so the stars in it are where they are at the middle of the block. """
+
+    # Many drifting stars, and the backgrounds of five blocks
+    drift = (0.01, 0.0)
+    handle = _DriftHandle([], total_frames=1280, n_stars=400, drift=drift, seed=4)
+    det = MatchedFilterDetector(handle, config)
+    det.frame_first, det.frame_end = 0, 1280
+    det.block_starts, det.block_ends = [0, 256, 512, 768, 1024], [256, 512, 768, 1024, 1280]
+    det.psf_sigma = PSF_SIGMA
+    det.backgroundPass()
+
+    # A track across the middle block, and the background around it estimated again
+    k = 2
+    mid = (det.block_starts[k] + det.block_ends[k] - 1)/2.0
+    track = np.array([[f, 30 + 0.05*(f - 512), 64.0] for f in range(512, 768, 8)], dtype=np.float64)
+    det.maskObjects([track])
+    after = det.backgrounds[k].median
+
+    # The stars at the middle of the block
+    M = np.float32([[1, 0, drift[0]*mid], [0, 1, drift[1]*mid]])
+    truth = SKY + cv2.warpAffine(handle.base_stars, M, (SIZE, SIZE), flags=cv2.INTER_CUBIC)
+
+    # In the region estimated again, away from the object, the background is the stars at the middle of the block
+    #   within the noise of the median (unaligned samples blur the stars by the motion over three blocks)
+    region = (slice(57, 72), slice(23, 48))
+    yy, xx = np.mgrid[region[0], region[1]]
+    away = np.abs(yy - 64) > 5.5
+    assert np.std((after[region] - truth[region])[away]) < NOISE
+
+
+def test_noise_around_a_track_not_reduced_by_the_alignment(config):
+    """ The noise of the background estimated again around a track (see maskObjects) is the noise of the frames,
+        although the samples are shifted with subpixel interpolation, which smooths their noise. """
+
+    # Pure noise, with a drift of fractions of a pixel (so the samples are interpolated), in five blocks
+    handle = _DriftHandle([], total_frames=1280, n_stars=0, drift=(0.0031, 0.0023), seed=6)
+    det = MatchedFilterDetector(handle, config)
+    det.frame_first, det.frame_end = 0, 1280
+    det.block_starts, det.block_ends = [0, 256, 512, 768, 1024], [256, 512, 768, 1024, 1280]
+    det.psf_sigma = PSF_SIGMA
+    det.backgroundPass()
+    det._drift = (0.0031, 0.0023)
+
+    # A track across the middle block, and the background around it estimated again
+    k = 2
+    track = np.array([[f, 30 + 0.05*(f - 512), 64.0] for f in range(512, 768, 8)], dtype=np.float64)
+    det.maskObjects([track])
+
+    # The noise in the region estimated again, away from the object, is the noise of the frames
+    noise = det.backgrounds[k].noise[57:72, 23:48]
+    yy = np.mgrid[57:72, 23:48][0]
+    assert abs(np.median(noise[np.abs(yy - 64) > 5.5])/NOISE - 1) < 0.1
+
+
+def test_star_drift_of_a_short_input(config):
+    """ The drift of the stars, with which the backgrounds of the blocks are aligned, is measured also for an input
+        of fewer blocks than the separation used for longer inputs (e.g. a short segment). """
+
+    # Three blocks of drifting stars
+    handle = _DriftHandle([], total_frames=768, n_stars=60, drift=(0.01, -0.004), seed=8)
+    det = MatchedFilterDetector(handle, config)
+    det.frame_first, det.frame_end = 0, 768
+    det.block_starts, det.block_ends = [0, 256, 512], [256, 512, 768]
+    det.psf_sigma = PSF_SIGMA
+    det.backgroundPass()
+
+    # The drift is measured over the blocks there are
+    assert np.allclose(det.drift(), (0.01, -0.004), rtol=0, atol=0.001)
+
+
+def test_background_around_a_track_without_the_object(config):
+    """ The region estimated again around a track (see maskObjects) is large enough for the light of the object in
+        the medians of the neighbouring blocks after they are aligned with the motion of the stars, so none of it
+        is left in the background of the block. """
+
+    # A bright object which stays in place while the sky drifts fast, in five blocks
+    drift = (0.04, 0.0)
+    obj = linearObject(30.0, 60, 64, 0.0, 0.0, 0, 1280)
+    handle = _DriftHandle([obj], total_frames=1280, n_stars=0, drift=drift, seed=9)
+    det = MatchedFilterDetector(handle, config)
+    det.frame_first, det.frame_end = 0, 1280
+    det.block_starts, det.block_ends = [0, 256, 512, 768, 1024], [256, 512, 768, 1024, 1280]
+    det.psf_sigma = PSF_SIGMA
+
+    # The motion of the stars given (the synthetic frames have no stars to measure it on)
+    det.starDrift = lambda step=mfd.SLOW_REF_BLOCKS: drift
+    det.backgroundPass()
+
+    # Its track, and the background of the middle block estimated again around it
+    k = 2
+    track = np.array([[f, *obj['pos'](f)] for f in range(0, 1280, 8)], dtype=np.float64)
+    det.maskObjects([track])
+
+    # No light of the object above the sky anywhere near its path in the background of the block
+    region = det.backgrounds[k].median[50:79, 20:110]
+    assert np.max(region) - SKY < 3*NOISE
 
 
 def test_track_deviation_from_one_smooth_curve():

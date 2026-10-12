@@ -668,16 +668,39 @@ class MatchedFilterDetector(object):
             raw.append(self.blockBackground(samples))
             self.timing['background'] += time() - t1
 
+        # The motion of the stars, from the shifts between the medians of the blocks (see starDrift), SLOW_REF_BLOCKS
+        #   blocks apart, or fewer in a short input
+        for k, bg in enumerate(raw):
+            bg.raw_median = bg.median
+            self.backgrounds[k] = bg
+        self._drift = self.starDrift(step=max(1, min(SLOW_REF_BLOCKS, len(raw) - 1)))
+        drift = np.array(self._drift, dtype=np.float64)
+        mids = [(first + last - 1)/2.0 for first, last in zip(self.block_starts, self.block_ends)]
+
         # The median of every block is the mean of the medians of the block and of its neighbours (only one
-        #   neighbour at the ends), which reduces its noise by sqrt(3). The noise is the one of the block alone, as
-        #   it changes less from block to block, and its estimate doesn't add to the background of the frames.
-        #   The median of the block alone is kept for the search of objects which stay on the same pixels (see
-        #   slowSearch)
+        #   neighbour at the ends), which reduces its noise by sqrt(3). The medians of the neighbours are shifted by
+        #   the motion of the stars to the middle of the block first, so the stars of the mean are where they are
+        #   in the block (also at the ends, where the only neighbour is on one side). The noise is the one of the
+        #   block alone, as it changes less from block to block, and its estimate doesn't add to the background of
+        #   the frames. The median of the block alone is kept for the search of objects which stay on the same
+        #   pixels (see slowSearch)
         for k in range(len(raw)):
-            near = raw[max(k - 1, 0):k + 2]
-            median = np.mean([bg.median for bg in near], axis=0).astype(np.float32)
+            near = []
+            for j in range(max(k - 1, 0), min(k + 2, len(raw))):
+
+                # The median of the block itself as it is, the ones of the neighbours shifted to its middle
+                dx, dy = drift*(mids[k] - mids[j])
+                if (j == k) or (abs(dx) + abs(dy) < 1e-3):
+                    near.append(raw[j].median)
+                else:
+                    M = np.float32([[1, 0, dx], [0, 1, dy]])
+                    near.append(cv2.warpAffine(raw[j].median, M, (self.width, self.height), flags=cv2.INTER_CUBIC,
+                                               borderMode=cv2.BORDER_REPLICATE))
+            # The mean of the aligned medians, with the noise of the block alone
+            median = np.mean(near, axis=0).astype(np.float32)
             noise = raw[k].noise
-            bg = BlockBackground(median, noise, sum(bg.n_samples for bg in near))
+            n_samples = sum(raw[j].n_samples for j in range(max(k - 1, 0), min(k + 2, len(raw))))
+            bg = BlockBackground(median, noise, n_samples)
             bg.raw_median = raw[k].median
             self.starTemplate(bg)
             self.backgrounds[k] = bg
@@ -781,10 +804,14 @@ class MatchedFilterDetector(object):
         # Subtract the background of every frame: the median of this block, plus the linear interpolation towards
         #   the median of the neighbouring block on the side of the frame. With the middle frames m_k and m_j of
         #   the two blocks, the background of the frame f is median_k + (f - m_k)/(m_j - m_k)*(median_j - median_k),
-        #   so the background changes continuously from block to block
+        #   so the background changes continuously from block to block. Beyond the middle of the first and the last
+        #   block, where there is no block on the side of the frame, the line through the neighbour on the other
+        #   side is extrapolated, so the background follows the motion of the stars to the ends of the input
         for i in range(i0, i1):
             f = first + i
             j = k - 1 if f < mid else k + 1
+            if j not in self.backgrounds:
+                j = k + 1 if f < mid else k - 1
             z[i] -= bg.median
             if j in self.backgrounds:
                 mid_j = (self.block_starts[j] + self.block_ends[j] - 1)/2.0
@@ -1269,15 +1296,18 @@ class MatchedFilterDetector(object):
         window = cv2.createHanningWindow((self.width, self.height), cv2.CV_32F)
 
         # The shift between the stars (median minus sky, negative values clipped) of the blocks k and k + step, for
-        #   up to 8 pairs of blocks over the input, divided by the time between them. A weak peak of the
+        #   up to 8 pairs of blocks over the input, divided by the time between their middles. A weak peak of the
         #   correlation (response) means no reliable shift, e.g. too few stars
         shifts = []
         for k in range(0, n - step, max(1, (n - step)//8)):
             a, b = self.backgrounds[k], self.backgrounds[k + step]
-            img_a = np.clip(a.raw_median - a.sky, 0, None).astype(np.float32)
-            img_b = np.clip(b.raw_median - b.sky, 0, None).astype(np.float32)
+            img_a = np.clip(a.raw_median - self.skyLevel(a.raw_median), 0, None).astype(np.float32)
+            img_b = np.clip(b.raw_median - self.skyLevel(b.raw_median), 0, None).astype(np.float32)
             (dx, dy), response = cv2.phaseCorrelate(img_a, img_b, window)
-            dt = self.block_starts[k + step] - self.block_starts[k]
+
+            # The medians are of the middles of the blocks (the last block can be longer or shorter)
+            dt = ((self.block_starts[k + step] + self.block_ends[k + step]) - (self.block_starts[k]
+                                                                             + self.block_ends[k]))/2.0
             if response > 0.05:
                 shifts.append((dx/dt, dy/dt))
 
@@ -1292,7 +1322,7 @@ class MatchedFilterDetector(object):
         """ The motion of the stars (px per frame), measured once. """
 
         if getattr(self, '_drift', None) is None:
-            self._drift = self.starDrift()
+            self._drift = self.starDrift(step=max(1, min(SLOW_REF_BLOCKS, len(self.block_starts) - 1)))
 
         return self._drift
 
@@ -2313,6 +2343,9 @@ class MatchedFilterDetector(object):
         radius = 4*self.psf_sigma + 1
         n_blocks = len(self.block_starts)
 
+        # The motion of the stars (px per frame), which the samples are aligned with
+        drift = np.array(self.drift(), dtype=np.float64)
+
         # The sampled frames of the blocks (read once, kept while they are needed), the blocks whose background
         #   was changed, and the reference backgrounds of the blocks (see referenceBackground)
         samples = {}
@@ -2339,8 +2372,12 @@ class MatchedFilterDetector(object):
                 continue
 
             # A region around every track, and in it the samples masked where any of the tracks is at the time
-            #   of the sample
+            #   of the sample. The samples are aligned with the motion of the stars to the middle of the block (see
+            #   below), which moves the object in them by up to the motion over the neighbouring blocks: the region
+            #   is enlarged by that much
             bg = self.backgrounds[k]
+            mid = (self.block_starts[k] + self.block_ends[k] - 1)/2.0
+            pad_x, pad_y = np.abs(drift)*max(mid - lo, hi - mid)
             for c in tracks:
 
                 # The bounding box of the positions of the track during the neighbouring blocks (with a margin of
@@ -2349,25 +2386,40 @@ class MatchedFilterDetector(object):
                 if sel.sum() == 0:
                     continue
                 pos = c[sel, 1:3]
-                x0 = int(max(np.floor(pos[:, 0].min() - radius - 2), 0))
-                x1 = int(min(np.ceil(pos[:, 0].max() + radius + 3), self.width))
-                y0 = int(max(np.floor(pos[:, 1].min() - radius - 2), 0))
-                y1 = int(min(np.ceil(pos[:, 1].max() + radius + 3), self.height))
+                x0 = int(max(np.floor(pos[:, 0].min() - radius - 2 - pad_x), 0))
+                x1 = int(min(np.ceil(pos[:, 0].max() + radius + 3 + pad_x), self.width))
+                y0 = int(max(np.floor(pos[:, 1].min() - radius - 2 - pad_y), 0))
+                y1 = int(min(np.ceil(pos[:, 1].max() + radius + 3 + pad_y), self.height))
                 if (x1 <= x0) or (y1 <= y0):
                     continue
 
                 # The region in every sample of the neighbouring blocks, with the pixels near any of the tracks at
                 #   the time of the sample set to NaN (the positions are interpolated between the measurements, and
-                #   the tracks are masked up to 8 frames beyond their ends)
+                #   the tracks are masked up to 8 frames beyond their ends). The region of a sample is taken where
+                #   the stars were at its time (shifted by the motion of the stars from the middle of the block, with
+                #   subpixel interpolation), so the stars of all samples are where they are in the block, as in the
+                #   rest of its background (see backgroundPass); the positions of the objects are shifted the same way
                 yy, xx = np.mgrid[y0:y1, x0:x1]
+                centre = ((x0 + x1 - 1)/2.0, (y0 + y1 - 1)/2.0)
                 crops = []
+                smoothing = []
                 for j in near:
                     fr, frames = blockSamples(j)
                     for f, img in zip(fr, frames):
-                        crop = img[y0:y1, x0:x1].astype(np.float64)
+                        sx, sy = drift*(f - mid)
+
+                        # The bilinear interpolation of the shift averages neighbouring pixels, which reduces the
+                        #   standard deviation of their independent noise by this factor (1 for whole pixels)
+                        ax, ay = sx - np.floor(sx), sy - np.floor(sy)
+                        smoothing.append(math.sqrt(((1 - ax)**2 + ax**2)*((1 - ay)**2 + ay**2)))
+
+                        # The region of the sample where the stars were at its time, and the tracks masked in it
+                        src = img if img.dtype == np.float32 else img.astype(np.float32)
+                        crop = cv2.getRectSubPix(src, (x1 - x0, y1 - y0),
+                                                 (centre[0] + sx, centre[1] + sy)).astype(np.float64)
                         for t in tracks:
                             if t[0, 0] - 8 <= f <= t[-1, 0] + 8:
-                                px, py = np.interp(f, t[:, 0], t[:, 1]), np.interp(f, t[:, 0], t[:, 2])
+                                px, py = np.interp(f, t[:, 0], t[:, 1]) - sx, np.interp(f, t[:, 0], t[:, 2]) - sy
                                 crop[(xx - px)**2 + (yy - py)**2 <= radius**2] = np.nan
                         crops.append(crop)
 
@@ -2377,8 +2429,11 @@ class MatchedFilterDetector(object):
 
                 # The noise too: the pixels which the object crosses during the block vary between the sky and the
                 #   object, and their noise would weigh down the object itself in the fits. It is the MAD of the
-                #   unmasked samples, scaled by 1.4826 to the standard deviation of Gaussian noise
-                mad = 1.4826*nanMedian(np.abs(crops - masked))
+                #   unmasked samples, scaled by 1.4826 to the standard deviation of Gaussian noise. The deviations of
+                #   every sample are divided by the smoothing of its interpolation, so the noise is the one of the
+                #   frames, which are normalized with it
+                smoothing = np.array(smoothing)[:, None, None]
+                mad = 1.4826*nanMedian(np.abs(crops - masked)/smoothing)
 
                 # A very slow object covers some pixels in most of the samples of three blocks: there, the
                 #   background of blocks further away, aligned on the stars, is used
