@@ -288,9 +288,17 @@ def lineKeep(frame, lines, level=LINE_KEEP_LEVEL, window=LINE_LOCAL):
     keep = np.zeros(frame.shape, dtype=bool)
 
     def lineLevel(sub):
-        """ The running median along the lines (the first axis of sub). Beyond the ends of a line it is padded with
-            the median of the whole line, so a source which reaches the edge of the image doesn't set the level. """
+        """ The running median along the lines. Beyond the ends of a line it is padded with the median of the whole
+            line, so a source which reaches the edge of the image doesn't set the level.
 
+        Arguments:
+            sub: [ndarray] The pixels of the lines, along the first axis.
+
+        Return:
+            [ndarray] The level of the lines at every pixel, of the shape of sub.
+        """
+
+        # The lines padded with their medians at both ends, and the running median along them
         pad = window//2
         base = np.median(sub, axis=0, keepdims=True)
         padded = np.concatenate([np.repeat(base, pad, axis=0), sub, np.repeat(base, pad, axis=0)], axis=0)
@@ -1025,8 +1033,13 @@ class MatchedFilterDetector(object):
     def lineWindow(self):
         """ The length of the running median along a bright line (see lineKeep): at least LINE_LOCAL, and longer
             than twice the streak of the fastest searched object in a frame (with its PSF), so such a streak along
-            the line is kept. """
+            the line is kept.
 
+        Return:
+            [int] Length of the running median (px, odd).
+        """
+
+        # The PSF before it is measured is taken as 1 px
         psf = self.psf_sigma if self.psf_sigma is not None else 1.0
 
         return max(LINE_LOCAL, 2*int(math.ceil(self.opts.speed_max + 6*psf)) + 1)
@@ -1064,10 +1077,12 @@ class MatchedFilterDetector(object):
         Arguments:
             z: [ndarray] Frames normalized to unit noise, (n, height, width).
             static: [ndarray] Mask of static sources (True = masked).
-            lines: [ndarray] Mask of the bright columns and rows (see lineMask), None for none. Their pixels are
-                masked in every frame except near the sources which stand out from them (see lineKeep).
             block_first: [int] Index of the first frame of the block.
             stackers: [list] (run_frames, bin, VelocityStacker) to run.
+
+        Keyword arguments:
+            lines: [ndarray] Mask of the bright columns and rows (see lineMask), None for none. Their pixels are
+                masked in every frame except near the sources which stand out from them (see lineKeep).
 
         Return:
             [list] Hits.

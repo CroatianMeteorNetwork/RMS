@@ -955,10 +955,12 @@ def test_bright_object_along_a_column_detected(config):
         bright in the median of a block and masked as a bright line: the line is not masked near the object, so
         it is detected over its whole passage. """
 
+    # A bright object with a trail, moving along a column
     obj = linearObject(200.0, 60, 20, 0.0, 0.12, 20, 620)
     obj['trail'] = 1.0
     _, detections = runDetector(_SynthHandle([obj], total_frames=640, n_stars=6), config)
 
+    # One detection, accurate, over the whole passage
     assert len(detections) == 1
     cent = detections[0][2]
     assert np.median(truthError(cent, obj)) < 0.3
@@ -969,6 +971,7 @@ def test_line_keep_only_sources_above_the_line():
     """ On a bright column which flickers as a whole above the level, no pixel is kept; a compact source on it is
         kept with its surroundings, also on a column brighter near one end (e.g. near the star of its trail). """
 
+    # A frame of noise, and a bright column
     rng = np.random.default_rng(3)
     frame = rng.normal(0, 1, (SIZE, SIZE)).astype(np.float32)
     lines = np.zeros((SIZE, SIZE), dtype=bool)
@@ -992,11 +995,13 @@ class _BrightColumnHandle(_SynthHandle):
     """ Synthetic frames with a column brighter than the sky by a constant level (e.g. a bad column). """
 
     def __init__(self, objects, column=60, level=8.0, **kwargs):
+        """ The frames of _SynthHandle with the column brighter by level times the noise. """
 
         super(_BrightColumnHandle, self).__init__(objects, **kwargs)
         self.column, self.level = column, level
 
     def loadFrame(self, avepixel=False):
+        """ The current frame, with the bright column. """
 
         img = super(_BrightColumnHandle, self).loadFrame(avepixel)
         img[:, self.column] += np.float32(self.level*NOISE)
@@ -1014,6 +1019,7 @@ def test_bright_object_along_a_strong_bright_column(config):
         obj = linearObject(200.0, 60, 5, 0.0, 0.2, 20, 620)
         _, detections = runDetector(_BrightColumnHandle([obj], level=level, total_frames=640, n_stars=6), config)
 
+        # The object is found over its whole passage
         found = [d for d in detections if np.median(truthError(d[2], obj)) < 0.5]
         assert len(found) == 1
         assert (found[0][2][0, 0] < 60) and (found[0][2][-1, 0] > 560)
@@ -1024,6 +1030,7 @@ def test_bright_line_masked_before_the_trails_are_removed(config):
         bright sources are removed, so the line is not taken for a source whose trails cover the whole frame: the
         other pixels of the frame are kept. """
 
+    # A frame of noise with a bright column, and no static sources
     det = MatchedFilterDetector(_SynthHandle([], total_frames=64), config)
     rng = np.random.default_rng(1)
     frame = rng.normal(0, 1, (SIZE, SIZE)).astype(np.float32)
@@ -1036,6 +1043,7 @@ def test_bright_line_masked_before_the_trails_are_removed(config):
     frame[30, 20] += 8
     det.prepareFrame(frame, static, lines)
 
+    # The object is kept, the line masked
     assert frame[30, 20] > 4
     assert np.all(frame[:, 90] == 0)
 
@@ -1044,6 +1052,7 @@ def test_line_keep_long_streak(config):
     """ The streak of a fast object along a bright column is kept when the running median along the line is longer
         than twice the streak (see lineWindow), not when the streak sets the level of the line. """
 
+    # A bright column with a streak of 20 px along it
     rng = np.random.default_rng(4)
     frame = rng.normal(0, 1, (SIZE, SIZE)).astype(np.float32)
     lines = np.zeros((SIZE, SIZE), dtype=bool)
