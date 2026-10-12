@@ -2326,7 +2326,8 @@ class MatchedFilterDetector(object):
                     fr, frames = blockSamples(j)
                     for f, img in zip(fr, frames):
                         sx, sy = drift*(f - mid)
-                        crop = cv2.getRectSubPix(img.astype(np.float32), (x1 - x0, y1 - y0),
+                        src = img if img.dtype == np.float32 else img.astype(np.float32)
+                        crop = cv2.getRectSubPix(src, (x1 - x0, y1 - y0),
                                                  (centre[0] + sx, centre[1] + sy)).astype(np.float64)
                         for t in tracks:
                             if t[0, 0] - 8 <= f <= t[-1, 0] + 8:
