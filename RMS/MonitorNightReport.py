@@ -1270,11 +1270,8 @@ def writeObservationSummary(night_dir, night_name, config, frames_per_file, n_de
     else:
         obs_start, obs_end = nightBoundsFromName(config, night_name)
 
-    # Start a new summary for every night (the database and the working summary of a previous report)
-    db_path = os.path.join(config.data_dir, "observation.db")
-    if os.path.exists(db_path):
-        os.remove(db_path)
-
+    # Start a new summary of the night (the working summary of a previous report of the night is removed). The
+    #   database keeps a row for every night, from which e.g. the days since the last detection are computed
     working_path = getRMSStyleFileName(night_dir, obs.OBSERVATION_SUMMARY_WORKING_NAME_JSON)
     if os.path.exists(working_path):
         os.remove(working_path)
