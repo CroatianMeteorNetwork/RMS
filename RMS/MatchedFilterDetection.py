@@ -289,6 +289,7 @@ class MatchedFilterOptions(object):
         self.sigma_scale = config.mf_sigma_scale
         self.track_significance = config.mf_track_significance
         self.line_concentration = config.mf_line_concentration
+        self.max_track_deviation = config.mf_max_track_deviation
         self.edge_margin = max(config.detection_border, config.mf_edge_margin)
         self.gpu = config.mf_gpu
         self.smooth_frames = config.mf_smooth_frames
@@ -571,6 +572,9 @@ class MatchedFilterDetector(object):
 
         # Significances of the measured tracks: (first frame, last frame, significance, off time, reordered)
         self.significances = []
+
+        # Number of the detections rejected as wandering from a smooth path (see removeDeviatingDetections)
+        self.deviation_rejected = 0
 
 
         # The persistence counts of the segments of the input before this one, {(run, bin): (counts, runs)} (see
@@ -2029,6 +2033,11 @@ class MatchedFilterDetector(object):
         # Join the pieces of tracks and remove the duplicates
         detections = self.joinDetections(detections)
 
+        # The whole tracks which wander sideways from one smooth path are no objects (e.g. pieces of diffuse
+        #   light)
+        detections, rejected = removeDeviatingDetections(detections, self.opts.max_track_deviation)
+        self.deviation_rejected += len(rejected)
+
         self.timing['total'] = time() - t0
         log.info('Matched filter: {:d} detections in {:.1f} s ({:s})'.format(len(detections),
             self.timing['total'], ', '.join('{:s} {:.1f} s'.format(k, v) for k, v in self.timing.items()
@@ -2142,6 +2151,7 @@ class MatchedFilterDetector(object):
                         'detected': bool(s[2] >= self.opts.track_significance), 'linear_structure': bool(s[-1])}
                        for s in self.significances],
             'linear_structure_rejected': int(sum(bool(s[-1]) for s in self.significances)),
+            'deviation_rejected': int(self.deviation_rejected),
         }
 
 
@@ -3558,6 +3568,66 @@ def isValidDetection(cent, detector):
         and (np.hypot(*(cent[-1, 1:3] - cent[0, 1:3]))/detector.det_bin >= detector.minDisplacement())
 
 
+def trackDeviation(cent):
+    """ How far a track wanders sideways from one smooth path over its whole length: the RMS distance of its rows
+        across the direction of motion from a quadratic in time fitted to x and to y. Real objects follow
+        straight or smoothly curved paths (also over long passes, and with the distortion of the lens), while a
+        track which goes back and forth (e.g. along diffuse light) does not. The distance along the motion is not
+        used: the angular speed of a real object changes over a long pass more than the quadratic follows.
+
+    Arguments:
+        cent: [ndarray] Rows of the detection, [frame, x, y, ...], sorted by frame.
+
+    Return:
+        [float] The RMS distance across the motion (px), 0 for fewer than 5 rows.
+    """
+
+    if (len(cent) < 5) or (np.ptp(cent[:, 0]) <= 0):
+        return 0.0
+
+    # The time scaled to -0.5 .. 0.5, so the fit is well conditioned for long tracks
+    t = (cent[:, 0] - cent[:, 0].mean())/np.ptp(cent[:, 0])
+    px, py = np.polyfit(t, cent[:, 1], 2), np.polyfit(t, cent[:, 2], 2)
+    dx = cent[:, 1] - np.polyval(px, t)
+    dy = cent[:, 2] - np.polyval(py, t)
+
+    # The direction of motion of the fitted path at every row, and the distance across it
+    vx, vy = np.polyval(np.polyder(px), t), np.polyval(np.polyder(py), t)
+    speed = np.hypot(vx, vy)
+    speed[speed == 0] = 1.0
+    across = (dy*vx - dx*vy)/speed
+
+    return float(np.sqrt(np.mean(across**2)))
+
+
+def removeDeviatingDetections(detections, max_deviation):
+    """ Remove the detections which wander sideways from one smooth path by more than the limit (see
+        trackDeviation).
+
+    Arguments:
+        detections: [list] Detections as [rho, theta, centroids] (unbinned).
+        max_deviation: [float] Largest RMS distance across the path (px), 0 to keep all.
+
+    Return:
+        (detections, rejected): [tuple] The detections kept, and (first frame, deviation) of the removed ones.
+    """
+
+    if max_deviation <= 0:
+        return list(detections), []
+
+    kept, rejected = [], []
+    for det in detections:
+        deviation = trackDeviation(det[2])
+        if deviation > max_deviation:
+            rejected.append((float(det[2][0, 0]), deviation))
+            log.info('Matched filter: detection {:.0f}-{:.0f} wanders sideways from a smooth path by {:.2f} px '
+                     'RMS, rejected'.format(det[2][0, 0], det[2][-1, 0], deviation))
+        else:
+            kept.append(det)
+
+    return kept, rejected
+
+
 def removeInvalidDetections(detections, detector):
     """ The detections which pass the checks of a detection (see isValidDetection). """
 
@@ -3799,7 +3869,7 @@ def stitchSegments(segment_detections, cuts, overlaps, detector, tolerance, sear
 
 class SegmentedRun(object):
     def __init__(self, img_handle, ranges, detectors, cuts, sky_map, buffer, timing, removed_rows=(),
-                 removed_first=()):
+                 removed_first=(), deviation_rejected=0):
         """ The matched filter of an input in segments (see detectMatchedFilterSegments), with the summary of the
             whole input in the form of MatchedFilterDetector.summary.
 
@@ -3816,6 +3886,8 @@ class SegmentedRun(object):
             removed_rows: [list] Frames of the measurements removed on sky clouded in the sky quality of the whole
                 input, after the segments (see detectMatchedFilterSegments). Empty by default.
             removed_first: [list] First frames of the detections removed then. Empty by default.
+            deviation_rejected: [int] Number of the detections rejected as wandering from a smooth path (see
+                removeDeviatingDetections). 0 by default.
         """
 
         self.img_handle = img_handle
@@ -3829,6 +3901,7 @@ class SegmentedRun(object):
         # The measurements and the detections removed on sky clouded in the sky quality of the whole input
         self.removed_rows = list(removed_rows)
         self.removed_first = list(removed_first)
+        self.deviation_rejected = int(deviation_rejected)
 
 
     def summary(self):
@@ -3888,6 +3961,7 @@ class SegmentedRun(object):
             'timing_s': {k: round(v, 2) for k, v in timing.items()},
             'tracks': tracks,
             'linear_structure_rejected': sum(int(track.get('linear_structure', False)) for track in tracks),
+            'deviation_rejected': self.deviation_rejected,
             'segments': [{'first_frame': int(f), 'end_frame': int(e), 'searched': det is not None}
                          for (f, e), det in zip(self.ranges, self.detectors)],
             'frames_read': int(self.buffer.frames_read),
@@ -4043,13 +4117,16 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
             log.info('Matched filter: {:d} frames of detections and {:d} detections on sky clouded in the whole '
                      'input removed'.format(len(removed_rows), len(removed_first)))
 
+    # The whole tracks (joined over the segments) which wander sideways from one smooth path are no objects
+    detections, deviating = removeDeviatingDetections(detections, config.mf_max_track_deviation)
+
     timing['segments_total'] = time() - t0
     log.info('Matched filter: {:d} detections in {:d} segments, {:d} frames read once ({:d} outside the '
              'segments), {:.1f} min'.format(len(detections), len(ranges), buffer.frames_read, buffer.frames_outside,
                                             timing['segments_total']/60.0))
 
     run = SegmentedRun(img_handle, ranges, detectors, cuts, sky_map, buffer, timing, removed_rows=removed_rows,
-                       removed_first=removed_first)
+                       removed_first=removed_first, deviation_rejected=len(deviating))
 
     return star_list, detections, run, buffer
 

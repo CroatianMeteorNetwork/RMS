@@ -950,6 +950,59 @@ def test_tracks_on_a_drifting_line_rejected(config, line_concentration):
         assert det.summary()['linear_structure_rejected'] == 0
 
 
+def test_track_deviation_from_one_smooth_curve():
+    """ The deviation of a track across its motion from one smooth path (a quadratic in time) over its whole
+        length: about 0 for a straight or a uniformly curved track, also with a little noise or a changing speed
+        along the path, and large for a track which wanders sideways. """
+
+    t = np.arange(0, 600, 1.0)
+    rng = np.random.default_rng(2)
+    straight = np.c_[t, 100 + 0.3*t, 50 + 0.1*t]
+    curved = np.c_[t, 100 + 0.3*t + 2e-4*t**2, 50 + 0.1*t - 1e-4*t**2]
+    noisy = curved.copy()
+    noisy[:, 1:3] += rng.normal(0, 0.1, (len(t), 2))
+    wandering = np.c_[t, 100 + 0.3*t + 3*np.sin(2*np.pi*t/200), 50 + 0.1*t + 3*np.cos(2*np.pi*t/170)]
+
+    # The speed along a straight path changing more than a quadratic follows (e.g. a long pass)
+    speeding = np.c_[t, 100 + 0.3*t + 20*np.sin(2*np.pi*t/600)*0.3, 50 + 0.1*t + 20*np.sin(2*np.pi*t/600)*0.1]
+
+    assert mfd.trackDeviation(straight) < 0.01
+    assert mfd.trackDeviation(speeding) < 0.01
+    assert mfd.trackDeviation(curved) < 0.01
+    assert mfd.trackDeviation(noisy) < 0.15
+    assert mfd.trackDeviation(wandering) > 2
+
+    # Too few rows to judge: no deviation
+    assert mfd.trackDeviation(wandering[:4]) == 0.0
+
+    # The detections deviating more than the limit are removed, none with the limit 0
+    dets = [[0, 0, straight], [0, 0, wandering]]
+    kept, rejected = mfd.removeDeviatingDetections(dets, 1.0)
+    assert (len(kept) == 1) and (kept[0][2] is straight) and (len(rejected) == 1)
+    assert len(mfd.removeDeviatingDetections(dets, 0.0)[0]) == 2
+
+
+@pytest.mark.parametrize('max_deviation', [1.0, 0.0])
+def test_wandering_track_rejected(config, max_deviation):
+    """ A track which wanders sideways from one smooth path (by 4 px back and forth) is rejected by the whole detector,
+        a straight object at the same time is kept; with the test off both are detected. """
+
+    straight = linearObject(4.0, 20, 30, 0.2, 0.05, 40, 470)
+    wander = {'snr': 4.0, 'f0': 40, 'f1': 470,
+              'pos': lambda f: (60 + 4*np.sin(2*np.pi*(f - 40)/200), 110 - 0.2*(f - 40))}
+    config.mf_max_track_deviation = max_deviation
+    det, detections = runDetector(_SynthHandle([straight, wander], n_stars=4), config)
+
+    found_straight = [d for d in detections if np.median(truthError(d[2], straight)) < 1.5]
+    found_wander = [d for d in detections if np.median(truthError(d[2], wander)) < 3]
+    assert len(found_straight) == 1
+    if max_deviation > 0:
+        assert len(found_wander) == 0
+        assert det.summary()['deviation_rejected'] >= 1
+    else:
+        assert len(found_wander) >= 1
+
+
 ### Light curves, bright objects, photometric scale ###
 
 def test_flashes_kept_in_light_curve(config):

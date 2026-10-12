@@ -996,6 +996,12 @@ class Config:
         #   crossed the field), is rejected. 0 turns the test off
         self.mf_line_concentration = 0.5
 
+        # Largest RMS distance (px of the input frames) of a detection across its direction of motion from one
+        #   smooth path over its whole length (a quadratic in time, which follows the curvature of a real track): a
+        #   track which wanders sideways is rejected. Depends on the pixel scale and the seeing of the camera (on
+        #   recorded data: real tracks up to ~0.9 px, mostly below 0.1). 0 turns the test off
+        self.mf_max_track_deviation = 1.0
+
         # Stars brighter than this in the median of the frames (in the noise of the sky in one frame) are masked
         self.mf_star_threshold = 3.0
 
@@ -2413,7 +2419,7 @@ def parseMatchedFilter(config, parser):
     for name in ("mf_threshold", "mf_ang_vel_min", "mf_ang_vel_max", "mf_psf_sigma", "mf_max_pos_error",
                  "mf_min_sample_snr", "mf_star_threshold", "mf_persistence", "mf_clip", "mf_trail_level", "mf_min_displacement",
                  "mf_sigma_scale", "mf_track_significance", "mf_tier_speed", "mf_cloud_max_offset",
-                 "mf_buffer_memory", "mf_line_concentration"):
+                 "mf_buffer_memory", "mf_line_concentration", "mf_max_track_deviation"):
         if parser.has_option(section, name):
             setattr(config, name, parser.getfloat(section, name))
 

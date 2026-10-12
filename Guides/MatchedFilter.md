@@ -274,6 +274,15 @@ axis), and $c$ computed with the brightest axis in place of the whole ring. A de
 light are at 0.08–0.38, objects at 0.5–1 (lower only for tracks which run beside a bright object or pick up its
 trails). The number of rejected detections is in the done file (`linear_structure_rejected`); 0 turns the test off.
 
+**Smooth path.** A whole detection (after the pieces of a track are joined) must follow one smooth path: x and y
+are fitted with a quadratic in time over the whole track, and the RMS distance of its rows across the direction of
+motion must be at most `mf_max_track_deviation` (1 px of the input frames). Real objects follow straight or
+smoothly curved paths, also over long passes (on recorded data up to ~0.9 px across, mostly below 0.1 px), while
+tracks along diffuse light wander sideways by up to several px. The distance along the motion is not used: the
+angular speed of a real object changes over a long pass more than the quadratic follows. The number of rejected
+detections is in the done file (`deviation_rejected`); the limit depends on the pixel scale and the seeing of the
+camera, 0 turns the test off.
+
 ### 8. Clear sky
 
 The measurements on clouded sky are removed: first the fitted positions (and the track if fewer than
@@ -554,6 +563,7 @@ All settings are in the `[MatchedFilter]` section, see the comments in `.config`
 | `mf_threshold` | 5.0 | Threshold of the search (sigma of the maximum over the motions) |
 | `mf_track_significance` | 12.0 | Minimum significance of a detection |
 | `mf_line_concentration` | 0.5 | Minimum concentration against the brightest axis (linear structures), 0 off |
+| `mf_max_track_deviation` | 1.0 | Largest RMS distance across the motion from one smooth path (px), 0 off |
 | `mf_min_frames` | 20 | Minimum duration of a detection (frames) |
 | `mf_min_centroids` | 6 | Minimum number of measurements of a detection (on clear sky) |
 | `mf_max_pos_error` | 0.5 | Target position error of a measurement (px): sets the frames per position; measurements up to twice this are accepted |
