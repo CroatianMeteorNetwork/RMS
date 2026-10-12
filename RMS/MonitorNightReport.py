@@ -281,29 +281,56 @@ def latestPlateparPath(output_dir, config):
     return os.path.join(output_dir, 'latest_' + config.platepar_name)
 
 
-
-### Done flags and report state ###
-
-def selectPlatepar(output_dir, config, platepar_path):
-    """ The platepar which the files are processed with: the best platepar of the latest reported night (see
-        latestPlateparPath), unless it is not carried forward (monitor_update_platepar) or the given platepar is
-        newer (e.g. it was fitted again manually).
+def autoPlateparPath(output_dir, config):
+    """ Path of the platepar fitted by the automatic calibration (monitor_auto_calibration). It has its own name,
+        so the platepar given to the monitor is never overwritten.
 
     Arguments:
         output_dir: [str] Output directory of the monitor.
         config: [Config] Configuration.
-        platepar_path: [str] Path of the platepar given to the monitor.
 
     Return:
         [str] Path of the platepar.
     """
 
-    latest_platepar_path = latestPlateparPath(output_dir, config)
-    if config.monitor_update_platepar and os.path.isfile(latest_platepar_path) \
-            and (os.path.getmtime(latest_platepar_path) > os.path.getmtime(platepar_path)):
-        return latest_platepar_path
+    return os.path.join(output_dir, 'auto_' + config.platepar_name)
 
-    return platepar_path
+
+
+### Done flags and report state ###
+
+def selectPlatepar(output_dir, config, platepar_path):
+    """ The platepar which the files are processed with: the newest of the given platepar, the best platepar of
+        the latest reported night (see latestPlateparPath) if it is carried forward (monitor_update_platepar),
+        and the platepar fitted by the automatic calibration (see autoPlateparPath) if it is enabled
+        (monitor_auto_calibration). A given platepar newer than the others (e.g. it was fitted again manually)
+        is used.
+
+    Arguments:
+        output_dir: [str] Output directory of the monitor.
+        config: [Config] Configuration.
+        platepar_path: [str] Path of the platepar given to the monitor. It may not exist (or be None) with the
+            automatic calibration, until a platepar is fitted.
+
+    Return:
+        [str] Path of the platepar, None if there is none.
+    """
+
+    candidates = [platepar_path]
+    if config.monitor_update_platepar:
+        candidates.append(latestPlateparPath(output_dir, config))
+    if config.monitor_auto_calibration:
+        candidates.append(autoPlateparPath(output_dir, config))
+
+    # The newest existing platepar. With equal times the earlier candidate is kept, so the given platepar wins
+    #   a tie
+    selected = None
+    for path in candidates:
+        if (path is not None) and os.path.isfile(path) \
+                and ((selected is None) or (os.path.getmtime(path) > os.path.getmtime(selected))):
+            selected = path
+
+    return selected
 
 
 def _writeJSON(file_path, data):
@@ -734,7 +761,11 @@ def mergeNightResults(night_dir, output_dir, results, config):
 
     first_results = results_paths[0]
 
-    shutil.copy2(os.path.join(first_results, config.platepar_name), night_dir)
+    # The platepar of the latest file which has one: the files processed before the camera was calibrated
+    #   automatically have none, and a platepar fitted again during the night is the one the later files used
+    platepar_results = [path for path in results_paths if os.path.isfile(os.path.join(path, config.platepar_name))]
+    if platepar_results:
+        shutil.copy2(os.path.join(platepar_results[-1], config.platepar_name), night_dir)
 
     for config_path in glob.glob(os.path.join(first_results, '*.config')):
         shutil.copy2(config_path, night_dir)
@@ -1434,11 +1465,15 @@ def generateNightReport(output_dir, night_name, config, results=None, archive=Tr
                 n_stars, residual))
             saveNightPlatepar(platepar, night_dir, night_name, output_dir, config)
 
-        if merged.calstars_name is not None:
+        # The calibration report and plots need the platepar of the night (there is none if no file of the night
+        #   was calibrated)
+        night_platepar_exists = os.path.isfile(os.path.join(night_dir, config.platepar_name))
+
+        if (merged.calstars_name is not None) and night_platepar_exists:
             _runStep('calibration_report',
                 lambda: generateCalibrationReport(config, night_dir, min_size=1000))
 
-        if merged.recalibrated:
+        if merged.recalibrated and night_platepar_exists:
             _runStep('calibration_variation', lambda: plotNightCalibrationVariation(night_dir, night_name,
                 merged.recalibrated, config, chunk_frames))
 
@@ -1456,25 +1491,32 @@ def generateNightReport(output_dir, night_name, config, results=None, archive=Tr
 
         ### Optional products (off by default) ###
 
-        platepar = Platepar()
-        platepar.read(os.path.join(night_dir, config.platepar_name), use_flat=config.use_flat)
+        # The platepar of the night, None if no file of the night was calibrated
+        platepar = None
+        if os.path.isfile(os.path.join(night_dir, config.platepar_name)):
+            platepar = Platepar()
+            platepar.read(os.path.join(night_dir, config.platepar_name), use_flat=config.use_flat)
 
         mask = None
         if os.path.isfile(os.path.join(night_dir, config.mask_file)):
             mask = loadMask(os.path.join(night_dir, config.mask_file))
 
-        if config.monitor_shower_association:
+        if (platepar is None) and (config.monitor_shower_association or config.monitor_fov_kml
+                                   or config.monitor_flux):
+            log.info("Night {:s} has no platepar, the products which need it are skipped".format(night_name))
+
+        if config.monitor_shower_association and (platepar is not None):
             from Utils.ShowerAssociation import showerAssociation
             _runStep('shower_association', lambda: showerAssociation(config, [ftpdetectinfo_path],
                 save_plot=True, plot_activity=True, color_map=config.shower_color_map,
                 sporadic_color=config.sporadic_color))
 
-        if config.monitor_fov_kml:
+        if config.monitor_fov_kml and (platepar is not None):
             from Utils.FOVKML import fovKML
             _runStep('fov_kml', lambda: [fovKML(night_dir, platepar, mask=mask, plot_station=False,
                 area_ht=area_ht) for area_ht in [100000, 70000, 25000]])
 
-        if config.monitor_flux:
+        if config.monitor_flux and (platepar is not None):
             from Utils.Flux import prepareFluxFiles
             _runStep('flux', lambda: prepareFluxFiles(config, night_dir, ftpdetectinfo_path, mask=mask,
                                                       platepar=platepar))

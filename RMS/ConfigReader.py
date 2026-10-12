@@ -852,6 +852,10 @@ class Config:
         #   use it for the following data
         self.monitor_update_platepar = True
 
+        # Calibrate the camera automatically: fit a platepar from the stars when there is none, and fit it again
+        #   when the platepar no longer fits the stars on a clear sky
+        self.monitor_auto_calibration = False
+
         # Save every calibrated detection as an ECSV file (in the ECSV directory of the night)
         self.monitor_save_ecsv = False
 
@@ -2446,6 +2450,9 @@ def parseMonitorProcessing(config, parser):
 
     if parser.has_option(section, "monitor_update_platepar"):
         config.monitor_update_platepar = parser.getboolean(section, "monitor_update_platepar")
+
+    if parser.has_option(section, "monitor_auto_calibration"):
+        config.monitor_auto_calibration = parser.getboolean(section, "monitor_auto_calibration")
 
     if parser.has_option(section, "monitor_save_ecsv"):
         config.monitor_save_ecsv = parser.getboolean(section, "monitor_save_ecsv")

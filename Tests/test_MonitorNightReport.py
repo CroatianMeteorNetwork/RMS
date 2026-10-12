@@ -474,6 +474,40 @@ def test_older_night_does_not_overwrite_the_latest_platepar(tmp_path):
     assert mnr.readReportStates(output_dir)['latest_platepar_night'] == later_night
 
 
+@pytest.mark.parametrize('update, auto, newest, expected', [
+    (True, True, 'auto', 'auto'), (True, True, 'latest', 'latest'), (True, True, 'given', 'given'),
+    (False, True, 'latest', 'auto'), (True, False, 'auto', 'latest'), (False, False, 'auto', 'given')])
+def test_select_platepar_takes_the_newest_enabled(tmp_path, update, auto, newest, expected):
+    """ The newest of the given platepar, the carried forward one (monitor_update_platepar) and the automatically
+        fitted one (monitor_auto_calibration), each only if enabled. """
+
+    config = _config()
+    config.monitor_update_platepar = update
+    config.monitor_auto_calibration = auto
+
+    output_dir = str(tmp_path)
+    paths = {'given': str(tmp_path/'given.cal'), 'latest': mnr.latestPlateparPath(output_dir, config),
+             'auto': mnr.autoPlateparPath(output_dir, config)}
+
+    # All exist, the newest one as given, the others older in this order
+    for i, name in enumerate(['given', 'latest', 'auto']):
+        open(paths[name], 'w').close()
+        os.utime(paths[name], (1000 + i, 1000 + i))
+    os.utime(paths[newest], (5000, 5000))
+
+    assert mnr.selectPlatepar(output_dir, config, paths['given']) == paths[expected]
+
+
+def test_select_platepar_without_any(tmp_path):
+    """ Without a given platepar (missing or not given) and none fitted, there is no platepar. """
+
+    config = _config()
+    config.monitor_auto_calibration = True
+
+    assert mnr.selectPlatepar(str(tmp_path), config, str(tmp_path/'missing.cal')) is None
+    assert mnr.selectPlatepar(str(tmp_path), config, None) is None
+
+
 ### Night report ###
 
 def test_generate_night_report(tmp_path):
@@ -500,6 +534,36 @@ def test_generate_night_report(tmp_path):
 
     # The archive was made from scratch
     assert 'stale.txt' not in os.listdir(archived_dir)
+
+
+def test_night_report_without_a_platepar(tmp_path):
+    """ The files processed before the camera was calibrated automatically have no platepar. The night is still
+        reported, the products which need the platepar are skipped, and the platepar of the night is the one of
+        the latest file which has one. """
+
+    config = _config()
+    config.monitor_fov_kml = True
+    config.monitor_flux = True
+    output_dir = str(tmp_path)
+
+    # A night of one file without the calibration
+    results_dir = _makeResults(output_dir, config, 'file1')
+    for name in [config.platepar_name, config.platepars_recalibrated_name]:
+        os.remove(os.path.join(output_dir, results_dir, name))
+
+    night_state = mnr.generateNightReport(output_dir, NIGHT, config)
+    night_dir = mnr.nightDirPath(output_dir, NIGHT, config)
+
+    assert 'archive' in night_state['ok_steps']
+    assert night_state['failed_steps'] == []
+    for step in ['fov_kml', 'flux', 'calibration_report', 'calibration_variation']:
+        assert step not in night_state['ok_steps']
+    assert not os.path.exists(os.path.join(night_dir, config.platepar_name))
+
+    # A later file of the night was calibrated, its platepar is the one of the night
+    _makeResults(output_dir, config, 'file2', start_s=600)
+    mnr.generateNightReport(output_dir, NIGHT, config)
+    assert os.path.isfile(os.path.join(night_dir, config.platepar_name))
 
 
 def test_detected_stack_named_with_the_number_of_meteors(tmp_path):

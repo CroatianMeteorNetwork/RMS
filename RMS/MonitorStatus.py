@@ -27,8 +27,8 @@ from RMS.Formats.FTPdetectinfo import validDefaultFTPdetectinfo
 from RMS.Formats.Platepar import Platepar
 from RMS.Logger import getLogger
 from RMS.Misc import RmsDateTime, UTCFromTimestamp
-from RMS.MonitorNightReport import (ESSENTIAL_STEPS, JSON_TIME_FORMAT, _writeJSON, latestPlateparPath, nightInfo,
-                                    nightConditionRows, nightSkyResults, plateparResidual, readFileSkyResults,
+from RMS.MonitorNightReport import (ESSENTIAL_STEPS, JSON_TIME_FORMAT, _writeJSON, autoPlateparPath,
+                                    latestPlateparPath, nightInfo, nightConditionRows, nightSkyResults, plateparResidual, readFileSkyResults,
                                     readReportStates, scanNights, selectPlatepar)
 
 
@@ -1190,18 +1190,18 @@ class MonitorStatus(object):
         calibration = {'dist_check_threshold_px': self.config.dist_check_threshold,
                        'camera_moved_threshold_px': CAMERA_MOVED_PX}
 
-        # The platepar which the following files are processed with, selected as by the workers: the best platepar
-        #   of the latest reported night if it is carried forward and newer than the given one
-        if self.platepar_path is not None:
-            platepar_path = selectPlatepar(self.output_dir, self.config, self.platepar_path)
-        else:
-            platepar_path = latestPlateparPath(self.output_dir, self.config)
-        if os.path.isfile(platepar_path):
+        # The platepar which the following files are processed with, selected as by the workers: the newest of the
+        #   given platepar, the best platepar of the latest reported night and the automatically fitted one. Without
+        #   any, the files are processed without the calibration
+        platepar_path = selectPlatepar(self.output_dir, self.config, self.platepar_path)
+        calibration['calibrated'] = platepar_path is not None
+        if platepar_path is not None:
             calibration['platepar'] = platepar_path
             calibration['platepar_utc'] = _timeString(
                 UTCFromTimestamp.utcfromtimestamp(os.path.getmtime(platepar_path)))
             calibration['platepar_from_previous_night'] = (platepar_path == latestPlateparPath(self.output_dir,
                                                                                                self.config))
+            calibration['platepar_auto'] = (platepar_path == autoPlateparPath(self.output_dir, self.config))
 
         # The calibration of every file (read once per file), with its clear chunks from its conditions
         per_file = []

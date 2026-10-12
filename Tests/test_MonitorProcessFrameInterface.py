@@ -464,6 +464,40 @@ def test_processFile_uses_latest_platepar_unless_given_is_newer(process_file, tm
     assert _usedPlatepar() == 'given'
 
 
+def test_processFile_without_a_platepar_with_auto_calibration(process_file, tmp_path):
+    """ With the automatic calibration, a file is processed without a platepar until one is fitted (none is copied
+        to the results, and one of an earlier processing is removed), then with the fitted platepar if it is the
+        newest. """
+
+    from RMS.MonitorNightReport import autoPlateparPath
+
+    run, config, seen = process_file
+    config.monitor_auto_calibration = True
+
+    output_dir = tmp_path/'out'
+    output_dir.mkdir()
+    results_dir = os.path.join(str(output_dir), '2025', '202512', '20251225', 'dummy')
+    results_platepar = os.path.join(results_dir, config.platepar_name)
+
+    # No platepar is given, and none was fitted yet. A platepar of an earlier processing is in the results
+    os.remove(str(tmp_path/'given.cal'))
+    os.makedirs(results_dir)
+    with open(results_platepar, 'w') as f:
+        f.write('earlier')
+
+    run()
+    assert 'config' in seen
+    assert not os.path.exists(results_platepar)
+
+    # The fitted platepar is used once it exists
+    with open(autoPlateparPath(str(output_dir), config), 'w') as f:
+        f.write('auto')
+
+    run()
+    with open(results_platepar) as f:
+        assert f.read() == 'auto'
+
+
 @pytest.mark.parametrize('mf_enable, mf_fails', [(False, False), (True, False), (True, True)])
 def test_matched_filter_pass(config_path, tmp_path, monkeypatch, mf_enable, mf_fails):
     """ The matched filter runs after the normal detection when it is enabled, saves its results into their
@@ -1091,6 +1125,24 @@ def test_missing_camera_files_are_found(tmp_path):
     assert mon.missingCameraFiles(config_path, config_path) == []
     assert mon.missingCameraFiles(config_path, str(tmp_path/'pp.cal'), dark_path=str(tmp_path/'dark.png')) == \
         [str(tmp_path/'pp.cal'), str(tmp_path/'dark.png')]
+
+    # A platepar which is not given is reported once (not for the other files which are not given either)
+    assert mon.missingCameraFiles(config_path, None) == ['platepar (not given)']
+
+
+def test_platepar_is_not_required_with_auto_calibration(config_path, tmp_path):
+    """ With the automatic calibration the camera starts without a platepar (missing or not given), the other
+        files are still required. """
+
+    with open(config_path) as f:
+        text = f.read()
+    with open(config_path, 'w') as f:
+        f.write(text.replace('monitor_auto_calibration: false', 'monitor_auto_calibration: true'))
+
+    assert mon.missingCameraFiles(config_path, str(tmp_path/'pp.cal')) == []
+    assert mon.missingCameraFiles(config_path, None) == []
+    assert mon.missingCameraFiles(config_path, None, dark_path=str(tmp_path/'dark.png')) == \
+        [str(tmp_path/'dark.png')]
 
 
 

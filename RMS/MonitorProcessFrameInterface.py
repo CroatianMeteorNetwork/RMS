@@ -722,11 +722,14 @@ def readPlatepar(platepar_path):
     """ Read a platepar.
 
     Arguments:
-        platepar_path: [str] Path to the platepar file.
+        platepar_path: [str] Path to the platepar file, None if there is no platepar.
 
     Return:
-        [Platepar] The platepar, or None if it can't be read.
+        [Platepar] The platepar, or None if there is none or it can't be read.
     """
+
+    if platepar_path is None:
+        return None
 
     # Platepar.read returns False for a missing file, and a damaged file raises an exception
     try:
@@ -749,7 +752,8 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
     Arguments:
         file_path: [str] Path to the input file.
         config_path: [str] Path to the config file.
-        platepar_path: [str] Path to the platepar file.
+        platepar_path: [str] Path to the platepar file. With the automatic calibration it may not exist (or be
+            None), the file is then processed without the astrometry and the photometry.
         output_dir: [str] Path to the output directory.
         chunk_frames: [int] Number of frames per chunk for star extraction.
 
@@ -864,16 +868,28 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
         if processing_path != file_path:
             proc_log.info("Processing the local copy: {}".format(processing_path))
 
-        # Use the best platepar of the latest reported night, unless the given platepar is newer (e.g. it was
-        #   fitted again manually)
+        # Use the newest of the given platepar, the best platepar of the latest reported night and the
+        #   automatically fitted platepar
         selected_platepar_path = selectPlatepar(output_dir, config, platepar_path)
-        if selected_platepar_path != platepar_path:
-            platepar_path = selected_platepar_path
-            proc_log.info("Using the best platepar of a previous night: {}".format(platepar_path))
+        if selected_platepar_path is None:
+            proc_log.info("There is no platepar yet, the file is processed without the astrometry and the "
+                          "photometry")
+        elif selected_platepar_path != platepar_path:
+            proc_log.info("Using the platepar: {}".format(selected_platepar_path))
+        platepar_path = selected_platepar_path
 
-        # Copy the platepar into the results directory so ApplyRecalibrate can find it
+        # Copy the platepar into the results directory so ApplyRecalibrate can find it. Without a platepar, the
+        #   platepar of an earlier processing of the file is removed, so the results don't refer to it
         results_platepar_path = os.path.join(results_dir, config.platepar_name)
-        shutil.copy2(platepar_path, results_platepar_path)
+        if platepar_path is not None:
+            shutil.copy2(platepar_path, results_platepar_path)
+
+        else:
+            for stale_path in [results_platepar_path,
+                               os.path.join(results_dir, config.platepars_recalibrated_name)]:
+                if os.path.isfile(stale_path):
+                    os.remove(stale_path)
+            results_platepar_path = None
 
         # Copy the config file into the results directory
         results_config_path = os.path.join(results_dir, os.path.basename(config_path))
@@ -1065,7 +1081,10 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
         # Find the FTPdetectinfo file in the results directory
         ftpdetect_files = glob.glob(os.path.join(results_dir, 'FTPdetectinfo_*.txt'))
 
-        if ftpdetect_files:
+        if ftpdetect_files and (results_platepar_path is None):
+            proc_log.info("No platepar, skipping recalibration for: {}".format(file_name))
+
+        elif ftpdetect_files:
             ftpdetectinfo_path = ftpdetect_files[0]
 
             proc_log.info("Running ApplyRecalibrate on: {}".format(ftpdetectinfo_path))
@@ -1104,6 +1123,7 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
             'mask_path': mask_path,
             'dark_applied': dark is not None,
             'flat_applied': flat_struct is not None,
+            'calibrated': results_platepar_path is not None,
         })
 
         proc_log.info("Done processing: {} -> {}".format(file_name, results_dir))
@@ -1164,11 +1184,12 @@ def processFileWorker(*args, **kwargs):
 
 def missingCameraFiles(config_path, platepar_path, dark_path=None, flat_path=None, mask_path=None):
     """ Return the files given for a camera which don't exist. They are checked at the start, as with a wrong
-        path every file would fail and be given up.
+        path every file would fail and be given up. The platepar may be missing if the camera is calibrated
+        automatically (monitor_auto_calibration in the config file), until a platepar is fitted.
 
     Arguments:
         config_path: [str] Path to the config file.
-        platepar_path: [str] Path to the platepar file.
+        platepar_path: [str] Path to the platepar file, None if not given.
 
     Keyword arguments:
         dark_path: [str] Path to the dark frame, None if not given.
@@ -1176,11 +1197,35 @@ def missingCameraFiles(config_path, platepar_path, dark_path=None, flat_path=Non
         mask_path: [str] Path to the mask, None if not given.
 
     Return:
-        [list] Paths which don't exist.
+        [list] Paths which don't exist (and 'platepar (not given)' if the platepar is required but not given).
     """
 
-    return [path for path in (config_path, platepar_path, dark_path, flat_path, mask_path)
-            if (path is not None) and (not os.path.isfile(path))]
+    # The platepar is not required with the automatic calibration. A config file which can't be read requires it
+    #   (the file fails anyway when it is processed)
+    platepar_required = True
+    if os.path.isfile(config_path):
+        try:
+            platepar_required = not cr.parse(config_path).monitor_auto_calibration
+
+        except Exception:
+            pass
+
+    missing = []
+    for name, path in [('config', config_path), ('platepar', platepar_path), ('dark', dark_path),
+                       ('flat', flat_path), ('mask', mask_path)]:
+
+        if name == 'platepar':
+            if not platepar_required:
+                continue
+
+            if path is None:
+                missing.append('platepar (not given)')
+                continue
+
+        if (path is not None) and (not os.path.isfile(path)):
+            missing.append(path)
+
+    return missing
 
 
 def findInputMask(input_dir, config, mask_path=None):
@@ -1575,6 +1620,9 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
     if missing:
         log.error("The given files don't exist: {}".format(", ".join(missing)))
         sys.exit(1)
+
+    if (platepar_path is None) or (not os.path.isfile(platepar_path)):
+        log.info("No platepar is given, the camera is calibrated automatically from the stars")
 
     # Output directories of monitors can't be nested
     enclosing = enclosingMonitorOutput(output_dir)
@@ -1985,7 +2033,8 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
             'input_dir': os.path.abspath(cp.get(section, 'input_dir')),
             'output_dir': os.path.abspath(cp.get(section, 'output_dir')),
             'config_path': os.path.abspath(cp.get(section, 'config')),
-            'platepar_path': os.path.abspath(cp.get(section, 'platepar')),
+            'platepar_path': (os.path.abspath(cp.get(section, 'platepar')) if cp.has_option(section, 'platepar')
+                              else None),
             'flat_path': cp.get(section, 'flat', fallback=None),
             'dark_path': cp.get(section, 'dark', fallback=None),
             'mask_path': cp.get(section, 'mask', fallback=None),
@@ -2021,6 +2070,10 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
         if missing:
             print("ERROR: Camera {}: the given files don't exist: {}".format(cam['id'], ", ".join(missing)))
             sys.exit(1)
+
+        if (cam['platepar_path'] is None) or (not os.path.isfile(cam['platepar_path'])):
+            print("Camera {}: no platepar is given, the camera is calibrated automatically from the "
+                  "stars".format(cam['id']))
 
     # Every camera needs its own output directory, and they can't be nested
     output_dirs = [os.path.realpath(cam['output_dir']) for cam in cameras]
@@ -2570,19 +2623,20 @@ def findPlatepar(input_dir, config, cml_platepar=None):
         cml_platepar: [str] Path to a platepar file provided on the command line.
 
     Return:
-        [str] Absolute path to the platepar file.
+        [str] Absolute path to the platepar file. With the automatic calibration (monitor_auto_calibration) the
+            file may not exist, the camera is then calibrated from the stars.
     """
 
     if cml_platepar is not None:
         platepar_path = os.path.abspath(cml_platepar)
-        if not os.path.isfile(platepar_path):
+        if (not os.path.isfile(platepar_path)) and (not config.monitor_auto_calibration):
             print("ERROR: Platepar file not found: {}".format(platepar_path))
             sys.exit(1)
         return platepar_path
 
     # Look for the default platepar in the input directory
     default_path = os.path.join(os.path.abspath(input_dir), config.platepar_name)
-    if os.path.isfile(default_path):
+    if os.path.isfile(default_path) or config.monitor_auto_calibration:
         return default_path
 
     print("ERROR: No platepar file '{}' found in {}. Use --platepar to specify one.".format(
