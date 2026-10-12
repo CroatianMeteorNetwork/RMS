@@ -448,6 +448,29 @@ def test_select_best_night_platepar(monkeypatch):
     assert mnr.selectBestNightPlatepar({'FF_a': _recalibratedPlatepar(100, auto_recalibrated=False)}) is None
 
 
+def test_night_platepar_only_from_the_newest_platepar(tmp_path):
+    """ With the automatic calibration, the platepar of the night is selected only from the files calibrated with
+        the newest platepar of the night (a platepar which was replaced during the night is not carried forward). """
+
+    config = _config()
+    output_dir = str(tmp_path)
+
+    results = {}
+    for name, mtime in [('old', 1000.0), ('new', 2000.0)]:
+        results_dir = os.path.join('2025', name)
+        os.makedirs(os.path.join(output_dir, results_dir))
+        with open(os.path.join(output_dir, results_dir, config.platepars_recalibrated_name), 'w') as f:
+            json.dump({'FF_' + name: {}}, f)
+        results[results_dir] = {'platepar_mtime': mtime}
+
+    recalibrated = {'FF_old': {'a': 1}, 'FF_new': {'b': 2}}
+    assert mnr.newestPlateparRecalibrations(output_dir, results, recalibrated, config) == {'FF_new': {'b': 2}}
+
+    # Without the times (results processed before they were recorded), all are kept
+    results = {results_dir: {} for results_dir in results}
+    assert mnr.newestPlateparRecalibrations(output_dir, results, recalibrated, config) == recalibrated
+
+
 def test_older_night_does_not_overwrite_the_latest_platepar(tmp_path):
 
     config = _config()

@@ -1216,3 +1216,52 @@ def test_matched_filter_replaces_detection(config_path, tmp_path, monkeypatch, e
     # The summary of the matched filter is saved with the results, and there is no separate directory
     assert os.path.isfile(os.path.join(results_dir, mfd.DONE_NAME))
     assert not os.path.isdir(os.path.join(results_dir, mfd.MATCHED_FILTER_DIR))
+
+
+def test_auto_calibration_step_recalibrates_with_a_new_platepar(config_path, tmp_path, monkeypatch):
+    """ When the automatic calibration installs a platepar, a file processed without one is recalibrated with it,
+        and the other files of the night processed without one are calibrated. A file with a passing platepar is
+        not recalibrated when a newer platepar appears. """
+
+    import logging
+
+    import RMS.Astrometry.AutoCalibration as ac
+    from RMS.MonitorNightReport import autoPlateparPath
+
+    config = cr.parse(config_path)
+    config.monitor_auto_calibration = True
+    output_dir = str(tmp_path/'out')
+    os.makedirs(output_dir)
+    auto_path = autoPlateparPath(output_dir, config)
+
+    def _install(results_dir, config, output_dir, platepar_path, **kwargs):
+        with open(auto_path, 'w') as f:
+            f.write('auto')
+        return {'installed': auto_path, 'current': ({'ok': True} if platepar_path else {})}
+
+    calls = {'recalibrated': [], 'backfilled': []}
+    monkeypatch.setattr(ac, 'autoCalibrateFile', _install)
+    monkeypatch.setattr(mon, 'recalibrateResults',
+                        lambda results_dir, config, platepar_path=None, proc_log=None:
+                        calls['recalibrated'].append(platepar_path))
+    monkeypatch.setattr(mon, 'backfillCalibration',
+                        lambda output_dir, config, night_name, proc_log=None: calls['backfilled'].append(night_name))
+
+    proc_log = logging.getLogger('test')
+
+    # Processed without a platepar
+    calibrated, used = mon.autoCalibrationStep(str(tmp_path), config, output_dir, None, None, False, 'night',
+                                               None, proc_log)
+    assert calibrated and (used == auto_path)
+    assert calls == {'recalibrated': [auto_path], 'backfilled': ['night']}
+
+    # Processed with a given platepar which passes: not recalibrated with the newer platepar
+    given = str(tmp_path/'given.cal')
+    with open(given, 'w') as f:
+        f.write('given')
+    os.utime(given, (0, 0))
+    calls = {'recalibrated': [], 'backfilled': []}
+    calibrated, used = mon.autoCalibrationStep(str(tmp_path), config, output_dir, given, given, True, 'night',
+                                               None, proc_log)
+    assert calibrated and (used == given)
+    assert calls['recalibrated'] == []

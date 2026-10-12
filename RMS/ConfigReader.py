@@ -856,6 +856,15 @@ class Config:
         #   when the platepar no longer fits the stars on a clear sky
         self.monitor_auto_calibration = False
 
+        # Minutes of clear sky between the attempts to fit a better platepar than the current one
+        self.monitor_auto_calibration_interval = 30.0
+
+        # Fit the vignetting coefficient also when a platepar exists (it is always fitted without one)
+        self.monitor_auto_calibration_fit_vignetting = False
+
+        # Only save the fitted platepars as candidates, don't use them
+        self.monitor_auto_calibration_dry_run = False
+
         # Save every calibrated detection as an ECSV file (in the ECSV directory of the night)
         self.monitor_save_ecsv = False
 
@@ -2453,6 +2462,16 @@ def parseMonitorProcessing(config, parser):
 
     if parser.has_option(section, "monitor_auto_calibration"):
         config.monitor_auto_calibration = parser.getboolean(section, "monitor_auto_calibration")
+
+    if parser.has_option(section, "monitor_auto_calibration_interval"):
+        config.monitor_auto_calibration_interval = parser.getfloat(section, "monitor_auto_calibration_interval")
+
+    if parser.has_option(section, "monitor_auto_calibration_fit_vignetting"):
+        config.monitor_auto_calibration_fit_vignetting = parser.getboolean(section,
+                                                                           "monitor_auto_calibration_fit_vignetting")
+
+    if parser.has_option(section, "monitor_auto_calibration_dry_run"):
+        config.monitor_auto_calibration_dry_run = parser.getboolean(section, "monitor_auto_calibration_dry_run")
 
     if parser.has_option(section, "monitor_save_ecsv"):
         config.monitor_save_ecsv = parser.getboolean(section, "monitor_save_ecsv")

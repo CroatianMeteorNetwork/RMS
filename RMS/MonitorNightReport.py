@@ -842,6 +842,43 @@ def selectBestNightPlatepar(recalibrated, use_flat=False):
     return best
 
 
+def newestPlateparRecalibrations(output_dir, results, recalibrated, config):
+    """ The recalibrated platepars of the files of a night which were calibrated with the newest platepar of the
+        night (the time of the platepar is in the done flag of every file). Files without the time (processed
+        before it was recorded) are kept if no file has it.
+
+    Arguments:
+        output_dir: [str] Output directory of the monitor.
+        results: [dict] Results of the night, {results_dir: done flag info}.
+        recalibrated: [dict] Recalibrated platepars of the night, keyed by the FF name.
+        config: [Config] Configuration.
+
+    Return:
+        [dict] The recalibrated platepars of those files, keyed by the FF name.
+    """
+
+    times = [info.get('platepar_mtime') for info in results.values() if info.get('platepar_mtime') is not None]
+    if not times:
+        return recalibrated
+
+    newest = max(times)
+    names = set()
+    for results_dir, info in results.items():
+        if info.get('platepar_mtime') != newest:
+            continue
+
+        recalibrated_path = os.path.join(output_dir, results_dir, config.platepars_recalibrated_name)
+        if os.path.isfile(recalibrated_path):
+            try:
+                with open(recalibrated_path) as f:
+                    names.update(json.load(f).keys())
+
+            except ValueError:
+                continue
+
+    return {name: pp_dict for name, pp_dict in recalibrated.items() if name in names}
+
+
 def _writePlatepar(platepar, file_path):
     """ Write the platepar to a temporary file and rename it, as other processes may be reading it. """
 
@@ -1368,6 +1405,19 @@ def generateNightReport(output_dir, night_name, config, results=None, archive=Tr
     # Results finished after this time are reported again, see unreportedResults
     files_time = RmsDateTime.utcnow()
 
+    # With the automatic calibration, the files of the night which were processed before the platepar was fitted
+    #   get the astrometry and the photometry now (if no worker did it yet). Their done flags change, so the results
+    #   are scanned again
+    if config.monitor_auto_calibration:
+        from RMS.MonitorProcessFrameInterface import backfillCalibration
+        try:
+            if backfillCalibration(output_dir, config, night_name):
+                results = None
+
+        except Exception:
+            log.error("Adding the calibration to the files of night {:s} failed:\n{:s}".format(night_name,
+                                                                                              traceback.format_exc()))
+
     if results is None:
         results = scanNights(output_dir, config).get(night_name, {})
 
@@ -1453,11 +1503,17 @@ def generateNightReport(output_dir, night_name, config, results=None, archive=Tr
                         "and the pointing of the camera.".format(n_recalibrated, len(merged.recalibrated),
                                                              night_name))
 
-        # Save the most confident platepar of the night and carry it forward to the following data
+        # Save the most confident platepar of the night and carry it forward to the following data. With the
+        #   automatic calibration, it is taken only from the files calibrated with the newest platepar of the night,
+        #   so a platepar which was replaced during the night (e.g. it fits the stars only in a part of the image,
+        #   where its recalibration still succeeds) is not carried forward again
         best_platepar = None
-        if merged.recalibrated:
+        candidates = merged.recalibrated
+        if config.monitor_auto_calibration:
+            candidates = newestPlateparRecalibrations(output_dir, results, merged.recalibrated, config)
+        if candidates:
             best_platepar = _runStep('platepar_selection',
-                lambda: selectBestNightPlatepar(merged.recalibrated, use_flat=config.use_flat))
+                lambda: selectBestNightPlatepar(candidates, use_flat=config.use_flat))
 
         if best_platepar is not None:
             ff_name, platepar, n_stars, residual = best_platepar

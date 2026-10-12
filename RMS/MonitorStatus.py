@@ -1182,6 +1182,37 @@ class MonitorStatus(object):
         return self.conditions_cache[1]
 
 
+    def _autoCalibration(self, files):
+        """ The state of the automatic calibration of the camera, see RMS.Astrometry.AutoCalibration. """
+
+        from RMS.Astrometry.AutoCalibration import FILE_RESULT_NAME, readState
+
+        state = readState(self.output_dir)
+        summary = {'installs': len(state['installs']), 'pending': state.get('pending') is not None}
+        if state['installs']:
+            summary['last_install'] = {key: state['installs'][-1].get(key) for key in ['path', 'reason']}
+
+        # The judgement of the latest file which has one
+        for results_dir, _, _, _ in sorted(files, key=lambda entry: entry[0], reverse=True):
+            result_path = os.path.join(self.output_dir, results_dir, FILE_RESULT_NAME)
+            if not os.path.isfile(result_path):
+                continue
+
+            try:
+                with open(result_path) as f:
+                    result = json.load(f)
+
+            except ValueError:
+                continue
+
+            summary['latest'] = {'results_dir': results_dir, 'action': result.get('action'),
+                                 'platepar_ok': result.get('current', {}).get('ok'),
+                                 'reasons': result.get('current', {}).get('reasons', [])}
+            break
+
+        return summary
+
+
     def _calibration(self, files):
         """ How healthy the calibration is, from the recalibration of the chunks of the processed files. Only the
             chunks on clear sky are judged, as under clouds there are too few stars for any calibration. """
@@ -1202,6 +1233,11 @@ class MonitorStatus(object):
             calibration['platepar_from_previous_night'] = (platepar_path == latestPlateparPath(self.output_dir,
                                                                                                self.config))
             calibration['platepar_auto'] = (platepar_path == autoPlateparPath(self.output_dir, self.config))
+
+        # The automatic calibration: its judgement of the latest file judged, the last platepar it installed and a
+        #   candidate which waits for the confirmation
+        if self.config.monitor_auto_calibration:
+            calibration['auto_calibration'] = self._autoCalibration(files)
 
         # The calibration of every file (read once per file), with its clear chunks from its conditions
         per_file = []

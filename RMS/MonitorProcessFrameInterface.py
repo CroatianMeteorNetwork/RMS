@@ -745,6 +745,103 @@ def readPlatepar(platepar_path):
 
 
 
+def recalibrateResults(results_dir, config, platepar_path=None, proc_log=None):
+    """ Recalibrate the detections in the FTPdetectinfo of the results of a file (ApplyRecalibrate), which adds
+        their astrometry and photometry.
+
+    Arguments:
+        results_dir: [str] Results directory of the file.
+        config: [Config] Configuration.
+
+    Keyword arguments:
+        platepar_path: [str] Platepar which is copied into the results directory first. None by default (the
+            platepar in the results directory is used).
+        proc_log: [Logger] Logger, the module logger if None.
+
+    Return:
+        [bool] True if there was an FTPdetectinfo file to recalibrate.
+    """
+
+    proc_log = log if proc_log is None else proc_log
+
+    if platepar_path is not None:
+        shutil.copy2(platepar_path, os.path.join(results_dir, config.platepar_name))
+
+    ftpdetect_files = glob.glob(os.path.join(results_dir, 'FTPdetectinfo_*.txt'))
+    if not ftpdetect_files:
+        return False
+
+    proc_log.info("Running ApplyRecalibrate on: {}".format(ftpdetect_files[0]))
+
+    # Run recalibration with load_all=True. The ECSV files of the detections are saved to the results directory and
+    #   collected into the night directory by the night report
+    applyRecalibrate(
+        ftpdetect_files[0], config,
+        # The calibration variation plots are made for the whole night in the night report
+        generate_plot=False,
+        load_all=True,
+        generate_ufoorbit=False,
+        ecsv_out=config.monitor_save_ecsv,
+    )
+
+    return True
+
+
+def backfillCalibration(output_dir, config, night_name, proc_log=None):
+    """ Add the astrometry and the photometry to the files of a night which were processed without a platepar,
+        once the automatic calibration has fitted one (the detections themselves are not repeated).
+
+    Arguments:
+        output_dir: [str] Output directory of the monitor.
+        config: [Config] Configuration.
+        night_name: [str] Name of the night.
+
+    Keyword arguments:
+        proc_log: [Logger] Logger, the module logger if None.
+
+    Return:
+        [list] Results directories which were calibrated.
+    """
+
+    from RMS.MonitorNightReport import autoPlateparPath, readDoneFlag, scanNights
+
+    proc_log = log if proc_log is None else proc_log
+
+    # Only the automatically fitted platepar is added (a given platepar was used from the start)
+    platepar_path = autoPlateparPath(output_dir, config)
+    if not os.path.isfile(platepar_path):
+        return []
+
+    calibrated = []
+    for results_dir, info in sorted(scanNights(output_dir, config).get(night_name, {}).items()):
+
+        if info.get('calibrated', True):
+            continue
+
+        results_path = os.path.join(output_dir, results_dir)
+        try:
+            recalibrateResults(results_path, config, platepar_path=platepar_path, proc_log=proc_log)
+
+            # Read the flag again, it may have changed since the scan
+            info = readDoneFlag(results_path)
+            info['calibrated'] = True
+            info['calibrated_later'] = True
+            info['platepar_mtime'] = plateparTime(platepar_path)
+            writeDoneFlag(results_path, info)
+            calibrated.append(results_dir)
+
+        except Exception:
+            proc_log.error("Adding the calibration to {:s} failed:\n{:s}".format(results_dir,
+                                                                                traceback.format_exc()))
+
+    if calibrated:
+        proc_log.info("Added the calibration to {:d} files of night {:s} processed without it".format(
+            len(calibrated), night_name))
+
+    return calibrated
+
+
+
 def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
                 flat_path=None, dark_path=None, unique_id=None, start_time=None, mask_path=None):
     """ Process a single file through the detection and recalibration pipeline.
@@ -870,6 +967,7 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
 
         # Use the newest of the given platepar, the best platepar of the latest reported night and the
         #   automatically fitted platepar
+        given_platepar_path = platepar_path
         selected_platepar_path = selectPlatepar(output_dir, config, platepar_path)
         if selected_platepar_path is None:
             proc_log.info("There is no platepar yet, the file is processed without the astrometry and the "
@@ -1085,26 +1183,20 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
             proc_log.info("No platepar, skipping recalibration for: {}".format(file_name))
 
         elif ftpdetect_files:
-            ftpdetectinfo_path = ftpdetect_files[0]
-
-            proc_log.info("Running ApplyRecalibrate on: {}".format(ftpdetectinfo_path))
-
-            # Run recalibration with load_all=True. The ECSV files of the detections are saved to the results
-            #   directory and collected into the night directory by the night report
-            applyRecalibrate(
-                ftpdetectinfo_path, config,
-                # The calibration variation plots are made for the whole night in the night report
-                generate_plot=False,
-                load_all=True,
-                generate_ufoorbit=False,
-                ecsv_out=config.monitor_save_ecsv,
-            )
-
+            recalibrateResults(results_dir, config, proc_log=proc_log)
             proc_log.info("Recalibration complete for: {}".format(file_name))
 
         else:
             proc_log.info("No FTPdetectinfo file found, skipping recalibration for: {}".format(
                 file_name))
+
+        # Judge the calibration on the clear chunks of the file, and fit a platepar if there is none, if it fails,
+        #   or periodically to check whether a better one can be fitted. A failure doesn't fail the file
+        calibrated = results_platepar_path is not None
+        calibrated_with = platepar_path
+        if config.monitor_auto_calibration:
+            calibrated, calibrated_with = autoCalibrationStep(results_dir, config, output_dir, given_platepar_path,
+                                                              platepar_path, calibrated, night_name, mask, proc_log)
 
         # A file which changed while it was processed was still being written (e.g. the recording paused for a
         #   while in the middle of the file), so only a part of it was processed. It gets no done flag, so the
@@ -1123,7 +1215,8 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
             'mask_path': mask_path,
             'dark_applied': dark is not None,
             'flat_applied': flat_struct is not None,
-            'calibrated': results_platepar_path is not None,
+            'calibrated': calibrated,
+            'platepar_mtime': plateparTime(calibrated_with),
         })
 
         proc_log.info("Done processing: {} -> {}".format(file_name, results_dir))
@@ -1180,6 +1273,67 @@ def processFileWorker(*args, **kwargs):
         success = False
 
     sys.exit(0 if success else 1)
+
+
+def autoCalibrationStep(results_dir, config, output_dir, given_platepar_path, platepar_path, calibrated,
+                        night_name, mask, proc_log):
+    """ The automatic calibration of a processed file (see RMS.Astrometry.AutoCalibration.autoCalibrateFile). If a
+        platepar was installed meanwhile (by this or another worker) and the file was processed without a platepar
+        or its platepar fails, the file is recalibrated with the new platepar. After a new platepar is installed,
+        the files of the night which were processed without a platepar are calibrated too.
+
+    Arguments:
+        results_dir: [str] Results directory of the file.
+        config: [Config] Configuration.
+        output_dir: [str] Output directory of the monitor.
+        given_platepar_path: [str] Platepar given to the monitor (it may not exist).
+        platepar_path: [str] Platepar the file was processed with, None if there was none.
+        calibrated: [bool] Whether the file was calibrated.
+        night_name: [str] Name of the night of the file.
+        mask: [MaskStructure] Mask of the camera.
+        proc_log: [Logger] Logger.
+
+    Return:
+        (calibrated, platepar_path): [tuple] Whether the file is calibrated now, and the platepar it is calibrated
+            with.
+    """
+
+    try:
+        from RMS.Astrometry.AutoCalibration import autoCalibrateFile
+
+        judgement = autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=mask,
+                                      dry_run=config.monitor_auto_calibration_dry_run,
+                                      fit_vignetting=config.monitor_auto_calibration_fit_vignetting)
+
+        # The platepar the following files are processed with
+        new_platepar_path = selectPlatepar(output_dir, config, given_platepar_path)
+        platepar_failed = judgement.get('current', {}).get('ok') is False
+        if (new_platepar_path is not None) and (new_platepar_path != platepar_path) \
+                and ((not calibrated) or platepar_failed):
+
+            proc_log.info("Recalibrating the file with the new platepar: {}".format(new_platepar_path))
+            recalibrateResults(results_dir, config, platepar_path=new_platepar_path, proc_log=proc_log)
+            calibrated = True
+            platepar_path = new_platepar_path
+
+        # The files of the night which were processed without a platepar
+        if judgement.get('installed'):
+            backfillCalibration(output_dir, config, night_name, proc_log=proc_log)
+
+    except Exception:
+        proc_log.error("The automatic calibration failed:\n" + traceback.format_exc())
+
+    return calibrated, platepar_path
+
+
+def plateparTime(platepar_path):
+    """ Modification time of a platepar (identifies which version of a platepar a file was calibrated with), None
+        if there is none. """
+
+    if (platepar_path is None) or (not os.path.isfile(platepar_path)):
+        return None
+
+    return os.path.getmtime(platepar_path)
 
 
 def missingCameraFiles(config_path, platepar_path, dark_path=None, flat_path=None, mask_path=None):
