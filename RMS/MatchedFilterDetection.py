@@ -115,11 +115,16 @@ SPILL_MIN_SNR = 100.0
 #   sky in one frame, and 10 times the scatter of the columns or rows) are masked (see staticMask)
 BRIGHT_LINE_LEVEL = 0.2
 
-# The bright columns and rows (see lineMask) are not masked in a frame within TRAIL_KEEP px of the pixels above
-#   LINE_KEEP_LEVEL (in the noise of a frame): an object much brighter than the flicker of such a line is kept on it.
+# The bright columns and rows (see lineMask) are not masked in a frame within TRAIL_KEEP px of the pixels which are
+#   LINE_KEEP_LEVEL (in the noise of a frame) above the line: an object much brighter than such a line is kept on it.
 #   An object moving along a column (or row) for most of a block lights the column with its own trail, which makes
 #   the column bright in the median of the block, and its path would be masked
 LINE_KEEP_LEVEL = 10.0
+
+# A pixel of a bright column (or row) is a source above its line if it is LINE_KEEP_LEVEL above the running median
+#   of LINE_LOCAL px along the line (in the frame): a line which flickers as a whole (or brighter near the star of
+#   its trail) is not a source, a compact source on it is
+LINE_LOCAL = 31
 
 # A track which stays within SHADOW_RADIUS (px) of a track at least SHADOW_STRENGTH times stronger (the sum of
 #   the significances of the hits over the square root of their number), for at least SHADOW_OVERLAP of its hits,
@@ -258,6 +263,43 @@ def slowSearchMinBlocks():
             return n
 
         n += 1
+
+
+def lineKeep(frame, lines, level=LINE_KEEP_LEVEL):
+    """ The pixels of the bright columns and rows (see MatchedFilterDetector.lineMask) near the sources which stand
+        out from the line itself in a frame: LINE_KEEP_LEVEL above the running median of LINE_LOCAL px along the
+        line, grown by TRAIL_KEEP px. A line which flickers as a whole, or which is brighter near the star of its
+        trail, has no such pixels.
+
+    Arguments:
+        frame: [ndarray] Normalized frame (unit noise).
+        lines: [ndarray] Mask of the bright columns and rows (whole columns and rows are True).
+
+    Keyword arguments:
+        level: [float] Level above the line (in the noise of a frame). LINE_KEEP_LEVEL by default.
+
+    Return:
+        [ndarray] Boolean mask of the pixels to keep.
+    """
+
+    keep = np.zeros(frame.shape, dtype=bool)
+
+    # The columns and the rows of the lines, and in them the pixels above the running median along the line
+    cols = np.flatnonzero(lines.all(axis=0))
+    rows = np.flatnonzero(lines.all(axis=1))
+    if cols.size:
+        sub = frame[:, cols]
+        keep[:, cols] = (sub - ndimage.median_filter(sub, size=(LINE_LOCAL, 1), mode='nearest')) > level
+    if rows.size:
+        sub = frame[rows, :]
+        keep[rows, :] |= (sub - ndimage.median_filter(sub, size=(1, LINE_LOCAL), mode='nearest')) > level
+
+    # Grown to cover the source and the wings of its PSF
+    if keep.any():
+        box = np.ones((2*TRAIL_KEEP + 1, 2*TRAIL_KEEP + 1), np.uint8)
+        keep = cv2.dilate(keep.astype(np.uint8), box) > 0
+
+    return keep
 
 
 class MatchedFilterOptions(object):
@@ -957,7 +999,7 @@ class MatchedFilterDetector(object):
             z: [ndarray] Frames normalized to unit noise, (n, height, width).
             static: [ndarray] Mask of static sources (True = masked).
             lines: [ndarray] Mask of the bright columns and rows (see lineMask), None for none. Their pixels are
-                masked in every frame except within TRAIL_KEEP px of the pixels above LINE_KEEP_LEVEL.
+                masked in every frame except near the sources which stand out from them (see lineKeep).
             block_first: [int] Index of the first frame of the block.
             stackers: [list] (run_frames, bin, VelocityStacker) to run.
 
@@ -980,16 +1022,10 @@ class MatchedFilterDetector(object):
         for i in range(len(z)):
             self.removeTrails(z[i], static)
 
-            # The bright columns and rows, except near the sources much brighter than their flicker (e.g. an object
-            #   moving along a column, which lights the column with its own trail)
+            # The bright columns and rows, except near the sources which stand out from them (e.g. an object
+            #   moving along a column, which lights the column with its own trail), see lineKeep
             if (lines is not None) and lines.any():
-                keep = z[i] > LINE_KEEP_LEVEL
-                if keep.any():
-                    box = np.ones((2*TRAIL_KEEP + 1, 2*TRAIL_KEEP + 1), np.uint8)
-                    keep = cv2.dilate(keep.astype(np.uint8), box) > 0
-                    z[i][lines & ~keep] = 0
-                else:
-                    z[i][lines] = 0
+                z[i][lines & ~lineKeep(z[i], lines)] = 0
 
             # The masked pixels don't take part in the stacks of their neighbours either
             z[i][static] = 0

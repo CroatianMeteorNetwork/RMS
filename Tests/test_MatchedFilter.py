@@ -965,6 +965,29 @@ def test_bright_object_along_a_column_detected(config):
     assert (cent[0, 0] < 60) and (cent[-1, 0] > 580)
 
 
+def test_line_keep_only_sources_above_the_line():
+    """ On a bright column which flickers as a whole above the level, no pixel is kept; a compact source on it is
+        kept with its surroundings, also on a column brighter near one end (e.g. near the star of its trail). """
+
+    rng = np.random.default_rng(3)
+    frame = rng.normal(0, 1, (SIZE, SIZE)).astype(np.float32)
+    lines = np.zeros((SIZE, SIZE), dtype=bool)
+    lines[:, 70] = True
+
+    # The whole column 15 sigma above the sky: nothing is kept
+    frame[:, 70] += 15
+    assert not mfd.lineKeep(frame, lines).any()
+
+    # The column brighter towards its top end (a trail), still nothing
+    frame[:, 70] += np.linspace(20, 0, SIZE).astype(np.float32)
+    assert not mfd.lineKeep(frame, lines).any()
+
+    # A compact source of 60 sigma on it is kept, with TRAIL_KEEP px around it
+    frame[80, 70] += 60
+    keep = mfd.lineKeep(frame, lines)
+    assert keep[80, 70] and keep[80 + mfd.TRAIL_KEEP, 70] and not keep[80 + mfd.TRAIL_KEEP + 2, 70]
+
+
 ### Light curves, bright objects, photometric scale ###
 
 def test_flashes_kept_in_light_curve(config):
