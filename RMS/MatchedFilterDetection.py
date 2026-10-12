@@ -133,6 +133,13 @@ SHADOW_RADIUS = 20.0
 SHADOW_STRENGTH = 3.0
 SHADOW_OVERLAP = 0.8
 
+# A detection which follows a longer one at a constant offset along the motion of up to DUPLICATE_ALONG PSF
+#   FWHMs (on the same line) is the same object measured twice (e.g. on the wing or the trail of a very bright
+#   object) if the image is above CONNECTED_LEVEL (in the noise of a frame) all the way between them (see
+#   connectedLight); two objects which move together have no light between them
+DUPLICATE_ALONG = 10.0
+CONNECTED_LEVEL = 5.0
+
 # Shape of the detections (see extentConcentration): the frames are stacked along the track (every EXTENT_STEP-th
 #   frame) within EXTENT_RADIUS px, and the concentration of the light at the centre tells a point source from an
 #   extended structure (e.g. a cloud). Only detections below EXTENT_MAX_SIGNIFICANCE are tested. On recorded data,
@@ -2070,7 +2077,51 @@ class MatchedFilterDetector(object):
         return getPolarLine(xa, self.height - ya, xb, self.height - yb, self.height, self.width)
 
 
-    def joinDetections(self, detections):
+    def connectedLight(self, frame, x1, y1, x2, y2):
+        """ The fraction of the segment between two points which is well above the background (CONNECTED_LEVEL in
+            the noise) in a frame. See removeDuplicateDetections.
+
+        Arguments:
+            frame: [float] Frame of the input.
+            x1: [float] X of the first point (unbinned px).
+            y1: [float] Y of the first point (unbinned px).
+            x2: [float] X of the second point (unbinned px).
+            y2: [float] Y of the second point (unbinned px).
+
+        Return:
+            [float] The fraction of the segment above the level, None if the frame has no background (e.g. outside
+                the frames of this detector) or the segment is outside the image.
+        """
+
+        # The block of the frame
+        f = int(round(frame))
+        k = next((k for k, (a, b) in enumerate(zip(self.block_starts, self.block_ends)) if a <= f < b), None)
+        if (k is None) or (k not in self.backgrounds) or (self.backgrounds[k].median is None):
+            return None
+
+        # The frame above the background of its block, in its noise
+        bg = self.backgrounds[k]
+        z = (self.readFrames(f, 1)[0] - bg.median)/bg.noise
+
+        # The segment in the binned image, sampled every half pixel
+        b = self.det_bin
+        p1 = np.array([x1 - (b - 1)/2.0, y1 - (b - 1)/2.0])/b
+        p2 = np.array([x2 - (b - 1)/2.0, y2 - (b - 1)/2.0])/b
+        n = max(2, int(np.ceil(2*np.hypot(*(p2 - p1)))) + 1)
+        t = np.linspace(0, 1, n)[:, None]
+        pts = np.round(p1 + t*(p2 - p1)).astype(int)
+
+        # Only the part of the segment inside the image is judged
+        inside = (pts[:, 0] >= 0) & (pts[:, 0] < self.width) & (pts[:, 1] >= 0) & (pts[:, 1] < self.height)
+        if not inside.any():
+            return None
+        pts = pts[inside]
+
+        # The fraction of the samples above the level
+        return float(np.mean(z[pts[:, 1], pts[:, 0]] > CONNECTED_LEVEL))
+
+
+    def joinDetections(self, detections, connected=None):
         """ Join the pieces of tracks (a faint object can be lost for a while, e.g. behind stars) and remove the
             duplicates. An object can be lost for many seconds while moving only a few PSF widths, so pieces
             are joined across any gap in which the object moved less than 15 PSF widths, if the second piece
@@ -2078,6 +2129,10 @@ class MatchedFilterDetector(object):
 
         Arguments:
             detections: [list] Detections as [rho, theta, centroids].
+
+        Keyword arguments:
+            connected: [function] The light between two points in a frame (see connectedLight), e.g. over the
+                segments of an input (see connectedOver). None by default (connectedLight of this detector).
 
         Return:
             [list] The joined detections.
@@ -2090,7 +2145,11 @@ class MatchedFilterDetector(object):
         detections = joinContinuousDetections(detections, max_gap, 15*fwhm, 2*fwhm, self.height, self.width,
                                               bin_factor=self.det_bin)
 
-        return removeDuplicateDetections(detections, fwhm*self.det_bin, 3*fwhm*self.det_bin)
+        # The duplicates: detections of the same object close to a longer one, also further along the motion when
+        #   the light between them is connected (the same bright object measured twice)
+        return removeDuplicateDetections(detections, fwhm*self.det_bin, 3*fwhm*self.det_bin,
+                                         connected=connected if connected is not None else self.connectedLight,
+                                         max_connected_along=DUPLICATE_ALONG*fwhm*self.det_bin)
 
 
     def run(self):
@@ -3968,6 +4027,45 @@ def removePersistentDetections(detections, persistence, fraction, det_bin, max_s
 NEAR_TOLERANCE_FACTOR = 4.0
 
 
+def connectedOver(detectors):
+    """ The light between two points in a frame (see MatchedFilterDetector.connectedLight) from the detector of the
+        segment of the input whose blocks contain the frame, for the detections joined over the segments. A frame of
+        a segment no longer held in memory is read again from the input (counted in the frames read outside the
+        segments): at most 5 frames for a pair of detections, and only for the pairs which become duplicates after
+        the segments are joined (see removeDuplicateDetections), as the pairs within a segment are judged while it
+        is in memory.
+
+    Arguments:
+        detectors: [list] The detector of every segment, None where it was not searched.
+
+    Return:
+        [function] connected(frame, x1, y1, x2, y2), None for a frame of no searched segment.
+    """
+
+    def connected(frame, x1, y1, x2, y2):
+        """ The light between two points in a frame from the detector of its segment (see connectedLight).
+
+        Arguments:
+            frame: [float] Frame of the input.
+            x1: [float] X of the first point (unbinned px).
+            y1: [float] Y of the first point (unbinned px).
+            x2: [float] X of the second point (unbinned px).
+            y2: [float] Y of the second point (unbinned px).
+
+        Return:
+            [float] The fraction of the segment above the level, None for a frame of no searched segment.
+        """
+
+        # The first searched segment whose blocks contain the frame
+        for det in detectors:
+            if (det is not None) and det.block_starts and (det.block_starts[0] <= frame < det.block_ends[-1]):
+                return det.connectedLight(frame, x1, y1, x2, y2)
+
+        return None
+
+    return connected
+
+
 def stitchSegments(segment_detections, cuts, overlaps, detector, tolerance, searched=None):
     """ Join the detections of neighbouring segments of an input. Every overlap of two segments is split at its
         middle: the frames before it belong to the first segment, the ones after it to the second one. An object which crosses the middle is found in both segments: its detections are joined
@@ -4320,7 +4418,7 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
         tolerance = 3*2.355*searched[0].psf_sigma*searched[0].det_bin
         detections = stitchSegments(segment_detections, cuts, overlaps, searched[0], tolerance,
                                     searched=[det is not None for det in detectors])
-        detections = searched[0].joinDetections(detections)
+        detections = searched[0].joinDetections(detections, connected=connectedOver(detectors))
 
         # The pieces cut at the middle of an overlap and not joined again may be no detections any more
         detections = removeInvalidDetections(detections, searched[0])

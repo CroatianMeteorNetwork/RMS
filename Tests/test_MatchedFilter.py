@@ -949,6 +949,76 @@ def test_tracks_on_a_drifting_line_rejected(config, line_concentration):
         assert det.summary()['linear_structure_rejected'] == 0
 
 
+def test_duplicate_along_the_motion_removed_when_the_light_is_connected():
+    """ A detection which follows a longer one at a constant offset along the direction of motion, further than the
+        usual limit, is a duplicate only if the image is lit all the way between them (e.g. a second measurement on
+        the wing or the trail of a bright object), not if there is no light between them (two objects). """
+
+    from RMS.Detection import removeDuplicateDetections
+
+    # Two detections moving the same way, the second one 7 px behind the first along the motion and shorter
+    frames = np.arange(100, 300, 1.0)
+    first = np.c_[frames, 10 + 1.0*(frames - 100), 50 + 0.0*frames]
+    second = first.copy()
+    second[:, 1] -= 7.0
+    second = second[5:]
+    dets = [[0, 0, first], [0, 0, second]]
+
+    # The light between them: all lit, or none
+    lit = lambda frame, x1, y1, x2, y2: 1.0
+    dark = lambda frame, x1, y1, x2, y2: 0.0
+
+    # Not a duplicate with the usual limits, nor with the light unknown or not connected
+    assert len(removeDuplicateDetections(dets, 1.4, 4.2)) == 2
+    assert len(removeDuplicateDetections(dets, 1.4, 4.2, connected=dark, max_connected_along=14.0)) == 2
+
+    # A duplicate when the light is connected, within the larger limit along the motion
+    kept = removeDuplicateDetections(dets, 1.4, 4.2, connected=lit, max_connected_along=14.0)
+    assert (len(kept) == 1) and (kept[0][2] is first)
+    assert len(removeDuplicateDetections(dets, 1.4, 4.2, connected=lit, max_connected_along=5.0)) == 2
+
+
+def test_connected_light_along_a_trail(config):
+    """ The fraction of a segment which is lit (well above the background) in a frame: along the trail of a very
+        bright object from its position it is lit, towards the empty sky it is not. """
+
+    # A very bright object with a trail, searched
+    obj = linearObject(400.0, 64, 50, 0.0, 0.1, 0, 512)
+    obj['trail'] = 5.0
+    det = MatchedFilterDetector(_SynthHandle([obj], total_frames=512, n_stars=2), config)
+    det.run()
+
+    # Its position in a frame
+    f = 300
+    x, y = obj['pos'](f)
+
+    # Along its row (the trail is on the side of the lower columns) and its column, and towards the empty sky
+    assert det.connectedLight(f, x, y, x - 7, y) > 0.9
+    assert det.connectedLight(f, x, y, x + 7, y + 7) < 0.5
+
+
+def test_connected_light_over_the_segments():
+    """ The light between two points in a frame is taken from the detector of the segment of the input whose
+        blocks contain the frame (the detections joined over the segments span several of them). """
+
+    class _Det(object):
+        def __init__(self, first, end, value):
+            """ A detector of the frames first .. end, whose light between any two points is value. """
+            self.block_starts, self.block_ends, self.value = [first], [end], value
+
+        def connectedLight(self, frame, x1, y1, x2, y2):
+            """ The light between two points, the same everywhere. """
+            return self.value
+
+    # Three segments, the second one not searched
+    connected = mfd.connectedOver([_Det(0, 1000, 0.1), None, _Det(900, 2000, 0.9)])
+
+    # Every frame from the first segment which contains it, none outside them
+    assert connected(500, 0, 0, 1, 1) == 0.1
+    assert connected(1500, 0, 0, 1, 1) == 0.9
+    assert connected(5000, 0, 0, 1, 1) is None
+
+
 def test_bright_object_along_a_column_detected(config):
     """ A bright object moving along a pixel column lights the column with its own trail, which makes the column
         bright in the median of a block and masked as a bright line: the line is not masked near the object, so

@@ -3001,7 +3001,7 @@ def joinContinuousDetections(meteor_detections, max_gap_frames, max_gap_spatial,
 
 
 def removeDuplicateDetections(meteor_detections, max_dist, max_along_dist, x_col=1, connected=None,
-    max_connected_dist=None):
+    max_connected_dist=None, max_connected_along=None):
     """ Remove the detections which follow the same object as a longer detection. At least half of their
         frames are shared with it, and in the shared frames the centroids are closer than max_dist across the
         direction of motion and closer than max_along_dist along it (median). The centroids of an extended
@@ -3022,6 +3022,10 @@ def removeDuplicateDetections(meteor_detections, max_dist, max_along_dist, x_col
             max_dist is used.
         max_connected_dist: [float] Maximum median distance across the direction of motion of the centroids of
             the same extended object (px). None by default.
+        max_connected_along: [float] Maximum median distance along the direction of motion of the centroids of
+            the same object measured twice (e.g. on the wing or the trail of a bright object), which is a duplicate
+            if the image is above the threshold all the way between them (px). None by default, in which case
+            only max_along_dist is used.
 
     Return:
         [list] Detections without duplicates, in the original order.
@@ -3077,6 +3081,12 @@ def removeDuplicateDetections(meteor_detections, max_dist, max_along_dist, x_col
                 elif (connected is not None) and (max_connected_dist is not None) \
                         and (across < max_connected_dist):
                     duplicate = sameExtendedObject(cent, cent_kept, idx, idx_kept)
+
+            # Further along the motion, on the same line: the same object measured twice if the image is lit all
+            #   the way between them (two objects moving together have no light between them)
+            elif (connected is not None) and (max_connected_along is not None) and (along < max_connected_along) \
+                    and (across < max_dist):
+                duplicate = sameExtendedObject(cent, cent_kept, idx, idx_kept)
 
             if duplicate:
                 break
