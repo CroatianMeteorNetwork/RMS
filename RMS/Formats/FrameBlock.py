@@ -33,6 +33,7 @@ Usage:
 
 from __future__ import print_function, division, absolute_import
 
+import errno
 import json
 import os
 import struct
@@ -189,6 +190,11 @@ def unpack12(buf, width, height, shift=0):
 
 ### Writing ###
 
+# Errors of posix_fallocate meaning that the file system can't preallocate (the size is then only set)
+PREALLOCATION_UNSUPPORTED = tuple(getattr(errno, name) for name in ('EINVAL', 'EOPNOTSUPP', 'ENOTSUP', 'ENOSYS')
+                                  if hasattr(errno, name))
+
+
 def _pwriteAll(fd, data, offset):
     """ Write all bytes at the offset: the system may write only a part of them at once (e.g. a full disk
         writes none, which is an error), so the writing continues until all are written.
@@ -263,13 +269,29 @@ class FrameBlockWriter(object):
         # The file with its full size reserved (no data is written for the reserved space), the header and an
         #   empty frame table
         self.fd = os.open(self.part_path, os.O_RDWR | os.O_CREAT | os.O_TRUNC | getattr(os, 'O_BINARY', 0), 0o644)
-        total = self.data_offset + self.max_frames*self.frame_stride
         try:
-            os.posix_fallocate(self.fd, 0, total)
-        except (AttributeError, OSError):
-            os.ftruncate(self.fd, total)
-        _pwriteAll(self.fd, MAGIC + struct.pack('<II', VERSION, HEADER_SIZE) + text, 0)
-        _pwriteAll(self.fd, bytes(self.data_offset - self.table_offset), self.table_offset)
+            total = self.data_offset + self.max_frames*self.frame_stride
+
+            # Without preallocation (the system or the file system doesn't have it) the size is only set; a full
+            #   disk is an error now rather than in the middle of the recording
+            try:
+                os.posix_fallocate(self.fd, 0, total)
+            except AttributeError:
+                os.ftruncate(self.fd, total)
+            except OSError as e:
+                if e.errno not in PREALLOCATION_UNSUPPORTED:
+                    raise
+                os.ftruncate(self.fd, total)
+
+            _pwriteAll(self.fd, MAGIC + struct.pack('<II', VERSION, HEADER_SIZE) + text, 0)
+            _pwriteAll(self.fd, bytes(self.data_offset - self.table_offset), self.table_offset)
+
+        # A block which could not be started leaves no file and no open descriptor
+        except Exception:
+            os.close(self.fd)
+            self.fd = None
+            os.remove(self.part_path)
+            raise
 
     def write(self, frame, time_ns, exposure_us=0, gain=0.0, counter=0, packed=False):
         """ Append a frame.

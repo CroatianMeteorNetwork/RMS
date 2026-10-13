@@ -458,3 +458,30 @@ def test_fsync_also_syncs_the_directory(tmp_path, monkeypatch):
 
     import stat
     assert [stat.S_ISDIR(mode) for mode in synced] == [False, True]
+
+
+@pytest.mark.skipif(not hasattr(os, 'posix_fallocate'), reason='No preallocation on this system')
+@pytest.mark.parametrize('code, fails', [('ENOSPC', True), ('EOPNOTSUPP', False)])
+def test_preallocation_errors(tmp_path, monkeypatch, code, fails):
+    """ A full disk when the block is reserved is an error (with the file descriptor closed and no file left);
+        a file system without preallocation falls back to setting the size. """
+
+    import errno
+
+    def fallocate(fd, offset, length):
+        raise OSError(getattr(errno, code), code)
+
+    monkeypatch.setattr(os, 'posix_fallocate', fallocate)
+    fds = len(os.listdir('/proc/self/fd')) if os.path.isdir('/proc/self/fd') else None
+    path = str(tmp_path/('XX0001_20251225_010203_000000' + fb.EXTENSION))
+
+    if fails:
+        with pytest.raises(OSError):
+            fb.FrameBlockWriter(path, 16, 10, max_frames=2)
+        assert not os.path.exists(path + '.part')
+        if fds is not None:
+            assert len(os.listdir('/proc/self/fd')) == fds
+    else:
+        with fb.FrameBlockWriter(path, 16, 10, max_frames=2) as w:
+            w.write(np.zeros((10, 16), np.uint16), 0)
+        assert fb.FrameBlockReader(path).n_frames == 1
