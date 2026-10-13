@@ -3024,7 +3024,7 @@ def detectInputTypeFile(input_file, config, beginning_time=None, fps=None, detec
                                     chunk_frames=chunk_frames)
 
     # Check if the given file is a frame block file
-    elif file_name.endswith('.fblk'):
+    elif file_name.lower().endswith('.fblk'):
 
         img_handle = InputTypeFrameBlock(input_file, config, detection=detection, flipud=flipud,
                                          chunk_frames=chunk_frames)

@@ -215,8 +215,8 @@ class FrameBlockWriter(object):
 
         if packing not in PACKINGS:
             raise ValueError('Unknown packing: {}'.format(packing))
-        if (packing == 'mono12p') and (bit_depth > 12):
-            raise ValueError('mono12p holds at most 12 bits')
+        if not (1 <= bit_depth <= (12 if packing == 'mono12p' else 16)):
+            raise ValueError('{} can not hold {}-bit values'.format(packing, bit_depth))
 
         self.path = path
         self.part_path = path + '.part'
@@ -528,6 +528,12 @@ def convertFitsDirectory(fits_dir, out_dir, packing='mono12p', bit_depth=12, fra
         station = station_id or str(header0.get('TELESCOP', 'XX0000')).strip()
         t0 = times[chunk[0]]
         name = '{}_{}{}'.format(station, t0.strftime('%Y%m%d_%H%M%S_%f'), EXTENSION)
+
+        # Blocks starting at the same time (a clock coarser than the frames) get names a microsecond apart, so
+        #   none replaces another; the times of the frames are in the frame table
+        while os.path.join(out_dir, name) in written:
+            t0 += datetime.timedelta(microseconds=1)
+            name = '{}_{}{}'.format(station, t0.strftime('%Y%m%d_%H%M%S_%f'), EXTENSION)
         metadata = {k: header0[k] for k in ('TELESCOP', 'SITELAT', 'SITELONG', 'SITEELEV', 'XBINNING',
                                             'YBINNING', 'GAIN', 'FRAMERAT', 'PIXFMT') if k in header0}
         metadata['station_id'] = station

@@ -324,3 +324,42 @@ def test_negative_values_are_rejected(tmp_path, packing):
         with pytest.raises(ValueError):
             w.write(frame, 0)
         assert w.n_frames == 0
+
+
+def test_convert_names_blocks_uniquely_when_times_repeat(tmp_path):
+    """ Blocks whose first frames have the same DATE-OBS (a coarse clock) get different names, so none is
+        overwritten. """
+
+    frames = [np.full((10, 16), 4093 - i, np.uint16) for i in range(4)]
+    _writeFitsFrames(tmp_path/'fits', frames, ['2026-04-24T05:40:22+00:00']*4)
+
+    paths = fb.convertFitsDirectory(str(tmp_path/'fits'), str(tmp_path/'out'), frames_per_block=2,
+                                    station_id='TEST01')
+    assert len(set(paths)) == 2
+    assert sum(fb.FrameBlockReader(p).n_frames for p in paths) == 4
+
+
+@pytest.mark.parametrize('packing, bit_depth', [('uint16', 17), ('uint16', 0), ('mono12p', 13)])
+def test_bit_depth_beyond_the_storage_is_rejected(tmp_path, packing, bit_depth):
+    """ A bit depth the packing can't hold (or not positive) is refused. """
+
+    path = str(tmp_path/('XX0001_20251225_010203_000000' + fb.EXTENSION))
+    with pytest.raises(ValueError):
+        fb.FrameBlockWriter(path, 16, 10, max_frames=2, packing=packing, bit_depth=bit_depth)
+    assert not os.path.exists(path + '.part')
+
+
+def test_rms_opens_an_upper_case_extension(tmp_path):
+    """ A block named with an upper-case extension is opened as a block, as the monitor accepts it. """
+
+    import RMS.ConfigReader as cr
+    from RMS.Formats.FrameInterface import detectInputTypeFile
+
+    config = cr.parse(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.config'))
+    config.width, config.height = 16, 10
+    path = str(tmp_path/'XX0001_20251225_010203_000000.FBLK')
+    with fb.FrameBlockWriter(path, 16, 10, max_frames=2) as w:
+        w.write(np.zeros((10, 16), np.uint16), 1_766_624_523_000_000_000)
+        w.write(np.zeros((10, 16), np.uint16), 1_766_624_523_040_000_000)
+
+    assert detectInputTypeFile(path, config, detection=True).input_type == 'fblk'
