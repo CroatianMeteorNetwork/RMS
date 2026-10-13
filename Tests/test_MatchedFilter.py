@@ -228,11 +228,13 @@ def test_bin_frames_is_the_scaled_sum_of_the_bins(bin_factor):
         (up to the rounding of the last bits of a float32, as the pixels are added in another order).
     """
 
+    # Frames whose size is not a multiple of the bins, and the sums of their whole bins
     rng = np.random.default_rng(1)
     frames = rng.normal(0, 1, (3, 101, 135)).astype(np.float32)
     h2, w2 = 101//bin_factor, 135//bin_factor
     expected = frames[:, :h2*bin_factor, :w2*bin_factor].reshape(3, h2, bin_factor, w2, bin_factor).sum(axis=(2, 4))
 
+    # float32 frames of the whole bins, every pixel the sum divided by the bin factor
     binned = binFrames(frames, bin_factor)
     assert binned.dtype == np.float32
     assert np.allclose(binned, expected/bin_factor, rtol=1e-6, atol=1e-6)
@@ -1790,6 +1792,8 @@ def test_gpu_runs_agree_with_the_cpu():
 
     from RMS.Routines.MatchedFilterKernels import DeviceFrames, VelocityStacker
 
+    # Random motions, noise frames whose width is not a multiple of the pixels of a block of GPU threads, and
+    #   four runs of 8 frames
     rng = np.random.default_rng(2)
     angles = rng.uniform(0, 2*np.pi, 60)
     speeds = rng.uniform(0, 1.5, 60)
@@ -1799,9 +1803,14 @@ def test_gpu_runs_agree_with_the_cpu():
 
     cpu = VelocityStacker(velocities, 8, use_gpu=False)
     gpu = VelocityStacker(velocities, 8, use_gpu=True)
+
+    # The frames given from the CPU, and already on the GPU with a larger padding
     for source in (frames, DeviceFrames(frames, gpu.pad + 3)):
         stack_max, vel_idx = gpu.stackMaxRuns(source, starts)
         assert stack_max.shape == (4, 70, 150)
+
+        # Every run as on the CPU (the sums in another order differ in the last bits, which can change the best
+        #   motion of a very few pixels where two motions give the same sum)
         for i, r0 in enumerate(starts):
             expected_max, expected_idx = cpu.stackMax(frames[r0:r0 + 8])
             assert np.allclose(stack_max[i], expected_max, atol=1e-5)
@@ -1815,12 +1824,15 @@ def test_kept_normalized_blocks_give_the_same_detections(config, monkeypatch, ca
         background is estimated again without a slow object is normalized again.
     """
 
+    # A faint object (the blocks are kept to the end), or a slow one, whose background is estimated again without
+    #   it after the search (its blocks are read and normalized again)
     if case == 'faint':
         objects, kwargs = [linearObject(1.5, 25, 30, 0.3, 0.12, 40, 470)], {}
     else:
         objects, kwargs = [linearObject(6.0, 30, 60, 0.03, 0.015, 0, 1536)], dict(n_stars=4, total_frames=1536)
         config.mf_smooth_frames = 0
 
+    # The frames read by every run of the detector are counted
     reads = []
     read = MatchedFilterDetector.readFrames
 
@@ -1830,6 +1842,7 @@ def test_kept_normalized_blocks_give_the_same_detections(config, monkeypatch, ca
 
     monkeypatch.setattr(MatchedFilterDetector, 'readFrames', countingRead)
 
+    # The detector without and with the kept blocks
     results = []
     for memory in (0.0, 10.0):
         config.mf_cache_memory = memory
@@ -1837,6 +1850,7 @@ def test_kept_normalized_blocks_give_the_same_detections(config, monkeypatch, ca
         det, detections = runDetector(_SynthHandle(objects, **kwargs), config)
         results.append(detections)
 
+    # The same detection with the same measurements, from fewer frames read
     assert len(results[0]) == len(results[1]) == 1
     for a, b in zip(results[0], results[1]):
         assert np.array_equal(a[2], b[2])

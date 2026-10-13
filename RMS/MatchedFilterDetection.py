@@ -542,12 +542,18 @@ def binFrames(frames, bin_factor):
     #   order)
     n, h, w = frames.shape
     h2, w2 = h//bin_factor, w//bin_factor
+
+    # Without binning, the frames as float32
     if bin_factor == 1:
         return frames[:, :h2, :w2].astype(np.float32)
+
+    # Every frame is resampled on its own (OpenCV resamples single images), cropped to the whole bins
     binned = np.empty((n, h2, w2), dtype=np.float32)
     for i in range(n):
         binned[i] = cv2.resize(np.ascontiguousarray(frames[i, :h2*bin_factor, :w2*bin_factor], dtype=np.float32),
                                (w2, h2), interpolation=cv2.INTER_AREA)
+
+    # The mean of a bin times b is its sum divided by b
     binned *= bin_factor
 
     return binned
@@ -731,6 +737,8 @@ class MatchedFilterDetector(object):
             [bool] True if the block can be kept.
         """
 
+        # The memory of the blocks kept so far, and of the new block: 4 bytes of a normalized pixel and 1 byte of
+        #   its saturation mask
         used = sum(z.nbytes + sat.nbytes for z, sat in self.block_cache.values())
 
         return used + n_frames*self.height*self.width*5 <= self.cache_bytes_max
@@ -747,9 +755,11 @@ class MatchedFilterDetector(object):
             (z, saturated): [tuple of ndarrays] float32 normalized frames and uint8 saturation masks.
         """
 
+        # The block kept from the search
         if k in self.block_cache:
             return self.block_cache[k]
 
+        # Otherwise the frames and their saturated pixels are read again, and normalized as in the search
         first, last = self.block_starts[k], self.block_ends[k]
         t1 = time()
         frames, saturated = self.readFrames(first, last - first, saturation=True)
@@ -1088,9 +1098,15 @@ class MatchedFilterDetector(object):
         #   numbered in the order of their first pixel) at a third of the time
         n, labels, stats, _ = cv2.connectedComponentsWithStats(bright.view(np.uint8), connectivity=4,
                                                                ltype=cv2.CV_32S)
+
+        # The label 0 is the background, the sources are 1 .. n
         n -= 1
+
+        # The peak of every source
         peaks = np.full(n, -np.inf)
         np.maximum.at(peaks, labels[bright] - 1, frame[bright])
+
+        # The box of every source as the slices of its rows and columns, as ndimage.find_objects gives them
         boxes = [(slice(y, y + h), slice(x, x + w)) for x, y, w, h in stats[1:, :4].tolist()]
         sources = []
         for i in np.argsort(peaks)[::-1]:
@@ -1206,6 +1222,8 @@ class MatchedFilterDetector(object):
             """
 
             for i in range(i0, i1):
+
+                # The frame is prepared in place, or in a copy if the block is kept unchanged (see search)
                 frame = z[i].copy() if keep_frames else z[i]
                 self.prepareFrame(frame, static, lines)
 
@@ -1218,7 +1236,8 @@ class MatchedFilterDetector(object):
                     zbs[b][i] = cv2.GaussianBlur(binned.astype(np.float32), (0, 0), self.searchSigma()/b)
 
         # Every frame is prepared on its own, so the frames are prepared in parallel threads, in slices of frames
-        #   (OpenCV and numpy release the GIL), with the same results as in one thread
+        #   (OpenCV and numpy release the GIL), with the same results as in one thread. The threads of the matched
+        #   filter (mf_threads) take a slice each, of at least 8 frames
         n_threads = max(min(numba.get_num_threads(), len(z)//8), 1)
         bounds = np.linspace(0, len(z), n_threads + 1).astype(int)
         self.inThreads(lambda j: prepareFrames(bounds[j], bounds[j + 1]), list(range(n_threads)))
@@ -1238,8 +1257,12 @@ class MatchedFilterDetector(object):
         if self.opts.use_gpu:
             try:
                 for b in bins:
+
+                    # The padding of the frames of a bin is the largest shift of its stackers
                     pad = max(stacker.pad for _, stacker_bin, stacker in stackers if stacker_bin == b)
                     device_frames[b] = DeviceFrames(zbs[b], pad)
+
+            # E.g. out of GPU memory with several workers: continue on the CPU
             except Exception:
                 log.error('Matched filter: the GPU failed, continuing on the CPU:\n' + traceback.format_exc())
                 self.useCPU(stackers)
@@ -1264,6 +1287,8 @@ class MatchedFilterDetector(object):
             run_starts = list(range(0, len(zb) - run_frames + 1, run_frames))
             t1 = time()
             try:
+
+                # The frames already on the GPU, or the frames on the CPU
                 stack_maxes, vel_idxs = stacker.stackMaxRuns(device_frames.get(b, zb), run_starts)
             except Exception:
                 if not stacker.use_gpu:
@@ -1275,6 +1300,7 @@ class MatchedFilterDetector(object):
                 stack_maxes, vel_idxs = stacker.stackMaxRuns(zb, run_starts)
             self.timing['stack'] += time() - t1
 
+            # The hits of every run, from its stack
             for r0, stack_max, vel_idx in zip(run_starts, stack_maxes, vel_idxs):
 
                 # The maximum over many velocities of noise is not the noise of a single stack (it is the largest of
@@ -1316,6 +1342,7 @@ class MatchedFilterDetector(object):
             stackers: [list] (run_frames, bin, VelocityStacker) of the search, all switched to the CPU.
         """
 
+        # The following blocks are searched on the CPU too
         self.opts.use_gpu = False
         for _, _, stacker in stackers:
             stacker.use_gpu = False
@@ -1780,6 +1807,8 @@ class MatchedFilterDetector(object):
             #   for a quick lookup of the hits of the next run
             arr = np.array([[h.frame, h.x, h.y, h.z, h.vx, h.vy, h.run, h.bin] for h in group])
             by_frame = collections.defaultdict(list)
+
+            # The middle frames of the hits as Python floats, which are rounded much quicker than numpy numbers
             frames = arr[:, 0].tolist()
             for i, f in enumerate(frames):
                 by_frame[round(f, 1)].append(i)
@@ -1807,17 +1836,27 @@ class MatchedFilterDetector(object):
             first_near = {}
             for direction in (1, -1):
                 for gap in (1, 2, 3):
+
+                    # The hits by the run gap runs before or after them
                     dt_run = direction*gap*run_frames
                     targets = collections.defaultdict(list)
                     for i, f in enumerate(frames):
                         targets[round(f + dt_run, 1)].append(i)
+
                     for t, idx in targets.items():
+
+                        # A run without hits has nothing near any position
                         if t not in trees:
                             first_near.update(((i, direction, gap), []) for i in idx)
                             continue
+
+                        # The positions predicted with the motion of every hit, looked up at once in the spatial
+                        #   index of the run, within the radius of the look-up of a single hit
                         idx = np.array(idx)
                         points = np.column_stack([arr[idx, 1] + arr[idx, 4]*dt_run, arr[idx, 2] + arr[idx, 5]*dt_run])
                         found = trees[t].query_ball_point(points, 1.5*b + 1.5*step*abs(dt_run) + 1e-6)
+
+                        # The hits found, in increasing order, as nearHits gives them
                         for i, near in zip(idx.tolist(), found):
                             first_near[(i, direction, gap)] = sorted(by_frame[t][near])
 
@@ -1865,7 +1904,8 @@ class MatchedFilterDetector(object):
 
                             # The hits which can pass the tests below: within the reach of the motion of the chain
                             #   around the predicted position, and for a single strong hit, also within the reach of
-                            #   the largest speed around its position
+                            #   the largest speed around its position. For a chain of a single hit, the first look-ups
+                            #   were made above for all hits at once
                             dt_run = direction*gap*run_frames
                             if (len(chain) == 1) and (gap <= 3):
                                 near = first_near[(cur, direction, gap)]

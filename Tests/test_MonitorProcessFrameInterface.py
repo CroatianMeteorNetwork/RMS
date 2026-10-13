@@ -1503,13 +1503,16 @@ def test_star_catalog_loaded_once_before_forked_workers(monkeypatch, start_metho
     import RMS.MonitorProcessFrameInterface as mpfi
     from RMS.Formats import StarCatalog
 
+    # The readings of the catalog are counted, with the workers forked or spawned, and no catalog loaded yet
     calls = []
     monkeypatch.setattr(StarCatalog, 'readStarCatalog', lambda *args, **kwargs: calls.append(args))
     monkeypatch.setattr(multiprocessing, 'get_start_method', lambda allow_none=False: start_method)
     monkeypatch.setattr(mpfi, '_PRELOADED_CATALOGS', set())
 
+    # Three workers started with the same config
     config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.config')
     for _ in range(3):
         mpfi.preloadStarCatalog(config_path)
 
+    # One reading for forked workers, none for spawned ones
     assert len(calls) == expected

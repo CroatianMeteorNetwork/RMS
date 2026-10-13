@@ -122,8 +122,10 @@ def velocityStackMaxCPU(frames, pad, shifts, out_max, out_idx):
             out_idx[y, x] = best_idx[x]
 
 
-# The GPU threads of a block of the stack kernel: TX x TY threads, every thread computing GPU_PX pixels of a row,
-#   GPU_TX px apart (so the threads of a warp read neighbouring pixels)
+# The threads of a block of the stack kernel on the GPU (_velocityStackRunsKernel): GPU_TX x GPU_TY threads, every
+#   thread computing GPU_PX pixels of a row, GPU_TX px apart. The 32 threads of a warp are neighbours in a row, so
+#   at every step they read 32 neighbouring pixels at once (one memory transaction). A block covers GPU_TX*GPU_PX
+#   x GPU_TY pixels, and the pixels of a thread share the reading of the shifts and the computing of the addresses
 GPU_TX = 32
 GPU_TY = 8
 GPU_PX = 4
@@ -137,11 +139,18 @@ if CUDA_AVAILABLE:
             pad + GPU_TX*GPU_PX px on the right (the extra pixels of the last threads of a row).
         """
 
+        # The pixel of the padded frames written by this thread (one thread per pixel, the threads beyond the
+        #   padded frames do nothing)
         x, y, k = cuda.grid(3)
         if (k >= dst.shape[0]) or (y >= dst.shape[1]) or (x >= dst.shape[2]):
             return
+
+        # The pixel of the frames it corresponds to, shifted by the padding
         ys = y - pad
         xs = x - pad
+
+        # Inside the frames the pixel is copied, in the padding it is zero (a pixel shifted outside the image adds
+        #   nothing to a stack)
         if (ys >= 0) and (ys < src.shape[1]) and (xs >= 0) and (xs < src.shape[2]):
             dst[k, y, x] = src[k, ys, xs]
         else:
@@ -155,37 +164,57 @@ if CUDA_AVAILABLE:
             precision as on the CPU (velocityStackMaxCPU), and the padding removes the bounds checks.
         """
 
+        # The run of this block of threads (the z index of the grid), the row of this thread, and the first of its
+        #   pixels in the row: the thread computes the pixels x0, x0 + GPU_TX, ..., x0 + (GPU_PX - 1)*GPU_TX
         run = cuda.blockIdx.z
         y = cuda.blockIdx.y*GPU_TY + cuda.threadIdx.y
         x0 = cuda.blockIdx.x*GPU_TX*GPU_PX + cuda.threadIdx.x
         _, height, width = out_max.shape
 
-        # The threads beyond the last row compute the last row again, and don't write it
+        # The row in the padded frames. The threads beyond the last row compute the last row again, and don't
+        #   write it
         yy = min(y, height - 1) + pad
+
+        # The first frame of the run in the block
         k0 = run_starts[run]
 
+        # For every pixel of the thread: the largest sum so far and the index of its velocity, and the sum of the
+        #   current velocity (small arrays of a fixed size, kept in the registers of the thread)
         best = cuda.local.array(GPU_PX, numba.float32)
         best_idx = cuda.local.array(GPU_PX, numba.int32)
         acc = cuda.local.array(GPU_PX, numba.float32)
+
+        # Before the first velocity, every sum is larger than the largest so far
         for j in range(GPU_PX):
             best[j] = numba.float32(-1e30)
             best_idx[j] = 0
 
         # Sum of the frames along every velocity, keeping the largest sum and its velocity for every pixel
         for v in range(shifts.shape[0]):
+
+            # The sums of this velocity start at zero (in single precision: a float literal would make the sums
+            #   double precision, which consumer GPUs compute many times slower)
             for j in range(GPU_PX):
                 acc[j] = numba.float32(0.0)
+
+            # The frame k of the run is read shifted by the motion of the velocity v at its time (see
+            #   velocityShifts), so an object moving with v adds up at its position at the middle of the run. The
+            #   padding is at least the largest shift, so the shifted pixels are always inside the array (pixels
+            #   shifted outside the image read zeros) and no bounds have to be checked
             for k in range(n_frames):
                 ys = yy + shifts[v, k, 1]
                 xs = x0 + pad + shifts[v, k, 0]
                 for j in range(GPU_PX):
                     acc[j] += frames[k0 + k, ys, xs + j*GPU_TX]
+
+            # Keep the largest sum of every pixel and its velocity
             for j in range(GPU_PX):
                 if acc[j] > best[j]:
                     best[j] = acc[j]
                     best_idx[j] = v
 
-        # The mean over the frames, as on the CPU
+        # The mean over the frames, as on the CPU, written for the pixels of the thread which are in the image (the
+        #   last threads of a row also compute pixels in the padding on the right)
         if y < height:
             for j in range(GPU_PX):
                 x = x0 + j*GPU_TX
@@ -236,16 +265,24 @@ class DeviceFrames(object):
             pad: [int] Padding (px), at least the largest shift of the stacks which use the frames.
         """
 
+        # The frames as one contiguous float32 array, and their size
         frames = np.ascontiguousarray(frames, dtype=np.float32)
         self.n_frames, self.height, self.width = frames.shape
         self.pad = int(pad)
 
+        # The frames are copied to the GPU as they are, and padded there: pad px of zeros around them, and
+        #   GPU_TX*GPU_PX px more on the right, which the last threads of a row of the stack kernel read (copying
+        #   the padded frames would copy mostly zeros)
         d_src = cuda.to_device(frames)
         self.d_frames = cuda.device_array((self.n_frames, self.height + 2*self.pad,
                                            self.width + 2*self.pad + GPU_TX*GPU_PX), dtype=np.float32)
+
+        # One thread per pixel of the padded frames, in blocks of 32x8 threads, a layer of blocks per frame
         threads = (32, 8, 1)
         blocks = ((self.d_frames.shape[2] + 31)//32, (self.d_frames.shape[1] + 7)//8, self.n_frames)
         _padKernel[blocks, threads](d_src, self.d_frames, self.pad)
+
+        # The unpadded copy on the GPU is not needed any more
         del d_src
 
 
@@ -331,28 +368,41 @@ class VelocityStacker(object):
 
         n_runs = len(run_starts)
 
-        # On the CPU (or without runs), run by run
+        # On the CPU (or without runs), run by run, as stackMax computes them. The frames are then an array on the
+        #   CPU (frames on the GPU are only given to stackers on the GPU)
         if (not self.use_gpu) or (n_runs == 0):
             frames = frames if isinstance(frames, np.ndarray) else None
             results = [self.stackMax(frames[r0:r0 + self.n_frames]) for r0 in run_starts]
+
+            # Without runs, empty stacks
             if not results:
                 return np.empty((0, 0, 0), np.float32), np.empty((0, 0, 0), np.int32)
+
+            # The stacks of the runs as one array of every output
             return np.stack([r[0] for r in results]), np.stack([r[1] for r in results])
 
         # On the GPU: the frames are copied once (unless they are already there), all runs are stacked by one
         #   launch, and the results are copied back once
         d_frames = frames if isinstance(frames, DeviceFrames) else DeviceFrames(frames, self.pad)
+
+        # The padding of the frames on the GPU has to hold the largest shift of this stacker
         if d_frames.pad < self.pad:
             raise ValueError('The frames on the GPU are padded by {} px, the stacks need {}'.format(d_frames.pad,
                                                                                                    self.pad))
+
+        # The first frames of the runs, and the outputs of all runs, on the GPU
         height, width = d_frames.height, d_frames.width
         d_starts = cuda.to_device(np.asarray(run_starts, dtype=np.int32))
         d_max = cuda.device_array((n_runs, height, width), dtype=np.float32)
         d_idx = cuda.device_array((n_runs, height, width), dtype=np.int32)
+
+        # Blocks of GPU_TX x GPU_TY threads, every thread computing GPU_PX pixels of a row: enough blocks to cover
+        #   the image, and a layer of blocks per run
         blocks = ((width + GPU_TX*GPU_PX - 1)//(GPU_TX*GPU_PX), (height + GPU_TY - 1)//GPU_TY, n_runs)
         _velocityStackRunsKernel[blocks, (GPU_TX, GPU_TY)](d_frames.d_frames, d_frames.pad, d_starts, self.n_frames,
                                                             self.d_shifts, d_max, d_idx)
 
+        # The stacks of all runs copied back at once (which waits for the kernel to finish)
         return d_max.copy_to_host(), d_idx.copy_to_host()
 
 

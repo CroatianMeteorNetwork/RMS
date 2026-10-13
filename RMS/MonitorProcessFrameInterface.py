@@ -1803,10 +1803,13 @@ def preloadStarCatalog(config_path):
         config_path: [str] Path to the config file.
     """
 
+    # Once per config, and only for forked workers (spawned workers start from nothing and load it themselves)
     if (config_path in _PRELOADED_CATALOGS) or (multiprocessing.get_start_method(allow_none=True) != 'fork'):
         return
     _PRELOADED_CATALOGS.add(config_path)
 
+    # The catalog of the config, read as the workers read it (the decompressed catalog stays in the memory of
+    #   StarCatalog, whatever the epoch and the limiting magnitude of a reading)
     try:
         from RMS.Formats import StarCatalog
         config = cr.parse(config_path)
