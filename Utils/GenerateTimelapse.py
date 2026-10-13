@@ -741,7 +741,8 @@ def frameMetaPath(video_path):
     highlight rebuild changed the frame), or null for a frame without one. Only written when at
     least one frame carries a record, so stations without the metadata ship no file. With the
     exposure de-jump on, each record also has "dejump_gain": the multiplier applied to that frame's
-    codes in the video (divide by it to get the saved frame's codes back, below saturation).
+    codes in the video, never above 1 (divide by it to get the saved frame's codes back, to
+    within rounding).
 
     Arguments:
         video_path: [str] Path of the timelapse .mp4.
@@ -754,8 +755,9 @@ def frameMetaPath(video_path):
     return video_path.replace('.mp4', '_' + FRAME_META_JSON_SUFFIX)
 
 
-# Clamp of the exposure de-jump gains (see dejumpGains)
-DEJUMP_GAIN_RANGE = (0.5, 1.6)
+# Clamp of the exposure de-jump gains (see dejumpGains). Never above 1: a gain above 1 pushes the
+# frame's highlights into 255 (up to 12 % of a dawn frame on US05 2026-10-11).
+DEJUMP_GAIN_RANGE = (0.5, 1.0)
 
 
 def frameExposure(meta):
@@ -787,13 +789,23 @@ def dejumpGains(times, exposures, modes, sigma_s, gamma, gain_range=DEJUMP_GAIN_
 
     The auto exposure moves in steps (and podcontrol's WB rung snaps back by up to 1.5 stops in one
     frame), which makes the timelapse jump in brightness. The frames are scaled to a virtual
-    exposure instead: the log exposure smoothed by a Gaussian of sigma_s seconds of capture time,
-    with the kernel renormalised at block edges and gaps. Day and night frames are smoothed
-    separately, so the mode switch is left alone. Slow changes of the light pass through.
+    exposure instead, built with hindsight from the frames on both sides:
+
+    1. The trend: the log exposure smoothed by a Gaussian of sigma_s seconds of capture time, with
+       the kernel renormalised at block edges and gaps. Slow changes of the light pass through.
+    2. Never brighten: a frame exposed below the trend would need a gain above 1, which pushes its
+       highlights into 255, and the auto exposure usually stepped down because highlights were
+       clipping. Where a frame sits below the trend, the virtual exposure dips to that frame's own
+       exposure instead, entering and leaving the dip at no more than 1 stop per 5*sigma_s (the
+       tightest such curve below the trend and every exposure, two-pass). The neighbours are darkened
+       to meet the dip, so every gain is <= 1.
+
+    Day and night frames are handled separately, so the mode switch is left alone.
 
     On US05C1 2026-10-11 (sigma 120 s) this removed every exposure-caused jump (16 jumps over 0.1
-    stop -> 0, largest 0.73 -> 0.065 stop) and left the scene's own changes alone; gains spanned
-    0.72-1.28.
+    stop -> 0, largest 0.73 -> 0.062 stop) and left the scene's own changes alone; gains spanned
+    0.61-1. The trend alone (gains 0.71-1.29) removed the same jumps but pushed up to 12 % of a
+    frame into 255 on US05A1-D1 at dawn.
 
     Arguments:
         times: [list[float]] Capture times (s), any order.
@@ -813,6 +825,7 @@ def dejumpGains(times, exposures, modes, sigma_s, gamma, gain_range=DEJUMP_GAIN_
     modes = np.asarray(modes)
     gains = np.ones(len(times))
     half_width = 4*sigma_s
+    max_slope = 1.0/(5*sigma_s)
 
     for mode in set(modes.tolist()):
         idx = np.flatnonzero((modes == mode) & np.isfinite(times) & np.isfinite(log_exp))
@@ -823,9 +836,20 @@ def dejumpGains(times, exposures, modes, sigma_s, gamma, gain_range=DEJUMP_GAIN_
         lo = np.searchsorted(t, t - half_width)
         hi = np.searchsorted(t, t + half_width, side="right")
 
+        # Trend
+        trend = np.empty(len(idx))
         for i in range(len(idx)):
             w = np.exp(-0.5*((t[lo[i]:hi[i]] - t[i])/sigma_s)**2)
-            gains[idx[i]] = 2**(gamma*(np.dot(w, log_e[lo[i]:hi[i]])/w.sum() - log_e[i]))
+            trend[i] = np.dot(w, log_e[lo[i]:hi[i]])/w.sum()
+
+        # Dips: the highest slope-limited curve below every frame's offset from the trend
+        dip = np.minimum(log_e - trend, 0.0)
+        for i in range(1, len(dip)):
+            dip[i] = min(dip[i], dip[i - 1] + max_slope*(t[i] - t[i - 1]))
+        for i in range(len(dip) - 2, -1, -1):
+            dip[i] = min(dip[i], dip[i + 1] + max_slope*(t[i + 1] - t[i]))
+
+        gains[idx] = 2**(gamma*(trend + dip - log_e))
 
     return np.clip(gains, gain_range[0], gain_range[1])
 

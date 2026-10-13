@@ -768,7 +768,8 @@ class Config:
         self.timelapse_frames_threads = 2
 
         # Exposure de-jump of the frames timelapse: frames with exposure metadata are scaled to the
-        # exposure smoothed over this time scale (s), so exposure steps become ramps. 0 disables.
+        # exposure smoothed over this time scale (s), so exposure steps become ramps. Frames are only
+        # darkened, never brightened, so no highlight is clipped. 0 disables.
         self.timelapse_frames_dejump_s = 120.0
 
 
