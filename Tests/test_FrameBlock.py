@@ -374,3 +374,15 @@ def test_convert_16_bit_values_needs_no_scaling(tmp_path):
     reader = fb.FrameBlockReader(fb.convertFitsDirectory(str(tmp_path/'fits'), str(tmp_path/'out'), packing='uint16',
                                                          bit_depth=16)[0])
     assert int(reader.frame(1).max()) == 16
+
+
+def test_convert_takes_fits_of_any_case(tmp_path):
+    """ Frames named .FITS, .fits and .fit are all converted. """
+
+    frames = [np.full((10, 16), 4093 - i, np.uint16) for i in range(3)]
+    _writeFitsFrames(tmp_path/'fits', frames, ['2026-04-24T05:40:22.{:06d}+00:00'.format(66667*i) for i in range(3)],
+                     names=['a.FITS', 'b.fits', 'c.fit'])
+
+    reader = fb.FrameBlockReader(fb.convertFitsDirectory(str(tmp_path/'fits'), str(tmp_path/'out'),
+                                                         station_id='TEST01')[0])
+    assert reader.n_frames == 3

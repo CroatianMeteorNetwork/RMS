@@ -484,7 +484,6 @@ def convertFitsDirectory(fits_dir, out_dir, packing='mono12p', bit_depth=12, fra
     """
 
     import datetime
-    import glob
 
     from astropy.io import fits
 
@@ -497,7 +496,8 @@ def convertFitsDirectory(fits_dir, out_dir, packing='mono12p', bit_depth=12, fra
         return t
 
     # The frames in the order of their times
-    paths = glob.glob(os.path.join(fits_dir, '*.fits'))
+    paths = [os.path.join(fits_dir, name) for name in os.listdir(fits_dir)
+             if name.lower().endswith(('.fits', '.fit'))]
     if not paths:
         raise ValueError('No FITS files in {}'.format(fits_dir))
     times = {path: _utc(fits.getheader(path)['DATE-OBS']) for path in paths}
