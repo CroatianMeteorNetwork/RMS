@@ -504,3 +504,26 @@ def test_matched_filter_finds_blocks_in_a_directory(tmp_path):
     open(str(tmp_path/'XX0001_20251225_010203_000000.fblk'), 'wb').close()
     open(str(tmp_path/'notes.txt'), 'w').close()
     assert [os.path.basename(p) for p in findInputFiles([str(tmp_path)])] == ['XX0001_20251225_010203_000000.fblk']
+
+
+@pytest.mark.parametrize('failing', ['ftruncate', 'fsync'])
+def test_failed_finishing_closes_the_file(tmp_path, monkeypatch, failing):
+    """ An error while a block is finished closes its file descriptor and leaves the block unpublished. """
+
+    path = str(tmp_path/('XX0001_20251225_010203_000000' + fb.EXTENSION))
+    w = fb.FrameBlockWriter(path, 16, 10, max_frames=2)
+    w.write(np.zeros((10, 16), np.uint16), 0)
+    fd = w.fd
+
+    def fail(*args):
+        raise OSError('disk error')
+
+    monkeypatch.setattr(os, failing, fail)
+    with pytest.raises(OSError):
+        w.close(fsync=True)
+    monkeypatch.undo()
+
+    assert w.fd is None
+    with pytest.raises(OSError):
+        os.fstat(fd)
+    assert not os.path.exists(path) and os.path.exists(path + '.part')

@@ -362,11 +362,14 @@ class FrameBlockWriter(object):
             self.abort()
             return
 
-        os.ftruncate(self.fd, self.data_offset + self.n_frames*self.frame_stride)
-        if fsync:
-            os.fsync(self.fd)
-        os.close(self.fd)
-        self.fd = None
+        # The file is closed also when finishing it fails; it then stays unpublished as <name>.part
+        try:
+            os.ftruncate(self.fd, self.data_offset + self.n_frames*self.frame_stride)
+            if fsync:
+                os.fsync(self.fd)
+        finally:
+            os.close(self.fd)
+            self.fd = None
         os.replace(self.part_path, self.path)
 
         # The new name is in the directory, which is flushed too (on POSIX systems, where a directory can be
@@ -386,9 +389,11 @@ class FrameBlockWriter(object):
         if self.fd is None:
             return
 
-        os.ftruncate(self.fd, self.data_offset + self.n_frames*self.frame_stride)
-        os.close(self.fd)
-        self.fd = None
+        try:
+            os.ftruncate(self.fd, self.data_offset + self.n_frames*self.frame_stride)
+        finally:
+            os.close(self.fd)
+            self.fd = None
 
     def __enter__(self):
         return self
