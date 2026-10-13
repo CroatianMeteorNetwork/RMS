@@ -32,7 +32,7 @@ if os.environ.get('RMS_DISABLE_LOCAL_ASTROMETRY', '').lower() in ('1', 'true', '
 
 def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None, y_data=None,
                             fov_w_range=None, fov_w_hint=None, max_stars=100, verbose=False, x_center=None, y_center=None,
-                            lat=None, lon=None, jd=None, input_intensities=None):
+                            lat=None, lon=None, jd=None, input_intensities=None, position_hint=None):
     """ Find an astrometric solution of X, Y image coordinates of stars detected on an image using the
         local installation of astrometry.net.
 
@@ -52,6 +52,8 @@ def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None,
         lon: [float] Station longitude in degrees. Required for iterative matching.
         jd: [float] Julian date. Required for iterative matching.
         input_intensities: [ndarray] Star intensities for brightness-based matching. Optional.
+        position_hint: [tuple] (ra, dec, radius) in degrees: only search within the radius of the given pointing,
+            which is much faster than a search of the whole sky. None by default (the whole sky).
 
     Returns:
         [tuple] A tuple containing the following elements:
@@ -332,7 +334,7 @@ def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None,
         solution = solver.solve(
             stars=star_data,
             size_hint=size_hint,
-            position_hint=None,
+            position_hint=_positionHint(position_hint),
             solution_parameters=solution_parameters
             )
 
@@ -342,7 +344,7 @@ def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None,
             stars_xs=x_data,
             stars_ys=y_data,
             size_hint=size_hint,
-            position_hint=None,
+            position_hint=_positionHint(position_hint),
             solution_parameters=solution_parameters
             )
 
@@ -449,9 +451,19 @@ def astrometryNetSolveLocal(ff_file_path=None, img=None, mask=None, x_data=None,
         return None
 
 
+def _positionHint(position_hint):
+    """ The position hint of the local solver from (ra, dec, radius) in degrees, None for the whole sky. """
+
+    if position_hint is None:
+        return None
+
+    ra, dec, radius = position_hint
+    return astrometry.PositionHint(ra_deg=float(ra)%360.0, dec_deg=float(dec), radius_deg=float(radius))
+
+
 def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_data=None, fov_w_range=None,
                        fov_w_hint=None, max_stars=100, verbose=False, x_center=None, y_center=None,
-                       lat=None, lon=None, jd=None, input_intensities=None):
+                       lat=None, lon=None, jd=None, input_intensities=None, position_hint=None):
     """ Find an astrometric solution of X, Y image coordinates of stars detected on an image using the
         local installation of astrometry.net.
 
@@ -540,7 +552,7 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
                 ff_file_path=ff_file_path, img=img, mask=mask, x_data=x_data, y_data=y_data,
                 fov_w_range=fov_w_range, fov_w_hint=fov_w_hint, max_stars=max_stars, verbose=verbose,
                 x_center=x_center, y_center=y_center,
-                lat=lat, lon=lon, jd=jd, input_intensities=input_intensities
+                lat=lat, lon=lon, jd=jd, input_intensities=input_intensities, position_hint=position_hint
                 )
 
         # If local fails, try remote APIs

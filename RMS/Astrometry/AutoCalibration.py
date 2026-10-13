@@ -983,7 +983,7 @@ def _agreeingSubset(n, agree):
 
 
 def fitCandidate(chunk_dirs, section_chunks, held_out, catalog_stars, config, mask=None, use_flat=False,
-                 fit_vignetting=False, vignetting_coeff=None, ff_frames=256):
+                 fit_vignetting=False, vignetting_coeff=None, ff_frames=256, position_hint=None):
     """ Fit a platepar from scratch (blind plate solve and distortion fit, see AutoPlatepar) independently on
         several sections (chunks spread in time), keep the sections which agree with each other apart from the
         pointing, take the one which scores best on the held-out chunks, and fit its photometry.
@@ -1003,6 +1003,8 @@ def fitCandidate(chunk_dirs, section_chunks, held_out, catalog_stars, config, ma
         vignetting_coeff: [float] Vignetting coefficient to use when it is not fitted (e.g. the one of the current
             platepar). None by default, in which case the default of AutoPlatepar is used.
         ff_frames: [int] Number of frames of a chunk. 256 by default.
+        position_hint: [tuple] (ra, dec, radius) in degrees: the plate solver only searches within the radius of
+            this pointing. None by default (the whole sky).
 
     Return:
         (platepar, info): [tuple] The candidate platepar (None if it could not be fitted) and a dictionary which
@@ -1026,7 +1028,8 @@ def fitCandidate(chunk_dirs, section_chunks, held_out, catalog_stars, config, ma
         try:
             with contextlib.redirect_stdout(io.StringIO()):
                 platepar, paired_stars, _ = autoFitPlatepar(chunk_dirs[name], config, catalog_stars, ff_name=name,
-                                                            mask=mask, use_flat=use_flat, verbose=False)
+                                                            mask=mask, use_flat=use_flat,
+                                                            position_hint=position_hint, verbose=False)
 
         except Exception as e:
 
@@ -1119,6 +1122,10 @@ RETRY_EVIDENCE_GROWTH = 1.5
 #   the chunks of as many minutes after its fit: it is kept if it passes, the previous platepar is put back if
 #   that is clearly better on them, otherwise a better one is fitted
 CONFIRM_MINUTES = 15
+
+# The periodic fit of a camera whose platepar passes searches the sky within this many diagonals of the field of view
+#   around its pointing
+HINT_RADIUS_FOV = 2.0
 
 # Number of star counts of chunks kept for the reference of the clear sky, and number of entries of the history
 MAX_STAR_COUNTS = 5000
@@ -1546,10 +1553,13 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
         # Record the attempt, then fit the candidate
         state['last_attempt_jd'] = end_jd
         state['last_attempt_clear'] = len(window)
+        # A platepar which passes gives the pointing to search around (the blind search of the whole sky takes
+        #   minutes per section); without one, or when it fails (e.g. the camera moved), the whole sky is searched
+        position_hint = None if current_fails else _positionHint(current, end_jd)
         candidate, info = fitCandidate(chunk_dirs, pool, held_out, catalog_stars, config, mask=mask,
                                        use_flat=use_flat, fit_vignetting=(fit_vignetting or (current is None)),
                                        vignetting_coeff=(None if current is None else current.vignetting_coeff),
-                                       ff_frames=ff_frames)
+                                       ff_frames=ff_frames, position_hint=position_hint)
         result['candidate'] = info
 
         # Without a candidate (e.g. too few sections agree), the next attempt is made later
@@ -1608,6 +1618,33 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
         writeState(output_dir, state)
 
     return _saveFileResult(results_dir, result)
+
+
+def _positionHint(platepar, jd):
+    """ The pointing of a platepar at a time, as a hint for the plate solver: the RA and Dec of the centre of the
+        image and a search radius of HINT_RADIUS_FOV diagonals of the field of view.
+
+    Arguments:
+        platepar: [Platepar] The platepar.
+        jd: [float] Julian date.
+
+    Return:
+        [tuple] (ra, dec, radius) in degrees, None if it can't be computed.
+    """
+
+    from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
+    from RMS.Astrometry.Conversions import jd2Date
+
+    try:
+        _, ra, dec, _ = xyToRaDecPP([jd2Date(jd)], [platepar.X_res/2.0], [platepar.Y_res/2.0], [1], platepar,
+                                    extinction_correction=False, jd_time=False)
+        radius = HINT_RADIUS_FOV*float(np.hypot(platepar.fov_h, platepar.fov_v))
+
+        return float(ra[0]), float(dec[0]), radius
+
+    except Exception as e:
+        log.warning("Automatic calibration: no pointing hint ({:s})".format(repr(e)))
+        return None
 
 
 def _plateparInUse(output_dir, config, platepar_path, dry_run):

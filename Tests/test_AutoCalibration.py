@@ -269,8 +269,9 @@ def camera(tmp_path, monkeypatch):
     def _fitCandidate(chunk_dirs, section_chunks, held_out, catalog_stars, config, **kwargs):
         """ A candidate with the share of state['candidate_share']. """
 
-        # The fits are counted, the candidate has the share of state['candidate_share']
+        # The fits are counted with their options, the candidate has the share of state['candidate_share']
         state['fits'] += 1
+        state['fit_kwargs'] = kwargs
         platepar = _platepar()
         platepar.mag_lev = state['candidate_share']
         return platepar, {'sections': []}
@@ -642,3 +643,29 @@ def test_older_file_finishing_late_makes_no_decision(camera, tmp_path):
     assert result['action'] == 'judged'
     assert state['fits'] == 1
     assert ac.readState(output_dir)['last_attempt_jd'] == decided
+
+
+def test_fit_is_hinted_with_the_pointing_of_a_passing_platepar(camera, tmp_path):
+    """ The periodic fit of a camera whose platepar passes searches only around its pointing (much faster); a fit
+        without a platepar or for a failing one searches the whole sky, so a camera which moved is still found. """
+
+    config, output_dir, state, process = camera
+
+    # Without a platepar: no hint
+    process('file0')
+    assert state['fit_kwargs'].get('position_hint') is None
+
+    # A passing platepar: a hint around its pointing, with a radius of a few fields of view
+    good = _writePlatepar(str(tmp_path/'good.cal'), 0.95)
+    state['jd'] += 60/1440.0
+    process('file1', good)
+    hint = state['fit_kwargs'].get('position_hint')
+    assert hint is not None
+    ra, dec, radius = hint
+    assert (0 <= ra < 360) and (-90 <= dec <= 90) and (radius > 10)
+
+    # A failing platepar: no hint
+    bad = _writePlatepar(str(tmp_path/'bad.cal'), 0.75)
+    state['jd'] += 60/1440.0
+    process('file2', bad)
+    assert state['fit_kwargs'].get('position_hint') is None
