@@ -1341,3 +1341,45 @@ def test_backfill_calibrates_files_without_a_platepar_or_with_a_failing_one(conf
     assert sorted(mon.backfillCalibration(output_dir, config, 'night')) == ['f1', 'f2']
     assert sorted(recalibrated) == ['f1', 'f2']
     assert readDoneFlag(os.path.join(output_dir, 'f2'))['platepar_mtime'] == 2000
+
+
+def test_recalibration_includes_the_matched_filter_results(config_path, tmp_path, monkeypatch):
+    """ Recalibrating the results of a file with a new platepar also recalibrates the completed results of the
+        separate matched-filter pass. """
+
+    import RMS.MatchedFilterDetection as mfd
+
+    config = cr.parse(config_path)
+    results_dir = str(tmp_path/'results')
+    mf_dir = os.path.join(results_dir, mfd.MATCHED_FILTER_DIR)
+    os.makedirs(mf_dir)
+    platepar_path = str(tmp_path/'new.cal')
+    with open(platepar_path, 'w') as f:
+        f.write('new')
+
+    # The normal and the matched-filter detections, the latter complete
+    picks = [[1, 10.0, 20.0, 0.0, 0.0, 0.0, 0.0, 1000, 0.0, 50, 8.0, 0]]
+    meteor = [['FF_XX0001_20251225_030000_000_0000000.fits', 1, 10.0, 45.0, picks]]
+    FTPdetectinfo.writeFTPdetectinfo(meteor, results_dir, 'FTPdetectinfo_file.txt', results_dir, 'XX0001', 25.0,
+                                     celestial_coords_given=True)
+    FTPdetectinfo.writeFTPdetectinfo(meteor, mf_dir, 'FTPdetectinfo_file_mf.txt', mf_dir, 'XX0001', 25.0,
+                                     celestial_coords_given=True)
+    with open(os.path.join(mf_dir, mfd.DONE_NAME), 'w') as f:
+        f.write('{}')
+
+    recalibrated = []
+    monkeypatch.setattr(mon, 'applyRecalibrate', lambda ftp_path, config, **kwargs: recalibrated.append(ftp_path))
+
+    assert mon.recalibrateResults(results_dir, config, platepar_path=platepar_path)
+
+    # Both are recalibrated with the new platepar
+    assert sorted(os.path.basename(path) for path in recalibrated) == ['FTPdetectinfo_file.txt',
+                                                                      'FTPdetectinfo_file_mf.txt']
+    with open(os.path.join(mf_dir, config.platepar_name)) as f:
+        assert f.read() == 'new'
+
+    # Unfinished matched-filter results are left alone
+    os.remove(os.path.join(mf_dir, mfd.DONE_NAME))
+    recalibrated.clear()
+    mon.recalibrateResults(results_dir, config, platepar_path=platepar_path)
+    assert [os.path.basename(path) for path in recalibrated] == ['FTPdetectinfo_file.txt']

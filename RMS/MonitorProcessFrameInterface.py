@@ -747,7 +747,7 @@ def readPlatepar(platepar_path):
 
 def recalibrateResults(results_dir, config, platepar_path=None, proc_log=None):
     """ Recalibrate the detections in the FTPdetectinfo of the results of a file (ApplyRecalibrate), which adds
-        their astrometry and photometry.
+        their astrometry and photometry, and the completed results of the separate matched-filter pass.
 
     Arguments:
         results_dir: [str] Results directory of the file.
@@ -766,6 +766,9 @@ def recalibrateResults(results_dir, config, platepar_path=None, proc_log=None):
 
     if platepar_path is not None:
         shutil.copy2(platepar_path, os.path.join(results_dir, config.platepar_name))
+
+    # The detections of the separate matched-filter pass get the same platepar
+    _recalibrateMatchedFilter(results_dir, config, os.path.join(results_dir, config.platepar_name), proc_log)
 
     # The detections of the file, a file without detections has nothing to recalibrate
     ftpdetect_files = glob.glob(os.path.join(results_dir, 'FTPdetectinfo_*.txt'))
@@ -786,6 +789,36 @@ def recalibrateResults(results_dir, config, platepar_path=None, proc_log=None):
     )
 
     return True
+
+
+def _recalibrateMatchedFilter(results_dir, config, platepar_path, proc_log):
+    """ Recalibrate the detections of the matched filter in the subdirectory of the results of a file, if its
+        results are complete and it has detections (see MatchedFilterDetection.saveMatchedFilterResults).
+
+    Arguments:
+        results_dir: [str] Results directory of the file.
+        config: [Config] Configuration.
+        platepar_path: [str] Platepar the detections are recalibrated with.
+        proc_log: [Logger] Logger.
+    """
+
+    from RMS.Formats import FTPdetectinfo
+    from RMS.MatchedFilterDetection import DONE_NAME, MATCHED_FILTER_DIR
+
+    # Only complete results with detections, and only with a platepar
+    mf_dir = os.path.join(results_dir, MATCHED_FILTER_DIR)
+    if (not os.path.isfile(os.path.join(mf_dir, DONE_NAME))) or (not os.path.isfile(platepar_path)):
+        return
+
+    for ftp_path in sorted(glob.glob(os.path.join(mf_dir, 'FTPdetectinfo_*.txt'))):
+        if not FTPdetectinfo.readFTPdetectinfo(mf_dir, os.path.basename(ftp_path)):
+            continue
+
+        # As for the normal detections, the platepar is copied next to them first
+        proc_log.info("Running ApplyRecalibrate on: {}".format(ftp_path))
+        shutil.copy2(platepar_path, os.path.join(mf_dir, config.platepar_name))
+        applyRecalibrate(ftp_path, config, generate_plot=False, generate_ufoorbit=False,
+                         ecsv_out=config.monitor_save_ecsv)
 
 
 def backfillCalibration(output_dir, config, night_name, proc_log=None):
