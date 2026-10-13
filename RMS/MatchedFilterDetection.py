@@ -719,8 +719,15 @@ class MatchedFilterDetector(object):
 
 
     def cacheFits(self, n_frames):
-        """ Whether a block of n_frames normalized frames, with their saturation masks, fits into the memory left
-            for the kept blocks (mf_cache_memory). """
+        """ Whether a block of normalized frames, with their saturation masks, fits into the memory left for the
+            kept blocks (mf_cache_memory).
+
+        Arguments:
+            n_frames: [int] Number of frames of the block.
+
+        Return:
+            [bool] True if the block can be kept.
+        """
 
         used = sum(z.nbytes + sat.nbytes for z, sat in self.block_cache.values())
 
@@ -728,8 +735,11 @@ class MatchedFilterDetector(object):
 
 
     def normalizedBlock(self, k):
-        """ The frames of the block k normalized to unit noise, and the masks of their saturated pixels: kept from
+        """ The frames of a block normalized to unit noise, and the masks of their saturated pixels: kept from
             the search, or read and normalized again.
+
+        Arguments:
+            k: [int] Index of the block.
 
         Return:
             (z, saturated): [tuple of ndarrays] float32 normalized frames and uint8 saturation masks.
@@ -1187,6 +1197,12 @@ class MatchedFilterDetector(object):
         zbs = {b: np.empty((len(z), z.shape[1]//b, z.shape[2]//b), dtype=np.float32) for b in bins}
 
         def prepareFrames(i0, i1):
+            """ Prepare the frames i0 .. i1 - 1 of the block, and bin and smooth them for every bin.
+
+            Arguments:
+                i0, i1: [int] The range of the frames (in the block).
+            """
+
             for i in range(i0, i1):
                 frame = z[i].copy() if keep_frames else z[i]
                 self.prepareFrame(frame, static, lines)
@@ -1292,7 +1308,11 @@ class MatchedFilterDetector(object):
 
 
     def useCPU(self, stackers):
-        """ Continue the search on the CPU (after the GPU failed, e.g. out of memory with several workers). """
+        """ Continue the search on the CPU (after the GPU failed, e.g. out of memory with several workers).
+
+        Arguments:
+            stackers: [list] (run_frames, bin, VelocityStacker) of the search, all switched to the CPU.
+        """
 
         self.opts.use_gpu = False
         for _, _, stacker in stackers:
