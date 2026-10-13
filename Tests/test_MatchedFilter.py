@@ -224,7 +224,8 @@ def test_bin_frames_keeps_unit_noise():
 
 @pytest.mark.parametrize('bin_factor', [2, 3, 4, 8])
 def test_bin_frames_is_the_scaled_sum_of_the_bins(bin_factor):
-    """ Every binned pixel is the sum of its bin divided by the bin factor, with the frames cropped to whole bins.
+    """ Every binned pixel is the sum of its bin divided by the bin factor, with the frames cropped to whole bins
+        (up to the rounding of the last bits of a float32, as the pixels are added in another order).
     """
 
     rng = np.random.default_rng(1)
@@ -234,7 +235,7 @@ def test_bin_frames_is_the_scaled_sum_of_the_bins(bin_factor):
 
     binned = binFrames(frames, bin_factor)
     assert binned.dtype == np.float32
-    assert np.allclose(binned, expected/bin_factor, atol=1e-5)
+    assert np.allclose(binned, expected/bin_factor, rtol=1e-6, atol=1e-6)
 
 
 def test_velocity_stack_finds_moving_object():
@@ -1840,3 +1841,6 @@ def test_kept_normalized_blocks_give_the_same_detections(config, monkeypatch, ca
     for a, b in zip(results[0], results[1]):
         assert np.array_equal(a[2], b[2])
     assert reads[1] < reads[0]
+
+    # The kept blocks are released at the end (a segmented input keeps the detector of every segment)
+    assert det.block_cache == {}

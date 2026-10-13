@@ -538,6 +538,8 @@ def binFrames(frames, bin_factor):
 
     # Crop to a whole number of bins. The mean of every bin (OpenCV's area resampling by a whole factor, much
     #   faster than summing the pixels with numpy) times b^2 is the sum, and the sum divided by b is b times the mean
+    #   (the same as the sum of the pixels up to the rounding of the last bits, as the pixels are added in another
+    #   order)
     n, h, w = frames.shape
     h2, w2 = h//bin_factor, w//bin_factor
     if bin_factor == 1:
@@ -2406,6 +2408,10 @@ class MatchedFilterDetector(object):
                                                          self.opts.track_deviation_fwhm,
                                                          self.opts.track_deviation_length)
         self.deviation_rejected += len(rejected)
+
+        # The kept normalized frames are not needed any more (a segmented input keeps the detector of every
+        #   segment until the end of the input)
+        self.block_cache.clear()
 
         self.timing['total'] = time() - t0
         log.info('Matched filter: {:d} detections in {:.1f} s ({:s})'.format(len(detections),
