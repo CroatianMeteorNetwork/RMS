@@ -251,7 +251,113 @@ def acquireStationLock(config):
     return _takeStationLock(str(config.stationID))
 
 
-def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
+def takeSessionCut(session_cut, session_cut_time):
+    """ Mark the latest capture session split (polar day or night) as handled and get its time.
+
+    Arguments:
+        session_cut: [multiprocessing.Value] Shared int, incremented by the capture mode switcher on a split.
+        session_cut_time: [multiprocessing.Value] Shared double, Unix time of the last split.
+
+    Return:
+        (session_cut_handled, cut_utc): [tuple]
+            - session_cut_handled: [int] Counter value to compare against to detect the next split.
+            - cut_utc: [datetime] Naive UTC time of the split. The current time if the split time is not
+                available.
+    """
+
+    session_cut_handled = session_cut.value
+
+    cut_utc = None
+    if (session_cut_time is not None) and (session_cut_time.value > 0):
+        cut_utc = UTCFromTimestamp.utcfromtimestamp(session_cut_time.value)
+
+    if cut_utc is None:
+        cut_utc = RmsDateTime.utcnow()
+
+    return session_cut_handled, cut_utc
+
+
+
+def processAndUploadTimelapses(config, upload_manager, cutoff_utc=None):
+    """ Make timelapses from the saved frames, archive them and put them up for upload.
+
+    Arguments:
+        config: [Config] Configuration object.
+        upload_manager: [UploadManager] Upload manager, None to skip the upload.
+
+    Keyword arguments:
+        cutoff_utc: [datetime] Naive UTC time, only frames before it are used. None by default, in which
+            case the frames until the end of the night just captured are used.
+
+    Return:
+        archive_paths: [list[str] | None] Archives put up for upload, None if nothing was made.
+    """
+
+    if not config.timelapse_generate_from_frames:
+        return None
+
+    try:
+        log.info("Processing frame files...")
+        archive_paths = processFramesFiles(config, cutoff_utc=cutoff_utc)          # may return None
+        log.info("Processing frame files done.")
+
+    except Exception:
+        log.exception("An error occurred when processing frame files!")
+        archive_paths = None
+
+    # -- enqueue & upload -----------------------------------------
+    if archive_paths and upload_manager:
+        try:
+            log.info("Adding file to upload list: %s", archive_paths)
+            upload_manager.addFiles(archive_paths)
+            log.info("File added.")
+
+        except Exception:
+            log.exception("Frames upload failed")
+
+    return archive_paths
+
+
+
+def splitSessionTimelapses(config, upload_manager, cutoff_utc, duration=None):
+    """ Free up disk space, then make the timelapses of the frames up to a capture session split (polar day or
+        night) and put them up for upload.
+
+    The space is freed before the timelapses are made. When space is short, the cleanup deletes the frame
+    archives with the oldest dates first, and the timelapses of a backlog of frames (e.g. after an outage)
+    would be the oldest ones - they would be deleted before they were uploaded.
+
+    Arguments:
+        config: [Config] Configuration object.
+        upload_manager: [UploadManager] Upload manager, None to skip the upload.
+        cutoff_utc: [datetime] Naive UTC time of the split, only frames before it are used.
+
+    Keyword arguments:
+        duration: [float] Duration of the next capture in seconds, passed to deleteOldObservations. None by
+            default.
+
+    Return:
+        space_ok: [bool] True if there is enough disk space to continue capturing.
+    """
+
+    log.info('Freeing up disk space...')
+    space_ok = deleteOldObservations(config.data_dir, config.captured_dir, config.archived_dir, config,
+        duration=duration)
+
+    processAndUploadTimelapses(config, upload_manager, cutoff_utc=cutoff_utc)
+
+    # Making the timelapses deletes the source frames, so try again if there was not enough space before
+    if not space_ok:
+        log.info('Freeing up disk space again after making the timelapses...')
+        space_ok = deleteOldObservations(config.data_dir, config.captured_dir, config.archived_dir, config,
+            duration=duration)
+
+    return space_ok
+
+
+
+def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None, session_cut=None,
+    session_cut_handled=None):
     """ The function will wait for the specified time, or it will stop when Enter is pressed. If no time was
         given (in seconds), it will wait until Enter is pressed. Additionally, it will also stop when the camera mode
         (day/night) changes, in case of continuous capture mode.
@@ -262,9 +368,13 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
         buffered_capture: [BufferedCapture] buffered capture process object
         video_file: [str] Path to the video file, if it was given as the video source.
         daytime_mode: [multiprocessing.Value] shared boolean variable to keep track of camera day/night mode switching. None by default.
+        session_cut: [multiprocessing.Value] shared int, incremented by the capture mode switcher when the
+            capture session should be split during polar day or night. None by default.
+        session_cut_handled: [int] Value of session_cut when the last split was handled.
 
     Return:
-        [str] Reason for exit: "normal", "capture_died", "capture_hung", "compressor_died", "mode_switch"
+        [str] Reason for exit: "normal", "capture_died", "capture_hung", "compressor_died", "mode_switch",
+            "session_cut"
     """
 
     global STOP_CAPTURE
@@ -315,6 +425,10 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
         # Break in case camera modes switched
         if (daytime_mode is not None) and (daytime_mode_prev != daytime_mode.value):
             return "mode_switch"
+
+        # Break in case the capture session should be split (polar day or night, no mode switches)
+        if (session_cut is not None) and (session_cut.value != session_cut_handled):
+            return "session_cut"
 
 
         # If the compressor has died, restart capture
@@ -387,7 +501,8 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
 
 
 def runCapture(config, duration=None, video_file=None, nodetect=False, detect_end=False, \
-    upload_manager=None, eventmonitor=None, resume_capture=False, daytime_mode=None, camera_mode_switch_trigger=None):
+    upload_manager=None, eventmonitor=None, resume_capture=False, daytime_mode=None, camera_mode_switch_trigger=None,
+    session_cut=None, session_cut_time=None):
     """ Run capture and compression for the given time.given
     
     Arguments:
@@ -404,6 +519,10 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         eventmonitor: [EventMonitor object]. Event monitor object. None by default.
         resume_capture: [bool] Resume capture in the last data directory in CapturedFiles. False by default.
         daytime_mode: [multiprocessing.Value] shared boolean variable to keep track of camera day/night mode switching. None by default.
+        session_cut: [multiprocessing.Value] shared int, incremented by the capture mode switcher when the
+            capture session should be split once a day during polar day or night (continuous capture only).
+            None by default.
+        session_cut_time: [multiprocessing.Value] shared double, Unix time of the last session split.
 
     Return:
         night_archive_dir: [str] Path to the archive folder of the processed night.
@@ -622,8 +741,14 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # Path to the archive directory of the processed night (stays None if the night was never processed)
     night_archive_dir = None
 
+    # Value of the session split counter when the last split was handled (polar day/night, continuous mode)
+    session_cut_handled = session_cut.value if session_cut is not None else None
+
     # Loop to handle both continuous and standard capture modes
     while True:
+
+        # Time of the session split handled in this iteration (polar day/night), None if there was no split
+        session_cut_utc = None
 
         # Continuous mode only: Setup new directories for a new night capture
         if config.continuous_capture and (not daytime_mode.value) and ran_once:
@@ -668,7 +793,16 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             # Wait loop with watchdog restart capability
             watchdog_restart_count = 0
             while True:
-                wait_result = wait(duration, None, bc, video_file, daytime_mode)
+                wait_result = wait(duration, None, bc, video_file, daytime_mode, session_cut=session_cut,
+                    session_cut_handled=session_cut_handled)
+
+                # The Sun has not set for a day (polar day): split the session, so the daytime frames are
+                # made into a timelapse and uploaded (there is no night to end the session)
+                if wait_result == "session_cut":
+                    session_cut_handled, session_cut_utc = takeSessionCut(session_cut, session_cut_time)
+                    log.info('No sunset for a day (polar day), splitting the daytime capture session at '
+                        '{}'.format(session_cut_utc))
+                    break
 
                 # WATCHDOG: If capture died or hung, restart it and continue waiting
                 if wait_result in ("capture_died", "capture_hung"):
@@ -815,7 +949,16 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             # Wait loop with watchdog restart capability
             watchdog_restart_count = 0
             while True:
-                wait_result = wait(duration, compressor, bc, video_file, daytime_mode)
+                wait_result = wait(duration, compressor, bc, video_file, daytime_mode, session_cut=session_cut,
+                    session_cut_handled=session_cut_handled)
+
+                # The Sun has not risen for a day (polar night): split the session, so the night is
+                # processed and uploaded and a new night directory is started (there is no sunrise to end it)
+                if wait_result == "session_cut":
+                    session_cut_handled, session_cut_utc = takeSessionCut(session_cut, session_cut_time)
+                    log.info('No sunrise for a day (polar night), splitting the nighttime capture session at '
+                        '{}'.format(session_cut_utc))
+                    break
 
                 # WATCHDOG: If capture died or hung, restart it and continue waiting
                 # The compressor keeps running since it uses shared memory arrays owned by parent
@@ -1065,25 +1208,15 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
             # frames -> timelapse(s) -> archive(s) -> upload
-            if config.timelapse_generate_from_frames:
-                try:
-                    log.info("Processing frame files...")
-                    archive_paths = processFramesFiles(config)          # may return None
-                    log.info("Processing frame files done.")
+            if session_cut_utc is None:
+                processAndUploadTimelapses(config, upload_manager)
 
-                except Exception:
-                    log.exception("An error occurred when processing frame files!")
-                    archive_paths = None
-
-                # -- enqueue & upload -----------------------------------------
-                if archive_paths and upload_manager:
-                    try:
-                        log.info("Adding file to upload list: %s", archive_paths)
-                        upload_manager.addFiles(archive_paths)
-                        log.info("File added.")
-
-                    except Exception:
-                        log.exception("Frames upload failed")
+            # Polar night: the frames up to the session split are used. The disk space is freed first, as the
+            #   next night directory is started right away and the cleanup there could otherwise delete the
+            #   new timelapses before they are uploaded
+            elif not splitSessionTimelapses(config, upload_manager, session_cut_utc, duration=duration):
+                log.error('No more disk space can be freed up! Stopping capture...')
+                disk_full = True
 
 
             # Run the external script (skip it if the night was not archived, as it takes the archive
@@ -1093,6 +1226,16 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
             else:
                 log.warning("Skipping the external script, the night was not successfully processed!")
+
+
+        # Continuous mode, polar day: the daytime session was split - make and upload the timelapse of the
+        #   daytime frames up to the split, and free up disk space as no night starts to do it
+        elif config.continuous_capture and daytime_mode_prev and (session_cut_utc is not None) \
+            and (not disk_full):
+
+            if not splitSessionTimelapses(config, upload_manager, session_cut_utc, duration=duration):
+                log.error('No more disk space can be freed up! Stopping capture...')
+                disk_full = True
 
 
         # If capture is terminated manually, or the disk is full, exit program
@@ -1815,9 +1958,15 @@ if __name__ == "__main__":
             daytime_mode = multiprocessing.Value(ctypes.c_bool, False, lock=False)
             camera_mode_switch_trigger = multiprocessing.Value(ctypes.c_bool, True, lock=False)
 
+            # Shared values to split the capture session once a day during polar day or night, when the
+            # camera mode never switches
+            session_cut = multiprocessing.Value(ctypes.c_int, 0, lock=False)
+            session_cut_time = multiprocessing.Value(ctypes.c_double, 0.0, lock=False)
+
             # Setup the capture mode switcher on another thread
             switcher_stop_event = threading.Event()
-            capture_switcher = threading.Thread(target=captureModeSwitcher, args=(config, daytime_mode, camera_mode_switch_trigger, switcher_stop_event))
+            capture_switcher = threading.Thread(target=captureModeSwitcher, args=(config, daytime_mode, camera_mode_switch_trigger, switcher_stop_event),
+                kwargs={'session_cut': session_cut, 'session_cut_time': session_cut_time})
 
             # To make sure the capture switcher thread exits automatically at the end
             capture_switcher.daemon = True
@@ -1840,13 +1989,16 @@ if __name__ == "__main__":
         else:
             daytime_mode = None
             camera_mode_switch_trigger = None
+            session_cut = None
+            session_cut_time = None
             log.info('Starting capture for {:.2f} hours'.format(duration/60/60))
 
 
         # Run capture and compression
         night_archive_dir = runCapture(config, duration=duration, nodetect=cml_args.nodetect, \
             upload_manager=upload_manager, eventmonitor=eventmonitor, detect_end=(cml_args.detectend or config.postprocess_at_end), \
-            resume_capture=cml_args.resume, daytime_mode=daytime_mode, camera_mode_switch_trigger=camera_mode_switch_trigger)
+            resume_capture=cml_args.resume, daytime_mode=daytime_mode, camera_mode_switch_trigger=camera_mode_switch_trigger,
+            session_cut=session_cut, session_cut_time=session_cut_time)
         cml_args.resume = False
 
         # Indicate that the capture was done once
