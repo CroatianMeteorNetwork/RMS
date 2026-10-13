@@ -911,11 +911,16 @@ def cleanupTempArtifacts(config):
                     log.warning("Failed to remove %s: %s", tmpFile, exc)
 
 
-def processFramesFiles(config):
+def processFramesFiles(config, cutoff_utc=None):
     """Convert saved frame files into timelapse videos and archive them.
 
     Arguments:
         config: [Config] Loaded configuration object.
+
+    Keyword arguments:
+        cutoff_utc: [datetime] Naive UTC time, only frames before it are used. None by default, in which
+            case the cutoff is the last night-to-day switch (end of the night just captured). Given when
+            the capture session is split during polar day or night.
 
     Return:
         archive_paths: [list[str] | None] Paths to the .tar archives produced,
@@ -931,19 +936,24 @@ def processFramesFiles(config):
     log.info("Generating timelapse(s) from saved frames...")
 
     try:
-        # Get sunrise time and maximum possible cutoff (sunrise + inertia)
-        sunrise_utc, max_cutoff_utc = lastNightToDaySwitch(config)
 
-        # Find the actual last night frame in the inertia window
-        # This prevents day frames captured during inertia from being included
-        last_night_frame_ts = findLastNightFrameInWindow(frame_dir, sunrise_utc, max_cutoff_utc)
+        if cutoff_utc is None:
 
-        # Use the last night frame timestamp (+ 1 second to include it) as cutoff,
-        # or fall back to sunrise if no night frames were found in the window
-        if last_night_frame_ts is not None:
-            cutoff_utc = last_night_frame_ts + timedelta(seconds=1)
-        else:
-            cutoff_utc = sunrise_utc
+            # Get sunrise time and maximum possible cutoff (sunrise + inertia)
+            sunrise_utc, max_cutoff_utc = lastNightToDaySwitch(config)
+
+            # Find the actual last night frame in the inertia window
+            # This prevents day frames captured during inertia from being included
+            last_night_frame_ts = findLastNightFrameInWindow(frame_dir, sunrise_utc, max_cutoff_utc)
+
+            # Use the last night frame timestamp (+ 1 second to include it) as cutoff,
+            # or fall back to sunrise if no night frames were found in the window
+            if last_night_frame_ts is not None:
+                cutoff_utc = last_night_frame_ts + timedelta(seconds=1)
+            else:
+                cutoff_utc = sunrise_utc
+
+        log.info("Using frames captured before %s", cutoff_utc)
 
         image_blocks = listImageBlocksBefore(cutoff_utc, frame_dir)
 
