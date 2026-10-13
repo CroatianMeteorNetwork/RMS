@@ -363,3 +363,14 @@ def test_rms_opens_an_upper_case_extension(tmp_path):
         w.write(np.zeros((10, 16), np.uint16), 1_766_624_523_040_000_000)
 
     assert detectInputTypeFile(path, config, detection=True).input_type == 'fblk'
+
+
+def test_convert_16_bit_values_needs_no_scaling(tmp_path):
+    """ 16-bit values are converted as they are, without asking whether they are shifted. """
+
+    frames = [np.full((10, 16), 16*i, np.uint16) for i in range(2)]
+    _writeFitsFrames(tmp_path/'fits', frames, ['2026-04-24T05:40:22.{:06d}+00:00'.format(66667*i) for i in range(2)])
+
+    reader = fb.FrameBlockReader(fb.convertFitsDirectory(str(tmp_path/'fits'), str(tmp_path/'out'), packing='uint16',
+                                                         bit_depth=16)[0])
+    assert int(reader.frame(1).max()) == 16

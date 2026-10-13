@@ -507,6 +507,8 @@ def convertFitsDirectory(fits_dir, out_dir, packing='mono12p', bit_depth=12, fra
     #   bit_depth bits shows they are, a value with its low bits set shows they are not; a frame of zeros or of
     #   multiples of 2**shift alone shows neither
     shift = 16 - bit_depth
+    if shift == 0:
+        shifted = False
     if shifted is None:
         for path in paths:
             values = np.asarray(fits.getdata(path)).astype(np.int64)
