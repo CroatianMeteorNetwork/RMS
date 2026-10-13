@@ -449,6 +449,11 @@ class CaptureHarness(object):
         self.timelapse_cutoffs = []
         self.deletes = 0
         self.compressors = 0
+
+        # Order of the disk cleanups ('delete') and timelapse runs ('timelapse'), and the results the scripted
+        #   cleanups return (True when the list is empty)
+        self.events = []
+        self.delete_results = []
         self.upload_manager = FakeUploadManager()
         self.script = []
         self.clock = Clock(datetime(2026, 10, 10, 0, 0))
@@ -471,11 +476,13 @@ class CaptureHarness(object):
 
         def fakeProcessFramesFiles(config, cutoff_utc=None):
             harness.timelapse_cutoffs.append(cutoff_utc)
+            harness.events.append('timelapse')
             return ['timelapse_{:d}.tar'.format(len(harness.timelapse_cutoffs))]
 
         def fakeDelete(*args, **kwargs):
             harness.deletes += 1
-            return True
+            harness.events.append('delete')
+            return harness.delete_results.pop(0) if harness.delete_results else True
 
         def fakeWait(duration, compressor, bc, video_file, daytime_mode=None, session_cut=None,
                 session_cut_handled=None):
@@ -566,6 +573,10 @@ def test_runcapture_polar_day(monkeypatch, tmp_path):
     assert h.deletes == 3
     assert h.compressors == 0
 
+    # The disk is cleaned up before the timelapses are made, so the new archives are not deleted before
+    #   they are uploaded
+    assert h.events == ['delete', 'timelapse']*3
+
 
 def test_runcapture_polar_night(monkeypatch, tmp_path):
     """ Polar night: every split processes and uploads the night so far and starts a new night directory. """
@@ -585,8 +596,33 @@ def test_runcapture_polar_night(monkeypatch, tmp_path):
     assert h.upload_manager.files == [nights[0], 'timelapse_1.tar', nights[1], 'timelapse_2.tar',
         nights[2], 'timelapse_3.tar']
 
-    # A new night directory frees disk space
-    assert h.deletes == 2
+    # Every split frees disk space before the timelapses are made, and so does every new night directory
+    #   (it finds enough space then, and deletes nothing)
+    assert h.events == ['delete', 'timelapse', 'delete']*2 + ['timelapse']
+
+
+def test_runcapture_split_low_disk(monkeypatch, tmp_path):
+    """ If there is not enough disk space at a split, the cleanup is repeated after the timelapses are made
+        (they delete the source frames). Capture stops only if there is still not enough space. """
+
+    # Polar day: enough space after the timelapses
+    h = CaptureHarness(monkeypatch, tmp_path, start_daytime=True)
+    h.delete_results = [False, True]
+    h.run(['cut', 'stop'])
+    assert h.events == ['delete', 'timelapse', 'delete']
+
+    # Polar day: still not enough space, capture stops at the split
+    h = CaptureHarness(monkeypatch, tmp_path, start_daytime=True)
+    h.delete_results = [False, False]
+    h.run(['cut'])
+    assert h.events == ['delete', 'timelapse', 'delete']
+
+    # Polar night: still not enough space, capture stops at the split without starting a new night
+    h = CaptureHarness(monkeypatch, tmp_path, start_daytime=False)
+    h.delete_results = [False, False]
+    h.run(['cut'])
+    assert h.events == ['delete', 'timelapse', 'delete']
+    assert h.compressors == 1
 
 
 def test_runcapture_normal_and_transitions(monkeypatch, tmp_path):
