@@ -588,3 +588,33 @@ def test_candidate_with_worse_photometry_is_not_used():
     better, reason = ac.candidateIsBetter(candidate, current)
     assert not better
     assert 'photometry' in reason
+
+
+@pytest.mark.parametrize('current_worst, current_share, far_better', [
+    (0.6, 0.6, True),      # The candidate matches 1.58 times the stars of the worst zone
+    (0.75, 0.75, False),   # 1.27 times: the candidate waits for the confirmation
+    (0.75, 0.5, True),     # 1.9 times the stars over the whole image (e.g. chunks not recalibrated)
+    (0.0, 0.0, True),      # Nothing matches
+])
+def test_far_better_candidate(current_worst, current_share, far_better):
+    """ A candidate is installed on trial only if it matches TRIAL_MATCH_RATIO times the share of the stars of a
+        failing platepar, over the whole image or in the worst zone. """
+
+    candidate = _score([0.95]*8)
+    candidate.share = 0.95
+    current = _score([current_worst] + [0.95]*7)
+    current.share = current_share
+
+    assert ac.candidateIsFarBetter(candidate, current) is far_better
+
+
+def test_passing_platepar_is_never_replaced_on_trial():
+    """ A platepar which passes is not replaced on trial, however much better the candidate is. """
+
+    candidate = _score([0.95]*8)
+    candidate.share = 0.95
+    current = _score([0.5]*8)
+    current.share = 0.5
+
+    assert ac.judgeScore(current)[0]
+    assert not ac.candidateIsFarBetter(candidate, current)

@@ -548,10 +548,10 @@ ZONE_MAG_TOLERANCE = 0.05
 MIN_WORST_ZONE_GAIN = 0.1
 ZONE_SHARE_TOLERANCE = 0.03
 
-# A failing platepar is replaced right away, on trial, by a candidate which matches this share of the stars more,
-#   over the whole image or in the worst zone (a platepar which is far off would otherwise stay in use until the
-#   candidate is confirmed)
-TRIAL_SHARE_GAIN = 0.25
+# A failing platepar is replaced right away, on trial, by a candidate which matches this many times the share of
+#   the stars it matches, over the whole image or in the worst zone (a platepar which is far off would otherwise stay
+#   in use until the candidate is confirmed)
+TRIAL_MATCH_RATIO = 1.5
 
 
 def judgeScore(score):
@@ -667,18 +667,26 @@ def candidateIsFarBetter(candidate, current):
         current: [CalibrationScore] Score of the current platepar, None if there is none.
 
     Return:
-        [bool] True if the current platepar fails and the candidate matches clearly more stars.
+        [bool] True if the current platepar fails and the candidate matches far more stars.
     """
 
     # Only a failing platepar is replaced on trial
     if (current is None) or judgeScore(current)[0]:
         return False
 
-    # The candidate matches far more stars over the whole image or in the worst zone
-    share_gain = candidate.share - current.share
-    zone_gain = candidate.worstZoneShare() - current.worstZoneShare()
+    def _farMore(candidate_share, current_share):
 
-    return bool((share_gain >= TRIAL_SHARE_GAIN) or (zone_gain >= TRIAL_SHARE_GAIN))
+        # A platepar which matches nothing (or can't be judged) is far worse than one which matches stars
+        if not np.isfinite(candidate_share):
+            return False
+        if (not np.isfinite(current_share)) or (current_share <= 0):
+            return candidate_share > 0
+
+        return candidate_share >= TRIAL_MATCH_RATIO*current_share
+
+    # The candidate matches far more stars over the whole image or in the worst zone
+    return bool(_farMore(candidate.share, current.share)
+                or _farMore(candidate.worstZoneShare(), current.worstZoneShare()))
 
 
 
@@ -1107,7 +1115,7 @@ RETRY_MINUTES = 10
 RETRY_EVIDENCE_GROWTH = 1.5
 
 # A candidate which would replace a platepar has to be confirmed on the chunks of a later file, at least this many
-#   minutes after the chunks it was fitted on. A platepar installed on trial (see TRIAL_SHARE_GAIN) is tested on
+#   minutes after the chunks it was fitted on. A platepar installed on trial (see TRIAL_MATCH_RATIO) is tested on
 #   the chunks of as many minutes after its fit: it is kept if it passes, the previous platepar is put back if
 #   that is clearly better on them, otherwise a better one is fitted
 CONFIRM_MINUTES = 15
