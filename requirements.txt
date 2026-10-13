@@ -12,7 +12,10 @@ numpy>=1.26.0,<2.0.0 ; python_version>='3.10' and python_version<'3.13'
 # arithmetic in function frames (all-black stacks). 2.3 is the first release with 3.14 wheels.
 numpy>=2.3.0,<3.0.0 ; python_version>='3.13'
 matplotlib>=2.1.1
-pyephem>=3.7.6.0
+# ephem < 4.2 can loop forever computing the Moon rising/setting at high latitudes (hung the night
+# processing on AQ000A in Antarctica). Require the library directly: the old "pyephem" name is a stub that
+# doesn't pin a version, so stations were never upgraded
+ephem>=4.2
 cython>=0.27.3 ; python_version<'3.13'
 # NumPy 2 headers require Cython >= 3.0.6 to build the .pyx modules
 cython>=3.0.6 ; python_version>='3.13'
