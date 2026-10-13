@@ -1185,17 +1185,25 @@ class MatchedFilterDetector(object):
         #   PSF in binned pixels
         bins = sorted(set(stacker_bin for _, stacker_bin, _ in stackers))
         zbs = {b: np.empty((len(z), z.shape[1]//b, z.shape[2]//b), dtype=np.float32) for b in bins}
-        for i in range(len(z)):
-            frame = z[i].copy() if keep_frames else z[i]
-            self.prepareFrame(frame, static, lines)
 
-            # The outliers are clipped once, and the clipped frame binned and smoothed for every bin. The smoothing
-            #   is the PSF in binned pixels, which is smaller than a pixel for the coarse bins (the binning itself
-            #   is then most of the matched filter of the PSF)
-            clipped = np.clip(frame[None], -self.opts.clip, self.opts.clip)
-            for b in bins:
-                binned = binFrames(clipped, b)[0]
-                zbs[b][i] = cv2.GaussianBlur(binned.astype(np.float32), (0, 0), self.searchSigma()/b)
+        def prepareFrames(i0, i1):
+            for i in range(i0, i1):
+                frame = z[i].copy() if keep_frames else z[i]
+                self.prepareFrame(frame, static, lines)
+
+                # The outliers are clipped once, and the clipped frame binned and smoothed for every bin. The
+                #   smoothing is the PSF in binned pixels, which is smaller than a pixel for the coarse bins (the
+                #   binning itself is then most of the matched filter of the PSF)
+                clipped = np.clip(frame[None], -self.opts.clip, self.opts.clip)
+                for b in bins:
+                    binned = binFrames(clipped, b)[0]
+                    zbs[b][i] = cv2.GaussianBlur(binned.astype(np.float32), (0, 0), self.searchSigma()/b)
+
+        # Every frame is prepared on its own, so the frames are prepared in parallel threads, in slices of frames
+        #   (OpenCV and numpy release the GIL), with the same results as in one thread
+        n_threads = max(min(numba.get_num_threads(), len(z)//8), 1)
+        bounds = np.linspace(0, len(z), n_threads + 1).astype(int)
+        self.inThreads(lambda j: prepareFrames(bounds[j], bounds[j + 1]), list(range(n_threads)))
 
         # The static mask binned the same way, grown by a binned pixel (a bin is masked if any of its pixels is)
         statics_b = {}
