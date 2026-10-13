@@ -548,6 +548,11 @@ ZONE_MAG_TOLERANCE = 0.05
 MIN_WORST_ZONE_GAIN = 0.1
 ZONE_SHARE_TOLERANCE = 0.03
 
+# A failing platepar is replaced right away, on trial, by a candidate which matches this share of the stars more,
+#   over the whole image or in the worst zone (a platepar which is far off would otherwise stay in use until the
+#   candidate is confirmed)
+TRIAL_SHARE_GAIN = 0.25
+
 
 def judgeScore(score):
     """ Judge whether a platepar fits the stars well over the whole image, from its score on clear chunks.
@@ -651,6 +656,29 @@ def candidateIsBetter(candidate, current):
         return True, 'the worst zone matches {:+.2f} of its stars more'.format(gain)
 
     return False, 'not clearly better (worst zone {:+.2f})'.format(gain)
+
+
+def candidateIsFarBetter(candidate, current):
+    """ Whether a candidate which is better than a failing platepar (see candidateIsBetter) is so much better that
+        it is installed right away, on trial, instead of waiting for the confirmation on later chunks.
+
+    Arguments:
+        candidate: [CalibrationScore] Score of the candidate.
+        current: [CalibrationScore] Score of the current platepar, None if there is none.
+
+    Return:
+        [bool] True if the current platepar fails and the candidate matches clearly more stars.
+    """
+
+    # Only a failing platepar is replaced on trial
+    if (current is None) or judgeScore(current)[0]:
+        return False
+
+    # The candidate matches far more stars over the whole image or in the worst zone
+    share_gain = candidate.share - current.share
+    zone_gain = candidate.worstZoneShare() - current.worstZoneShare()
+
+    return bool((share_gain >= TRIAL_SHARE_GAIN) or (zone_gain >= TRIAL_SHARE_GAIN))
 
 
 
@@ -1079,7 +1107,9 @@ RETRY_MINUTES = 10
 RETRY_EVIDENCE_GROWTH = 1.5
 
 # A candidate which would replace a platepar has to be confirmed on the chunks of a later file, at least this many
-#   minutes after the chunks it was fitted on
+#   minutes after the chunks it was fitted on. A platepar installed on trial (see TRIAL_SHARE_GAIN) is tested on
+#   the chunks of as many minutes after its fit: it is kept if it passes, the previous platepar is put back if
+#   that is clearly better on them, otherwise a better one is fitted
 CONFIRM_MINUTES = 15
 
 # Number of star counts of chunks kept for the reference of the clear sky, and number of entries of the history
@@ -1136,8 +1166,8 @@ def readState(output_dir):
         [dict] The state, a new state if there is none or it is damaged.
     """
 
-    state = {'files': [], 'star_counts': [], 'last_attempt_jd': None, 'pending': None, 'installs': [],
-             'history': []}
+    state = {'files': [], 'star_counts': [], 'last_attempt_jd': None, 'pending': None, 'trial': None,
+             'installs': [], 'history': []}
 
     # The saved state replaces the defaults
     path = statePath(output_dir)
@@ -1295,7 +1325,9 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
         whether a clearly better platepar can be fitted. A platepar is fitted from scratch on several sections,
         which have to agree, and judged on chunks which were not fitted on (see fitCandidate and judgeScore). A
         new platepar is installed right away if there is none; one which would replace a platepar has to be
-        confirmed as better on a later file first.
+        confirmed as better on a later file first, unless the platepar fails and is far worse: then the new one is
+        installed right away on trial, and the previous one is put back if the new one fails on the following
+        chunks while the previous one is clearly better there.
 
     Arguments:
         results_dir: [str] Results directory of the file (with its CALSTARS file).
@@ -1376,6 +1408,12 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
 
         catalog_stars = _loadCatalog(config, end_jd)
 
+        # The platepar in use is judged: one installed while this file was processed (e.g. by another worker) is
+        #   newer than the one it was processed with. In a dry run the saved candidate stands for the installed
+        #   platepar, so the decisions are the ones which would be made
+        platepar_path = _plateparInUse(output_dir, config, platepar_path, dry_run)
+        result['judged_platepar'] = platepar_path
+
         # Judge the current platepar
         current = _platepar(platepar_path, use_flat)
         current_score = None
@@ -1386,6 +1424,60 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
             log.info("Automatic calibration: the platepar {:s} on {:d} clear chunks{:s}".format(
                 'passes' if current_ok else 'FAILS', len(held_out),
                 '' if current_ok else ': ' + '; '.join(current_reasons)))
+
+        # A platepar on trial is tested on the chunks after the ones it was fitted on, once they span
+        #   CONFIRM_MINUTES. No new candidate is fitted meanwhile. The trial ends if another platepar is in use
+        trial = state.get('trial')
+        if trial and ((platepar_path is None) or (os.path.abspath(platepar_path) != os.path.abspath(trial['path']))
+                      or (not os.path.isfile(trial['previous']))):
+            _removeFile(trial['previous'])
+            state['trial'] = trial = None
+
+        if trial:
+
+            # The chunks later than the ones the platepar was fitted on, it is tested until they span
+            #   CONFIRM_MINUTES
+            later = [chunk for chunk in window if chunk[1] > trial['fitted_jd']]
+            if (not later) or (later[-1][1] - trial['fitted_jd'] < CONFIRM_MINUTES/1440.0):
+                result['action'] = 'the platepar on trial is tested'
+                writeState(output_dir, state)
+                return _saveFileResult(results_dir, result)
+
+            # The platepar on trial and the previous one are scored on the same later chunks
+            confirm_chunks = spreadChunks(later, MAX_HELD_OUT)
+            previous = _platepar(trial['previous'], use_flat)
+            trial_score = scorePlatepar(current, confirm_chunks, catalog_stars, config, ff_frames=ff_frames)
+            trial_ok, trial_reasons = judgeScore(trial_score)
+            previous_better, reason = False, ''
+            if (not trial_ok) and (previous is not None):
+                previous_score = scorePlatepar(previous, confirm_chunks, catalog_stars, config, ff_frames=ff_frames)
+                previous_better, reason = candidateIsBetter(previous_score, trial_score)
+
+            result['trial'] = {'kept': trial_ok, 'reasons': trial_reasons, 'rolled_back': previous_better,
+                               'score': trial_score.toDict()}
+            state['trial'] = None
+            _removeFile(trial['previous'])
+
+            # A platepar which passes is kept
+            if trial_ok:
+                log.info("Automatic calibration: the platepar on trial passes, it is kept")
+                result['action'] = 'kept the platepar on trial'
+                writeState(output_dir, state)
+                return _saveFileResult(results_dir, result)
+
+            # The previous platepar is put back if it is clearly better
+            if previous_better:
+                path = installPlatepar(previous, output_dir, config, 'rolled back: ' + reason, dry_run=dry_run)
+                state['installs'].append({'jd': end_jd, 'path': path, 'reason': 'rolled back: ' + reason,
+                                          'dry_run': dry_run})
+                result['action'] = _dryRunAction('rolled back the platepar on trial', dry_run)
+                result['installed'] = None if dry_run else path
+                writeState(output_dir, state)
+                return _saveFileResult(results_dir, result)
+
+            # Otherwise a better platepar is fitted below, as the platepar in use fails
+            log.info("Automatic calibration: the platepar on trial fails ({:s}), a better one is fitted".format(
+                '; '.join(trial_reasons)))
 
         # A pending candidate is confirmed (or dropped) on the chunks after the ones it was fitted on, once they
         #   span CONFIRM_MINUTES, comparing it with the current platepar on the same chunks. No new candidate is
@@ -1413,13 +1505,14 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
             better, reason = candidateIsBetter(candidate_score, current_confirm_score)
             result['pending'] = {'better': better, 'reason': reason, 'score': candidate_score.toDict()}
             state['pending'] = None
+            _removeFile(pending['path'])
 
             # A confirmed candidate is installed
             if better:
                 path = installPlatepar(candidate, output_dir, config, 'confirmed: ' + reason, dry_run=dry_run)
                 state['installs'].append({'jd': end_jd, 'path': path, 'reason': 'confirmed: ' + reason,
                                           'dry_run': dry_run})
-                result['action'] = 'installed the confirmed candidate'
+                result['action'] = _dryRunAction('installed the confirmed candidate', dry_run)
                 result['installed'] = None if dry_run else path
                 writeState(output_dir, state)
                 return _saveFileResult(results_dir, result)
@@ -1468,7 +1561,23 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
             #   held-out chunks
             path = installPlatepar(candidate, output_dir, config, reason, dry_run=dry_run)
             state['installs'].append({'jd': end_jd, 'path': path, 'reason': reason, 'dry_run': dry_run})
-            result['action'] = 'installed the first platepar'
+            result['action'] = _dryRunAction('installed the first platepar', dry_run)
+            result['installed'] = None if dry_run else path
+
+        elif better and candidateIsFarBetter(candidate_score, current_score):
+
+            # A candidate far better than a failing platepar is installed right away, on trial: it is tested on
+            #   the following chunks, and the replaced platepar is kept to be put back
+            import shutil
+
+            previous_path = os.path.join(output_dir, 'auto_previous_' + config.platepar_name)
+            shutil.copyfile(platepar_path, previous_path)
+            path = installPlatepar(candidate, output_dir, config, 'on trial: ' + reason, dry_run=dry_run)
+            state['trial'] = {'path': path, 'previous': previous_path,
+                              'fitted_jd': max(chunk[1] for chunk in window), 'reason': reason}
+            state['installs'].append({'jd': end_jd, 'path': path, 'reason': 'on trial: ' + reason,
+                                      'dry_run': dry_run})
+            result['action'] = _dryRunAction('installed the platepar on trial', dry_run)
             result['installed'] = None if dry_run else path
 
         elif better:
@@ -1486,6 +1595,55 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
         writeState(output_dir, state)
 
     return _saveFileResult(results_dir, result)
+
+
+def _plateparInUse(output_dir, config, platepar_path, dry_run):
+    """ The platepar a camera uses now: the one installed by the automatic calibration if it is newer than the
+        platepar a file was processed with (see MonitorNightReport.selectPlatepar), in a dry run the saved candidate.
+
+    Arguments:
+        output_dir: [str] Output directory of the camera.
+        config: [Config] Configuration.
+        platepar_path: [str] Platepar the file was processed with, None if there was none.
+        dry_run: [bool] Whether the platepars are only saved as candidates.
+
+    Return:
+        [str] Path of the platepar in use, None if there is none.
+    """
+
+    from RMS.MonitorNightReport import autoPlateparPath
+
+    # The platepar installed by the automatic calibration, or the candidate of a dry run
+    installed_path = autoPlateparPath(output_dir, config)
+    if dry_run:
+        installed_path = os.path.join(output_dir, 'auto_candidate_' + config.platepar_name)
+
+    if not os.path.isfile(installed_path):
+        return platepar_path
+
+    # The newer one is in use
+    if (platepar_path is None) or (not os.path.isfile(platepar_path)) \
+            or (os.path.getmtime(installed_path) >= os.path.getmtime(platepar_path)):
+        return installed_path
+
+    return platepar_path
+
+
+def _dryRunAction(action, dry_run):
+    """ The action of the automatic calibration as it is reported, marked in a dry run (nothing is installed). """
+
+    return ('dry run: ' + action) if dry_run else action
+
+
+def _removeFile(path):
+    """ Remove a file of the automatic calibration which is no longer needed, if it exists. """
+
+    try:
+        if path and os.path.isfile(path):
+            os.remove(path)
+
+    except OSError as e:
+        log.warning("Automatic calibration: {:s} can't be removed: {:s}".format(path, repr(e)))
 
 
 def _loadCatalog(config, jd):

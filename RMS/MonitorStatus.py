@@ -1190,17 +1190,21 @@ class MonitorStatus(object):
                 relative to the output directory.
 
         Return:
-            [dict] The number of installed platepars, the last one, whether a candidate waits for the
-                confirmation, and the judgement of the latest judged file.
+            [dict] The number of installed platepars, the last one, the number of candidates of a dry run, whether
+                a candidate waits for the confirmation or a platepar is on trial, and the judgement of the latest
+                judged file.
         """
 
         from RMS.Astrometry.AutoCalibration import FILE_RESULT_NAME, readState
 
-        # The installed platepars and a pending candidate, from the state of the camera
+        # The installed platepars (apart from the candidates of a dry run, which are not used), a pending
+        #   candidate and a platepar on trial, from the state of the camera
         state = readState(self.output_dir)
-        summary = {'installs': len(state['installs']), 'pending': state.get('pending') is not None}
-        if state['installs']:
-            summary['last_install'] = {key: state['installs'][-1].get(key) for key in ['path', 'reason']}
+        installs = [entry for entry in state['installs'] if not entry.get('dry_run')]
+        summary = {'installs': len(installs), 'dry_run_candidates': len(state['installs']) - len(installs),
+                   'pending': state.get('pending') is not None, 'trial': state.get('trial') is not None}
+        if installs:
+            summary['last_install'] = {key: installs[-1].get(key) for key in ['path', 'reason']}
 
         # The judgement of the latest file which has one
         for results_dir, _, _, _ in sorted(files, key=lambda entry: entry[0], reverse=True):

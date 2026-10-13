@@ -342,12 +342,13 @@ def test_good_platepar_is_kept_and_checked_periodically(camera, tmp_path):
 
 
 def test_failing_platepar_is_replaced_after_confirmation(camera, tmp_path):
-    """ A failing platepar is replaced by a candidate confirmed on later chunks. """
+    """ A failing platepar which is not far worse than the candidate is replaced by it once it is confirmed on
+        later chunks. """
 
     from RMS.MonitorNightReport import autoPlateparPath
 
     config, output_dir, state, process = camera
-    bad = _writePlatepar(str(tmp_path/'bad.cal'), 0.2)
+    bad = _writePlatepar(str(tmp_path/'bad.cal'), 0.75)
 
     # The candidate waits for the confirmation on a later file
     result = process('file1', bad)
@@ -361,17 +362,19 @@ def test_failing_platepar_is_replaced_after_confirmation(camera, tmp_path):
     assert result['action'] == 'candidate waits for the confirmation'
     assert state['fits'] == 1
 
-    # Confirmed on the second file after the fit
+    # Confirmed on the second file after the fit, the saved candidate is removed
+    pending_path = ac.readState(output_dir)['pending']['path']
     result = process('file3', bad)
     assert result['action'] == 'installed the confirmed candidate'
     assert os.path.isfile(autoPlateparPath(output_dir, config))
+    assert not os.path.isfile(pending_path)
 
 
 def test_unconfirmed_candidate_is_dropped(camera, tmp_path, monkeypatch):
     """ A candidate which isn't better on the later chunks is dropped. """
 
     config, output_dir, state, process = camera
-    bad = _writePlatepar(str(tmp_path/'bad.cal'), 0.2)
+    bad = _writePlatepar(str(tmp_path/'bad.cal'), 0.75)
 
     process('file1', bad)
     assert ac.readState(output_dir)['pending'] is not None
@@ -383,6 +386,10 @@ def test_unconfirmed_candidate_is_dropped(camera, tmp_path, monkeypatch):
     result = process('file3', bad)
     assert result['pending']['better'] is False
     assert result['action'] != 'installed the confirmed candidate'
+
+    # As the platepar still fails, a new candidate is fitted in its place
+    assert state['fits'] == 2
+    assert ac.readState(output_dir)['pending']['fitted_jd'] > state['jd'] - 15/1440.0
 
 
 def test_dry_run_installs_nothing(camera):
@@ -399,8 +406,108 @@ def test_dry_run_installs_nothing(camera):
 
     # Nothing is installed, the candidate is saved only
     assert result['installed'] is None
+    assert result['action'] == 'dry run: installed the first platepar'
     assert not os.path.isfile(autoPlateparPath(output_dir, config))
     assert os.path.isfile(os.path.join(output_dir, 'auto_candidate_' + config.platepar_name))
+    assert ac.readState(output_dir)['installs'][-1]['dry_run'] is True
+
+
+def test_dry_run_judges_its_candidate_as_installed(camera):
+    """ A dry run takes its saved candidate as the platepar in use, so it decides as it would with the candidate
+        installed, and doesn't fit a new first platepar on every file. """
+
+    from RMS.MonitorNightReport import autoPlateparPath
+
+    config, output_dir, state, process = camera
+
+    for i in range(3):
+        results_dir = os.path.join(os.path.dirname(output_dir), 'file{:d}'.format(i))
+        os.makedirs(results_dir)
+        result = ac.autoCalibrateFile(results_dir, config, output_dir, None, dry_run=True)
+        state['jd'] += 10/1440.0
+
+    # The candidate of the first file is judged on the next ones, nothing is fitted again within the interval
+    assert result['action'] == 'judged'
+    assert result['current']['ok'] is True
+    assert state['fits'] == 1
+    assert not os.path.isfile(autoPlateparPath(output_dir, config))
+
+
+def test_terrible_platepar_is_replaced_on_trial_and_kept(camera, tmp_path):
+    """ A platepar which is far worse than the candidate is replaced right away, and the new platepar is kept once
+        it passes on the chunks of the following CONFIRM_MINUTES. """
+
+    from RMS.MonitorNightReport import autoPlateparPath
+
+    config, output_dir, state, process = camera
+    bad = _writePlatepar(str(tmp_path/'bad.cal'), 0.2)
+
+    # Installed on trial right away, the replaced platepar is kept for a roll back
+    result = process('file1', bad)
+    assert result['action'] == 'installed the platepar on trial'
+    assert result['installed'] == autoPlateparPath(output_dir, config)
+    trial = ac.readState(output_dir)['trial']
+    assert os.path.isfile(trial['previous'])
+
+    # A file still processed with the replaced platepar (by another worker) judges the trial platepar, nothing is
+    #   fitted while it is tested
+    result = process('file2', bad)
+    assert result['action'] == 'the platepar on trial is tested'
+    assert result['current']['ok'] is True
+    assert state['fits'] == 1
+
+    # It passes on the chunks after the fit, so it is kept
+    result = process('file3', autoPlateparPath(output_dir, config))
+    assert result['action'] == 'kept the platepar on trial'
+    assert ac.readState(output_dir)['trial'] is None
+    assert not os.path.isfile(trial['previous'])
+    with open(autoPlateparPath(output_dir, config)) as f:
+        assert json.load(f)['mag_lev'] == pytest.approx(0.95)
+
+
+def test_failing_trial_platepar_is_rolled_back(camera, tmp_path):
+    """ A platepar on trial which fails on the following chunks, where the replaced one is clearly better, is
+        replaced by the previous platepar again. """
+
+    from RMS.MonitorNightReport import autoPlateparPath
+
+    config, output_dir, state, process = camera
+    bad = _writePlatepar(str(tmp_path/'bad.cal'), 0.2)
+    process('file1', bad)
+    trial = ac.readState(output_dir)['trial']
+
+    # The sky changes: the trial platepar fails on the later chunks, while the previous one fits them
+    _writePlatepar(autoPlateparPath(output_dir, config), 0.1)
+    _writePlatepar(trial['previous'], 0.95)
+    process('file2', bad)
+    result = process('file3', bad)
+
+    # The previous platepar is put back
+    assert result['action'] == 'rolled back the platepar on trial'
+    assert result['installed'] == autoPlateparPath(output_dir, config)
+    with open(autoPlateparPath(output_dir, config)) as f:
+        assert json.load(f)['mag_lev'] == pytest.approx(0.95)
+    assert ac.readState(output_dir)['trial'] is None
+
+
+def test_failing_trial_platepar_without_a_better_previous_is_refitted(camera, tmp_path):
+    """ A platepar on trial which fails, while the replaced one is no better, is replaced by a new fit. """
+
+    from RMS.MonitorNightReport import autoPlateparPath
+
+    config, output_dir, state, process = camera
+    bad = _writePlatepar(str(tmp_path/'bad.cal'), 0.2)
+    process('file1', bad)
+
+    # The trial platepar fails on the later chunks, the previous one too
+    _writePlatepar(autoPlateparPath(output_dir, config), 0.1)
+    process('file2', bad)
+    result = process('file3', bad)
+
+    # A new candidate is fitted, far better than the failing trial platepar, so it goes on trial
+    assert result['trial']['kept'] is False
+    assert result['action'] == 'installed the platepar on trial'
+    assert state['fits'] == 2
 
 
 def test_not_enough_clear_sky(camera, monkeypatch):

@@ -1743,9 +1743,11 @@ def test_status_reports_the_automatic_calibration(tmp_path):
 
     status = mst.MonitorStatus('XX0001', str(output_dir), str(tmp_path/'input'), config, lambda: [], 2)
 
-    # One installed platepar, and the judgements of the files (the platepar failed on the later one)
+    # One installed platepar and a candidate of a dry run, and the judgements of the files (the platepar failed on
+    #   the later one)
     state = ac.readState(str(output_dir))
     state['installs'].append({'jd': 2461000.5, 'path': 'auto.cal', 'reason': 'there is no platepar'})
+    state['installs'].append({'jd': 2461000.6, 'path': 'auto_candidate.cal', 'reason': 'better', 'dry_run': True})
     ac.writeState(str(output_dir), state)
     for name, ok in [('f1', True), ('f2', False)]:
         with open(str(output_dir/'2025'/name/ac.FILE_RESULT_NAME), 'w') as f:
@@ -1755,9 +1757,12 @@ def test_status_reports_the_automatic_calibration(tmp_path):
     files = [(os.path.join('2025', name), {}, {}, None) for name in ['f1', 'f2']]
     summary = status._autoCalibration(files)
 
-    # The installed platepar, no pending candidate, and the judgement of the latest file
+    # The installed platepar, the candidate of the dry run, no pending candidate or platepar on trial, and the
+    #   judgement of the latest file
     assert summary['installs'] == 1
     assert summary['last_install'] == {'path': 'auto.cal', 'reason': 'there is no platepar'}
+    assert summary['dry_run_candidates'] == 1
     assert summary['pending'] is False
+    assert summary['trial'] is False
     assert summary['latest']['results_dir'] == os.path.join('2025', 'f2')
     assert summary['latest']['platepar_ok'] is False
