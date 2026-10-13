@@ -510,10 +510,13 @@ def test_matched_filter_finds_blocks_in_a_directory(tmp_path):
 def test_failed_finishing_closes_the_file(tmp_path, monkeypatch, failing):
     """ An error while a block is finished closes its file descriptor and leaves the block unpublished. """
 
+    def openFiles():
+        return len(os.listdir('/proc/self/fd')) if os.path.isdir('/proc/self/fd') else None
+
     path = str(tmp_path/('XX0001_20251225_010203_000000' + fb.EXTENSION))
+    n_open = openFiles()
     w = fb.FrameBlockWriter(path, 16, 10, max_frames=2)
     w.write(np.zeros((10, 16), np.uint16), 0)
-    fd = w.fd
 
     def fail(*args):
         raise OSError('disk error')
@@ -524,6 +527,58 @@ def test_failed_finishing_closes_the_file(tmp_path, monkeypatch, failing):
     monkeypatch.undo()
 
     assert w.fd is None
-    with pytest.raises(OSError):
-        os.fstat(fd)
+    assert openFiles() == n_open
     assert not os.path.exists(path) and os.path.exists(path + '.part')
+
+
+def test_failed_close_never_touches_the_descriptor_again(tmp_path, monkeypatch):
+    """ When closing the file itself fails, the writer forgets its descriptor (the system has released it, and the
+        number can belong to another file by now): a later abort doesn't truncate or close anything. """
+
+    path = str(tmp_path/('XX0001_20251225_010203_000000' + fb.EXTENSION))
+    w = fb.FrameBlockWriter(path, 16, 10, max_frames=2)
+    w.write(np.zeros((10, 16), np.uint16), 0)
+
+    # The descriptor is closed, but the close reports an error (as it can on network file systems)
+    close = os.close
+
+    def failingClose(fd):
+        close(fd)
+        raise OSError('close failed')
+
+    monkeypatch.setattr(os, 'close', failingClose)
+    with pytest.raises(OSError):
+        w.close()
+    monkeypatch.undo()
+    assert w.fd is None
+
+    # Nothing is done with the old descriptor afterwards
+    touched = []
+    monkeypatch.setattr(os, 'ftruncate', lambda fd, size: touched.append(fd))
+    monkeypatch.setattr(os, 'close', lambda fd: touched.append(fd))
+    w.abort()
+    assert touched == []
+
+
+@pytest.mark.skipif(os.name != 'posix', reason='Directories are synchronized on POSIX systems only')
+def test_failed_directory_sync_after_publishing_warns(tmp_path, monkeypatch):
+    """ If the directory can't be flushed after the block got its final name, the block is published: a warning,
+        not an error which would look like the block was not written. """
+
+    path = str(tmp_path/('XX0001_20251225_010203_000000' + fb.EXTENSION))
+    w = fb.FrameBlockWriter(path, 16, 10, max_frames=1)
+    w.write(np.zeros((10, 16), np.uint16), 0)
+
+    # The file is flushed, the directory not
+    import stat
+    fsync = os.fsync
+
+    def failingDirectorySync(fd):
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            raise OSError('directory sync failed')
+        fsync(fd)
+
+    monkeypatch.setattr(os, 'fsync', failingDirectorySync)
+    with pytest.warns(RuntimeWarning):
+        w.close(fsync=True)
+    assert fb.FrameBlockReader(path).n_frames == 1

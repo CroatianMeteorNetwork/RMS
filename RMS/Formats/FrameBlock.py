@@ -38,6 +38,7 @@ import json
 import os
 import struct
 import time
+import warnings
 
 import numpy as np
 
@@ -286,10 +287,11 @@ class FrameBlockWriter(object):
             _pwriteAll(self.fd, MAGIC + struct.pack('<II', VERSION, HEADER_SIZE) + text, 0)
             _pwriteAll(self.fd, bytes(self.data_offset - self.table_offset), self.table_offset)
 
-        # A block which could not be started leaves no file and no open descriptor
+        # A block which could not be started leaves no file and no open descriptor (forgotten before it is closed,
+        #   see close)
         except Exception:
-            os.close(self.fd)
-            self.fd = None
+            fd, self.fd = self.fd, None
+            os.close(fd)
             os.remove(self.part_path)
             raise
 
@@ -362,24 +364,31 @@ class FrameBlockWriter(object):
             self.abort()
             return
 
-        # The file is closed also when finishing it fails; it then stays unpublished as <name>.part
+        # The file is closed also when finishing it fails; it then stays unpublished as <name>.part. The descriptor
+        #   is forgotten before it is closed: after a failed close the system may give its number to another file,
+        #   which must never be truncated or closed by this writer
+        fd, self.fd = self.fd, None
         try:
-            os.ftruncate(self.fd, self.data_offset + self.n_frames*self.frame_stride)
+            os.ftruncate(fd, self.data_offset + self.n_frames*self.frame_stride)
             if fsync:
-                os.fsync(self.fd)
+                os.fsync(fd)
         finally:
-            os.close(self.fd)
-            self.fd = None
+            os.close(fd)
         os.replace(self.part_path, self.path)
 
         # The new name is in the directory, which is flushed too (on POSIX systems, where a directory can be
-        #   opened), so the block survives a power loss under its final name
+        #   opened), so the block survives a power loss under its final name. The block is published by now, so a
+        #   failure here is a warning: an error would look like the block was not written
         if fsync and (os.name == 'posix'):
-            dir_fd = os.open(os.path.dirname(os.path.abspath(self.path)), os.O_RDONLY)
             try:
-                os.fsync(dir_fd)
-            finally:
-                os.close(dir_fd)
+                dir_fd = os.open(os.path.dirname(os.path.abspath(self.path)), os.O_RDONLY)
+                try:
+                    os.fsync(dir_fd)
+                finally:
+                    os.close(dir_fd)
+            except OSError as e:
+                warnings.warn('{} is written, but its directory could not be flushed to the disk: {}'.format(
+                    self.path, e), RuntimeWarning)
 
     def abort(self):
         """ Stop writing without publishing the file: it stays as <name>.part, readable up to its last frame, and
@@ -389,11 +398,12 @@ class FrameBlockWriter(object):
         if self.fd is None:
             return
 
+        # The descriptor is forgotten before it is closed (see close)
+        fd, self.fd = self.fd, None
         try:
-            os.ftruncate(self.fd, self.data_offset + self.n_frames*self.frame_stride)
+            os.ftruncate(fd, self.data_offset + self.n_frames*self.frame_stride)
         finally:
-            os.close(self.fd)
-            self.fd = None
+            os.close(fd)
 
     def __enter__(self):
         return self
