@@ -23,6 +23,7 @@ import logging
 import RMS.ConfigReader as cr
 import RMS.StartCapture as sc
 import RMS.Reprocess as rp
+from RMS.Misc import RmsDateTime
 import Utils.GenerateTimelapse as gt
 from RMS.CaptureModeSwitcher import captureModeAt, polarSessionBoundary, switcherStep, lastNightToDaySwitch, \
     POLAR_RECHECK_SECONDS, SWITCH_HORIZON_DEG
@@ -39,6 +40,8 @@ SITES = {
     'AQ000A_ArrivalHeights': (-77.8476, 166.6710, 184),
     'AQ0001_TerraNovaBay': (-74.62035, 164.22646, 30),
     'CA_Elginfield': (43.1928, -81.3157, 323),
+    'FI_Helsinki': (60.1699, 24.9384, 20),
+    'NO_Tromso': (69.6496, 18.9560, 10),
     'NO_Svalbard': (78.2232, 15.6267, 30),
     'AQ_SouthPole': (-89.99, 0.0, 2835),
     'Equator': (0.0, 0.0, 0),
@@ -218,6 +221,26 @@ def test_splits_only_at_culmination_without_horizon_crossing(yearly_runs, name):
 def test_no_splits_at_mid_and_low_latitudes(yearly_runs):
     for name in ('CA_Elginfield', 'Equator'):
         assert yearly_runs[name][3] == []
+
+
+def test_high_latitude_summer(yearly_runs):
+    """ Above ~57.6 deg the Sun stays above the -9 deg switching horizon around the summer solstice, so the
+        session is split daily there too (not only at polar stations). Only polar day, no polar night. """
+
+    for name in ('FI_Helsinki', 'NO_Tromso'):
+
+        config = siteConfig(name)
+        _, _, _, cuts = yearly_runs[name]
+
+        assert len(cuts) > 40, "{}: only {} splits".format(name, len(cuts))
+
+        for c in cuts:
+            assert sunIsUp(config, c), "{}: split at {} with the Sun below the horizon".format(name, c)
+            assert 4 <= c.month <= 8, "{}: split outside of the summer at {}".format(name, c)
+
+        # One split per day
+        for a, b in zip(cuts[:-1], cuts[1:]):
+            assert timedelta(hours=23, minutes=50) <= b - a <= timedelta(hours=24, minutes=10)
 
 
 def test_aq000a_polar_periods(yearly_runs):
@@ -818,7 +841,7 @@ def test_switcher_thread_runs_now_at_aq000a():
     import time
     time.sleep(2)
     assert thread.is_alive()
-    assert daytime_mode.value == sunIsUp(config, datetime.utcnow())
+    assert daytime_mode.value == sunIsUp(config, RmsDateTime.utcnow())
     assert session_cut.value == 0
 
     stop_event.set()

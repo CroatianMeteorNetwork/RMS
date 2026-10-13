@@ -26,8 +26,8 @@ SHUTDOWN_INERTIA_SECONDS = 300  # 5 minutes - generous buffer since mode-based s
 # first real sunset or sunrise) is not missed
 POLAR_RECHECK_SECONDS = 3600
 
-# A capture session is not split if it ended less than this long before the split time (e.g. a short night
-# just before the polar day ended)
+# A capture session is not split if it ended less than this long before the split time, so a split never
+# leaves an almost empty session (e.g. at the pole, when the mode changes shortly before a split)
 MIN_SESSION_SECONDS = 12*3600
 
 # During polar day or night a capture session is split at the latest this long after the last split (at the
