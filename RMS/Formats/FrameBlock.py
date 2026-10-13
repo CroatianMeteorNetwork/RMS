@@ -27,6 +27,7 @@ crash) is read up to the last complete frame. A finished file is truncated after
 Usage:
     python -m RMS.Formats.FrameBlock info FILE
     python -m RMS.Formats.FrameBlock convert FITS_DIR OUT_DIR [--packing mono12p|uint16] [--bits 12] [--frames N]
+        [--shifted auto|yes|no]
     python -m RMS.Formats.FrameBlock demo OUT_DIR       (a simulated camera recording to block files)
 """
 
@@ -280,9 +281,9 @@ class FrameBlockWriter(object):
             if np.shape(frame) != (self.height, self.width):
                 raise ValueError('The frame is {}, expected {}x{}'.format(np.shape(frame), self.height, self.width))
 
-            # Values above the bit depth would be stored wrapped around
-            if (self.bit_depth < 16) and (np.max(frame) > 2**self.bit_depth - 1):
-                raise ValueError('The frame has values above {} bits'.format(self.bit_depth))
+            # Values outside the bit depth would be stored wrapped around
+            if (np.min(frame) < 0) or (np.max(frame) > 2**self.bit_depth - 1):
+                raise ValueError('The frame has values outside 0-{}'.format(2**self.bit_depth - 1))
             if self.packing == 'mono12p':
                 data = pack12(frame)
             else:
@@ -461,7 +462,7 @@ class FrameBlockReader(object):
 ### Conversion and example ###
 
 def convertFitsDirectory(fits_dir, out_dir, packing='mono12p', bit_depth=12, frames_per_block=None,
-                         station_id=None):
+                         station_id=None, shifted=None):
     """ Convert a directory of FITS frames (one frame per file, DATE-OBS the start of the exposure) into block
         files.
 
@@ -474,6 +475,9 @@ def convertFitsDirectory(fits_dir, out_dir, packing='mono12p', bit_depth=12, fra
         bit_depth: [int] Significant bits of the values (the FITS values are shifted down to them). 12 by default.
         frames_per_block: [int] Frames per block file, all frames of the directory in one block if None.
         station_id: [str] Station ID for the names of the files, from the FITS header (TELESCOP) if None.
+        shifted: [bool] The values are stored shifted up to span 16 bits (a 12-bit camera in a 16-bit FITS holds
+            them times 16). If None, taken from the first frame which shows it (a value above bit_depth bits, or
+            a value with its low bits set); an error if no frame shows it.
 
     Return:
         [list] Paths of the written block files.
@@ -499,11 +503,21 @@ def convertFitsDirectory(fits_dir, out_dir, packing='mono12p', bit_depth=12, fra
     times = {path: _utc(fits.getheader(path)['DATE-OBS']) for path in paths}
     paths.sort(key=lambda path: times[path])
 
-    # Whether the values are stored shifted up (a 12-bit camera in a 16-bit FITS holds them times 16), decided
-    #   once from the first frame so all frames are scaled the same way: shifted values have their low bits zero
+    # Whether the values are stored shifted up, decided once so all frames are scaled the same way: a value above
+    #   bit_depth bits shows they are, a value with its low bits set shows they are not; a frame of zeros or of
+    #   multiples of 2**shift alone shows neither
     shift = 16 - bit_depth
-    first = np.asarray(fits.getdata(paths[0])).astype(np.int64)
-    shifted = bool(first.max() > (2**bit_depth - 1)) or not np.any(first & (2**shift - 1))
+    if shifted is None:
+        for path in paths:
+            values = np.asarray(fits.getdata(path)).astype(np.int64)
+            if values.max() > (2**bit_depth - 1):
+                shifted = True
+            elif np.any(values & (2**shift - 1)):
+                shifted = False
+            if shifted is not None:
+                break
+        if shifted is None:
+            raise ValueError('The frames do not show whether their values are shifted to 16 bits, give shifted')
     frames_per_block = frames_per_block or len(paths)
     os.makedirs(out_dir, exist_ok=True)
 
@@ -531,9 +545,11 @@ def convertFitsDirectory(fits_dir, out_dir, packing='mono12p', bit_depth=12, fra
 
                 # The values down to bit_depth bits, the same way for every frame
                 if shifted:
+                    if np.any(values & (2**shift - 1)):
+                        raise ValueError('{} has values which are not shifted to 16 bits'.format(path))
                     values = values >> shift
-                if values.max() > (2**bit_depth - 1):
-                    raise ValueError('{} has values above {} bits'.format(path, bit_depth))
+                if (values.min() < 0) or (values.max() > (2**bit_depth - 1)):
+                    raise ValueError('{} has values outside {} bits'.format(path, bit_depth))
                 time_ns = int(round(times[path].timestamp()*1e9))
                 writer.write(values, time_ns, exposure_us=round(exposure*1e6), gain=gain, counter=start + i)
         written.append(os.path.join(out_dir, name))
@@ -601,6 +617,8 @@ if __name__ == '__main__':
     p.add_argument('--packing', default='mono12p', choices=PACKINGS)
     p.add_argument('--bits', type=int, default=12)
     p.add_argument('--frames', type=int, default=None, help='Frames per block (all by default).')
+    p.add_argument('--shifted', choices=['auto', 'yes', 'no'], default='auto',
+                   help='The FITS values are shifted to span 16 bits (taken from the frames by default).')
 
     p = sub.add_parser('demo', help='Record simulated frames to block files.')
     p.add_argument('out_dir')
@@ -619,7 +637,8 @@ if __name__ == '__main__':
 
     elif args.command == 'convert':
         for path in convertFitsDirectory(args.fits_dir, args.out_dir, packing=args.packing, bit_depth=args.bits,
-                                         frames_per_block=args.frames):
+                                         frames_per_block=args.frames,
+                                         shifted={'auto': None, 'yes': True, 'no': False}[args.shifted]):
             print(path)
 
     elif args.command == 'demo':

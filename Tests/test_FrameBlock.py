@@ -191,7 +191,8 @@ def test_convert_takes_date_obs_without_offset_as_utc(tmp_path, monkeypatch):
         time.tzset()
     try:
         _writeFitsFrames(tmp_path/'fits', [np.zeros((10, 16), np.uint16)], ['2026-04-24T05:40:22.500000'])
-        reader = fb.FrameBlockReader(fb.convertFitsDirectory(str(tmp_path/'fits'), str(tmp_path/'out'))[0])
+        reader = fb.FrameBlockReader(fb.convertFitsDirectory(str(tmp_path/'fits'), str(tmp_path/'out'),
+                                                             shifted=False)[0])
     finally:
         monkeypatch.delenv('TZ')
         if hasattr(time, 'tzset'):
@@ -279,3 +280,47 @@ def test_inconsistent_header_is_rejected(tmp_path):
 
     with pytest.raises(ValueError):
         fb.FrameBlockReader(path)
+
+
+@pytest.mark.parametrize('first', ['zeros', 'multiples_of_16'])
+def test_convert_does_not_guess_from_an_ambiguous_first_frame(tmp_path, first):
+    """ Unshifted 12-bit frames whose first frame tells nothing about the scaling (all zeros, or only multiples
+        of 16) are not shifted down: the scaling is taken from the first frame which shows it. """
+
+    rng = np.random.default_rng(7)
+    first_frame = np.zeros((10, 16), np.uint16) if first == 'zeros' else \
+        (rng.integers(0, 256, (10, 16)).astype(np.uint16) << 4)
+    later = rng.integers(0, 4096, (10, 16)).astype(np.uint16)
+    later[0, 0] = 4095
+    _writeFitsFrames(tmp_path/'fits', [first_frame, later],
+                     ['2026-04-24T05:40:22.{:06d}+00:00'.format(66667*i) for i in range(2)])
+
+    reader = fb.FrameBlockReader(fb.convertFitsDirectory(str(tmp_path/'fits'), str(tmp_path/'out'))[0])
+    assert np.array_equal(reader.frame(0), first_frame)
+    assert np.array_equal(reader.frame(1), later)
+
+
+def test_convert_refuses_to_guess_when_no_frame_shows_the_scaling(tmp_path):
+    """ When no frame shows whether the values are stored shifted, the scaling must be given. """
+
+    frames = [np.full((10, 16), 16*i, np.uint16) for i in range(2)]
+    _writeFitsFrames(tmp_path/'fits', frames, ['2026-04-24T05:40:22.{:06d}+00:00'.format(66667*i) for i in range(2)])
+
+    with pytest.raises(ValueError):
+        fb.convertFitsDirectory(str(tmp_path/'fits'), str(tmp_path/'out'))
+
+    reader = fb.FrameBlockReader(fb.convertFitsDirectory(str(tmp_path/'fits'), str(tmp_path/'out'), shifted=False)[0])
+    assert int(reader.frame(1).max()) == 16
+
+
+@pytest.mark.parametrize('packing', fb.PACKINGS)
+def test_negative_values_are_rejected(tmp_path, packing):
+    """ A negative value is refused instead of being stored wrapped around. """
+
+    path = str(tmp_path/('XX0001_20251225_010203_000000' + fb.EXTENSION))
+    with fb.FrameBlockWriter(path, 16, 10, max_frames=2, packing=packing) as w:
+        frame = np.zeros((10, 16), np.int32)
+        frame[2, 2] = -1
+        with pytest.raises(ValueError):
+            w.write(frame, 0)
+        assert w.n_frames == 0

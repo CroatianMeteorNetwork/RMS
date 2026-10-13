@@ -109,6 +109,10 @@ python -m RMS.Formats.FrameBlock info FILE
 python -m RMS.Formats.FrameBlock convert FITS_DIR OUT_DIR [--packing mono12p|uint16] [--frames N]
 ```
 
+The converter takes from the frames whether their values are stored shifted to span 16 bits (as 12-bit cameras
+write them in 16-bit FITS files): a value above 12 bits shows they are, a value with its low 4 bits set shows they
+are not. If no frame shows it (e.g. only dark frames), give it with `--shifted yes|no`.
+
 In Python, `FrameBlockReader(path)` gives `n_frames`, `times` (s, UTC), `table` (the records), `metadata`, and
 `frame(i, shift_to_16bit=False)`.
 
