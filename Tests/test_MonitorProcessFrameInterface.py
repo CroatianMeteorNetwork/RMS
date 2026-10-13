@@ -1492,3 +1492,24 @@ def test_backfill_of_a_replaced_platepar_covers_unreported_nights(config_path, t
                          recalibrated.append(os.path.basename(results_dir))))
 
     assert sorted(mon.backfillCalibration(output_dir, config, 'night3', replaced_mtimes=[1000.0])) == ['f2', 'f3']
+
+
+@pytest.mark.parametrize('start_method, expected', [('fork', 1), ('spawn', 0)])
+def test_star_catalog_loaded_once_before_forked_workers(monkeypatch, start_method, expected):
+    """ The monitor loads the star catalog of a config once, before the first worker is forked (the forked
+        workers then find it decompressed), and not at all when the workers are not forked. """
+
+    import multiprocessing
+    import RMS.MonitorProcessFrameInterface as mpfi
+    from RMS.Formats import StarCatalog
+
+    calls = []
+    monkeypatch.setattr(StarCatalog, 'readStarCatalog', lambda *args, **kwargs: calls.append(args))
+    monkeypatch.setattr(multiprocessing, 'get_start_method', lambda allow_none=False: start_method)
+    monkeypatch.setattr(mpfi, '_PRELOADED_CATALOGS', set())
+
+    config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.config')
+    for _ in range(3):
+        mpfi.preloadStarCatalog(config_path)
+
+    assert len(calls) == expected

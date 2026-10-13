@@ -1009,6 +1009,7 @@ class Config:
         #   measurement) takes them from memory; neighbouring segments share mf_segment_overlap frames, and the
         #   detections found in both are joined. 0 reads the frames from the file for every pass
         self.mf_buffer_memory = 0.0
+        self.mf_cache_memory = 0.0
         self.mf_segment_overlap = 512
 
         # Clouded sky: the stars of every chunk of frames are matched to the catalog, and where the stars are
@@ -2399,7 +2400,7 @@ def parseMatchedFilter(config, parser):
     for name in ("mf_threshold", "mf_ang_vel_min", "mf_ang_vel_max", "mf_psf_sigma", "mf_max_pos_error",
                  "mf_min_sample_snr", "mf_star_threshold", "mf_persistence", "mf_clip", "mf_trail_level", "mf_min_displacement",
                  "mf_sigma_scale", "mf_track_significance", "mf_tier_speed", "mf_cloud_max_offset",
-                 "mf_buffer_memory", "mf_line_concentration", "mf_track_deviation_fwhm",
+                 "mf_buffer_memory", "mf_cache_memory", "mf_line_concentration", "mf_track_deviation_fwhm",
                  "mf_track_deviation_length"):
         if parser.has_option(section, name):
             setattr(config, name, parser.getfloat(section, name))

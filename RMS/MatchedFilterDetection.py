@@ -75,8 +75,8 @@ from RMS.Routines import Image
 from RMS.Routines import MaskImage
 from RMS.Routines.DynamicFTPCompressionCy import sampleMedianMAD
 from RMS.Routines.SkyQuality import CalibrationError, SkyQualityMap, SkyReference, chunkFirstFrames
-from RMS.Routines.MatchedFilterKernels import (VelocityStacker, fitMovingPSF, forcedTrackSignal, streakAperture,
-                                               CUDA_AVAILABLE)
+from RMS.Routines.MatchedFilterKernels import (DeviceFrames, VelocityStacker, fitMovingPSF, forcedTrackSignal,
+                                               streakAperture, CUDA_AVAILABLE)
 from RMS.Detection import getPolarLine, removeDuplicateDetections, joinContinuousDetections
 
 
@@ -536,13 +536,19 @@ def binFrames(frames, bin_factor):
         all its signal while the noise stays 1.
     """
 
-    # Crop to a whole number of bins, and sum the pixels of every bin (reshaped so the pixels of a bin are on
-    #   their own axes)
+    # Crop to a whole number of bins. The mean of every bin (OpenCV's area resampling by a whole factor, much
+    #   faster than summing the pixels with numpy) times b^2 is the sum, and the sum divided by b is b times the mean
     n, h, w = frames.shape
     h2, w2 = h//bin_factor, w//bin_factor
-    binned = frames[:, :h2*bin_factor, :w2*bin_factor].reshape(n, h2, bin_factor, w2, bin_factor).sum(axis=(2, 4))
+    if bin_factor == 1:
+        return frames[:, :h2, :w2].astype(np.float32)
+    binned = np.empty((n, h2, w2), dtype=np.float32)
+    for i in range(n):
+        binned[i] = cv2.resize(np.ascontiguousarray(frames[i, :h2*bin_factor, :w2*bin_factor], dtype=np.float32),
+                               (w2, h2), interpolation=cv2.INTER_AREA)
+    binned *= bin_factor
 
-    return binned/bin_factor
+    return binned
 
 
 class BlockBackground(object):
@@ -621,6 +627,13 @@ class MatchedFilterDetector(object):
 
         # The bright columns and rows of every block (see lineMask), masked in the search except near bright sources
         self.line_masks = {}
+
+        # The normalized frames of the blocks kept from the search for the measurement and the verification, which
+        #   then don't read and normalize them again (see normalizedBlock): block index -> (normalized frames,
+        #   saturation masks), within mf_cache_memory GB. A block is dropped when the background it was normalized
+        #   with changes (see maskObjects)
+        self.cache_bytes_max = getattr(config, 'mf_cache_memory', 0.0)*1e9
+        self.block_cache = {}
 
         # Factor of the intensities from the stars (see apertureCorrection), None if not applied
         self.aperture_correction = None
@@ -703,6 +716,34 @@ class MatchedFilterDetector(object):
             return frames, saturated
 
         return frames
+
+
+    def cacheFits(self, n_frames):
+        """ Whether a block of n_frames normalized frames, with their saturation masks, fits into the memory left
+            for the kept blocks (mf_cache_memory). """
+
+        used = sum(z.nbytes + sat.nbytes for z, sat in self.block_cache.values())
+
+        return used + n_frames*self.height*self.width*5 <= self.cache_bytes_max
+
+
+    def normalizedBlock(self, k):
+        """ The frames of the block k normalized to unit noise, and the masks of their saturated pixels: kept from
+            the search, or read and normalized again.
+
+        Return:
+            (z, saturated): [tuple of ndarrays] float32 normalized frames and uint8 saturation masks.
+        """
+
+        if k in self.block_cache:
+            return self.block_cache[k]
+
+        first, last = self.block_starts[k], self.block_ends[k]
+        t1 = time()
+        frames, saturated = self.readFrames(first, last - first, saturation=True)
+        self.timing['read'] += time() - t1
+
+        return self.normalize(frames, k), saturated
 
 
     def blockBackground(self, samples):
@@ -1031,10 +1072,14 @@ class MatchedFilterDetector(object):
         #   trail (the trail of a very bright source can itself be above the level), not a source. The peak of
         #   every source is the largest value of its pixels (computed from the bright pixels only: ndimage.maximum
         #   sorts the whole frame, which is slow for large frames)
-        labels, n = ndimage.label(bright)
+        #   The components and their boxes are found by OpenCV, which labels them as ndimage.label does (4-connected,
+        #   numbered in the order of their first pixel) at a third of the time
+        n, labels, stats, _ = cv2.connectedComponentsWithStats(bright.view(np.uint8), connectivity=4,
+                                                               ltype=cv2.CV_32S)
+        n -= 1
         peaks = np.full(n, -np.inf)
         np.maximum.at(peaks, labels[bright] - 1, frame[bright])
-        boxes = ndimage.find_objects(labels)
+        boxes = [(slice(y, y + h), slice(x, x + w)) for x, y, w, h in stats[1:, :4].tolist()]
         sources = []
         for i in np.argsort(peaks)[::-1]:
             sl = boxes[i]
@@ -1110,7 +1155,7 @@ class MatchedFilterDetector(object):
         frame[static] = 0
 
 
-    def searchBlock(self, z, static, block_first, stackers, lines=None):
+    def searchBlock(self, z, static, block_first, stackers, lines=None, keep_frames=False):
         """ Velocity search of a block of normalized frames.
 
         Arguments:
@@ -1122,6 +1167,7 @@ class MatchedFilterDetector(object):
         Keyword arguments:
             lines: [ndarray] Mask of the bright columns and rows (see lineMask), None for none. Their pixels are
                 masked in every frame except near the sources which stand out from them (see lineKeep).
+            keep_frames: [bool] Leave the frames unchanged (every frame is prepared in a copy). False by default.
 
         Return:
             [list] Hits.
@@ -1140,12 +1186,13 @@ class MatchedFilterDetector(object):
         bins = sorted(set(stacker_bin for _, stacker_bin, _ in stackers))
         zbs = {b: np.empty((len(z), z.shape[1]//b, z.shape[2]//b), dtype=np.float32) for b in bins}
         for i in range(len(z)):
-            self.prepareFrame(z[i], static, lines)
+            frame = z[i].copy() if keep_frames else z[i]
+            self.prepareFrame(frame, static, lines)
 
             # The outliers are clipped once, and the clipped frame binned and smoothed for every bin. The smoothing
             #   is the PSF in binned pixels, which is smaller than a pixel for the coarse bins (the binning itself
             #   is then most of the matched filter of the PSF)
-            clipped = np.clip(z[i:i + 1], -self.opts.clip, self.opts.clip)
+            clipped = np.clip(frame[None], -self.opts.clip, self.opts.clip)
             for b in bins:
                 binned = binFrames(clipped, b)[0]
                 zbs[b][i] = cv2.GaussianBlur(binned.astype(np.float32), (0, 0), self.searchSigma()/b)
@@ -1157,6 +1204,20 @@ class MatchedFilterDetector(object):
             statics_b[b] = cv2.dilate(static_b.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
 
         ### ###
+
+        # On the GPU, the frames of every bin are copied there once, padded for the largest shift of the stackers
+        #   which use them, and the stacks of all runs of a stacker are computed by one launch (see
+        #   VelocityStacker.stackMaxRuns)
+        device_frames = {}
+        if self.opts.use_gpu:
+            try:
+                for b in bins:
+                    pad = max(stacker.pad for _, stacker_bin, stacker in stackers if stacker_bin == b)
+                    device_frames[b] = DeviceFrames(zbs[b], pad)
+            except Exception:
+                log.error('Matched filter: the GPU failed, continuing on the CPU:\n' + traceback.format_exc())
+                self.useCPU(stackers)
+                device_frames = {}
 
         hits = []
         for run_frames, b, stacker in stackers:
@@ -1172,22 +1233,23 @@ class MatchedFilterDetector(object):
                 self.persistence_counts[key] = np.zeros(static_b.shape, dtype=np.int32)
                 self.persistence_runs[key] = 0
 
-            # Consecutive runs of run_frames frames of the block
-            for r0 in range(0, len(zb) - run_frames + 1, run_frames):
+            # Consecutive runs of run_frames frames of the block: the largest stack over the velocities of every
+            #   pixel, and its velocity, for all runs
+            run_starts = list(range(0, len(zb) - run_frames + 1, run_frames))
+            t1 = time()
+            try:
+                stack_maxes, vel_idxs = stacker.stackMaxRuns(device_frames.get(b, zb), run_starts)
+            except Exception:
+                if not stacker.use_gpu:
+                    raise
+                # E.g. out of GPU memory with several workers: continue on the CPU
+                log.error('Matched filter: the GPU failed, continuing on the CPU:\n' + traceback.format_exc())
+                self.useCPU(stackers)
+                device_frames = {}
+                stack_maxes, vel_idxs = stacker.stackMaxRuns(zb, run_starts)
+            self.timing['stack'] += time() - t1
 
-                # The largest stack over the velocities of every pixel, and its velocity
-                t1 = time()
-                try:
-                    stack_max, vel_idx = stacker.stackMax(zb[r0:r0 + run_frames])
-                except Exception:
-                    if not stacker.use_gpu:
-                        raise
-                    # E.g. out of GPU memory with several workers: continue on the CPU
-                    log.error('Matched filter: the GPU failed, continuing on the CPU:\n' + traceback.format_exc())
-                    stacker.use_gpu = False
-                    self.opts.use_gpu = False
-                    stack_max, vel_idx = stacker.stackMax(zb[r0:r0 + run_frames])
-                self.timing['stack'] += time() - t1
+            for r0, stack_max, vel_idx in zip(run_starts, stack_maxes, vel_idxs):
 
                 # The maximum over many velocities of noise is not the noise of a single stack (it is the largest of
                 #   many draws, so its distribution is shifted up and narrower). The detection image is therefore
@@ -1219,6 +1281,14 @@ class MatchedFilterDetector(object):
                                     (yb + 0.5)*b - 0.5, vxb*b, vyb*b, float(zmax[yb, xb]), run_frames, b))
 
         return hits
+
+
+    def useCPU(self, stackers):
+        """ Continue the search on the CPU (after the GPU failed, e.g. out of memory with several workers). """
+
+        self.opts.use_gpu = False
+        for _, _, stacker in stackers:
+            stacker.use_gpu = False
 
 
     def searchTiers(self):
@@ -1325,8 +1395,13 @@ class MatchedFilterDetector(object):
             # The persistence counts to carry to the next segment, before its frames
             self.persistenceCheckpoint(first)
 
+            # With the normalized blocks kept for the measurement, the saturated pixels are taken now too
             t1 = time()
-            frames = self.readFrames(first, last - first)
+            keep = self.cacheFits(last - first)
+            if keep:
+                frames, saturated = self.readFrames(first, last - first, saturation=True)
+            else:
+                frames = self.readFrames(first, last - first)
             self.timing['read'] += time() - t1
 
             # Measure the PSF sigma on the stars of the mean of the block, against the noise of the sky in the mean
@@ -1348,9 +1423,12 @@ class MatchedFilterDetector(object):
             z = self.normalize(frames, k)
             del frames
             self.timing['background'] += time() - t1
+            if keep:
+                self.block_cache[k] = (z, saturated)
 
+            # A kept block is searched on copies of its frames (the search changes the frames it prepares)
             t1 = time()
-            hits += self.searchBlock(z, static, first, stackers, lines=self.line_masks[k])
+            hits += self.searchBlock(z, static, first, stackers, lines=self.line_masks[k], keep_frames=keep)
             self.timing['search'] += time() - t1
 
         if not psf_measured:
@@ -2612,6 +2690,12 @@ class MatchedFilterDetector(object):
             self.starTemplate(self.backgrounds[k])
             self.static_masks[k] = self.blockMask(k, self.backgrounds[k])
 
+        # The kept normalized blocks which used a changed background (their own or a neighbour's, see normalize)
+        #   are read and normalized again when they are needed
+        for k in touched:
+            for j in (k - 1, k, k + 1):
+                self.block_cache.pop(j, None)
+
 
     def inThreads(self, function, items):
         """ Call a function on every item (e.g. the measurement of a track in a block of frames, or a slice of the
@@ -2649,11 +2733,8 @@ class MatchedFilterDetector(object):
                 continue
 
             # The unbinned frames with their saturated pixels, normalized to unit noise
-            t1 = time()
-            frames, saturated = self.readFrames(first, last - first, saturation=True)
-            self.timing['read'] += time() - t1
             bg = self.backgrounds[k]
-            z = self.normalize(frames, k)
+            z, saturated = self.normalizedBlock(k)
 
             # Every track continues its measurements in this block. The tracks are independent (each changes only
             #   its own state, the frames are only read), so they are measured in parallel threads
@@ -2741,10 +2822,7 @@ class MatchedFilterDetector(object):
             if not active:
                 continue
 
-            t1 = time()
-            frames, saturated = self.readFrames(first, last - first, saturation=True)
-            self.timing['read'] += time() - t1
-            z = self.normalize(frames, k)
+            z, saturated = self.normalizedBlock(k)
             noise = self.backgrounds[k].noise
 
             # The pixels of the stars are left out: the stars which are too faint to be masked still vary

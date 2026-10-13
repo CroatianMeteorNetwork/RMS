@@ -69,8 +69,9 @@ def _writePNG(file_path, img, pnginfo):
         reader never sees a partially written image.
     """
 
+    # The fastest zlib level: 14 times faster than the default for a 1080p 16-bit image, for 5% larger files
     tmp_path = file_path + '.tmp'
-    PILImage.fromarray(img).save(tmp_path, format='PNG', pnginfo=pnginfo)
+    PILImage.fromarray(img).save(tmp_path, format='PNG', pnginfo=pnginfo, compress_level=1)
     os.replace(tmp_path, file_path)
 
 
