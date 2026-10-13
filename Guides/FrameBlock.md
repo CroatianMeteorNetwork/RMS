@@ -106,7 +106,8 @@ with FrameBlockWriter(path, 1920, 1080, frames_per_block, packing='mono12p', bit
 
 ```
 python -m RMS.Formats.FrameBlock info FILE
-python -m RMS.Formats.FrameBlock convert FITS_DIR OUT_DIR [--packing mono12p|uint16] [--frames N]
+python -m RMS.Formats.FrameBlock convert FITS_DIR OUT_DIR [--packing mono12p|uint16] [--frames N] [--shifted auto|yes|no]
+    [--overwrite]
 ```
 
 The converter takes from the frames whether their values are stored shifted to span 16 bits (as 12-bit cameras

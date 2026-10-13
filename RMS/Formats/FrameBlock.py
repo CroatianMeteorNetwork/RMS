@@ -27,7 +27,7 @@ crash) is read up to the last complete frame. A finished file is truncated after
 Usage:
     python -m RMS.Formats.FrameBlock info FILE
     python -m RMS.Formats.FrameBlock convert FITS_DIR OUT_DIR [--packing mono12p|uint16] [--bits 12] [--frames N]
-        [--shifted auto|yes|no]
+        [--shifted auto|yes|no] [--overwrite]
     python -m RMS.Formats.FrameBlock demo OUT_DIR       (a simulated camera recording to block files)
 """
 
@@ -189,6 +189,20 @@ def unpack12(buf, width, height, shift=0):
 
 ### Writing ###
 
+def _pwriteAll(fd, data, offset):
+    """ Write all bytes at the offset: the system may write only a part of them at once (e.g. a full disk
+        writes none, which is an error), so the writing continues until all are written.
+    """
+
+    view = memoryview(data).cast('B')
+    while len(view):
+        n = os.pwrite(fd, view, offset)
+        if n <= 0:
+            raise OSError('Nothing could be written at byte {}'.format(offset))
+        view = view[n:]
+        offset += n
+
+
 class FrameBlockWriter(object):
     def __init__(self, path, width, height, max_frames, packing='mono12p', bit_depth=12, metadata=None):
         """ Write frames to a block file as they arrive (see the module docstring for the layout).
@@ -247,8 +261,8 @@ class FrameBlockWriter(object):
             os.posix_fallocate(self.fd, 0, total)
         except (AttributeError, OSError):
             os.ftruncate(self.fd, total)
-        os.pwrite(self.fd, MAGIC + struct.pack('<II', VERSION, HEADER_SIZE) + text, 0)
-        os.pwrite(self.fd, bytes(self.data_offset - self.table_offset), self.table_offset)
+        _pwriteAll(self.fd, MAGIC + struct.pack('<II', VERSION, HEADER_SIZE) + text, 0)
+        _pwriteAll(self.fd, bytes(self.data_offset - self.table_offset), self.table_offset)
 
     def write(self, frame, time_ns, exposure_us=0, gain=0.0, counter=0, packed=False):
         """ Append a frame.
@@ -291,14 +305,14 @@ class FrameBlockWriter(object):
 
         # The frame first, then its record, marked valid last
         i = self.n_frames
-        os.pwrite(self.fd, data, self.data_offset + i*self.frame_stride)
+        _pwriteAll(self.fd, data, self.data_offset + i*self.frame_stride)
         record = np.zeros(1, dtype=FRAME_RECORD)
         record['time_ns'] = int(time_ns)
         record['exposure_us'] = int(exposure_us)
         record['gain'] = float(gain)
         record['counter'] = int(counter)
         record['flags'] = FLAG_VALID
-        os.pwrite(self.fd, record.tobytes(), self.table_offset + i*FRAME_RECORD.itemsize)
+        _pwriteAll(self.fd, record.tobytes(), self.table_offset + i*FRAME_RECORD.itemsize)
         self.n_frames += 1
 
         return i
@@ -462,7 +476,7 @@ class FrameBlockReader(object):
 ### Conversion and example ###
 
 def convertFitsDirectory(fits_dir, out_dir, packing='mono12p', bit_depth=12, frames_per_block=None,
-                         station_id=None, shifted=None):
+                         station_id=None, shifted=None, overwrite=False):
     """ Convert a directory of FITS frames (one frame per file, DATE-OBS the start of the exposure) into block
         files.
 
@@ -478,6 +492,7 @@ def convertFitsDirectory(fits_dir, out_dir, packing='mono12p', bit_depth=12, fra
         shifted: [bool] The values are stored shifted up to span 16 bits (a 12-bit camera in a 16-bit FITS holds
             them times 16). If None, taken from the first frame which shows it (a value above bit_depth bits, or
             a value with its low bits set); an error if no frame shows it.
+        overwrite: [bool] Replace the blocks of the same names in out_dir (an error otherwise). False by default.
 
     Return:
         [list] Paths of the written block files.
@@ -536,6 +551,11 @@ def convertFitsDirectory(fits_dir, out_dir, packing='mono12p', bit_depth=12, fra
         while os.path.join(out_dir, name) in written:
             t0 += datetime.timedelta(microseconds=1)
             name = '{}_{}{}'.format(station, t0.strftime('%Y%m%d_%H%M%S_%f'), EXTENSION)
+
+        # A block of an earlier conversion is kept, unless it is to be replaced
+        if os.path.exists(os.path.join(out_dir, name)) and not overwrite:
+            raise FileExistsError('{} exists (convert with overwrite to replace it)'.format(
+                os.path.join(out_dir, name)))
         metadata = {k: header0[k] for k in ('TELESCOP', 'SITELAT', 'SITELONG', 'SITEELEV', 'XBINNING',
                                             'YBINNING', 'GAIN', 'FRAMERAT', 'PIXFMT') if k in header0}
         metadata['station_id'] = station
@@ -627,6 +647,7 @@ if __name__ == '__main__':
     p.add_argument('--frames', type=int, default=None, help='Frames per block (all by default).')
     p.add_argument('--shifted', choices=['auto', 'yes', 'no'], default='auto',
                    help='The FITS values are shifted to span 16 bits (taken from the frames by default).')
+    p.add_argument('--overwrite', action='store_true', help='Replace existing blocks of the same names.')
 
     p = sub.add_parser('demo', help='Record simulated frames to block files.')
     p.add_argument('out_dir')
@@ -646,7 +667,8 @@ if __name__ == '__main__':
     elif args.command == 'convert':
         for path in convertFitsDirectory(args.fits_dir, args.out_dir, packing=args.packing, bit_depth=args.bits,
                                          frames_per_block=args.frames,
-                                         shifted={'auto': None, 'yes': True, 'no': False}[args.shifted]):
+                                         shifted={'auto': None, 'yes': True, 'no': False}[args.shifted],
+                                         overwrite=args.overwrite):
             print(path)
 
     elif args.command == 'demo':

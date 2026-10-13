@@ -386,3 +386,42 @@ def test_convert_takes_fits_of_any_case(tmp_path):
     reader = fb.FrameBlockReader(fb.convertFitsDirectory(str(tmp_path/'fits'), str(tmp_path/'out'),
                                                          station_id='TEST01')[0])
     assert reader.n_frames == 3
+
+
+def test_convert_keeps_existing_blocks(tmp_path):
+    """ A block already in the output directory is not replaced, unless asked. """
+
+    frames = [np.full((10, 16), 4093, np.uint16)]
+    _writeFitsFrames(tmp_path/'fits', frames, ['2026-04-24T05:40:22+00:00'])
+    path = fb.convertFitsDirectory(str(tmp_path/'fits'), str(tmp_path/'out'), station_id='TEST01')[0]
+
+    with pytest.raises(FileExistsError):
+        fb.convertFitsDirectory(str(tmp_path/'fits'), str(tmp_path/'out'), station_id='TEST01')
+    assert fb.FrameBlockReader(path).n_frames == 1
+
+    assert fb.convertFitsDirectory(str(tmp_path/'fits'), str(tmp_path/'out'), station_id='TEST01',
+                                   overwrite=True) == [path]
+
+
+def test_short_writes_are_completed(tmp_path, monkeypatch):
+    """ A write which stores only part of the bytes (as the system may do) is continued until all are written. """
+
+    write = os.pwrite
+
+    def shortWrite(fd, data, offset):
+        data = memoryview(data).cast('B')
+        return write(fd, data[:max(1, len(data)//3)], offset)
+
+    monkeypatch.setattr(os, 'pwrite', shortWrite)
+    rng = np.random.default_rng(8)
+    frames = [rng.integers(0, 4096, (10, 16), dtype=np.uint16) for _ in range(2)]
+    path = str(tmp_path/('XX0001_20251225_010203_000000' + fb.EXTENSION))
+    with fb.FrameBlockWriter(path, 16, 10, max_frames=2) as w:
+        for i, frame in enumerate(frames):
+            w.write(frame, i, counter=7 + i)
+    monkeypatch.setattr(os, 'pwrite', write)
+
+    reader = fb.FrameBlockReader(path)
+    assert reader.n_frames == 2
+    assert all(np.array_equal(reader.frame(i), f) for i, f in enumerate(frames))
+    assert reader.table['counter'].tolist() == [7, 8]
