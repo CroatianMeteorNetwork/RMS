@@ -57,6 +57,13 @@ SIDE_MIN_DISTANCE = 0.5
 # Minimum number of detected stars in a zone (over all chunks) for the zone to be judged
 MIN_ZONE_STARS = 10
 
+# With a mask, a zone is judged only if at least this share of its area is usable (not masked, nor next to the
+#   mask), and the detections within this many FWHMs (at least MASK_EDGE_MIN_PX) of the mask are not counted: next
+#   to a tree or a building there are half-hidden stars and lit branches which match no catalog star
+MIN_ZONE_USABLE = 0.3
+MASK_EDGE_MARGIN_FWHM = 2.0
+MASK_EDGE_MIN_PX = 3.0
+
 # A detected star is matched if a catalog star is within this many FWHMs of it (at least 1 px)
 MATCH_RADIUS_FWHM = 1.0
 
@@ -231,6 +238,61 @@ def matchChunk(platepar, jd, stars, catalog_stars, lim_mag, match_radius):
     return dist, cat_ra, cat_dec, cat_mag
 
 
+def _usableArea(mask, platepar, fwhm):
+    """ The pixels whose detections are counted in the score: not masked, and not next to the mask.
+
+    Arguments:
+        mask: [ndarray] Mask image (0 is masked), None if there is none.
+        platepar: [Platepar] Platepar (its image size).
+        fwhm: [float] Width of the stars (px).
+
+    Return:
+        [ndarray] Boolean image, None without a mask (or with a mask of another size, which is not used).
+    """
+
+    import cv2
+
+    if mask is None:
+        return None
+
+    mask = np.asarray(mask)
+    if mask.shape[:2] != (int(platepar.Y_res), int(platepar.X_res)):
+        log.warning("Automatic calibration: the mask ({:d}x{:d}) doesn't match the image, it is not used".format(
+            mask.shape[1], mask.shape[0]))
+        return None
+
+    # Distance of every pixel from the nearest masked pixel
+    unmasked = (mask[:, :, 0] if mask.ndim == 3 else mask) > 0
+    if np.all(unmasked):
+        return unmasked
+    distance = cv2.distanceTransform(unmasked.astype(np.uint8), cv2.DIST_L2, 3)
+
+    return distance >= max(MASK_EDGE_MIN_PX, MASK_EDGE_MARGIN_FWHM*fwhm)
+
+
+def _zoneUsable(usable_px, width, height, step=4):
+    """ Whether enough of the area of every zone is usable to judge it (see MIN_ZONE_USABLE).
+
+    Arguments:
+        usable_px: [ndarray] Boolean image of the usable pixels.
+        width: [int] Image width (px).
+        height: [int] Image height (px).
+
+    Keyword arguments:
+        step: [int] Spacing of the sampled pixels. 4 by default.
+
+    Return:
+        [ndarray] Boolean array, one value per zone.
+    """
+
+    yy, xx = np.mgrid[0:height:step, 0:width:step]
+    membership = zoneMembership(xx.ravel() + 0.5, yy.ravel() + 0.5, width, height)
+    usable = usable_px[yy.ravel(), xx.ravel()]
+
+    return np.array([(np.mean(usable[in_zone]) >= MIN_ZONE_USABLE) if np.any(in_zone) else False
+                     for in_zone in membership])
+
+
 def recalibrateChunk(platepar, chunk_name, jd, stars, catalog_stars, config, ff_frames):
     """ Recalibrate the platepar on a chunk as in the processing (the pointing is refitted).
 
@@ -294,6 +356,7 @@ class CalibrationScore(object):
         mag_lev: [ndarray] Photometric offset of every chunk with enough matched stars.
         mag_lev_stddev: [ndarray] Scatter of the photometric fit of those chunks (mag).
         vignetting_coeff: [float] Vignetting coefficient used for the photometry.
+        zone_usable: [ndarray] Whether enough of the area of every zone is not masked to judge it.
     """
 
     def __init__(self):
@@ -316,16 +379,17 @@ class CalibrationScore(object):
         self.mag_lev = np.array([])
         self.mag_lev_stddev = np.array([])
         self.vignetting_coeff = None
+        self.zone_usable = np.ones(n_zones, dtype=bool)
 
 
     def judged(self):
-        """ Zones with enough stars to be judged.
+        """ Zones with enough stars, and enough area which is not masked, to be judged.
 
         Return:
             [ndarray] Boolean array, one value per zone.
         """
 
-        return self.zone_stars >= MIN_ZONE_STARS
+        return (self.zone_stars >= MIN_ZONE_STARS) & self.zone_usable
 
 
     def worstZoneShare(self):
@@ -390,7 +454,7 @@ class CalibrationScore(object):
 
 
 def scorePlatepar(platepar, chunks, catalog_stars, config, ff_frames=256, recalibrate=True, lim_mag=None,
-                  fit_vignetting=False):
+                  fit_vignetting=False, mask=None):
     """ Score how well a platepar fits the stars of the chunks over the whole image, see the module docstring.
 
     Arguments:
@@ -406,6 +470,8 @@ def scorePlatepar(platepar, chunks, catalog_stars, config, ff_frames=256, recali
         lim_mag: [float] Limiting magnitude of the catalog stars, config.catalog_mag_limit if None.
         fit_vignetting: [bool] Fit the vignetting coefficient in the photometry of every chunk, otherwise the
             coefficient of the platepar is used. False by default.
+        mask: [ndarray] Mask image (0 is masked), None if there is none. The detections next to the mask are not
+            counted, and the zones which are mostly masked are not judged. None by default.
 
     Return:
         [CalibrationScore] The score.
@@ -488,6 +554,16 @@ def scorePlatepar(platepar, chunks, catalog_stars, config, ff_frames=256, recali
     xs, ys = np.concatenate(xs), np.concatenate(ys)
     matched, dists = np.concatenate(matched), np.concatenate(dists)
     mag_residuals = np.concatenate(mag_residuals)
+
+    # With a mask, the detections next to it are not counted, and the zones which are mostly masked not judged
+    usable_px = _usableArea(mask, platepar, fwhm)
+    if usable_px is not None:
+        h, w = usable_px.shape
+        keep = usable_px[np.clip(ys.astype(int), 0, h - 1), np.clip(xs.astype(int), 0, w - 1)]
+        xs, ys, matched, dists, mag_residuals = xs[keep], ys[keep], matched[keep], dists[keep], mag_residuals[keep]
+        score.zone_usable = _zoneUsable(usable_px, platepar.X_res, platepar.Y_res)
+        if not len(xs):
+            return score
 
     # Overall
     score.n_stars = len(xs)
@@ -766,11 +842,18 @@ def spreadChunks(chunks, n):
 # Number of sections (chunks spread in time) on which a platepar is fitted independently
 N_SECTIONS = 4
 
-# Minimum number of sections which have to be fitted and agree
-MIN_SECTIONS = 3
+# Minimum number of sections which have to pass on the held-out chunks and agree. A fit from scratch on one chunk
+#   can converge to a wrong solution (a wrong scale and rotation) which still pairs many stars of its own chunk; it
+#   fails on the held-out chunks and is dropped, so two independent sections which pass and agree are enough
+MIN_SECTIONS = 2
 
 # Minimum number of stars matched in the fit of a section
 MIN_SECTION_STARS = 40
+
+# The plate solver stops at the first solution with a log odds ratio above this (its default of 60 makes it search on
+#   through all index files after a correct solution of 30-40 on a sparse chunk; a wrong solution is caught by the
+#   held-out chunks and the agreement of the sections)
+SOLVE_STOP_LOGODDS = 30.0
 
 # Agreement of the sections: the difference of the image positions over the image, after removing the pointing
 #   (shift, rotation and scale, which the recalibration refits on every chunk), in FWHM
@@ -1029,7 +1112,8 @@ def fitCandidate(chunk_dirs, section_chunks, held_out, catalog_stars, config, ma
             with contextlib.redirect_stdout(io.StringIO()):
                 platepar, paired_stars, _ = autoFitPlatepar(chunk_dirs[name], config, catalog_stars, ff_name=name,
                                                             mask=mask, use_flat=use_flat,
-                                                            position_hint=position_hint, verbose=False)
+                                                            position_hint=position_hint,
+                                                            stop_logodds=SOLVE_STOP_LOGODDS, verbose=False)
 
         except Exception as e:
 
@@ -1049,6 +1133,28 @@ def fitCandidate(chunk_dirs, section_chunks, held_out, catalog_stars, config, ma
     if len(fits) < MIN_SECTIONS:
         info['reason'] = 'only {:d} sections could be fitted'.format(len(fits))
         return None, info
+
+    # Every section is judged on the held-out chunks: a section fitted to a wrong solution fails there and is dropped
+    scores = {}
+    passing = []
+    for name, jd, platepar, section in fits:
+        if vignetting_coeff is not None:
+            platepar.vignetting_coeff = vignetting_coeff
+        score = scorePlatepar(platepar, held_out, catalog_stars, config, ff_frames=ff_frames,
+                              mask=getattr(mask, 'img', None))
+        ok, reasons = judgeScore(score)
+        section['held_out_ok'] = ok
+        section['held_out_worst_zone'] = score.worstZoneShare()
+        if not ok:
+            section['held_out_reasons'] = reasons
+            continue
+        scores[name] = score
+        passing.append((name, jd, platepar, section))
+
+    if len(passing) < MIN_SECTIONS:
+        info['reason'] = 'only {:d} sections pass on the held-out chunks'.format(len(passing))
+        return None, info
+    fits = passing
 
     # The width of the stars is the unit of the agreement
     fwhm = np.median([row[STAR_FWHM] for _, _, stars in section_chunks for row in stars])
@@ -1070,11 +1176,7 @@ def fitCandidate(chunk_dirs, section_chunks, held_out, catalog_stars, config, ma
     # The section which scores best on the held-out chunks (the worst zone, then the distance from the catalog)
     best = None
     for i in subset:
-        platepar = fits[i][2]
-        if vignetting_coeff is not None:
-            platepar.vignetting_coeff = vignetting_coeff
-        score = scorePlatepar(platepar, held_out, catalog_stars, config, ff_frames=ff_frames)
-        fits[i][3]['held_out_worst_zone'] = score.worstZoneShare()
+        score = scores[fits[i][0]]
         key = (np.nan_to_num(score.worstZoneShare(), nan=-1), -np.nan_to_num(score.dist, nan=99))
         if (best is None) or (key > best[0]):
             best = (key, i)
@@ -1444,7 +1546,8 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
         current = _platepar(platepar_path, use_flat)
         current_score = None
         if current is not None:
-            current_score = scorePlatepar(current, held_out, catalog_stars, config, ff_frames=ff_frames)
+            current_score = scorePlatepar(current, held_out, catalog_stars, config,
+                                          ff_frames=ff_frames, mask=mask_img)
             current_ok, current_reasons = judgeScore(current_score)
             result['current'] = {'ok': current_ok, 'reasons': current_reasons, 'score': current_score.toDict()}
             log.info("Automatic calibration: the platepar {:s} on {:d} clear chunks{:s}".format(
@@ -1472,11 +1575,13 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
             # The platepar on trial and the previous one are scored on the same later chunks
             confirm_chunks = spreadChunks(later, MAX_HELD_OUT)
             previous = _platepar(trial['previous'], use_flat)
-            trial_score = scorePlatepar(current, confirm_chunks, catalog_stars, config, ff_frames=ff_frames)
+            trial_score = scorePlatepar(current, confirm_chunks, catalog_stars, config,
+                                        ff_frames=ff_frames, mask=mask_img)
             trial_ok, trial_reasons = judgeScore(trial_score)
             previous_better, reason = False, ''
             if (not trial_ok) and (previous is not None):
-                previous_score = scorePlatepar(previous, confirm_chunks, catalog_stars, config, ff_frames=ff_frames)
+                previous_score = scorePlatepar(previous, confirm_chunks, catalog_stars, config,
+                                               ff_frames=ff_frames, mask=mask_img)
                 previous_better, reason = candidateIsBetter(previous_score, trial_score)
 
             result['trial'] = {'kept': trial_ok, 'reasons': trial_reasons, 'rolled_back': previous_better,
@@ -1528,9 +1633,10 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
             # Both platepars are scored on the same later chunks
             confirm_chunks = spreadChunks(later, MAX_HELD_OUT)
             candidate = _platepar(pending['path'], use_flat)
-            candidate_score = scorePlatepar(candidate, confirm_chunks, catalog_stars, config, ff_frames=ff_frames)
+            candidate_score = scorePlatepar(candidate, confirm_chunks, catalog_stars, config,
+                                            ff_frames=ff_frames, mask=mask_img)
             current_confirm_score = scorePlatepar(current, confirm_chunks, catalog_stars, config,
-                                                  ff_frames=ff_frames)
+                                                  ff_frames=ff_frames, mask=mask_img)
             better, reason = candidateIsBetter(candidate_score, current_confirm_score)
             result['pending'] = {'better': better, 'reason': reason, 'score': candidate_score.toDict()}
             state['pending'] = None
@@ -1586,7 +1692,8 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
             return _saveFileResult(results_dir, result)
 
         # Judge the candidate on the held-out chunks, against the current platepar
-        candidate_score = scorePlatepar(candidate, held_out, catalog_stars, config, ff_frames=ff_frames)
+        candidate_score = scorePlatepar(candidate, held_out, catalog_stars, config,
+                                        ff_frames=ff_frames, mask=mask_img)
         better, reason = candidateIsBetter(candidate_score, current_score)
         result['candidate']['better'] = better
         result['candidate']['reason'] = reason

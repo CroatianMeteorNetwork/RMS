@@ -725,3 +725,91 @@ def test_unreadable_trial_platepar_ends_the_trial(camera, tmp_path):
         f.write('{damaged')
     process('file2', bad)
     assert ac.readState(output_dir)['trial'] is None
+
+
+def test_mask_drops_mostly_masked_zones_and_the_mask_edge():
+    """ With a mask, a zone mostly under the mask is not judged, and detections next to the mask (e.g. lit branches
+        of a tree, half-hidden stars) are not counted, so a good platepar doesn't fail on them. """
+
+    import cv2
+
+    # A platepar and a chunk of stars which all match (the catalog is made from the stars themselves)
+    pp = _platepar()
+    pp.X_res, pp.Y_res = 512, 512
+    config = cr.parse(REPO_CONFIG)
+    rng = np.random.default_rng(1)
+    x, y = rng.uniform(5, 507, 800), rng.uniform(5, 507, 800)
+    stars = _stars(x, y, fwhm=2.0)
+
+    # The bottom right corner is masked, and a tree on the left side with unmatched detections along its edge
+    mask = np.full((512, 512), 255, np.uint8)
+    mask[380:, 380:] = 0
+    cv2.circle(mask, (40, 256), 60, 0, -1)
+    keep = mask[y.astype(int), x.astype(int)] > 0
+    stars = stars[keep]
+    edge = cv2.dilate((mask == 0).astype(np.uint8), np.ones((5, 5), np.uint8)) & (mask > 0)
+    ey, ex = np.nonzero(edge)
+    k = rng.choice(len(ex), 150, replace=False)
+    spurious = _stars(ex[k] + 0.3, ey[k] + 0.3, fwhm=2.0)
+
+    # Matching: every real star is matched, the spurious ones are not
+    def _match(platepar, jd, chunk_stars, catalog_stars, lim_mag, match_radius):
+        n = len(chunk_stars)
+        dist = np.where(np.arange(n) < len(stars), 0.1, np.inf)
+        return dist, np.zeros(n), np.zeros(n), np.zeros(n)
+
+    import unittest.mock
+    with unittest.mock.patch.object(ac, 'matchChunk', _match):
+        chunks = [('FF_XX0001_20251225_010000_000_0000000.fits', 2461000.5, np.vstack([stars, spurious]))]
+        without = ac.scorePlatepar(pp, chunks, None, config, recalibrate=False)
+        masked = ac.scorePlatepar(pp, chunks, None, config, recalibrate=False, mask=mask)
+
+    left = without.zones.index('side_left')
+    assert without.zone_share[left] < 0.8
+    assert masked.zone_share[left] > 0.99
+
+    # The masked corner: the outer ring there is mostly masked, but the ring has other corners; a zone which is
+    #   mostly masked is not judged
+    mask2 = np.full((512, 512), 255, np.uint8)
+    mask2[256:, :] = 0
+    mask2[:, :180] = 0
+    with unittest.mock.patch.object(ac, 'matchChunk', _match):
+        masked2 = ac.scorePlatepar(pp, [chunks[0][:2] + (stars,)], None, config, recalibrate=False, mask=mask2)
+    assert not masked2.judged()[masked2.zones.index('side_bottom')]
+    assert not masked2.judged()[masked2.zones.index('side_left')]
+
+
+def test_sections_which_fail_on_held_out_chunks_are_dropped(monkeypatch):
+    """ A section fitted to a wrong solution (it can pair many stars of its own chunk) fails on the held-out chunks
+        and is dropped before the agreement: two sections which pass and agree give the candidate, one wrong fit no
+        longer blocks it. """
+
+    import RMS.Astrometry.AutoPlatepar as ap
+
+    config = cr.parse(REPO_CONFIG)
+    chunks = [('FF_XX0001_20251225_0100{:02d}_000_0000000.fits'.format(i), 2461000.5 + i/1440.0,
+               _stars(np.linspace(10, 500, 60), np.linspace(10, 500, 60))) for i in range(8)]
+
+    # Sections 0 and 3 are wrong fits (their mag_lev marks them), 1 and 2 are good
+    calls = {'n': 0}
+
+    def _fit(dir_path, config, catalog_stars, ff_name=None, **kwargs):
+        pp = _platepar()
+        pp.mag_lev = 0.05 if calls['n'] in (0, 3) else 0.95
+        calls['n'] += 1
+        return pp, list(range(80)), ff_name
+
+    monkeypatch.setattr(ap, 'autoFitPlatepar', _fit)
+    # A wrong fit matches few stars on the held-out chunks, which can't be recalibrated with it
+    monkeypatch.setattr(ac, 'scorePlatepar', lambda pp, *a, **k: _score([pp.mag_lev]*8,
+                                                                        recalibrated=(0 if pp.mag_lev < 0.5 else 10)))
+    monkeypatch.setattr(ac, 'sectionDifference', lambda a, b, jd, fwhm: (0.0, 0.0) if a.mag_lev == b.mag_lev
+                        else (5.0, 10.0))
+    monkeypatch.setattr(ac, 'fitPhotometry', lambda *a, **k: {})
+
+    candidate, info = ac.fitCandidate({c[0]: '.' for c in chunks}, chunks, chunks[:2], None, config)
+
+    assert candidate is not None, info
+    assert candidate.mag_lev == pytest.approx(0.95)
+    assert len(info['agreeing_sections']) == 2
+    assert sum(1 for s in info['sections'] if s.get('held_out_ok') is False) == 2

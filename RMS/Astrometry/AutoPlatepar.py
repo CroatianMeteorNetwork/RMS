@@ -330,7 +330,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
                     fwhm_mult=DEFAULT_BLEND_FWHM_MULT,
                     wide_fov_search=False,
                     final_catalog_stars=None,
-                    mask=None, use_flat=False, position_hint=None,
+                    mask=None, use_flat=False, position_hint=None, stop_logodds=60.0,
                     verbose=True):
     """
     Automatically create a platepar from CALSTARS data in a directory.
@@ -372,6 +372,8 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
                   corrected and the vignetting coefficient is 0. False by default.
         position_hint: [tuple] (ra, dec, radius) in degrees: the plate solver only searches within the radius
                        of this pointing (much faster). None by default (the whole sky).
+        stop_logodds: [float] The plate solver stops at the first solution with a log odds ratio above this.
+                      60 by default.
         verbose: [bool] Print progress information
 
     Returns:
@@ -540,6 +542,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
         jd=jd,
         input_intensities=input_intensities,
         position_hint=position_hint,
+        stop_logodds=stop_logodds,
         verbose=verbose
     )
 
@@ -558,7 +561,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
                 fwhm_mult=fwhm_mult,
                 wide_fov_search=True,
                 final_catalog_stars=final_catalog_stars,
-                mask=mask, use_flat=use_flat, position_hint=position_hint,
+                mask=mask, use_flat=use_flat, position_hint=position_hint, stop_logodds=stop_logodds,
                 verbose=verbose
             )
 
