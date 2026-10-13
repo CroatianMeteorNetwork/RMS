@@ -425,3 +425,36 @@ def test_short_writes_are_completed(tmp_path, monkeypatch):
     assert reader.n_frames == 2
     assert all(np.array_equal(reader.frame(i), f) for i, f in enumerate(frames))
     assert reader.table['counter'].tolist() == [7, 8]
+
+
+def test_written_without_positional_writes(tmp_path, monkeypatch):
+    """ Where the system has no positional write (os.pwrite, e.g. Windows), the block is written by seeking. """
+
+    monkeypatch.delattr(os, 'pwrite')
+    rng = np.random.default_rng(9)
+    frames = [rng.integers(0, 4096, (10, 16), dtype=np.uint16) for _ in range(2)]
+    path = str(tmp_path/('XX0001_20251225_010203_000000' + fb.EXTENSION))
+    with fb.FrameBlockWriter(path, 16, 10, max_frames=3) as w:
+        for i, frame in enumerate(frames):
+            w.write(frame, i)
+
+    reader = fb.FrameBlockReader(path)
+    assert reader.n_frames == 2
+    assert all(np.array_equal(reader.frame(i), f) for i, f in enumerate(frames))
+
+
+@pytest.mark.skipif(os.name != 'posix', reason='Directories are synchronized on POSIX systems only')
+def test_fsync_also_syncs_the_directory(tmp_path, monkeypatch):
+    """ With fsync, the file and then its directory (the new name) are flushed to the disk. """
+
+    synced = []
+    fsync = os.fsync
+    monkeypatch.setattr(os, 'fsync', lambda fd: (synced.append(os.fstat(fd).st_mode), fsync(fd)))
+
+    path = str(tmp_path/('XX0001_20251225_010203_000000' + fb.EXTENSION))
+    w = fb.FrameBlockWriter(path, 16, 10, max_frames=1)
+    w.write(np.zeros((10, 16), np.uint16), 0)
+    w.close(fsync=True)
+
+    import stat
+    assert [stat.S_ISDIR(mode) for mode in synced] == [False, True]

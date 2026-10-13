@@ -196,7 +196,14 @@ def _pwriteAll(fd, data, offset):
 
     view = memoryview(data).cast('B')
     while len(view):
-        n = os.pwrite(fd, view, offset)
+
+        # Without positional writes (e.g. on Windows) the file is written at the offset after seeking to it (one
+        #   writer per file, so nothing moves the position in between)
+        if hasattr(os, 'pwrite'):
+            n = os.pwrite(fd, view, offset)
+        else:
+            os.lseek(fd, offset, os.SEEK_SET)
+            n = os.write(fd, view)
         if n <= 0:
             raise OSError('Nothing could be written at byte {}'.format(offset))
         view = view[n:]
@@ -255,7 +262,7 @@ class FrameBlockWriter(object):
 
         # The file with its full size reserved (no data is written for the reserved space), the header and an
         #   empty frame table
-        self.fd = os.open(self.part_path, os.O_RDWR | os.O_CREAT | os.O_TRUNC, 0o644)
+        self.fd = os.open(self.part_path, os.O_RDWR | os.O_CREAT | os.O_TRUNC | getattr(os, 'O_BINARY', 0), 0o644)
         total = self.data_offset + self.max_frames*self.frame_stride
         try:
             os.posix_fallocate(self.fd, 0, total)
@@ -339,6 +346,15 @@ class FrameBlockWriter(object):
         os.close(self.fd)
         self.fd = None
         os.replace(self.part_path, self.path)
+
+        # The new name is in the directory, which is flushed too (on POSIX systems, where a directory can be
+        #   opened), so the block survives a power loss under its final name
+        if fsync and (os.name == 'posix'):
+            dir_fd = os.open(os.path.dirname(os.path.abspath(self.path)), os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
 
     def abort(self):
         """ Stop writing without publishing the file: it stays as <name>.part, readable up to its last frame, and
