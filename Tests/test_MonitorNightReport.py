@@ -297,6 +297,35 @@ def test_merge_night(tmp_path):
     assert len(os.listdir(ecsv_dir)) == 3
 
 
+def test_merge_keeps_uncalibrated_detections_uncalibrated(tmp_path):
+    """ The detections of a file processed without a platepar (the automatic calibration had none yet) stay
+        uncalibrated in the merged FTPdetectinfo, the others are recalibrated. """
+
+    config = _config()
+    output_dir = str(tmp_path)
+    results_dirs = [_makeResults(output_dir, config, 'file1'), _makeResults(output_dir, config, 'file2',
+                                                                            start_s=600)]
+
+    # The second file has no calibration: its detections have no celestial coordinates
+    results_path = os.path.join(output_dir, results_dirs[1])
+    ftp_name = 'FTPdetectinfo_file2.txt'
+    entry = FTPdetectinfo.readFTPdetectinfo(results_path, ftp_name)[0]
+    picks = [[line[1], line[2], line[3], 0.0, 0.0, 0.0, 0.0] + list(line[8:]) for line in entry[11]]
+    FTPdetectinfo.writeFTPdetectinfo([[entry[0], 1, 10.0, 45.0, picks, entry[4]]], results_path, ftp_name,
+                                     results_path, 'XX0001', 32.0, calibration=None, celestial_coords_given=True)
+
+    night_dir = mnr.nightDirPath(output_dir, NIGHT, config)
+    merged = mnr.mergeNightResults(night_dir, output_dir, mnr.scanNights(output_dir, config)[NIGHT], config)
+
+    # The calibrated meteor is marked recalibrated, the other one uncalibrated
+    entries = FTPdetectinfo.readFTPdetectinfo(night_dir, merged.ftpdetectinfo_name)
+    assert [entry[11][0][0] for entry in entries] == [1, 0]
+    with open(os.path.join(night_dir, merged.ftpdetectinfo_name)) as f:
+        lines = f.read().splitlines()
+    status = [lines[i + 1] for i, line in enumerate(lines) if FFfile.validFFName(line)]
+    assert status[0].startswith('Recalibrated with RMS') and (status[1] == 'Uncalibrated')
+
+
 def test_matched_filter_results_are_merged_apart(tmp_path):
     """ The night report merges the finished results of the matched filter of every file into their own
         file in the matched-filter directory of the night, and the normal merged results only have the normal
@@ -448,6 +477,30 @@ def test_select_best_night_platepar(monkeypatch):
     assert mnr.selectBestNightPlatepar({'FF_a': _recalibratedPlatepar(100, auto_recalibrated=False)}) is None
 
 
+def test_night_platepar_only_from_the_newest_platepar(tmp_path):
+    """ With the automatic calibration, the platepar of the night is selected only from the files calibrated with
+        the newest platepar of the night (a platepar which was replaced during the night is not carried forward). """
+
+    config = _config()
+    output_dir = str(tmp_path)
+
+    # Two files of the night: one calibrated with an older platepar, one with the newest
+    results = {}
+    for name, mtime in [('old', 1000.0), ('new', 2000.0)]:
+        results_dir = os.path.join('2025', name)
+        os.makedirs(os.path.join(output_dir, results_dir))
+        with open(os.path.join(output_dir, results_dir, config.platepars_recalibrated_name), 'w') as f:
+            json.dump({'FF_' + name: {}}, f)
+        results[results_dir] = {'platepar_mtime': mtime}
+
+    recalibrated = {'FF_old': {'a': 1}, 'FF_new': {'b': 2}}
+    assert mnr.newestPlateparRecalibrations(output_dir, results, recalibrated, config) == {'FF_new': {'b': 2}}
+
+    # Without the times (results processed before they were recorded), all are kept
+    results = {results_dir: {} for results_dir in results}
+    assert mnr.newestPlateparRecalibrations(output_dir, results, recalibrated, config) == recalibrated
+
+
 def test_older_night_does_not_overwrite_the_latest_platepar(tmp_path):
 
     config = _config()
@@ -472,6 +525,42 @@ def test_older_night_does_not_overwrite_the_latest_platepar(tmp_path):
     assert latest.RA_d == platepar.RA_d - 1
     assert os.path.getmtime(mnr.latestPlateparPath(output_dir, config)) == latest_mtime
     assert mnr.readReportStates(output_dir)['latest_platepar_night'] == later_night
+
+
+@pytest.mark.parametrize('update, auto, newest, expected', [
+    (True, True, 'auto', 'auto'), (True, True, 'latest', 'latest'), (True, True, 'given', 'given'),
+    (False, True, 'latest', 'auto'), (True, False, 'auto', 'latest'), (False, False, 'auto', 'given')])
+def test_select_platepar_takes_the_newest_enabled(tmp_path, update, auto, newest, expected):
+    """ The newest of the given platepar, the carried forward one (monitor_update_platepar) and the automatically
+        fitted one (monitor_auto_calibration), each only if enabled. """
+
+    # The platepars which are enabled
+    config = _config()
+    config.monitor_update_platepar = update
+    config.monitor_auto_calibration = auto
+
+    # The given, the carried forward and the automatically fitted platepar
+    output_dir = str(tmp_path)
+    paths = {'given': str(tmp_path/'given.cal'), 'latest': mnr.latestPlateparPath(output_dir, config),
+             'auto': mnr.autoPlateparPath(output_dir, config)}
+
+    # All exist, the newest one as given, the others older in this order
+    for i, name in enumerate(['given', 'latest', 'auto']):
+        open(paths[name], 'w').close()
+        os.utime(paths[name], (1000 + i, 1000 + i))
+    os.utime(paths[newest], (5000, 5000))
+
+    assert mnr.selectPlatepar(output_dir, config, paths['given']) == paths[expected]
+
+
+def test_select_platepar_without_any(tmp_path):
+    """ Without a given platepar (missing or not given) and none fitted, there is no platepar. """
+
+    config = _config()
+    config.monitor_auto_calibration = True
+
+    assert mnr.selectPlatepar(str(tmp_path), config, str(tmp_path/'missing.cal')) is None
+    assert mnr.selectPlatepar(str(tmp_path), config, None) is None
 
 
 ### Night report ###
@@ -500,6 +589,38 @@ def test_generate_night_report(tmp_path):
 
     # The archive was made from scratch
     assert 'stale.txt' not in os.listdir(archived_dir)
+
+
+def test_night_report_without_a_platepar(tmp_path):
+    """ The files processed before the camera was calibrated automatically have no platepar. The night is still
+        reported, the products which need the platepar are skipped, and the platepar of the night is the one of
+        the latest file which has one. """
+
+    # The products which need the platepar are enabled
+    config = _config()
+    config.monitor_fov_kml = True
+    config.monitor_flux = True
+    output_dir = str(tmp_path)
+
+    # A night of one file without the calibration
+    results_dir = _makeResults(output_dir, config, 'file1')
+    for name in [config.platepar_name, config.platepars_recalibrated_name]:
+        os.remove(os.path.join(output_dir, results_dir, name))
+
+    night_state = mnr.generateNightReport(output_dir, NIGHT, config)
+    night_dir = mnr.nightDirPath(output_dir, NIGHT, config)
+
+    # Reported without failures, the products which need the platepar skipped, no platepar of the night
+    assert 'archive' in night_state['ok_steps']
+    assert night_state['failed_steps'] == []
+    for step in ['fov_kml', 'flux', 'calibration_report', 'calibration_variation']:
+        assert step not in night_state['ok_steps']
+    assert not os.path.exists(os.path.join(night_dir, config.platepar_name))
+
+    # A later file of the night was calibrated, its platepar is the one of the night
+    _makeResults(output_dir, config, 'file2', start_s=600)
+    mnr.generateNightReport(output_dir, NIGHT, config)
+    assert os.path.isfile(os.path.join(night_dir, config.platepar_name))
 
 
 def test_detected_stack_named_with_the_number_of_meteors(tmp_path):

@@ -1726,3 +1726,43 @@ def test_end_of_the_input_from_the_summary(tmp_path, now):
     with open(summary_path, 'w') as f:
         json.dump(summary, f)
     assert mnr.readFileSkyResults(results_path, config)['end_time'] == end
+
+
+def test_status_reports_the_automatic_calibration(tmp_path):
+    """ With the automatic calibration, the status has its judgement of the latest file, the last installed platepar
+        and whether a candidate waits for the confirmation. """
+
+    import RMS.Astrometry.AutoCalibration as ac
+
+    # A camera with the automatic calibration and two processed files
+    config = _config()
+    config.monitor_auto_calibration = True
+    output_dir = tmp_path/'output'
+    os.makedirs(str(output_dir/'2025'/'f1'))
+    os.makedirs(str(output_dir/'2025'/'f2'))
+
+    status = mst.MonitorStatus('XX0001', str(output_dir), str(tmp_path/'input'), config, lambda: [], 2)
+
+    # One installed platepar and a candidate of a dry run, and the judgements of the files (the platepar failed on
+    #   the later one)
+    state = ac.readState(str(output_dir))
+    state['installs'].append({'jd': 2461000.5, 'path': 'auto.cal', 'reason': 'there is no platepar'})
+    state['installs'].append({'jd': 2461000.6, 'path': 'auto_candidate.cal', 'reason': 'better', 'dry_run': True})
+    ac.writeState(str(output_dir), state)
+    for name, ok in [('f1', True), ('f2', False)]:
+        with open(str(output_dir/'2025'/name/ac.FILE_RESULT_NAME), 'w') as f:
+            json.dump({'action': 'judged', 'current': {'ok': ok, 'reasons': [] if ok else ['zone r75-100']}}, f)
+
+    # The summary of the processed files
+    files = [(os.path.join('2025', name), {}, {}, None) for name in ['f1', 'f2']]
+    summary = status._autoCalibration(files)
+
+    # The installed platepar, the candidate of the dry run, no pending candidate or platepar on trial, and the
+    #   judgement of the latest file
+    assert summary['installs'] == 1
+    assert summary['last_install'] == {'path': 'auto.cal', 'reason': 'there is no platepar'}
+    assert summary['dry_run_candidates'] == 1
+    assert summary['pending'] is False
+    assert summary['trial'] is False
+    assert summary['latest']['results_dir'] == os.path.join('2025', 'f2')
+    assert summary['latest']['platepar_ok'] is False

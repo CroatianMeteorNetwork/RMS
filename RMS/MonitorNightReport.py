@@ -281,29 +281,58 @@ def latestPlateparPath(output_dir, config):
     return os.path.join(output_dir, 'latest_' + config.platepar_name)
 
 
-
-### Done flags and report state ###
-
-def selectPlatepar(output_dir, config, platepar_path):
-    """ The platepar which the files are processed with: the best platepar of the latest reported night (see
-        latestPlateparPath), unless it is not carried forward (monitor_update_platepar) or the given platepar is
-        newer (e.g. it was fitted again manually).
+def autoPlateparPath(output_dir, config):
+    """ Path of the platepar fitted by the automatic calibration (monitor_auto_calibration). It has its own name,
+        so the platepar given to the monitor is never overwritten.
 
     Arguments:
         output_dir: [str] Output directory of the monitor.
         config: [Config] Configuration.
-        platepar_path: [str] Path of the platepar given to the monitor.
 
     Return:
         [str] Path of the platepar.
     """
 
-    latest_platepar_path = latestPlateparPath(output_dir, config)
-    if config.monitor_update_platepar and os.path.isfile(latest_platepar_path) \
-            and (os.path.getmtime(latest_platepar_path) > os.path.getmtime(platepar_path)):
-        return latest_platepar_path
+    return os.path.join(output_dir, 'auto_' + config.platepar_name)
 
-    return platepar_path
+
+
+### Done flags and report state ###
+
+def selectPlatepar(output_dir, config, platepar_path):
+    """ The platepar which the files are processed with: the newest of the given platepar, the best platepar of
+        the latest reported night (see latestPlateparPath) if it is carried forward (monitor_update_platepar),
+        and the platepar fitted by the automatic calibration (see autoPlateparPath) if it is enabled
+        (monitor_auto_calibration). A given platepar newer than the others (e.g. it was fitted again manually)
+        is used.
+
+    Arguments:
+        output_dir: [str] Output directory of the monitor.
+        config: [Config] Configuration.
+        platepar_path: [str] Path of the platepar given to the monitor. It may not exist (or be None) with the
+            automatic calibration, until a platepar is fitted.
+
+    Return:
+        [str] Path of the platepar, None if there is none.
+    """
+
+    # The platepars which can be used: the given one, and the carried forward and the automatically fitted
+    #   one if they are enabled
+    candidates = [platepar_path]
+    if config.monitor_update_platepar:
+        candidates.append(latestPlateparPath(output_dir, config))
+    if config.monitor_auto_calibration:
+        candidates.append(autoPlateparPath(output_dir, config))
+
+    # The newest existing platepar. With equal times the earlier candidate is kept, so the given platepar wins
+    #   a tie
+    selected = None
+    for path in candidates:
+        if (path is not None) and os.path.isfile(path) \
+                and ((selected is None) or (os.path.getmtime(path) > os.path.getmtime(selected))):
+            selected = path
+
+    return selected
 
 
 def _writeJSON(file_path, data):
@@ -592,7 +621,7 @@ def detectedImageNames(meteor_list, image_names):
         of the meteor) to the one with the last pick are returned.
 
     Arguments:
-        meteor_list: [list] Meteors as [ff_name, meteor_No, rho, phi, meteor_meas, meteor_fps], where the
+        meteor_list: [list] Meteors as [ff_name, meteor_No, rho, phi, meteor_meas, meteor_fps, ...], where the
             first element of every measurement is the frame relative to the beginning of the FF file.
         image_names: [list] FF names of the images in the night directory.
 
@@ -606,7 +635,8 @@ def detectedImageNames(meteor_list, image_names):
     image_index = {file_name: i for i, file_name in enumerate(image_names)}
 
     detected = set()
-    for ff_name, _, _, _, meteor_meas, meteor_fps in meteor_list:
+    for meteor in meteor_list:
+        ff_name, meteor_meas, meteor_fps = meteor[0], meteor[4], meteor[5]
 
         if ff_name not in image_index:
             continue
@@ -670,6 +700,9 @@ def mergeNightResults(night_dir, output_dir, results, config):
 
     ### Merge FTPdetectinfo ###
 
+    # The meteors of files processed without a platepar (before the automatic calibration fitted one) stay
+    #   uncalibrated, the others are marked as recalibrated
+    calibration = "Recalibrated with RMS on: " + RmsDateTime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f UTC")
     meteor_list = []
     for results_path in results_paths:
 
@@ -679,17 +712,17 @@ def mergeNightResults(night_dir, output_dir, results, config):
 
         for ftpdetectinfo_name in ftpdetectinfo_names:
 
-            # Read the full format to keep the frame rate of every meteor, and remove the calibration status
-            #   from the measurements to get the input format of the writer
+            # Read the full format to keep the frame rate and the calibration status of every meteor, and
+            #   remove the calibration status from the measurements to get the input format of the writer
             for entry in FTPdetectinfo.readFTPdetectinfo(results_path, ftpdetectinfo_name):
                 ff_name, _, meteor_No, _, meteor_fps, _, _, _, _, rho, phi, meteor_meas = entry
+                calibrated = all(line[0] == 1 for line in meteor_meas)
                 meteor_list.append([ff_name, meteor_No, rho, phi, [line[1:] for line in meteor_meas],
-                                    meteor_fps])
+                                    meteor_fps, calibration if calibrated else None])
 
     ftpdetectinfo_name = 'FTPdetectinfo_{:s}.txt'.format(night_name)
     FTPdetectinfo.writeFTPdetectinfo(sorted(meteor_list, key=lambda entry: (entry[0], entry[1])), night_dir,
-        ftpdetectinfo_name, night_dir, config.stationID, fps if fps else config.fps,
-        calibration="Recalibrated with RMS on: " + RmsDateTime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f UTC"),
+        ftpdetectinfo_name, night_dir, config.stationID, fps if fps else config.fps, calibration=calibration,
         celestial_coords_given=True)
 
 
@@ -734,7 +767,11 @@ def mergeNightResults(night_dir, output_dir, results, config):
 
     first_results = results_paths[0]
 
-    shutil.copy2(os.path.join(first_results, config.platepar_name), night_dir)
+    # The platepar of the latest file which has one: the files processed before the camera was calibrated
+    #   automatically have none, and a platepar fitted again during the night is the one the later files used
+    platepar_results = [path for path in results_paths if os.path.isfile(os.path.join(path, config.platepar_name))]
+    if platepar_results:
+        shutil.copy2(os.path.join(platepar_results[-1], config.platepar_name), night_dir)
 
     for config_path in glob.glob(os.path.join(first_results, '*.config')):
         shutil.copy2(config_path, night_dir)
@@ -809,6 +846,46 @@ def selectBestNightPlatepar(recalibrated, use_flat=False):
             best = (ff_name, platepar, n_stars, residual)
 
     return best
+
+
+def newestPlateparRecalibrations(output_dir, results, recalibrated, config):
+    """ The recalibrated platepars of the files of a night which were calibrated with the newest platepar of the
+        night (the time of the platepar is in the done flag of every file). Files without the time (processed
+        before it was recorded) are kept if no file has it.
+
+    Arguments:
+        output_dir: [str] Output directory of the monitor.
+        results: [dict] Results of the night, {results_dir: done flag info}.
+        recalibrated: [dict] Recalibrated platepars of the night, keyed by the FF name.
+        config: [Config] Configuration.
+
+    Return:
+        [dict] The recalibrated platepars of those files, keyed by the FF name.
+    """
+
+    # The times of the platepars the files were calibrated with (without them, nothing can be filtered)
+    times = [info.get('platepar_mtime') for info in results.values() if info.get('platepar_mtime') is not None]
+    if not times:
+        return recalibrated
+
+    # The FF names of the recalibrated platepars of the files calibrated with the newest platepar
+    newest = max(times)
+    names = set()
+    for results_dir, info in results.items():
+        if info.get('platepar_mtime') != newest:
+            continue
+
+        # The recalibrated platepars of the file (a damaged file is skipped)
+        recalibrated_path = os.path.join(output_dir, results_dir, config.platepars_recalibrated_name)
+        if os.path.isfile(recalibrated_path):
+            try:
+                with open(recalibrated_path) as f:
+                    names.update(json.load(f).keys())
+
+            except ValueError:
+                continue
+
+    return {name: pp_dict for name, pp_dict in recalibrated.items() if name in names}
 
 
 def _writePlatepar(platepar, file_path):
@@ -1337,6 +1414,21 @@ def generateNightReport(output_dir, night_name, config, results=None, archive=Tr
     # Results finished after this time are reported again, see unreportedResults
     files_time = RmsDateTime.utcnow()
 
+    # With the automatic calibration, the files of the night which were processed before the platepar was fitted
+    #   get the astrometry and the photometry now (if no worker did it yet). Their done flags change, so the results
+    #   are scanned again
+    if config.monitor_auto_calibration:
+        from RMS.MonitorProcessFrameInterface import backfillCalibration
+        try:
+            if backfillCalibration(output_dir, config, night_name):
+                results = None
+
+        except Exception:
+
+            # A failure doesn't stop the report, the files are reported without the calibration
+            log.error("Adding the calibration to the files of night {:s} failed:\n{:s}".format(night_name,
+                                                                                              traceback.format_exc()))
+
     if results is None:
         results = scanNights(output_dir, config).get(night_name, {})
 
@@ -1422,11 +1514,17 @@ def generateNightReport(output_dir, night_name, config, results=None, archive=Tr
                         "and the pointing of the camera.".format(n_recalibrated, len(merged.recalibrated),
                                                              night_name))
 
-        # Save the most confident platepar of the night and carry it forward to the following data
+        # Save the most confident platepar of the night and carry it forward to the following data. With the
+        #   automatic calibration, it is taken only from the files calibrated with the newest platepar of the night,
+        #   so a platepar which was replaced during the night (e.g. it fits the stars only in a part of the image,
+        #   where its recalibration still succeeds) is not carried forward again
         best_platepar = None
-        if merged.recalibrated:
+        candidates = merged.recalibrated
+        if config.monitor_auto_calibration:
+            candidates = newestPlateparRecalibrations(output_dir, results, merged.recalibrated, config)
+        if candidates:
             best_platepar = _runStep('platepar_selection',
-                lambda: selectBestNightPlatepar(merged.recalibrated, use_flat=config.use_flat))
+                lambda: selectBestNightPlatepar(candidates, use_flat=config.use_flat))
 
         if best_platepar is not None:
             ff_name, platepar, n_stars, residual = best_platepar
@@ -1434,11 +1532,15 @@ def generateNightReport(output_dir, night_name, config, results=None, archive=Tr
                 n_stars, residual))
             saveNightPlatepar(platepar, night_dir, night_name, output_dir, config)
 
-        if merged.calstars_name is not None:
+        # The calibration report and plots need the platepar of the night (there is none if no file of the night
+        #   was calibrated)
+        night_platepar_exists = os.path.isfile(os.path.join(night_dir, config.platepar_name))
+
+        if (merged.calstars_name is not None) and night_platepar_exists:
             _runStep('calibration_report',
                 lambda: generateCalibrationReport(config, night_dir, min_size=1000))
 
-        if merged.recalibrated:
+        if merged.recalibrated and night_platepar_exists:
             _runStep('calibration_variation', lambda: plotNightCalibrationVariation(night_dir, night_name,
                 merged.recalibrated, config, chunk_frames))
 
@@ -1456,25 +1558,33 @@ def generateNightReport(output_dir, night_name, config, results=None, archive=Tr
 
         ### Optional products (off by default) ###
 
-        platepar = Platepar()
-        platepar.read(os.path.join(night_dir, config.platepar_name), use_flat=config.use_flat)
+        # The platepar of the night, None if no file of the night was calibrated
+        platepar = None
+        if os.path.isfile(os.path.join(night_dir, config.platepar_name)):
+            platepar = Platepar()
+            platepar.read(os.path.join(night_dir, config.platepar_name), use_flat=config.use_flat)
 
         mask = None
         if os.path.isfile(os.path.join(night_dir, config.mask_file)):
             mask = loadMask(os.path.join(night_dir, config.mask_file))
 
-        if config.monitor_shower_association:
+        # Without a platepar of the night, the products which need it are skipped
+        if (platepar is None) and (config.monitor_shower_association or config.monitor_fov_kml
+                                   or config.monitor_flux):
+            log.info("Night {:s} has no platepar, the products which need it are skipped".format(night_name))
+
+        if config.monitor_shower_association and (platepar is not None):
             from Utils.ShowerAssociation import showerAssociation
             _runStep('shower_association', lambda: showerAssociation(config, [ftpdetectinfo_path],
                 save_plot=True, plot_activity=True, color_map=config.shower_color_map,
                 sporadic_color=config.sporadic_color))
 
-        if config.monitor_fov_kml:
+        if config.monitor_fov_kml and (platepar is not None):
             from Utils.FOVKML import fovKML
             _runStep('fov_kml', lambda: [fovKML(night_dir, platepar, mask=mask, plot_station=False,
                 area_ht=area_ht) for area_ht in [100000, 70000, 25000]])
 
-        if config.monitor_flux:
+        if config.monitor_flux and (platepar is not None):
             from Utils.Flux import prepareFluxFiles
             _runStep('flux', lambda: prepareFluxFiles(config, night_dir, ftpdetectinfo_path, mask=mask,
                                                       platepar=platepar))

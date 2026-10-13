@@ -27,8 +27,8 @@ from RMS.Formats.FTPdetectinfo import validDefaultFTPdetectinfo
 from RMS.Formats.Platepar import Platepar
 from RMS.Logger import getLogger
 from RMS.Misc import RmsDateTime, UTCFromTimestamp
-from RMS.MonitorNightReport import (ESSENTIAL_STEPS, JSON_TIME_FORMAT, _writeJSON, latestPlateparPath, nightInfo,
-                                    nightConditionRows, nightSkyResults, plateparResidual, readFileSkyResults,
+from RMS.MonitorNightReport import (ESSENTIAL_STEPS, JSON_TIME_FORMAT, _writeJSON, autoPlateparPath,
+                                    latestPlateparPath, nightInfo, nightConditionRows, nightSkyResults, plateparResidual, readFileSkyResults,
                                     readReportStates, scanNights, selectPlatepar)
 
 
@@ -1182,6 +1182,53 @@ class MonitorStatus(object):
         return self.conditions_cache[1]
 
 
+    def _autoCalibration(self, files):
+        """ The state of the automatic calibration of the camera, see RMS.Astrometry.AutoCalibration.
+
+        Arguments:
+            files: [list] Processed files of the night as (results_dir, info, file_result, _), results_dir
+                relative to the output directory.
+
+        Return:
+            [dict] The number of installed platepars, the last one, the number of candidates of a dry run, whether
+                a candidate waits for the confirmation or a platepar is on trial, and the judgement of the latest
+                judged file.
+        """
+
+        from RMS.Astrometry.AutoCalibration import FILE_RESULT_NAME, readState
+
+        # The installed platepars (apart from the candidates of a dry run, which are not used), a pending
+        #   candidate and a platepar on trial, from the state of the camera
+        state = readState(self.output_dir)
+        installs = [entry for entry in state['installs'] if not entry.get('dry_run')]
+        summary = {'installs': len(installs), 'dry_run_candidates': len(state['installs']) - len(installs),
+                   'pending': state.get('pending') is not None, 'trial': state.get('trial') is not None}
+        if installs:
+            summary['last_install'] = {key: installs[-1].get(key) for key in ['path', 'reason']}
+
+        # The judgement of the latest file which has one
+        for results_dir, _, _, _ in sorted(files, key=lambda entry: entry[0], reverse=True):
+            result_path = os.path.join(self.output_dir, results_dir, FILE_RESULT_NAME)
+            if not os.path.isfile(result_path):
+                continue
+
+            # A damaged judgement is skipped
+            try:
+                with open(result_path) as f:
+                    result = json.load(f)
+
+            except ValueError:
+                continue
+
+            # What was done, and whether the platepar passed
+            summary['latest'] = {'results_dir': results_dir, 'action': result.get('action'),
+                                 'platepar_ok': result.get('current', {}).get('ok'),
+                                 'reasons': result.get('current', {}).get('reasons', [])}
+            break
+
+        return summary
+
+
     def _calibration(self, files):
         """ How healthy the calibration is, from the recalibration of the chunks of the processed files. Only the
             chunks on clear sky are judged, as under clouds there are too few stars for any calibration. """
@@ -1190,18 +1237,23 @@ class MonitorStatus(object):
         calibration = {'dist_check_threshold_px': self.config.dist_check_threshold,
                        'camera_moved_threshold_px': CAMERA_MOVED_PX}
 
-        # The platepar which the following files are processed with, selected as by the workers: the best platepar
-        #   of the latest reported night if it is carried forward and newer than the given one
-        if self.platepar_path is not None:
-            platepar_path = selectPlatepar(self.output_dir, self.config, self.platepar_path)
-        else:
-            platepar_path = latestPlateparPath(self.output_dir, self.config)
-        if os.path.isfile(platepar_path):
+        # The platepar which the following files are processed with, selected as by the workers: the newest of the
+        #   given platepar, the best platepar of the latest reported night and the automatically fitted one. Without
+        #   any, the files are processed without the calibration
+        platepar_path = selectPlatepar(self.output_dir, self.config, self.platepar_path)
+        calibration['calibrated'] = platepar_path is not None
+        if platepar_path is not None:
             calibration['platepar'] = platepar_path
             calibration['platepar_utc'] = _timeString(
                 UTCFromTimestamp.utcfromtimestamp(os.path.getmtime(platepar_path)))
             calibration['platepar_from_previous_night'] = (platepar_path == latestPlateparPath(self.output_dir,
                                                                                                self.config))
+            calibration['platepar_auto'] = (platepar_path == autoPlateparPath(self.output_dir, self.config))
+
+        # The automatic calibration: its judgement of the latest file judged, the last platepar it installed and a
+        #   candidate which waits for the confirmation
+        if self.config.monitor_auto_calibration:
+            calibration['auto_calibration'] = self._autoCalibration(files)
 
         # The calibration of every file (read once per file), with its clear chunks from its conditions
         per_file = []

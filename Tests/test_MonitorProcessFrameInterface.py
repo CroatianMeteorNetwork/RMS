@@ -464,6 +464,43 @@ def test_processFile_uses_latest_platepar_unless_given_is_newer(process_file, tm
     assert _usedPlatepar() == 'given'
 
 
+def test_processFile_without_a_platepar_with_auto_calibration(process_file, tmp_path):
+    """ With the automatic calibration, a file is processed without a platepar until one is fitted (none is copied
+        to the results, and one of an earlier processing is removed), then with the fitted platepar if it is the
+        newest. """
+
+    from RMS.MonitorNightReport import autoPlateparPath
+
+    run, config, seen = process_file
+    config.monitor_auto_calibration = True
+
+    # The output directory, and the results of the file in it
+    output_dir = tmp_path/'out'
+    output_dir.mkdir()
+    results_dir = os.path.join(str(output_dir), '2025', '202512', '20251225', 'dummy')
+    results_platepar = os.path.join(results_dir, config.platepar_name)
+
+    # No platepar is given, and none was fitted yet. A platepar of an earlier processing is in the results
+    os.remove(str(tmp_path/'given.cal'))
+    os.makedirs(results_dir)
+    with open(results_platepar, 'w') as f:
+        f.write('earlier')
+
+    # The file is processed (up to the detection) without a platepar, the earlier one is removed
+    run()
+    assert 'config' in seen
+    assert not os.path.exists(results_platepar)
+
+    # The fitted platepar is used once it exists
+    with open(autoPlateparPath(str(output_dir), config), 'w') as f:
+        f.write('auto')
+
+    # The file is processed with the fitted platepar
+    run()
+    with open(results_platepar) as f:
+        assert f.read() == 'auto'
+
+
 @pytest.mark.parametrize('mf_enable, mf_fails', [(False, False), (True, False), (True, True)])
 def test_matched_filter_pass(config_path, tmp_path, monkeypatch, mf_enable, mf_fails):
     """ The matched filter runs after the normal detection when it is enabled, saves its results into their
@@ -1092,6 +1129,26 @@ def test_missing_camera_files_are_found(tmp_path):
     assert mon.missingCameraFiles(config_path, str(tmp_path/'pp.cal'), dark_path=str(tmp_path/'dark.png')) == \
         [str(tmp_path/'pp.cal'), str(tmp_path/'dark.png')]
 
+    # A platepar which is not given is reported once (not for the other files which are not given either)
+    assert mon.missingCameraFiles(config_path, None) == ['platepar (not given)']
+
+
+def test_platepar_is_not_required_with_auto_calibration(config_path, tmp_path):
+    """ With the automatic calibration the camera starts without a platepar (missing or not given), the other
+        files are still required. """
+
+    # Enable the automatic calibration in the config file
+    with open(config_path) as f:
+        text = f.read()
+    with open(config_path, 'w') as f:
+        f.write(text.replace('monitor_auto_calibration: false', 'monitor_auto_calibration: true'))
+
+    # A missing or not given platepar is not reported, a missing dark is
+    assert mon.missingCameraFiles(config_path, str(tmp_path/'pp.cal')) == []
+    assert mon.missingCameraFiles(config_path, None) == []
+    assert mon.missingCameraFiles(config_path, None, dark_path=str(tmp_path/'dark.png')) == \
+        [str(tmp_path/'dark.png')]
+
 
 
 @pytest.mark.parametrize('enough_stars', [True, False])
@@ -1164,3 +1221,274 @@ def test_matched_filter_replaces_detection(config_path, tmp_path, monkeypatch, e
     # The summary of the matched filter is saved with the results, and there is no separate directory
     assert os.path.isfile(os.path.join(results_dir, mfd.DONE_NAME))
     assert not os.path.isdir(os.path.join(results_dir, mfd.MATCHED_FILTER_DIR))
+
+
+def test_auto_calibration_step_recalibrates_with_a_new_platepar(config_path, tmp_path, monkeypatch):
+    """ When the automatic calibration installs a platepar, a file processed without one is recalibrated with it,
+        and the files of the night which need it are calibrated. A file processed with an older version of the
+        installed platepar (replaced at the same path) is recalibrated too, one processed with the current version
+        is not. """
+
+    import logging
+
+    import RMS.Astrometry.AutoCalibration as ac
+    from RMS.MonitorNightReport import autoPlateparPath
+
+    # A camera with the automatic calibration, and the path of its fitted platepar
+    config = cr.parse(config_path)
+    config.monitor_auto_calibration = True
+    output_dir = str(tmp_path/'out')
+    os.makedirs(output_dir)
+    auto_path = autoPlateparPath(output_dir, config)
+    install = {'on': True}
+
+    def _install(results_dir, config, output_dir, platepar_path, **kwargs):
+        """ Stand-in for autoCalibrateFile which installs a platepar if asked, the platepar in use passes. """
+
+        # The automatic calibration installs a platepar
+        if install['on']:
+            with open(auto_path, 'w') as f:
+                f.write('auto')
+            return {'installed': auto_path, 'current': ({'ok': True} if platepar_path else {})}
+
+        return {'current': {'ok': True}}
+
+    # Record the recalibrations and the backfills instead of running them
+    calls = {'recalibrated': [], 'backfilled': []}
+    monkeypatch.setattr(ac, 'autoCalibrateFile', _install)
+    monkeypatch.setattr(mon, 'recalibrateResults',
+                        lambda results_dir, config, platepar_path=None, proc_log=None, matched_filter=False:
+                        calls['recalibrated'].append(platepar_path))
+    monkeypatch.setattr(mon, 'backfillCalibration',
+                        lambda output_dir, config, night_name, proc_log=None, replaced_mtimes=None:
+                        calls['backfilled'].append(night_name))
+
+    proc_log = logging.getLogger('test')
+
+    # Processed without a platepar
+    calibrated, used, used_mtime = mon.autoCalibrationStep(str(tmp_path), config, output_dir, None, None, None,
+                                                           False, 'night', None, proc_log)
+    assert calibrated and (used == auto_path)
+    assert used_mtime == os.path.getmtime(auto_path)
+    assert calls == {'recalibrated': [auto_path], 'backfilled': ['night']}
+
+    # Processed with an older version of the platepar, which was replaced at the same path meanwhile (e.g. by
+    #   another worker): recalibrated with the new version
+    os.utime(auto_path, (1000, 1000))
+    install['on'] = False
+    calls = {'recalibrated': [], 'backfilled': []}
+    calibrated, used, used_mtime = mon.autoCalibrationStep(str(tmp_path), config, output_dir, None, auto_path,
+                                                           500.0, True, 'night', None, proc_log)
+    assert calls['recalibrated'] == [auto_path]
+    assert used_mtime == 1000
+
+    # Processed with the current version: not recalibrated, the version it was processed with is kept
+    calls = {'recalibrated': [], 'backfilled': []}
+    calibrated, used, used_mtime = mon.autoCalibrationStep(str(tmp_path), config, output_dir, None, auto_path,
+                                                           1000.0, True, 'night', None, proc_log)
+    assert calibrated and (used == auto_path) and (used_mtime == 1000)
+    assert calls['recalibrated'] == []
+
+    # Processed with a given platepar which passes, while a newer platepar was installed: recalibrated with it
+    given = str(tmp_path/'given.cal')
+    with open(given, 'w') as f:
+        f.write('given')
+    os.utime(given, (0, 0))
+    install['on'] = True
+    calls = {'recalibrated': [], 'backfilled': []}
+    calibrated, used, used_mtime = mon.autoCalibrationStep(str(tmp_path), config, output_dir, given, given, 0.0,
+                                                           True, 'night', None, proc_log)
+    assert calibrated and (used == auto_path)
+    assert calls['recalibrated'] == [auto_path]
+
+
+def test_backfill_calibrates_files_without_a_platepar_or_with_a_failing_one(config_path, tmp_path, monkeypatch):
+    """ After a platepar is installed, the files of the night processed without a platepar, or with a platepar
+        which failed the judgement, are calibrated with it. Files whose platepar passed, or which already use the
+        installed version, are left. """
+
+    import json
+    import shutil
+
+    import RMS.Astrometry.AutoCalibration as ac
+    from RMS.MonitorNightReport import autoPlateparPath, readDoneFlag
+
+    # A camera with an installed platepar
+    config = cr.parse(config_path)
+    config.monitor_auto_calibration = True
+    output_dir = str(tmp_path/'out')
+    os.makedirs(output_dir)
+    auto_path = autoPlateparPath(output_dir, config)
+    with open(auto_path, 'w') as f:
+        f.write('auto')
+    os.utime(auto_path, (2000, 2000))
+
+    # Files of the night: without a platepar, with a failing one, with a passing one, with the installed version
+    files = {'f1': (False, None, None), 'f2': (True, 1000.0, False), 'f3': (True, 1000.0, True),
+             'f4': (True, 2000.0, False)}
+    for name, (calibrated, mtime, ok) in files.items():
+        results_dir = os.path.join(output_dir, name)
+        os.makedirs(results_dir)
+        mon.writeDoneFlag(results_dir, {'night': 'night', 'calibrated': calibrated, 'platepar_mtime': mtime})
+        if ok is not None:
+            with open(os.path.join(results_dir, ac.FILE_RESULT_NAME), 'w') as f:
+                json.dump({'current': {'ok': ok}}, f)
+
+    # The recalibration copies the platepar into the results, as recalibrateResults does
+    recalibrated = []
+
+    def _recalibrate(results_dir, config, platepar_path=None, proc_log=None, matched_filter=False):
+        shutil.copy2(platepar_path, os.path.join(results_dir, config.platepar_name))
+        recalibrated.append(os.path.basename(results_dir))
+
+    monkeypatch.setattr(mon, 'recalibrateResults', _recalibrate)
+
+    # The files without a platepar and with the failing one get the installed platepar, labelled with its version
+    assert sorted(mon.backfillCalibration(output_dir, config, 'night')) == ['f1', 'f2']
+    assert sorted(recalibrated) == ['f1', 'f2']
+    assert readDoneFlag(os.path.join(output_dir, 'f2'))['platepar_mtime'] == 2000
+
+    # A file calibrated with a platepar which was replaced as it failed (or a rolled back trial) is calibrated again
+    #   if its own judgement didn't pass it, also without a judgement (e.g. a file calibrated later, or cloudy); one
+    #   whose judgement passed the replaced platepar keeps it
+    os.makedirs(os.path.join(output_dir, 'f5'))
+    mon.writeDoneFlag(os.path.join(output_dir, 'f5'), {'night': 'night', 'calibrated': True, 'platepar_mtime': 1000.0})
+    recalibrated.clear()
+    assert mon.backfillCalibration(output_dir, config, 'night', replaced_mtimes=[1000.0]) == ['f5']
+
+
+def test_recalibration_includes_the_matched_filter_results(config_path, tmp_path, monkeypatch):
+    """ Recalibrating the results of a file with a new platepar also recalibrates the completed results of the
+        separate matched-filter pass. """
+
+    import RMS.MatchedFilterDetection as mfd
+
+    config = cr.parse(config_path)
+    results_dir = str(tmp_path/'results')
+    mf_dir = os.path.join(results_dir, mfd.MATCHED_FILTER_DIR)
+    os.makedirs(mf_dir)
+    platepar_path = str(tmp_path/'new.cal')
+    with open(platepar_path, 'w') as f:
+        f.write('new')
+
+    # The normal and the matched-filter detections, the latter complete
+    picks = [[1, 10.0, 20.0, 0.0, 0.0, 0.0, 0.0, 1000, 0.0, 50, 8.0, 0]]
+    meteor = [['FF_XX0001_20251225_030000_000_0000000.fits', 1, 10.0, 45.0, picks]]
+    FTPdetectinfo.writeFTPdetectinfo(meteor, results_dir, 'FTPdetectinfo_file.txt', results_dir, 'XX0001', 25.0,
+                                     celestial_coords_given=True)
+    FTPdetectinfo.writeFTPdetectinfo(meteor, mf_dir, 'FTPdetectinfo_file_mf.txt', mf_dir, 'XX0001', 25.0,
+                                     celestial_coords_given=True)
+    with open(os.path.join(mf_dir, mfd.DONE_NAME), 'w') as f:
+        f.write('{}')
+
+    # Backups which earlier recalibrations left next to both are not recalibrated
+    FTPdetectinfo.writeFTPdetectinfo(meteor, results_dir, 'FTPdetectinfo_file_backup_1.txt', results_dir, 'XX0001',
+                                     25.0, celestial_coords_given=True)
+    FTPdetectinfo.writeFTPdetectinfo(meteor, mf_dir, 'FTPdetectinfo_file_mf_backup_1.txt', mf_dir, 'XX0001', 25.0,
+                                     celestial_coords_given=True)
+
+    recalibrated = []
+    monkeypatch.setattr(mon, 'applyRecalibrate', lambda ftp_path, config, **kwargs: recalibrated.append(ftp_path))
+
+    assert mon.recalibrateResults(results_dir, config, platepar_path=platepar_path, matched_filter=True)
+
+    # Both are recalibrated with the new platepar
+    assert sorted(os.path.basename(path) for path in recalibrated) == ['FTPdetectinfo_file.txt',
+                                                                      'FTPdetectinfo_file_mf.txt']
+    with open(os.path.join(mf_dir, config.platepar_name)) as f:
+        assert f.read() == 'new'
+
+    # Unfinished matched-filter results are left alone
+    os.remove(os.path.join(mf_dir, mfd.DONE_NAME))
+    recalibrated.clear()
+    mon.recalibrateResults(results_dir, config, platepar_path=platepar_path, matched_filter=True)
+    assert [os.path.basename(path) for path in recalibrated] == ['FTPdetectinfo_file.txt']
+
+    # The matched filter is left alone by default (processFile: its pass already used the platepar), and a failure
+    #   of its recalibration doesn't stop the normal detections
+    with open(os.path.join(mf_dir, mfd.DONE_NAME), 'w') as f:
+        f.write('{}')
+    recalibrated.clear()
+    mon.recalibrateResults(results_dir, config, platepar_path=platepar_path)
+    assert [os.path.basename(path) for path in recalibrated] == ['FTPdetectinfo_file.txt']
+
+    def _fail(ftp_path, config, **kwargs):
+        if '_mf' in ftp_path:
+            raise RuntimeError('matched filter recalibration failed')
+        recalibrated.append(ftp_path)
+
+    monkeypatch.setattr(mon, 'applyRecalibrate', _fail)
+    recalibrated.clear()
+    assert mon.recalibrateResults(results_dir, config, platepar_path=platepar_path, matched_filter=True)
+    assert [os.path.basename(path) for path in recalibrated] == ['FTPdetectinfo_file.txt']
+
+
+def test_backfill_stops_when_the_platepar_changes(config_path, tmp_path, monkeypatch):
+    """ If another platepar is installed during the backfill, it stops (the install's own backfill continues), and
+        every file is labelled with the version it really got. """
+
+    import shutil
+
+    from RMS.MonitorNightReport import autoPlateparPath, readDoneFlag
+
+    config = cr.parse(config_path)
+    config.monitor_auto_calibration = True
+    output_dir = str(tmp_path/'out')
+    os.makedirs(output_dir)
+    auto_path = autoPlateparPath(output_dir, config)
+    with open(auto_path, 'w') as f:
+        f.write('auto')
+    os.utime(auto_path, (2000, 2000))
+    for name in ('f1', 'f2', 'f3'):
+        os.makedirs(os.path.join(output_dir, name))
+        mon.writeDoneFlag(os.path.join(output_dir, name), {'night': 'night', 'calibrated': False})
+
+    recalibrated = []
+
+    def _recalibrate(results_dir, config, platepar_path=None, proc_log=None, matched_filter=False):
+        shutil.copy2(platepar_path, os.path.join(results_dir, config.platepar_name))
+        recalibrated.append(os.path.basename(results_dir))
+
+        # Another worker installs a new version during the first file
+        if len(recalibrated) == 1:
+            with open(auto_path, 'w') as f:
+                f.write('new')
+            os.utime(auto_path, (3000, 3000))
+
+    monkeypatch.setattr(mon, 'recalibrateResults', _recalibrate)
+    assert mon.backfillCalibration(output_dir, config, 'night') == ['f1']
+    assert readDoneFlag(os.path.join(output_dir, 'f1'))['platepar_mtime'] == 2000
+
+
+def test_backfill_of_a_replaced_platepar_covers_unreported_nights(config_path, tmp_path, monkeypatch):
+    """ Files calibrated with a replaced platepar are calibrated again on every night which is not reported yet
+        (e.g. a trial decided the next evening), not on the reported ones. """
+
+    import shutil
+
+    import RMS.MonitorNightReport as mnr
+    from RMS.MonitorNightReport import autoPlateparPath
+
+    config = cr.parse(config_path)
+    config.monitor_auto_calibration = True
+    output_dir = str(tmp_path/'out')
+    os.makedirs(output_dir)
+    auto_path = autoPlateparPath(output_dir, config)
+    with open(auto_path, 'w') as f:
+        f.write('auto')
+    os.utime(auto_path, (2000, 2000))
+    for name, night in (('f1', 'night1'), ('f2', 'night2'), ('f3', 'night3')):
+        os.makedirs(os.path.join(output_dir, name))
+        mon.writeDoneFlag(os.path.join(output_dir, name), {'night': night, 'calibrated': True,
+                                                            'platepar_mtime': 1000.0})
+
+    # night1 is reported
+    monkeypatch.setattr(mnr, 'readReportStates', lambda output_dir: {'nights': {'night1': {'reported_at': 'x'}},
+                                                                     'latest_platepar_night': None})
+    recalibrated = []
+    monkeypatch.setattr(mon, 'recalibrateResults',
+                        lambda results_dir, config, platepar_path=None, proc_log=None, matched_filter=False:
+                        (shutil.copy2(platepar_path, os.path.join(results_dir, config.platepar_name)),
+                         recalibrated.append(os.path.basename(results_dir))))
+
+    assert sorted(mon.backfillCalibration(output_dir, config, 'night3', replaced_mtimes=[1000.0])) == ['f2', 'f3']
