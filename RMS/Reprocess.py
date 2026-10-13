@@ -1175,7 +1175,9 @@ def processFramesFiles(config):
             frame_dir,
             base_crf=config.timelapse_frames_crf,
             cleanup_mode=config.frame_cleanup,
-            threads=config.timelapse_frames_threads
+            threads=config.timelapse_frames_threads,
+            dejump_sigma=config.timelapse_frames_dejump_s,
+            gamma=config.gamma
         )
 
     except Exception as exc:

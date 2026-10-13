@@ -588,7 +588,9 @@ def generateTimelapseFromFrameBlocks(frame_blocks,
                                      cleanup_mode='none',
                                      compression='bz2',
                                      use_color=True,
-                                     threads=2):
+                                     threads=2,
+                                     dejump_sigma=120.0,
+                                     gamma=0.5):
     """Create one timelapse per block and return their paths.
 
     Arguments:
@@ -604,6 +606,8 @@ def generateTimelapseFromFrameBlocks(frame_blocks,
             'bz2' or 'gz'. 'bz2' by default.
         use_color: [bool] Encode colour if possible. True by default.
         threads: [int] x264 encoder threads. 2 by default.
+        dejump_sigma: [float] Exposure de-jump time scale (s), 0 disables. 120 by default.
+        gamma: [float] Camera gamma for the de-jump. 0.5 by default.
 
     Return:
         results: [list[tuple[str, str] | None]] One *(mp4_path, json_path)*
@@ -635,7 +639,9 @@ def generateTimelapseFromFrameBlocks(frame_blocks,
             cleanup_mode=cleanup_mode,
             compression=compression,
             use_color=use_color,
-            threads=threads
+            threads=threads,
+            dejump_sigma=dejump_sigma,
+            gamma=gamma
         )
 
         results.append((mp4_path, json_path) if mp4_path else None)
@@ -652,6 +658,8 @@ def generateTimelapseFromDir(dir_path,
                              compression="bz2",
                              use_color=True,
                              threads=2,
+                             dejump_sigma=120.0,
+                             gamma=0.5,
                              ):
     """Build a single timelapse from every image under *dir_path*.
 
@@ -667,6 +675,8 @@ def generateTimelapseFromDir(dir_path,
         compression: [str] Tar compression when *cleanup_mode* == 'tar'.
         use_color: [bool] Encode colour if possible. True by default.
         threads: [int] x264 encoder threads. 2 by default.
+        dejump_sigma: [float] Exposure de-jump time scale (s), 0 disables. 120 by default.
+        gamma: [float] Camera gamma for the de-jump. 0.5 by default.
 
     Return:
         (video_path, json_path): [tuple[str, str] | (None, None)]
@@ -704,6 +714,8 @@ def generateTimelapseFromDir(dir_path,
         compression=compression,
         use_color=use_color,
         threads=threads,
+        dejump_sigma=dejump_sigma,
+        gamma=gamma,
     )
 
 
@@ -727,7 +739,9 @@ def frameMetaPath(video_path):
     embedded in that saved frame (RMS.FrameMetadata, config.save_frame_metadata: capture_utc,
     exp_us, again, dgain, ispdgain, wb_r, wb_g, wb_b, temp_c, frame_seq, and "highlight_rebuild" when the
     highlight rebuild changed the frame), or null for a frame without one. Only written when at
-    least one frame carries a record, so stations without the metadata ship no file.
+    least one frame carries a record, so stations without the metadata ship no file. With the
+    exposure de-jump on, each record also has "dejump_gain": the multiplier applied to that frame's
+    codes in the video (divide by it to get the saved frame's codes back, below saturation).
 
     Arguments:
         video_path: [str] Path of the timelapse .mp4.
@@ -740,6 +754,82 @@ def frameMetaPath(video_path):
     return video_path.replace('.mp4', '_' + FRAME_META_JSON_SUFFIX)
 
 
+# Clamp of the exposure de-jump gains (see dejumpGains)
+DEJUMP_GAIN_RANGE = (0.5, 1.6)
+
+
+def frameExposure(meta):
+    """ Effective linear exposure of a frame from its metadata record.
+
+    E = exp_us*again*dgain*ispdgain*wb_g. podcontrol's white balance rung scales all three WB gains
+    by one factor, so a wb_g change is an exposure change. Validated on US05C1 2026-10-11: the square
+    root of the exposure ratio predicts the code ratio of consecutive frames across 50 steps to 0.011
+    stop, at zero lag.
+
+    Arguments:
+        meta: [dict | None] Frame metadata record (RMS.FrameMetadata).
+
+    Return:
+        exposure: [float | None] None when the record is missing or incomplete.
+    """
+    try:
+        exposure = float(meta["exp_us"])*float(meta["again"])
+        for key in ("dgain", "ispdgain", "wb_g"):
+            if meta.get(key) is not None:
+                exposure *= float(meta[key])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return exposure if exposure > 0 else None
+
+
+def dejumpGains(times, exposures, modes, sigma_s, gamma, gain_range=DEJUMP_GAIN_RANGE):
+    """ Per-frame code multipliers that turn the camera's exposure steps into smooth ramps.
+
+    The auto exposure moves in steps (and podcontrol's WB rung snaps back by up to 1.5 stops in one
+    frame), which makes the timelapse jump in brightness. The frames are scaled to a virtual
+    exposure instead: the log exposure smoothed by a Gaussian of sigma_s seconds of capture time,
+    with the kernel renormalised at block edges and gaps. Day and night frames are smoothed
+    separately, so the mode switch is left alone. Slow changes of the light pass through.
+
+    On US05C1 2026-10-11 (sigma 120 s) this removed every exposure-caused jump (16 jumps over 0.1
+    stop -> 0, largest 0.73 -> 0.065 stop) and left the scene's own changes alone; gains spanned
+    0.72-1.28.
+
+    Arguments:
+        times: [list[float]] Capture times (s), any order.
+        exposures: [list[float | None]] Frame exposures (frameExposure); None = gain 1.
+        modes: [list[str]] Day/night mode of each frame ('d', 'n' or '').
+        sigma_s: [float] Smoothing time scale (s).
+        gamma: [float] Camera gamma: codes are proportional to light**gamma.
+
+    Keyword arguments:
+        gain_range: [tuple[float, float]] Clamp of the gains.
+
+    Return:
+        gains: [ndarray] One multiplier per frame.
+    """
+    times = np.array([np.nan if t is None else t for t in times], dtype=np.float64)
+    log_exp = np.array([np.log2(e) if e else np.nan for e in exposures], dtype=np.float64)
+    modes = np.asarray(modes)
+    gains = np.ones(len(times))
+    half_width = 4*sigma_s
+
+    for mode in set(modes.tolist()):
+        idx = np.flatnonzero((modes == mode) & np.isfinite(times) & np.isfinite(log_exp))
+        if len(idx) < 2:
+            continue
+        idx = idx[np.argsort(times[idx], kind="stable")]
+        t, log_e = times[idx], log_exp[idx]
+        lo = np.searchsorted(t, t - half_width)
+        hi = np.searchsorted(t, t + half_width, side="right")
+
+        for i in range(len(idx)):
+            w = np.exp(-0.5*((t[lo[i]:hi[i]] - t[i])/sigma_s)**2)
+            gains[idx[i]] = 2**(gamma*(np.dot(w, log_e[lo[i]:hi[i]])/w.sum() - log_e[i]))
+
+    return np.clip(gains, gain_range[0], gain_range[1])
+
+
 def generateTimelapseFromFrames(image_files,
                                 frames_root,
                                 video_path,
@@ -748,7 +838,9 @@ def generateTimelapseFromFrames(image_files,
                                 cleanup_mode='none',
                                 compression='bz2',
                                 use_color=True,
-                                threads=2):
+                                threads=2,
+                                dejump_sigma=120.0,
+                                gamma=0.5):
     """Stream images into ffmpeg and write a timelapse without temp JPGs.
 
     Arguments:
@@ -765,6 +857,9 @@ def generateTimelapseFromFrames(image_files,
             'bz2' or 'gz'. 'bz2' by default.
         use_color: [bool] Encode colour if possible. True by default.
         threads: [int] x264 encoder threads. 2 by default.
+        dejump_sigma: [float] Time scale (s) of the exposure de-jump (dejumpGains) applied to frames
+            with exposure metadata; 0 disables it. 120 by default.
+        gamma: [float] Camera gamma (config.gamma) used by the de-jump. 0.5 by default.
 
     Return:
         (video_path, json_path): [tuple[str, str] | (None, None)]
@@ -843,16 +938,18 @@ def generateTimelapseFromFrames(image_files,
         # Don't use color if grayscale
         use_color = False
 
-    # Encoder settings, from a benchmark on NR-off (grainy) science-camera stills, 2026-09:
+    # Encoder settings, from benchmarks on NR-off (grainy) science-camera stills, 2026-09 and 2026-10:
     # - No maxrate/bufsize cap. The old 2M/4M cap was pinned on 74% of a real night's frames and
     #   flattened every busy frame to the same SSIM regardless of CRF; the movie is a science
-    #   product (contrail detection), so CRF alone sets the quality. The worst case without a cap is
-    #   bounded by the all-intra cost, which is what the GOP below already pays every 10 frames.
+    #   product (contrail detection), so CRF alone sets the quality.
     # - psy-rd 0 and aq-strength 0.5: x264 stops spending bits reproducing grain texture, which a
     #   detector does not need. -41% size at equal SSIM on the grainy source.
-    # - GOP 10, no B-frames: frames are 5 s apart so inter prediction gains little; this costs +7%
-    #   size over GOP 120, is ~30% cheaper in CPU, and any frame is at most 9 decodes from a keyframe
-    #   when the server fetches one by timestamp.
+    # - All-intra (GOP 1). Predicted frames skip the faint (1-4 code) change a new or vanished
+    #   contrail makes, so it shows up only at the next keyframe and lingers until the one after:
+    #   the detector saw contrails from neighbouring frames. Synthetic contrails on real skies, CRF 25:
+    #   GOP 10 kept 0.48 of a contrail's amplitude and left +0.09 of it in the next frame; all-intra
+    #   keeps 0.65 and leaves nothing, for 1.86x the size of a day block and half the CPU. Every
+    #   frame is also a keyframe when the server fetches one by timestamp.
     # x264-params: ':' separates options, and the two psy-rd values need a ',' (a ':' there makes
     # ffmpeg 6.1 silently drop everything after it).
     x264_params = "psy-rd=0.0,0.0:aq-strength=0.5"
@@ -873,22 +970,49 @@ def generateTimelapseFromFrames(image_files,
                   "-pix_fmt", "yuv420p",
                   "-movflags", "faststart",  # Optimize for streaming
                   "-threads", str(int(threads)),
-                  "-g", "10",
+                  "-g", "1",
                   "-bf", "0",
                   temp_video_path]           # Use temporary path
     
+    # Per-frame metadata embedded in the saved frames, read before encoding: the de-jump needs every
+    # frame's exposure up front, and cleanup may delete the frames afterwards
+    try:
+        from RMS.FrameMetadata import readImageMeta
+    except Exception:
+        readImageMeta = None
+    image_meta = []
+    for img_path in image_files:
+        meta = None
+        if readImageMeta is not None:
+            try:
+                meta = readImageMeta(img_path, max_bytes=65536)
+            except Exception:
+                meta = None
+        image_meta.append(meta)
+
+    # Exposure de-jump: one code multiplier per frame
+    gains = None
+    exposures = [frameExposure(meta) for meta in image_meta]
+    n_exposures = sum(1 for e in exposures if e)
+    if dejump_sigma and (dejump_sigma > 0) and (n_exposures >= 2):
+        times, modes = [], []
+        for img_path, meta in zip(image_files, image_meta):
+            try:
+                times.append(float(meta["capture_utc"]))
+            except (KeyError, TypeError, ValueError):
+                times.append(None)
+            m = IMAGE_PATTERN.match(os.path.basename(img_path))
+            modes.append((m.group("suffix") or '').lower() if m else '')
+        gains = dejumpGains(times, exposures, modes, dejump_sigma, gamma)
+        log.info("Exposure de-jump (sigma {:.0f} s, gamma {:.2f}) on {:d} frames: gains {:.3f} to {:.3f}"
+                 .format(dejump_sigma, gamma, n_exposures, gains.min(), gains.max()))
+
     log.info("Starting ffmpeg process for {}...".format(video_path))
     log.info("Video mode: {}".format('Color' if use_color else 'Grayscale'))
     ffmpeg_process = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE)
     
     # Initialize timestamp JSON data
     timestamp_data = {}
-
-    # Per-frame metadata embedded in the saved frames, read here because cleanup may delete them
-    try:
-        from RMS.FrameMetadata import readImageMeta
-    except Exception:
-        readImageMeta = None
     frame_meta = {}
     
     # Process frames
@@ -907,6 +1031,12 @@ def generateTimelapseFromFrames(image_files,
             log.warning("Warning: Skipping corrupted or unreadable image: {}".format(img_path))
             skipped_count += 1
             continue  # Skip this frame
+
+        # Exposure de-jump, before the timestamp is stamped so the text keeps its levels
+        gain = 1.0
+        if (gains is not None) and (gains[index] != 1.0) and (image.dtype == np.uint8):
+            gain = float(gains[index])
+            image = cv2.LUT(image, np.clip(np.round(np.arange(256)*gain), 0, 255).astype(np.uint8))
         
         # Extract timestamp from filename
         try:
@@ -947,12 +1077,9 @@ def generateTimelapseFromFrames(image_files,
             # Write frame to ffmpeg
             ffmpeg_process.stdin.write(image.tobytes())
 
-            meta = None
-            if readImageMeta is not None:
-                try:
-                    meta = readImageMeta(img_path, max_bytes=65536)
-                except Exception:
-                    meta = None
+            meta = image_meta[index]
+            if (meta is not None) and (gains is not None):
+                meta = dict(meta, dejump_gain=round(gain, 4))
             frame_meta[str(processed_count)] = meta
             processed_count += 1
             
@@ -1137,6 +1264,10 @@ def main():
                       help='When using image files create grayscale video instead of color')
     parser.add_argument('--hires', action="store_true",
                             help='Make a higher resolution timelapse. The video file will be larger.')
+    parser.add_argument('--dejump', type=float, default=120.0,
+                        help='Image files: exposure de-jump time scale in seconds, 0 disables (default: 120)')
+    parser.add_argument('--gamma', type=float, default=0.5,
+                        help='Image files: camera gamma used by the de-jump (default: 0.5)')
 
 
     
@@ -1194,6 +1325,8 @@ def main():
                 cleanup_mode=args.cleanup,
                 compression=args.compression,
                 use_color=not args.grayscale,
+                dejump_sigma=args.dejump,
+                gamma=args.gamma,
             )
 
             # Record and print completion time and duration

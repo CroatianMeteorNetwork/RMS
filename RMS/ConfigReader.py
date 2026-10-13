@@ -767,6 +767,10 @@ class Config:
         # x264 threads for the frames timelapse
         self.timelapse_frames_threads = 2
 
+        # Exposure de-jump of the frames timelapse: frames with exposure metadata are scaled to the
+        # exposure smoothed over this time scale (s), so exposure steps become ramps. 0 disables.
+        self.timelapse_frames_dejump_s = 120.0
+
 
         #### Shower association
 
@@ -2091,6 +2095,9 @@ def parseTimelapse(config, parser):
 
     if parser.has_option(section, "timelapse_frames_threads"):
         config.timelapse_frames_threads = max(1, parser.getint(section, "timelapse_frames_threads"))
+
+    if parser.has_option(section, "timelapse_frames_dejump_s"):
+        config.timelapse_frames_dejump_s = max(0.0, parser.getfloat(section, "timelapse_frames_dejump_s"))
 
 
 def parseColors(config, parser):
