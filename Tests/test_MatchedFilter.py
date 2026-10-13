@@ -1858,3 +1858,21 @@ def test_kept_normalized_blocks_give_the_same_detections(config, monkeypatch, ca
 
     # The kept blocks are released at the end (a segmented input keeps the detector of every segment)
     assert det.block_cache == {}
+
+
+def test_cpu_search_streams_the_runs(config, monkeypatch):
+    """ On the CPU, the runs are stacked and searched one after the other (as before the GPU batches), not all
+        held in memory at once: the stacks of all runs at once are only computed on the GPU. """
+
+    from RMS.Routines.MatchedFilterKernels import VelocityStacker
+
+    # The stacks of all runs at once are not used on the CPU
+    def allRuns(self, frames, run_starts):
+        raise AssertionError('All runs stacked at once on the CPU')
+
+    monkeypatch.setattr(VelocityStacker, 'stackMaxRuns', allRuns)
+
+    # The faint object is found as with the stacks of all runs
+    obj = linearObject(1.5, 25, 30, 0.3, 0.12, 40, 470)
+    _, detections = runDetector(_SynthHandle([obj]), config)
+    assert len(detections) == 1

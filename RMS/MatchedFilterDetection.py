@@ -1283,25 +1283,44 @@ class MatchedFilterDetector(object):
                 self.persistence_runs[key] = 0
 
             # Consecutive runs of run_frames frames of the block: the largest stack over the velocities of every
-            #   pixel, and its velocity, for all runs
+            #   pixel, and its velocity, for every run
             run_starts = list(range(0, len(zb) - run_frames + 1, run_frames))
-            t1 = time()
-            try:
 
-                # The frames already on the GPU, or the frames on the CPU
-                stack_maxes, vel_idxs = stacker.stackMaxRuns(device_frames.get(b, zb), run_starts)
-            except Exception:
-                if not stacker.use_gpu:
-                    raise
+            def cpuRuns(stacker=stacker, zb=zb, run_frames=run_frames, run_starts=run_starts):
+                """ The stacks of the runs on the CPU, one run after the other, so only the stack of the run
+                    being searched is in memory.
+
+                Return:
+                    [generator] (first frame, stack_max, vel_idx) of every run.
+                """
+
+                for r0 in run_starts:
+                    t1 = time()
+                    stack_max, vel_idx = stacker.stackMax(zb[r0:r0 + run_frames])
+                    self.timing['stack'] += time() - t1
+                    yield r0, stack_max, vel_idx
+
+            # On the GPU, the stacks of all runs are computed by one launch, from the frames already on the GPU
+            if stacker.use_gpu:
+                t1 = time()
+                try:
+                    stack_maxes, vel_idxs = stacker.stackMaxRuns(device_frames.get(b, zb), run_starts)
+                    runs = zip(run_starts, stack_maxes, vel_idxs)
+
                 # E.g. out of GPU memory with several workers: continue on the CPU
-                log.error('Matched filter: the GPU failed, continuing on the CPU:\n' + traceback.format_exc())
-                self.useCPU(stackers)
-                device_frames = {}
-                stack_maxes, vel_idxs = stacker.stackMaxRuns(zb, run_starts)
-            self.timing['stack'] += time() - t1
+                except Exception:
+                    log.error('Matched filter: the GPU failed, continuing on the CPU:\n' + traceback.format_exc())
+                    self.useCPU(stackers)
+                    device_frames = {}
+                    runs = cpuRuns()
+                self.timing['stack'] += time() - t1
+
+            # On the CPU, run by run
+            else:
+                runs = cpuRuns()
 
             # The hits of every run, from its stack
-            for r0, stack_max, vel_idx in zip(run_starts, stack_maxes, vel_idxs):
+            for r0, stack_max, vel_idx in runs:
 
                 # The maximum over many velocities of noise is not the noise of a single stack (it is the largest of
                 #   many draws, so its distribution is shifted up and narrower). The detection image is therefore
