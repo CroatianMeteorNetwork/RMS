@@ -324,3 +324,183 @@ def test_negative_values_are_rejected(tmp_path, packing):
         with pytest.raises(ValueError):
             w.write(frame, 0)
         assert w.n_frames == 0
+
+
+def test_convert_names_blocks_uniquely_when_times_repeat(tmp_path):
+    """ Blocks whose first frames have the same DATE-OBS (a coarse clock) get different names, so none is
+        overwritten. """
+
+    frames = [np.full((10, 16), 4093 - i, np.uint16) for i in range(4)]
+    _writeFitsFrames(tmp_path/'fits', frames, ['2026-04-24T05:40:22+00:00']*4)
+
+    paths = fb.convertFitsDirectory(str(tmp_path/'fits'), str(tmp_path/'out'), frames_per_block=2,
+                                    station_id='TEST01')
+    assert len(set(paths)) == 2
+    assert sum(fb.FrameBlockReader(p).n_frames for p in paths) == 4
+
+
+@pytest.mark.parametrize('packing, bit_depth', [('uint16', 17), ('uint16', 0), ('mono12p', 13)])
+def test_bit_depth_beyond_the_storage_is_rejected(tmp_path, packing, bit_depth):
+    """ A bit depth the packing can't hold (or not positive) is refused. """
+
+    path = str(tmp_path/('XX0001_20251225_010203_000000' + fb.EXTENSION))
+    with pytest.raises(ValueError):
+        fb.FrameBlockWriter(path, 16, 10, max_frames=2, packing=packing, bit_depth=bit_depth)
+    assert not os.path.exists(path + '.part')
+
+
+def test_rms_opens_an_upper_case_extension(tmp_path):
+    """ A block named with an upper-case extension is opened as a block, as the monitor accepts it. """
+
+    import RMS.ConfigReader as cr
+    from RMS.Formats.FrameInterface import detectInputTypeFile
+
+    config = cr.parse(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.config'))
+    config.width, config.height = 16, 10
+    path = str(tmp_path/'XX0001_20251225_010203_000000.FBLK')
+    with fb.FrameBlockWriter(path, 16, 10, max_frames=2) as w:
+        w.write(np.zeros((10, 16), np.uint16), 1_766_624_523_000_000_000)
+        w.write(np.zeros((10, 16), np.uint16), 1_766_624_523_040_000_000)
+
+    assert detectInputTypeFile(path, config, detection=True).input_type == 'fblk'
+
+
+def test_convert_16_bit_values_needs_no_scaling(tmp_path):
+    """ 16-bit values are converted as they are, without asking whether they are shifted. """
+
+    frames = [np.full((10, 16), 16*i, np.uint16) for i in range(2)]
+    _writeFitsFrames(tmp_path/'fits', frames, ['2026-04-24T05:40:22.{:06d}+00:00'.format(66667*i) for i in range(2)])
+
+    reader = fb.FrameBlockReader(fb.convertFitsDirectory(str(tmp_path/'fits'), str(tmp_path/'out'), packing='uint16',
+                                                         bit_depth=16)[0])
+    assert int(reader.frame(1).max()) == 16
+
+
+def test_convert_takes_fits_of_any_case(tmp_path):
+    """ Frames named .FITS, .fits and .fit are all converted. """
+
+    frames = [np.full((10, 16), 4093 - i, np.uint16) for i in range(3)]
+    _writeFitsFrames(tmp_path/'fits', frames, ['2026-04-24T05:40:22.{:06d}+00:00'.format(66667*i) for i in range(3)],
+                     names=['a.FITS', 'b.fits', 'c.fit'])
+
+    reader = fb.FrameBlockReader(fb.convertFitsDirectory(str(tmp_path/'fits'), str(tmp_path/'out'),
+                                                         station_id='TEST01')[0])
+    assert reader.n_frames == 3
+
+
+def test_convert_keeps_existing_blocks(tmp_path):
+    """ A block already in the output directory is not replaced, unless asked. """
+
+    frames = [np.full((10, 16), 4093, np.uint16)]
+    _writeFitsFrames(tmp_path/'fits', frames, ['2026-04-24T05:40:22+00:00'])
+    path = fb.convertFitsDirectory(str(tmp_path/'fits'), str(tmp_path/'out'), station_id='TEST01')[0]
+
+    with pytest.raises(FileExistsError):
+        fb.convertFitsDirectory(str(tmp_path/'fits'), str(tmp_path/'out'), station_id='TEST01')
+    assert fb.FrameBlockReader(path).n_frames == 1
+
+    assert fb.convertFitsDirectory(str(tmp_path/'fits'), str(tmp_path/'out'), station_id='TEST01',
+                                   overwrite=True) == [path]
+
+
+def test_short_writes_are_completed(tmp_path, monkeypatch):
+    """ A write which stores only part of the bytes (as the system may do) is continued until all are written. """
+
+    write = os.pwrite
+
+    def shortWrite(fd, data, offset):
+        data = memoryview(data).cast('B')
+        return write(fd, data[:max(1, len(data)//3)], offset)
+
+    monkeypatch.setattr(os, 'pwrite', shortWrite)
+    rng = np.random.default_rng(8)
+    frames = [rng.integers(0, 4096, (10, 16), dtype=np.uint16) for _ in range(2)]
+    path = str(tmp_path/('XX0001_20251225_010203_000000' + fb.EXTENSION))
+    with fb.FrameBlockWriter(path, 16, 10, max_frames=2) as w:
+        for i, frame in enumerate(frames):
+            w.write(frame, i, counter=7 + i)
+    monkeypatch.setattr(os, 'pwrite', write)
+
+    reader = fb.FrameBlockReader(path)
+    assert reader.n_frames == 2
+    assert all(np.array_equal(reader.frame(i), f) for i, f in enumerate(frames))
+    assert reader.table['counter'].tolist() == [7, 8]
+
+
+def test_written_without_positional_writes(tmp_path, monkeypatch):
+    """ Where the system has no positional write (os.pwrite, e.g. Windows), the block is written by seeking. """
+
+    monkeypatch.delattr(os, 'pwrite')
+    rng = np.random.default_rng(9)
+    frames = [rng.integers(0, 4096, (10, 16), dtype=np.uint16) for _ in range(2)]
+    path = str(tmp_path/('XX0001_20251225_010203_000000' + fb.EXTENSION))
+    with fb.FrameBlockWriter(path, 16, 10, max_frames=3) as w:
+        for i, frame in enumerate(frames):
+            w.write(frame, i)
+
+    reader = fb.FrameBlockReader(path)
+    assert reader.n_frames == 2
+    assert all(np.array_equal(reader.frame(i), f) for i, f in enumerate(frames))
+
+
+@pytest.mark.skipif(os.name != 'posix', reason='Directories are synchronized on POSIX systems only')
+def test_fsync_also_syncs_the_directory(tmp_path, monkeypatch):
+    """ With fsync, the file and then its directory (the new name) are flushed to the disk. """
+
+    synced = []
+    fsync = os.fsync
+    monkeypatch.setattr(os, 'fsync', lambda fd: (synced.append(os.fstat(fd).st_mode), fsync(fd)))
+
+    path = str(tmp_path/('XX0001_20251225_010203_000000' + fb.EXTENSION))
+    w = fb.FrameBlockWriter(path, 16, 10, max_frames=1)
+    w.write(np.zeros((10, 16), np.uint16), 0)
+    w.close(fsync=True)
+
+    import stat
+    assert [stat.S_ISDIR(mode) for mode in synced] == [False, True]
+
+
+@pytest.mark.skipif(not hasattr(os, 'posix_fallocate'), reason='No preallocation on this system')
+@pytest.mark.parametrize('code, fails', [('ENOSPC', True), ('EOPNOTSUPP', False)])
+def test_preallocation_errors(tmp_path, monkeypatch, code, fails):
+    """ A full disk when the block is reserved is an error (with the file descriptor closed and no file left);
+        a file system without preallocation falls back to setting the size. """
+
+    import errno
+
+    def fallocate(fd, offset, length):
+        raise OSError(getattr(errno, code), code)
+
+    monkeypatch.setattr(os, 'posix_fallocate', fallocate)
+    fds = len(os.listdir('/proc/self/fd')) if os.path.isdir('/proc/self/fd') else None
+    path = str(tmp_path/('XX0001_20251225_010203_000000' + fb.EXTENSION))
+
+    if fails:
+        with pytest.raises(OSError):
+            fb.FrameBlockWriter(path, 16, 10, max_frames=2)
+        assert not os.path.exists(path + '.part')
+        if fds is not None:
+            assert len(os.listdir('/proc/self/fd')) == fds
+    else:
+        with fb.FrameBlockWriter(path, 16, 10, max_frames=2) as w:
+            w.write(np.zeros((10, 16), np.uint16), 0)
+        assert fb.FrameBlockReader(path).n_frames == 1
+
+
+@pytest.mark.parametrize('frames', [0, -1])
+def test_convert_refuses_non_positive_block_lengths(tmp_path, frames):
+    """ A block length which is not positive is refused instead of converting nothing or everything. """
+
+    _writeFitsFrames(tmp_path/'fits', [np.full((10, 16), 4093, np.uint16)], ['2026-04-24T05:40:22+00:00'])
+    with pytest.raises(ValueError):
+        fb.convertFitsDirectory(str(tmp_path/'fits'), str(tmp_path/'out'), frames_per_block=frames)
+
+
+def test_matched_filter_finds_blocks_in_a_directory(tmp_path):
+    """ The matched filter takes the frame blocks of a directory as its inputs. """
+
+    from RMS.MatchedFilterDetection import findInputFiles
+
+    open(str(tmp_path/'XX0001_20251225_010203_000000.fblk'), 'wb').close()
+    open(str(tmp_path/'notes.txt'), 'w').close()
+    assert [os.path.basename(p) for p in findInputFiles([str(tmp_path)])] == ['XX0001_20251225_010203_000000.fblk']
