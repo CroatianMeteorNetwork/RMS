@@ -1123,6 +1123,10 @@ RETRY_EVIDENCE_GROWTH = 1.5
 #   that is clearly better on them, otherwise a better one is fitted
 CONFIRM_MINUTES = 15
 
+# A file older than the last attempt to fit by less than this many minutes was finished late by a worker and makes
+#   no decision; an older one is older data processed again
+LATE_MINUTES = 60
+
 # The periodic fit of a camera whose platepar passes searches the sky within this many diagonals of the field of view
 #   around its pointing
 HINT_RADIUS_FOV = 2.0
@@ -1149,10 +1153,10 @@ class _StateLock(object):
     """ Exclusive lock of the state of the automatic calibration of a camera, so the workers which process its
         files in parallel judge and fit one at a time and see each other's results. """
 
-    def __init__(self, output_dir):
-        """ The lock of the camera with the given output directory. """
+    def __init__(self, output_dir, name=STATE_NAME + '.lock'):
+        """ The lock of the camera with the given output directory (name: the lock file, e.g. of the backfill). """
 
-        self.path = os.path.join(output_dir, STATE_NAME + '.lock')
+        self.path = os.path.join(output_dir, name)
         self.fd = None
 
     def __enter__(self):
@@ -1284,9 +1288,14 @@ def _platepar(path, use_flat):
     if (path is None) or (not os.path.isfile(path)):
         return None
 
-    # A platepar which can't be read is none
+    # A platepar which can't be read (e.g. damaged) is none
     platepar = Platepar()
-    if platepar.read(path, use_flat=use_flat) is False:
+    try:
+        if platepar.read(path, use_flat=use_flat) is False:
+            return None
+
+    except Exception as e:
+        log.warning("Automatic calibration: the platepar {:s} can't be read: {:s}".format(path, repr(e)))
         return None
 
     return platepar
@@ -1321,11 +1330,13 @@ def installPlatepar(platepar, output_dir, config, reason, dry_run=False):
 
     elif os.path.isfile(path):
 
-        # The replaced platepar is kept with the time it was replaced
+        # The replaced platepar is kept with the time it was replaced, copied so the installed path never goes
+        #   missing for the workers which read it
+        import shutil
         stamp = datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S')
-        os.replace(path, os.path.join(output_dir, 'auto_replaced_{:s}_{:s}'.format(stamp, config.platepar_name)))
+        shutil.copy2(path, os.path.join(output_dir, 'auto_replaced_{:s}_{:s}'.format(stamp, config.platepar_name)))
 
-    # Written atomically, as the workers may be reading it
+    # Written atomically over the old one, as the workers may be reading it
     _writePlatepar(platepar, path)
     log.info("Automatic calibration: {:s} platepar saved to {:s} ({:s})".format(
         'candidate' if dry_run else 'new', path, reason))
@@ -1443,7 +1454,7 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
         # A platepar on trial is tested on the chunks after the ones it was fitted on, once they span
         #   CONFIRM_MINUTES. No new candidate is fitted meanwhile. The trial ends if another platepar is in use
         trial = state.get('trial')
-        if trial and ((platepar_path is None) or (os.path.abspath(platepar_path) != os.path.abspath(trial['path']))
+        if trial and ((current is None) or (os.path.abspath(platepar_path) != os.path.abspath(trial['path']))
                       or (not os.path.isfile(trial['previous']))):
             _removeFile(trial['previous'])
             state['trial'] = trial = None
@@ -1484,7 +1495,7 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
             #   reported, so the files calibrated with it are calibrated again
             if previous_better:
                 if os.path.isfile(trial['path']):
-                    result['rejected_platepar_mtime'] = os.path.getmtime(trial['path'])
+                    result['replaced_platepar_mtime'] = os.path.getmtime(trial['path'])
                 path = installPlatepar(previous, output_dir, config, 'rolled back: ' + reason, dry_run=dry_run)
                 state['installs'].append({'jd': end_jd, 'path': path, 'reason': 'rolled back: ' + reason,
                                           'dry_run': dry_run})
@@ -1527,6 +1538,7 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
 
             # A confirmed candidate is installed
             if better:
+                result['replaced_platepar_mtime'] = _mtime(platepar_path)
                 path = installPlatepar(candidate, output_dir, config, 'confirmed: ' + reason, dry_run=dry_run)
                 state['installs'].append({'jd': end_jd, 'path': path, 'reason': 'confirmed: ' + reason,
                                           'dry_run': dry_run})
@@ -1538,14 +1550,18 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
             log.info("Automatic calibration: the candidate was not confirmed ({:s})".format(reason))
 
         # Fit a candidate without a platepar or when it fails (retried after a while, or sooner with clearly more
-        #   clear chunks), and periodically. A file older than the last attempt (a worker which finished late) makes
+        #   clear chunks), and periodically. A file which a worker finished late (older than the last attempt) makes
         #   no decision, so the decisions never go back to an older window
         current_fails = (current is None) or (not result['current']['ok'])
         last = state.get('last_attempt_jd')
         interval = RETRY_MINUTES if current_fails else config.monitor_auto_calibration_interval
         more_evidence = current_fails and (len(window) >= RETRY_EVIDENCE_GROWTH*state.get('last_attempt_clear', 0))
-        if (last is not None) and ((end_jd < last)
-                                   or ((end_jd - last < interval/1440.0) and (not more_evidence))):
+
+        # A file older than the last attempt by less than LATE_MINUTES is a late worker; a much older one is older
+        #   data processed again, which is judged as new
+        late = (last is not None) and (last - LATE_MINUTES/1440.0 < end_jd < last)
+        if late or ((last is not None) and (end_jd >= last) and (end_jd - last < interval/1440.0)
+                    and (not more_evidence)):
             result['action'] = 'judged'
             writeState(output_dir, state)
             return _saveFileResult(results_dir, result)
@@ -1595,6 +1611,7 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
 
             previous_path = os.path.join(output_dir, 'auto_previous_' + config.platepar_name)
             shutil.copyfile(platepar_path, previous_path)
+            result['replaced_platepar_mtime'] = _mtime(platepar_path)
             path = installPlatepar(candidate, output_dir, config, 'on trial: ' + reason, dry_run=dry_run)
             state['trial'] = {'path': path, 'previous': previous_path,
                               'fitted_jd': max(chunk[1] for chunk in window), 'reason': reason}
@@ -1677,6 +1694,15 @@ def _plateparInUse(output_dir, config, platepar_path, dry_run):
         return installed_path
 
     return platepar_path
+
+
+def _mtime(path):
+    """ Modification time of a file (the version of a platepar), None if it doesn't exist. """
+
+    try:
+        return os.path.getmtime(path)
+    except (OSError, TypeError):
+        return None
 
 
 def _dryRunAction(action, dry_run):

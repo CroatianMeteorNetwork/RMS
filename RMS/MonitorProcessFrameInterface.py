@@ -745,9 +745,9 @@ def readPlatepar(platepar_path):
 
 
 
-def recalibrateResults(results_dir, config, platepar_path=None, proc_log=None):
+def recalibrateResults(results_dir, config, platepar_path=None, proc_log=None, matched_filter=False):
     """ Recalibrate the detections in the FTPdetectinfo of the results of a file (ApplyRecalibrate), which adds
-        their astrometry and photometry, and the completed results of the separate matched-filter pass.
+        their astrometry and photometry, and if asked the completed results of the separate matched-filter pass.
 
     Arguments:
         results_dir: [str] Results directory of the file.
@@ -757,6 +757,9 @@ def recalibrateResults(results_dir, config, platepar_path=None, proc_log=None):
         platepar_path: [str] Platepar which is copied into the results directory first. None by default (the
             platepar in the results directory is used).
         proc_log: [Logger] Logger, the module logger if None.
+        matched_filter: [bool] Also recalibrate the results of the separate matched-filter pass (when a new
+            platepar is installed; in the processing of the file the pass already used its platepar). A failure
+            there is logged and doesn't affect the normal detections. False by default.
 
     Return:
         [bool] True if there was an FTPdetectinfo file to recalibrate.
@@ -767,31 +770,35 @@ def recalibrateResults(results_dir, config, platepar_path=None, proc_log=None):
     if platepar_path is not None:
         shutil.copy2(platepar_path, os.path.join(results_dir, config.platepar_name))
 
-    # The detections of the separate matched-filter pass get the same platepar
-    _recalibrateMatchedFilter(results_dir, config, os.path.join(results_dir, config.platepar_name), proc_log)
-
-    # The detections of the file (not the backups which earlier recalibrations left), a file without detections
-    #   has nothing to recalibrate
+    # The detections of the file (not the backups which earlier recalibrations left)
     from RMS.Formats.FTPdetectinfo import validDefaultFTPdetectinfo
     ftpdetect_files = sorted(path for path in glob.glob(os.path.join(results_dir, 'FTPdetectinfo_*.txt'))
                              if validDefaultFTPdetectinfo(os.path.basename(path)))
-    if not ftpdetect_files:
-        return False
+    if ftpdetect_files:
 
-    proc_log.info("Running ApplyRecalibrate on: {}".format(ftpdetect_files[0]))
+        proc_log.info("Running ApplyRecalibrate on: {}".format(ftpdetect_files[0]))
 
-    # Run recalibration with load_all=True. The ECSV files of the detections are saved to the results directory and
-    #   collected into the night directory by the night report
-    applyRecalibrate(
-        ftpdetect_files[0], config,
-        # The calibration variation plots are made for the whole night in the night report
-        generate_plot=False,
-        load_all=True,
-        generate_ufoorbit=False,
-        ecsv_out=config.monitor_save_ecsv,
-    )
+        # Run recalibration with load_all=True. The ECSV files of the detections are saved to the results directory
+        #   and collected into the night directory by the night report
+        applyRecalibrate(
+            ftpdetect_files[0], config,
+            # The calibration variation plots are made for the whole night in the night report
+            generate_plot=False,
+            load_all=True,
+            generate_ufoorbit=False,
+            ecsv_out=config.monitor_save_ecsv,
+        )
 
-    return True
+    # The detections of the separate matched-filter pass get the same platepar; a failure there doesn't fail the
+    #   file
+    if matched_filter:
+        try:
+            _recalibrateMatchedFilter(results_dir, config, os.path.join(results_dir, config.platepar_name),
+                                      proc_log)
+        except Exception:
+            proc_log.error("Recalibrating the matched-filter results failed:\n" + traceback.format_exc())
+
+    return bool(ftpdetect_files)
 
 
 def _recalibrateMatchedFilter(results_dir, config, platepar_path, proc_log):
@@ -827,11 +834,15 @@ def _recalibrateMatchedFilter(results_dir, config, platepar_path, proc_log):
                          ecsv_out=config.monitor_save_ecsv)
 
 
-def backfillCalibration(output_dir, config, night_name, proc_log=None, rejected_mtimes=None):
-    """ Add the astrometry and the photometry to the files of a night which were processed without a platepar,
-        once the automatic calibration has fitted one, and calibrate again the files whose platepar failed the
-        judgement of the automatic calibration or were calibrated with a rejected platepar with the newly
-        installed platepar (the detections themselves are not repeated).
+def backfillCalibration(output_dir, config, night_name, proc_log=None, replaced_mtimes=None):
+    """ Add the astrometry and the photometry of the installed automatic platepar to the files which need it (the
+        detections themselves are not repeated):
+          - the files of the night processed without a platepar,
+          - the files of the night whose platepar failed the judgement of the automatic calibration,
+          - with replaced_mtimes, the files of every night not reported yet which were calibrated with a replaced
+            version, unless their own judgement passed it.
+        One backfill runs at a time per camera, and it stops when another platepar is installed meanwhile (the
+        backfill of that install continues).
 
     Arguments:
         output_dir: [str] Output directory of the monitor.
@@ -840,61 +851,124 @@ def backfillCalibration(output_dir, config, night_name, proc_log=None, rejected_
 
     Keyword arguments:
         proc_log: [Logger] Logger, the module logger if None.
-        rejected_mtimes: [list] Versions (modification times, see plateparTime) of platepars which were rejected
-            (e.g. a platepar on trial which was rolled back), the files calibrated with them are calibrated again.
-            None by default.
+        replaced_mtimes: [list] Versions (modification times, see plateparTime) of the platepars which the
+            installed one replaced (e.g. a failing platepar, or a platepar on trial which was rolled back). None by
+            default.
 
     Return:
         [list] Results directories which were calibrated.
     """
 
-    from RMS.Astrometry.AutoCalibration import FILE_RESULT_NAME
-    from RMS.MonitorNightReport import autoPlateparPath, readDoneFlag, scanNights
+    from RMS.Astrometry.AutoCalibration import FILE_RESULT_NAME, _StateLock
+    from RMS.MonitorNightReport import autoPlateparPath, readDoneFlag, readReportStates, scanNights
 
     proc_log = log if proc_log is None else proc_log
+    replaced_mtimes = [t for t in (replaced_mtimes or []) if t is not None]
 
     # Only the automatically fitted platepar is added (a given platepar was used from the start)
     platepar_path = autoPlateparPath(output_dir, config)
     if not os.path.isfile(platepar_path):
         return []
 
-    platepar_mtime = plateparTime(platepar_path)
     calibrated = []
-    for results_dir, info in sorted(scanNights(output_dir, config).get(night_name, {}).items()):
+    with _StateLock(output_dir, name='auto_calibration_backfill.lock'):
 
-        # A calibrated file is calibrated again only if its platepar was rejected, or it failed and it is not the
-        #   installed one
-        rejected = info.get('platepar_mtime') in (rejected_mtimes or [])
-        if info.get('calibrated', True) and (not rejected) \
-                and ((info.get('platepar_mtime') == platepar_mtime)
-                     or (not _plateparFailed(os.path.join(output_dir, results_dir), FILE_RESULT_NAME))):
-            continue
+        # The version which is added; the nights which are searched: this one, and with replaced versions every
+        #   night which is not reported yet
+        platepar_mtime = plateparTime(platepar_path)
+        nights = scanNights(output_dir, config)
+        night_names = [night_name]
+        if replaced_mtimes:
+            reported = readReportStates(output_dir).get('nights', {})
+            night_names += sorted(n for n in nights if (n != night_name)
+                                  and (not (reported.get(n) or {}).get('reported_at')))
 
-        # Recalibrate the detections of the file with the fitted platepar, and mark it as calibrated
-        results_path = os.path.join(output_dir, results_dir)
-        try:
-            recalibrateResults(results_path, config, platepar_path=platepar_path, proc_log=proc_log)
+        for name in night_names:
+            for results_dir, info in sorted(nights.get(name, {}).items()):
+                results_path = os.path.join(output_dir, results_dir)
+                if not _needsCalibration(info, results_path, platepar_mtime, replaced_mtimes, FILE_RESULT_NAME):
+                    continue
 
-            # Read the flag again, it may have changed since the scan
-            info = readDoneFlag(results_path)
-            info['calibrated'] = True
-            info['calibrated_later'] = True
-            info['platepar_mtime'] = platepar_mtime
-            writeDoneFlag(results_path, info)
-            calibrated.append(results_dir)
+                # Another platepar installed meanwhile: its own backfill continues
+                if plateparTime(platepar_path) != platepar_mtime:
+                    proc_log.info("A new platepar was installed during the backfill, it is stopped")
+                    break
 
-        except Exception:
+                # Recalibrate the detections of the file with the fitted platepar, and mark it as calibrated with
+                #   the version it got (the copy in the results keeps its modification time)
+                try:
+                    recalibrateResults(results_path, config, platepar_path=platepar_path, proc_log=proc_log,
+                                       matched_filter=True)
 
-            # A file which fails is left without the calibration, the others are still calibrated
-            proc_log.error("Adding the calibration to {:s} failed:\n{:s}".format(results_dir,
-                                                                                traceback.format_exc()))
+                    # Read the flag again, it may have changed since the scan
+                    info = readDoneFlag(results_path)
+                    info['calibrated'] = True
+                    info['calibrated_later'] = True
+                    info['platepar_mtime'] = plateparTime(os.path.join(results_path, config.platepar_name))
+                    writeDoneFlag(results_path, info)
+                    calibrated.append(results_dir)
+
+                except Exception:
+
+                    # A file which fails is left as it is, the others are still calibrated
+                    proc_log.error("Adding the calibration to {:s} failed:\n{:s}".format(results_dir,
+                                                                                        traceback.format_exc()))
+            else:
+                continue
+            break
 
     # Report how many files got the calibration
     if calibrated:
-        proc_log.info("Added the calibration to {:d} files of night {:s} processed without it or with a failing "
-                      "platepar".format(len(calibrated), night_name))
+        proc_log.info("Added the calibration to {:d} files processed without it or with a failing or replaced "
+                      "platepar".format(len(calibrated)))
 
     return calibrated
+
+
+def _needsCalibration(info, results_path, platepar_mtime, replaced_mtimes, result_name):
+    """ Whether the backfill calibrates a file with the installed platepar (see backfillCalibration).
+
+    Arguments:
+        info: [dict] Done flag of the file.
+        results_path: [str] Results directory of the file.
+        platepar_mtime: [float] Version of the installed platepar.
+        replaced_mtimes: [list] Versions of the platepars it replaced.
+        result_name: [str] Name of the file with the judgement (see AutoCalibration.FILE_RESULT_NAME).
+
+    Return:
+        [bool] True if the file is calibrated with the installed platepar.
+    """
+
+    # Without a platepar
+    if not info.get('calibrated', True):
+        return True
+
+    # Already with the installed version
+    version = info.get('platepar_mtime')
+    if version == platepar_mtime:
+        return False
+
+    # With a replaced version, unless its own judgement passed it
+    if version in replaced_mtimes:
+        return not _plateparPassed(results_path, result_name)
+
+    # With a platepar which failed its judgement
+    return _plateparFailed(results_path, result_name)
+
+
+def _plateparPassed(results_path, result_name):
+    """ Whether the platepar a file was judged with passed the judgement of the automatic calibration.
+
+    Return:
+        [bool] True if it passed, False if it failed or the file was not judged.
+    """
+
+    try:
+        with open(os.path.join(results_path, result_name)) as f:
+            return (json.load(f).get('current') or {}).get('ok') is True
+
+    except (OSError, ValueError):
+        return False
 
 
 def _plateparFailed(results_path, result_name):
@@ -1403,17 +1477,17 @@ def autoCalibrationStep(results_dir, config, output_dir, given_platepar_path, pl
 
             # The detections of the file get the astrometry and the photometry of the new platepar
             proc_log.info("Recalibrating the file with the new platepar: {}".format(new_platepar_path))
-            recalibrateResults(results_dir, config, platepar_path=new_platepar_path, proc_log=proc_log)
+            recalibrateResults(results_dir, config, platepar_path=new_platepar_path, proc_log=proc_log,
+                               matched_filter=True)
             calibrated = True
             platepar_path = new_platepar_path
             platepar_mtime = new_platepar_mtime
 
-        # The files of the night which were processed without a platepar, with a failing one or with a rejected
-        #   one (a rolled back platepar on trial)
+        # The files which were processed without a platepar, with a failing one or with the one which was
+        #   replaced
         if judgement.get('installed'):
-            rejected = judgement.get('rejected_platepar_mtime')
             backfillCalibration(output_dir, config, night_name, proc_log=proc_log,
-                                rejected_mtimes=([rejected] if rejected is not None else None))
+                                replaced_mtimes=[judgement.get('replaced_platepar_mtime')])
 
     except Exception:
         proc_log.error("The automatic calibration failed:\n" + traceback.format_exc())

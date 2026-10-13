@@ -443,9 +443,11 @@ def test_terrible_platepar_is_replaced_on_trial_and_kept(camera, tmp_path):
     config, output_dir, state, process = camera
     bad = _writePlatepar(str(tmp_path/'bad.cal'), 0.2)
 
-    # Installed on trial right away, the replaced platepar is kept for a roll back
+    # Installed on trial right away, the replaced platepar is kept for a roll back, and its version reported so the
+    #   files calibrated with it are calibrated again
     result = process('file1', bad)
     assert result['action'] == 'installed the platepar on trial'
+    assert result['replaced_platepar_mtime'] == pytest.approx(os.path.getmtime(bad))
     assert result['installed'] == autoPlateparPath(output_dir, config)
     trial = ac.readState(output_dir)['trial']
     assert os.path.isfile(trial['previous'])
@@ -487,7 +489,7 @@ def test_failing_trial_platepar_is_rolled_back(camera, tmp_path):
     # The previous platepar is put back, and the version of the rejected platepar is reported, so the files
     #   calibrated with it are calibrated again
     assert result['action'] == 'rolled back the platepar on trial'
-    assert result['rejected_platepar_mtime'] == pytest.approx(trial_mtime)
+    assert result['replaced_platepar_mtime'] == pytest.approx(trial_mtime)
     assert result['installed'] == autoPlateparPath(output_dir, config)
     with open(autoPlateparPath(output_dir, config)) as f:
         assert json.load(f)['mag_lev'] == pytest.approx(0.95)
@@ -632,13 +634,13 @@ def test_older_file_finishing_late_makes_no_decision(camera, tmp_path):
     good = _writePlatepar(str(tmp_path/'good.cal'), 0.95)
 
     # A newer file makes the periodic attempt
-    state['jd'] += 60/1440.0
+    state['jd'] += 30/1440.0
     process('newer', good)
     decided = ac.readState(output_dir)['last_attempt_jd']
     assert state['fits'] == 1
 
     # An older file finishes later: judged only, the state of the decisions doesn't go back
-    state['jd'] -= 60/1440.0
+    state['jd'] -= 30/1440.0
     result = process('older', good)
     assert result['action'] == 'judged'
     assert state['fits'] == 1
@@ -669,3 +671,57 @@ def test_fit_is_hinted_with_the_pointing_of_a_passing_platepar(camera, tmp_path)
     state['jd'] += 60/1440.0
     process('file2', bad)
     assert state['fit_kwargs'].get('position_hint') is None
+
+
+def test_installed_platepar_never_missing_during_an_install(tmp_path, monkeypatch):
+    """ While a platepar replaces the installed one, the installed path always exists (other workers read it
+        without the lock). """
+
+    import RMS.MonitorNightReport as mnr
+    from RMS.MonitorNightReport import autoPlateparPath
+
+    config = cr.parse(REPO_CONFIG)
+    output_dir = str(tmp_path)
+    ac.installPlatepar(_platepar(), output_dir, config, 'first')
+
+    # The write of the new platepar finds the old one still in place
+    seen = []
+    real_write = mnr._writePlatepar
+    monkeypatch.setattr(mnr, '_writePlatepar', lambda pp, path: (seen.append(os.path.isfile(path)),
+                                                                 real_write(pp, path)))
+    ac.installPlatepar(_platepar(), output_dir, config, 'second')
+
+    assert seen == [True]
+    assert os.path.isfile(autoPlateparPath(output_dir, config))
+    assert len([name for name in os.listdir(output_dir) if name.startswith('auto_replaced_')]) == 1
+
+
+def test_reprocessing_an_older_night_still_fits(camera):
+    """ A file much older than the last attempt (an older night processed again) is not a late worker: without a
+        platepar a candidate is fitted for it. """
+
+    config, output_dir, state, process = camera
+    state['candidate_share'] = 0.2
+
+    # The last attempt is from a file a day later
+    process('newer')
+    assert state['fits'] == 1
+    state['jd'] -= 1.0
+    process('older')
+    assert state['fits'] == 2
+
+
+def test_unreadable_trial_platepar_ends_the_trial(camera, tmp_path):
+    """ A platepar on trial which can't be read ends the trial instead of failing every following file. """
+
+    from RMS.MonitorNightReport import autoPlateparPath
+
+    config, output_dir, state, process = camera
+    bad = _writePlatepar(str(tmp_path/'bad.cal'), 0.2)
+    process('file1', bad)
+    assert ac.readState(output_dir)['trial'] is not None
+
+    with open(autoPlateparPath(output_dir, config), 'w') as f:
+        f.write('{damaged')
+    process('file2', bad)
+    assert ac.readState(output_dir)['trial'] is None
