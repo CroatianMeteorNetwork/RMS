@@ -1721,8 +1721,10 @@ class InputTypeFrameBlock(InputType):
         self.frame_chunk_unix_times = []
         n = 0
         for i in range(first_frame, min(first_frame + frames_to_read, self.total_frames)):
+
+            # The frames are uint16 already (not copied again; the chunk keeps no reference to them)
             frame = self._frame(i)
-            ff_struct_fake.addFrame(frame.astype(np.uint16))
+            ff_struct_fake.addFrame(np.asarray(frame, dtype=np.uint16))
             if n == 0:
                 ff_struct_fake.dtype = self.getTargetDtype(frame)
             self.frame_chunk_unix_times.append(float(self.frame_unix_times[i]))

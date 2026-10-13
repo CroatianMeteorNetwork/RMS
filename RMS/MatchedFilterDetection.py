@@ -1778,7 +1778,8 @@ class MatchedFilterDetector(object):
             #   for a quick lookup of the hits of the next run
             arr = np.array([[h.frame, h.x, h.y, h.z, h.vx, h.vy, h.run, h.bin] for h in group])
             by_frame = collections.defaultdict(list)
-            for i, f in enumerate(arr[:, 0]):
+            frames = arr[:, 0].tolist()
+            for i, f in enumerate(frames):
                 by_frame[round(f, 1)].append(i)
 
             # A spatial index of the hits of every run, so only the hits near a predicted position are tested
@@ -1797,6 +1798,26 @@ class MatchedFilterDetector(object):
             # Velocity grid step (px/frame, unbinned), the uncertainty of the velocity of a hit, which sets the
             #   tolerances of the linking
             step = b/max(run_frames - 1.0, 1.0)
+
+            # The first look-ups of a chain of a single hit (with the motion of the hit, in the runs 1 to 3 runs
+            #   before and after it) depend only on the hit, so they are made for all hits at once, one query per
+            #   run, with the same positions and radii as one by one (most hits start a chain and find nothing)
+            first_near = {}
+            for direction in (1, -1):
+                for gap in (1, 2, 3):
+                    dt_run = direction*gap*run_frames
+                    targets = collections.defaultdict(list)
+                    for i, f in enumerate(frames):
+                        targets[round(f + dt_run, 1)].append(i)
+                    for t, idx in targets.items():
+                        if t not in trees:
+                            first_near.update(((i, direction, gap), []) for i in idx)
+                            continue
+                        idx = np.array(idx)
+                        points = np.column_stack([arr[idx, 1] + arr[idx, 4]*dt_run, arr[idx, 2] + arr[idx, 5]*dt_run])
+                        found = trees[t].query_ball_point(points, 1.5*b + 1.5*step*abs(dt_run) + 1e-6)
+                        for i, near in zip(idx.tolist(), found):
+                            first_near[(i, direction, gap)] = sorted(by_frame[t][near])
 
             # Hits this strong are judged by their positions only (see below)
             strong = LINK_STRONG*self.opts.threshold
@@ -1838,14 +1859,17 @@ class MatchedFilterDetector(object):
                             if (gap > 3) and (arr[cur, 3] < strong):
                                 break
 
-                            t = round(arr[cur, 0] + direction*gap*run_frames, 1)
+                            t = round(frames[cur] + direction*gap*run_frames, 1)
 
                             # The hits which can pass the tests below: within the reach of the motion of the chain
                             #   around the predicted position, and for a single strong hit, also within the reach of
                             #   the largest speed around its position
                             dt_run = direction*gap*run_frames
-                            near = nearHits(t, arr[cur, 1] + vx*dt_run, arr[cur, 2] + vy*dt_run,
-                                            1.5*b + 1.5*step*abs(dt_run))
+                            if (len(chain) == 1) and (gap <= 3):
+                                near = first_near[(cur, direction, gap)]
+                            else:
+                                near = nearHits(t, arr[cur, 1] + vx*dt_run, arr[cur, 2] + vy*dt_run,
+                                                1.5*b + 1.5*step*abs(dt_run))
                             if (len(chain) == 1) and strong_chain:
                                 near = sorted(set(near) | set(nearHits(t, arr[cur, 1], arr[cur, 2],
                                     self.opts.speed_max*abs(dt_run) + 1.5*b)))
