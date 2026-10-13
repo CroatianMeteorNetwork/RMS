@@ -131,7 +131,7 @@ GPU_PX = 4
 
 if CUDA_AVAILABLE:
 
-    @cuda.jit
+    @cuda.jit(cache=True)
     def _padKernel(src, dst, pad):
         """ Copy the frames into the zero-padded frames on the GPU: pad px on the top, bottom and left, and
             pad + GPU_TX*GPU_PX px on the right (the extra pixels of the last threads of a row).
@@ -148,7 +148,7 @@ if CUDA_AVAILABLE:
             dst[k, y, x] = 0.0
 
 
-    @cuda.jit
+    @cuda.jit(cache=True)
     def _velocityStackRunsKernel(frames, pad, run_starts, n_frames, shifts, out_max, out_idx):
         """ The velocity stacks of several runs of a block of padded frames on the GPU: the run is the z index
             of the grid, and every thread computes GPU_PX pixels of a row, GPU_TX px apart. The sums are in single
@@ -194,7 +194,7 @@ if CUDA_AVAILABLE:
                     out_idx[run, y, x] = best_idx[j]
 
 
-    @cuda.jit
+    @cuda.jit(cache=True)
     def _velocityStackMaxKernel(frames, shifts, out_max, out_idx):
         """ The GPU version of velocityStackMaxCPU: every thread computes one pixel of the output, for all
             velocities. The frames are not padded, pixels shifted outside the image are skipped (they add zero,
