@@ -70,10 +70,13 @@ Pixels:
 - The values are the camera's own (0-4095 for 12 bits). RMS shifts them to span 16 bits when it reads them (times 16
   for 12 bits), as the 16-bit FITS files of 12-bit cameras hold them.
 
-Writing a frame: its pixels first, then its record with `flags = 1`. A file whose writing stopped (e.g. a crash) is
-read up to the last complete frame. The writer reserves the full size at the start (`posix_fallocate`, no data is
-written), writes to `<name>.part`, truncates after the last frame and renames at the end, so a reader never takes a
-file which is still being written.
+Writing a frame: its pixels first, then its record with `flags = 1`. The writer reserves the full size at the start
+(`posix_fallocate`, no data is written), writes to `<name>.part`, truncates after the last frame and renames at the
+end, so a reader never takes a file which is still being written. A block without frames, or whose writing raised
+an error, is not renamed.
+
+A file whose writing stopped (e.g. a crash) stays as `<name>.part` and can be read up to its last complete frame.
+RMS does not process `.part` files: rename a stopped block to its `.fblk` name to process it.
 
 File names: `<station>_<YYYYMMDD>_<HHMMSS>_<microseconds>.fblk`, the time of the first frame (UTC).
 

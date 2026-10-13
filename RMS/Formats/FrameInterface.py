@@ -1639,6 +1639,8 @@ class InputTypeFrameBlock(InputType):
         #   span 16 bits, as in the 16-bit FITS files of such cameras
         self.reader = FrameBlockReader(file_path)
         self.total_frames = self.reader.n_frames
+        if self.total_frames == 0:
+            raise ValueError('{} has no complete frames'.format(file_path))
         self.frame_unix_times = self.reader.times
         self.beginning_datetime = unixTime2Date(*self._unixTimeParts(self.frame_unix_times[0]), dt_obj=True)
 

@@ -4,6 +4,7 @@
 from __future__ import print_function, division, absolute_import
 
 import os
+import time
 
 import numpy as np
 import pytest
@@ -147,3 +148,134 @@ def test_rms_reads_a_block_like_its_fits_frames(tmp_path):
         assert abs((block_handle.currentFrameTime(dt_obj=True)
                     - fits_handle.currentFrameTime(dt_obj=True)).total_seconds()) < 1e-6
     assert block_handle.fps == pytest.approx(15.0, rel=1e-3)
+
+
+def _writeFitsFrames(fits_dir, frames, date_obs, names=None):
+    """ Write FITS frames (one per file) with the given DATE-OBS values. """
+
+    from astropy.io import fits
+
+    os.makedirs(str(fits_dir))
+    for i, (values, t) in enumerate(zip(frames, date_obs)):
+        hdu = fits.PrimaryHDU(values)
+        hdu.header['DATE-OBS'] = t
+        hdu.header['EXPTIME'] = 0.065
+        hdu.header['TELESCOP'] = 'TEST01'
+        hdu.writeto(str(fits_dir/(names[i] if names else 'TEST01_{:d}.fits'.format(i))))
+
+
+@pytest.mark.parametrize('dark_first', [True, False])
+def test_convert_scales_dark_frames_like_the_others(tmp_path, dark_first):
+    """ A dark frame of a 12-bit camera stored times 16 (all values at most 4095 once stored) is shifted down as
+        the other frames of the directory, not kept 16 times brighter. """
+
+    rng = np.random.default_rng(6)
+    bright = rng.integers(0, 4096, (10, 16)).astype(np.uint16)
+    dark = rng.integers(0, 256, (10, 16)).astype(np.uint16)
+    originals = [dark, bright] if dark_first else [bright, dark]
+    _writeFitsFrames(tmp_path/'fits', [values << 4 for values in originals],
+                     ['2026-04-24T05:40:22.{:06d}+00:00'.format(66667*i) for i in range(2)])
+
+    reader = fb.FrameBlockReader(fb.convertFitsDirectory(str(tmp_path/'fits'), str(tmp_path/'out'))[0])
+    for i, values in enumerate(originals):
+        assert np.array_equal(reader.frame(i), values)
+
+
+def test_convert_takes_date_obs_without_offset_as_utc(tmp_path, monkeypatch):
+    """ A DATE-OBS without a time zone is UTC, whatever the time zone of the computer. """
+
+    import calendar
+
+    monkeypatch.setenv('TZ', 'America/Toronto')
+    if hasattr(time, 'tzset'):
+        time.tzset()
+    try:
+        _writeFitsFrames(tmp_path/'fits', [np.zeros((10, 16), np.uint16)], ['2026-04-24T05:40:22.500000'])
+        reader = fb.FrameBlockReader(fb.convertFitsDirectory(str(tmp_path/'fits'), str(tmp_path/'out'))[0])
+    finally:
+        monkeypatch.delenv('TZ')
+        if hasattr(time, 'tzset'):
+            time.tzset()
+
+    assert reader.times[0] == pytest.approx(calendar.timegm((2026, 4, 24, 5, 40, 22)) + 0.5, abs=1e-6)
+
+
+def test_convert_orders_frames_by_date_obs(tmp_path):
+    """ The frames are written in the order of their DATE-OBS, not of their file names. """
+
+    frames = [np.full((10, 16), 4093 + i, np.uint16) for i in range(3)]
+    _writeFitsFrames(tmp_path/'fits', frames, ['2026-04-24T05:40:22.{:06d}+00:00'.format(66667*i) for i in range(3)],
+                     names=['c.fits', 'b.fits', 'a.fits'])
+
+    reader = fb.FrameBlockReader(fb.convertFitsDirectory(str(tmp_path/'fits'), str(tmp_path/'out'),
+                                                         station_id='TEST01')[0])
+    assert [int(reader.frame(i).max()) for i in range(3)] == [4093, 4094, 4095]
+    assert np.all(np.diff(reader.times) > 0)
+
+
+def test_failed_writing_does_not_publish_the_block(tmp_path):
+    """ An error while a block is written leaves it as <name>.part, readable up to its last frame, and never
+        under its final name. """
+
+    path = str(tmp_path/('XX0001_20251225_010203_000000' + fb.EXTENSION))
+    with pytest.raises(RuntimeError):
+        with fb.FrameBlockWriter(path, 16, 10, max_frames=8) as w:
+            w.write(np.full((10, 16), 7, np.uint16), 0)
+            raise RuntimeError('camera lost')
+
+    assert not os.path.exists(path)
+    assert fb.FrameBlockReader(path + '.part').n_frames == 1
+
+
+@pytest.mark.parametrize('packing', fb.PACKINGS)
+def test_frame_of_the_wrong_size_is_rejected(tmp_path, packing):
+    """ A frame with fewer or more pixels than the block's frames is refused, and nothing is recorded for it. """
+
+    path = str(tmp_path/('XX0001_20251225_010203_000000' + fb.EXTENSION))
+    with fb.FrameBlockWriter(path, 16, 10, max_frames=4, packing=packing) as w:
+        for shape in [(10, 15), (11, 16)]:
+            with pytest.raises(ValueError):
+                w.write(np.zeros(shape, np.uint16), 0)
+        assert w.n_frames == 0
+
+
+@pytest.mark.parametrize('packing', fb.PACKINGS)
+def test_values_above_the_bit_depth_are_rejected(tmp_path, packing):
+    """ A value above the bit depth (e.g. a 16-bit frame given to a 12-bit block) is refused instead of being
+        stored wrapped around. """
+
+    path = str(tmp_path/('XX0001_20251225_010203_000000' + fb.EXTENSION))
+    with fb.FrameBlockWriter(path, 16, 10, max_frames=2, packing=packing) as w:
+        frame = np.zeros((10, 16), np.uint16)
+        frame[3, 4] = 4096
+        with pytest.raises(ValueError):
+            w.write(frame, 0)
+        assert w.n_frames == 0
+
+
+def test_empty_block_is_not_published(tmp_path):
+    """ A block closed before its first frame is not given its final name. """
+
+    path = str(tmp_path/('XX0001_20251225_010203_000000' + fb.EXTENSION))
+    fb.FrameBlockWriter(path, 16, 10, max_frames=2).close()
+    assert not os.path.exists(path)
+
+
+def test_inconsistent_header_is_rejected(tmp_path):
+    """ A header whose layout does not match the frame size is refused. """
+
+    import json
+    import struct
+
+    path = str(tmp_path/('XX0001_20251225_010203_000000' + fb.EXTENSION))
+    with fb.FrameBlockWriter(path, 16, 10, max_frames=2) as w:
+        w.write(np.zeros((10, 16), np.uint16), 0)
+
+    header = fb.readHeader(path)
+    header['frame_stride'] = 0
+    text = json.dumps({k: v for k, v in header.items() if k != 'version'}).encode()
+    with open(path, 'r+b') as f:
+        f.write(fb.MAGIC + struct.pack('<II', fb.VERSION, fb.HEADER_SIZE) + text + bytes(fb.HEADER_SIZE - 16 - len(text)))
+
+    with pytest.raises(ValueError):
+        fb.FrameBlockReader(path)

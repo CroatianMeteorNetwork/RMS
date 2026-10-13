@@ -276,12 +276,17 @@ class FrameBlockWriter(object):
             data = memoryview(frame).cast('B')
             if data.nbytes != self.frame_bytes:
                 raise ValueError('{} bytes given, a frame is {}'.format(data.nbytes, self.frame_bytes))
-        elif self.packing == 'mono12p':
-            data = pack12(frame)
         else:
-            data = np.ascontiguousarray(frame, dtype='<u2')
-            if data.size != self.width*self.height:
-                raise ValueError('The frame is {}, expected {}x{}'.format(data.shape, self.height, self.width))
+            if np.shape(frame) != (self.height, self.width):
+                raise ValueError('The frame is {}, expected {}x{}'.format(np.shape(frame), self.height, self.width))
+
+            # Values above the bit depth would be stored wrapped around
+            if (self.bit_depth < 16) and (np.max(frame) > 2**self.bit_depth - 1):
+                raise ValueError('The frame has values above {} bits'.format(self.bit_depth))
+            if self.packing == 'mono12p':
+                data = pack12(frame)
+            else:
+                data = np.ascontiguousarray(frame, dtype='<u2')
 
         # The frame first, then its record, marked valid last
         i = self.n_frames
@@ -308,6 +313,11 @@ class FrameBlockWriter(object):
         if self.fd is None:
             return
 
+        # A block without frames is not published
+        if self.n_frames == 0:
+            self.abort()
+            return
+
         os.ftruncate(self.fd, self.data_offset + self.n_frames*self.frame_stride)
         if fsync:
             os.fsync(self.fd)
@@ -315,11 +325,28 @@ class FrameBlockWriter(object):
         self.fd = None
         os.replace(self.part_path, self.path)
 
+    def abort(self):
+        """ Stop writing without publishing the file: it stays as <name>.part, readable up to its last frame, and
+            a complete file of the same name is not replaced.
+        """
+
+        if self.fd is None:
+            return
+
+        os.ftruncate(self.fd, self.data_offset + self.n_frames*self.frame_stride)
+        os.close(self.fd)
+        self.fd = None
+
     def __enter__(self):
         return self
 
-    def __exit__(self, *args):
-        self.close()
+    def __exit__(self, exc_type, *args):
+
+        # Only a block written without an error gets its final name
+        if exc_type is None:
+            self.close()
+        else:
+            self.abort()
 
 
 ### Reading ###
@@ -342,6 +369,19 @@ def readHeader(path):
     version, header_size = struct.unpack('<II', head[8:16])
     header = json.loads(head[16:header_size].rstrip(b'\x00').decode('utf-8'))
     header['version'] = version
+
+    # The layout must agree with the frame size, so frames are never read across each other
+    try:
+        expected_bytes = frameBytes(header['width'], header['height'], header['packing'])
+        table_bytes = header['max_frames']*FRAME_RECORD.itemsize
+        consistent = ((header['frame_bytes'] == expected_bytes)
+                      and (header['frame_stride'] >= expected_bytes > 0)
+                      and (header['table_offset'] >= header_size)
+                      and (header['data_offset'] >= header['table_offset'] + table_bytes))
+    except (KeyError, TypeError, ValueError):
+        consistent = False
+    if not consistent:
+        raise ValueError('{} has an inconsistent header'.format(path))
 
     return header
 
@@ -444,9 +484,26 @@ def convertFitsDirectory(fits_dir, out_dir, packing='mono12p', bit_depth=12, fra
 
     from astropy.io import fits
 
-    paths = sorted(glob.glob(os.path.join(fits_dir, '*.fits')))
+    def _utc(date_obs):
+
+        # DATE-OBS is UTC, also when it has no time zone
+        t = datetime.datetime.fromisoformat(date_obs.strip().replace('Z', '+00:00'))
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=datetime.timezone.utc)
+        return t
+
+    # The frames in the order of their times
+    paths = glob.glob(os.path.join(fits_dir, '*.fits'))
     if not paths:
         raise ValueError('No FITS files in {}'.format(fits_dir))
+    times = {path: _utc(fits.getheader(path)['DATE-OBS']) for path in paths}
+    paths.sort(key=lambda path: times[path])
+
+    # Whether the values are stored shifted up (a 12-bit camera in a 16-bit FITS holds them times 16), decided
+    #   once from the first frame so all frames are scaled the same way: shifted values have their low bits zero
+    shift = 16 - bit_depth
+    first = np.asarray(fits.getdata(paths[0])).astype(np.int64)
+    shifted = bool(first.max() > (2**bit_depth - 1)) or not np.any(first & (2**shift - 1))
     frames_per_block = frames_per_block or len(paths)
     os.makedirs(out_dir, exist_ok=True)
 
@@ -455,7 +512,7 @@ def convertFitsDirectory(fits_dir, out_dir, packing='mono12p', bit_depth=12, fra
         chunk = paths[start:start + frames_per_block]
         header0 = fits.getheader(chunk[0])
         station = station_id or str(header0.get('TELESCOP', 'XX0000')).strip()
-        t0 = datetime.datetime.fromisoformat(header0['DATE-OBS'].replace('Z', '+00:00'))
+        t0 = times[chunk[0]]
         name = '{}_{}{}'.format(station, t0.strftime('%Y%m%d_%H%M%S_%f'), EXTENSION)
         metadata = {k: header0[k] for k in ('TELESCOP', 'SITELAT', 'SITELONG', 'SITEELEV', 'XBINNING',
                                             'YBINNING', 'GAIN', 'FRAMERAT', 'PIXFMT') if k in header0}
@@ -469,13 +526,15 @@ def convertFitsDirectory(fits_dir, out_dir, packing='mono12p', bit_depth=12, fra
                 with fits.open(path, memmap=False) as hdul:
                     hdu = hdul[0]
                     values = np.asarray(hdu.data).astype(np.int64)
-                    t = datetime.datetime.fromisoformat(hdu.header['DATE-OBS'].replace('Z', '+00:00'))
                     exposure = float(hdu.header.get('EXPTIME', 0.0))
                     gain = float(str(hdu.header.get('GAIN', 0)).strip() or 0)
 
-                # The values down to bit_depth bits (a 12-bit camera in a 16-bit FITS holds them times 16)
-                values = (values >> (16 - bit_depth)) if values.max() > (2**bit_depth - 1) else values
-                time_ns = int(round(t.timestamp()*1e9))
+                # The values down to bit_depth bits, the same way for every frame
+                if shifted:
+                    values = values >> shift
+                if values.max() > (2**bit_depth - 1):
+                    raise ValueError('{} has values above {} bits'.format(path, bit_depth))
+                time_ns = int(round(times[path].timestamp()*1e9))
                 writer.write(values, time_ns, exposure_us=round(exposure*1e6), gain=gain, counter=start + i)
         written.append(os.path.join(out_dir, name))
 
