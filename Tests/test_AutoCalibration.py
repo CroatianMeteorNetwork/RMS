@@ -478,12 +478,15 @@ def test_failing_trial_platepar_is_rolled_back(camera, tmp_path):
 
     # The sky changes: the trial platepar fails on the later chunks, while the previous one fits them
     _writePlatepar(autoPlateparPath(output_dir, config), 0.1)
+    trial_mtime = os.path.getmtime(autoPlateparPath(output_dir, config))
     _writePlatepar(trial['previous'], 0.95)
     process('file2', bad)
     result = process('file3', bad)
 
-    # The previous platepar is put back
+    # The previous platepar is put back, and the version of the rejected platepar is reported, so the files
+    #   calibrated with it are calibrated again
     assert result['action'] == 'rolled back the platepar on trial'
+    assert result['rejected_platepar_mtime'] == pytest.approx(trial_mtime)
     assert result['installed'] == autoPlateparPath(output_dir, config)
     with open(autoPlateparPath(output_dir, config)) as f:
         assert json.load(f)['mag_lev'] == pytest.approx(0.95)

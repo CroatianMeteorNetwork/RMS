@@ -821,11 +821,11 @@ def _recalibrateMatchedFilter(results_dir, config, platepar_path, proc_log):
                          ecsv_out=config.monitor_save_ecsv)
 
 
-def backfillCalibration(output_dir, config, night_name, proc_log=None):
+def backfillCalibration(output_dir, config, night_name, proc_log=None, rejected_mtimes=None):
     """ Add the astrometry and the photometry to the files of a night which were processed without a platepar,
         once the automatic calibration has fitted one, and calibrate again the files whose platepar failed the
-        judgement of the automatic calibration with the newly installed platepar (the detections themselves are
-        not repeated).
+        judgement of the automatic calibration or were calibrated with a rejected platepar with the newly
+        installed platepar (the detections themselves are not repeated).
 
     Arguments:
         output_dir: [str] Output directory of the monitor.
@@ -834,6 +834,9 @@ def backfillCalibration(output_dir, config, night_name, proc_log=None):
 
     Keyword arguments:
         proc_log: [Logger] Logger, the module logger if None.
+        rejected_mtimes: [list] Versions (modification times, see plateparTime) of platepars which were rejected
+            (e.g. a platepar on trial which was rolled back), the files calibrated with them are calibrated again.
+            None by default.
 
     Return:
         [list] Results directories which were calibrated.
@@ -853,10 +856,12 @@ def backfillCalibration(output_dir, config, night_name, proc_log=None):
     calibrated = []
     for results_dir, info in sorted(scanNights(output_dir, config).get(night_name, {}).items()):
 
-        # A calibrated file is calibrated again only if its platepar failed and it is not the installed one
-        if info.get('calibrated', True) and ((info.get('platepar_mtime') == platepar_mtime)
-                                             or (not _plateparFailed(os.path.join(output_dir, results_dir),
-                                                                     FILE_RESULT_NAME))):
+        # A calibrated file is calibrated again only if its platepar was rejected, or it failed and it is not the
+        #   installed one
+        rejected = info.get('platepar_mtime') in (rejected_mtimes or [])
+        if info.get('calibrated', True) and (not rejected) \
+                and ((info.get('platepar_mtime') == platepar_mtime)
+                     or (not _plateparFailed(os.path.join(output_dir, results_dir), FILE_RESULT_NAME))):
             continue
 
         # Recalibrate the detections of the file with the fitted platepar, and mark it as calibrated
@@ -1397,9 +1402,12 @@ def autoCalibrationStep(results_dir, config, output_dir, given_platepar_path, pl
             platepar_path = new_platepar_path
             platepar_mtime = new_platepar_mtime
 
-        # The files of the night which were processed without a platepar
+        # The files of the night which were processed without a platepar, with a failing one or with a rejected
+        #   one (a rolled back platepar on trial)
         if judgement.get('installed'):
-            backfillCalibration(output_dir, config, night_name, proc_log=proc_log)
+            rejected = judgement.get('rejected_platepar_mtime')
+            backfillCalibration(output_dir, config, night_name, proc_log=proc_log,
+                                rejected_mtimes=([rejected] if rejected is not None else None))
 
     except Exception:
         proc_log.error("The automatic calibration failed:\n" + traceback.format_exc())

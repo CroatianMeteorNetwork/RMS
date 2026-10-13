@@ -1473,8 +1473,11 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
                 writeState(output_dir, state)
                 return _saveFileResult(results_dir, result)
 
-            # The previous platepar is put back if it is clearly better
+            # The previous platepar is put back if it is clearly better. The version of the rejected platepar is
+            #   reported, so the files calibrated with it are calibrated again
             if previous_better:
+                if os.path.isfile(trial['path']):
+                    result['rejected_platepar_mtime'] = os.path.getmtime(trial['path'])
                 path = installPlatepar(previous, output_dir, config, 'rolled back: ' + reason, dry_run=dry_run)
                 state['installs'].append({'jd': end_jd, 'path': path, 'reason': 'rolled back: ' + reason,
                                           'dry_run': dry_run})

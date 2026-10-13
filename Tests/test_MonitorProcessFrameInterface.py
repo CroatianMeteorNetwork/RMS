@@ -1260,7 +1260,8 @@ def test_auto_calibration_step_recalibrates_with_a_new_platepar(config_path, tmp
                         lambda results_dir, config, platepar_path=None, proc_log=None:
                         calls['recalibrated'].append(platepar_path))
     monkeypatch.setattr(mon, 'backfillCalibration',
-                        lambda output_dir, config, night_name, proc_log=None: calls['backfilled'].append(night_name))
+                        lambda output_dir, config, night_name, proc_log=None, rejected_mtimes=None:
+                        calls['backfilled'].append(night_name))
 
     proc_log = logging.getLogger('test')
 
@@ -1341,6 +1342,11 @@ def test_backfill_calibrates_files_without_a_platepar_or_with_a_failing_one(conf
     assert sorted(mon.backfillCalibration(output_dir, config, 'night')) == ['f1', 'f2']
     assert sorted(recalibrated) == ['f1', 'f2']
     assert readDoneFlag(os.path.join(output_dir, 'f2'))['platepar_mtime'] == 2000
+
+    # A file calibrated with a platepar which was rejected (a rolled back trial) is calibrated again, even though
+    #   its own judgement passed or it has none (e.g. a cloudy file)
+    recalibrated.clear()
+    assert mon.backfillCalibration(output_dir, config, 'night', rejected_mtimes=[1000.0]) == ['f3']
 
 
 def test_recalibration_includes_the_matched_filter_results(config_path, tmp_path, monkeypatch):
