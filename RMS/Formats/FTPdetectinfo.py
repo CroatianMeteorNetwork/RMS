@@ -48,7 +48,8 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
     
     Arguments:
         meteor_list: [list] a list of meteor data, entries: 
-            ff_name, meteor_No, rho, theta, centroids
+            ff_name, meteor_No, rho, theta, centroids, optionally followed by the fps of the meteor and its own
+            calibration string (None for 'Uncalibrated'), which replaces the calibration of the file
         ff_directory: [str] path to the directory in which the file will be written
         file_name: [str] file name of the file in which the data will be written
         cal_directory: [str] path to the CAL directory (optional, used only in CAMS processing)
@@ -101,8 +102,12 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
 
             # Unpack the meteor data
             # A meteor may optionally carry its own fps as a trailing element, used e.g. for inputs with
-            #   accurate per-frame timestamps where the measured fps differs from the config fps
-            if len(meteor) == 6:
+            #   accurate per-frame timestamps where the measured fps differs from the config fps, and its own
+            #   calibration, e.g. when the meteors of differently calibrated files are merged
+            meteor_calibration = calibration
+            if len(meteor) == 7:
+                ff_name, meteor_No, rho, theta, centroids, meteor_fps, meteor_calibration = meteor
+            elif len(meteor) == 6:
                 ff_name, meteor_No, rho, theta, centroids, meteor_fps = meteor
             else:
                 ff_name, meteor_No, rho, theta, centroids = meteor
@@ -110,7 +115,8 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
 
             ftpdetect_file.write("-------------------------------------------------------\n")
             ftpdetect_file.write(ff_name + "\n")
-            ftpdetect_file.write(calibration + "\n" if calibration is not None else "Uncalibrated\n")
+            ftpdetect_file.write(meteor_calibration + "\n" if meteor_calibration is not None
+                                 else "Uncalibrated\n")
 
             # Calculate meteor's angular velocity
             if len(centroids) > 1:

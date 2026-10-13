@@ -621,7 +621,7 @@ def detectedImageNames(meteor_list, image_names):
         of the meteor) to the one with the last pick are returned.
 
     Arguments:
-        meteor_list: [list] Meteors as [ff_name, meteor_No, rho, phi, meteor_meas, meteor_fps], where the
+        meteor_list: [list] Meteors as [ff_name, meteor_No, rho, phi, meteor_meas, meteor_fps, ...], where the
             first element of every measurement is the frame relative to the beginning of the FF file.
         image_names: [list] FF names of the images in the night directory.
 
@@ -635,7 +635,8 @@ def detectedImageNames(meteor_list, image_names):
     image_index = {file_name: i for i, file_name in enumerate(image_names)}
 
     detected = set()
-    for ff_name, _, _, _, meteor_meas, meteor_fps in meteor_list:
+    for meteor in meteor_list:
+        ff_name, meteor_meas, meteor_fps = meteor[0], meteor[4], meteor[5]
 
         if ff_name not in image_index:
             continue
@@ -699,6 +700,9 @@ def mergeNightResults(night_dir, output_dir, results, config):
 
     ### Merge FTPdetectinfo ###
 
+    # The meteors of files processed without a platepar (before the automatic calibration fitted one) stay
+    #   uncalibrated, the others are marked as recalibrated
+    calibration = "Recalibrated with RMS on: " + RmsDateTime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f UTC")
     meteor_list = []
     for results_path in results_paths:
 
@@ -708,17 +712,17 @@ def mergeNightResults(night_dir, output_dir, results, config):
 
         for ftpdetectinfo_name in ftpdetectinfo_names:
 
-            # Read the full format to keep the frame rate of every meteor, and remove the calibration status
-            #   from the measurements to get the input format of the writer
+            # Read the full format to keep the frame rate and the calibration status of every meteor, and
+            #   remove the calibration status from the measurements to get the input format of the writer
             for entry in FTPdetectinfo.readFTPdetectinfo(results_path, ftpdetectinfo_name):
                 ff_name, _, meteor_No, _, meteor_fps, _, _, _, _, rho, phi, meteor_meas = entry
+                calibrated = all(line[0] == 1 for line in meteor_meas)
                 meteor_list.append([ff_name, meteor_No, rho, phi, [line[1:] for line in meteor_meas],
-                                    meteor_fps])
+                                    meteor_fps, calibration if calibrated else None])
 
     ftpdetectinfo_name = 'FTPdetectinfo_{:s}.txt'.format(night_name)
     FTPdetectinfo.writeFTPdetectinfo(sorted(meteor_list, key=lambda entry: (entry[0], entry[1])), night_dir,
-        ftpdetectinfo_name, night_dir, config.stationID, fps if fps else config.fps,
-        calibration="Recalibrated with RMS on: " + RmsDateTime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f UTC"),
+        ftpdetectinfo_name, night_dir, config.stationID, fps if fps else config.fps, calibration=calibration,
         celestial_coords_given=True)
 
 

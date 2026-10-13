@@ -297,6 +297,35 @@ def test_merge_night(tmp_path):
     assert len(os.listdir(ecsv_dir)) == 3
 
 
+def test_merge_keeps_uncalibrated_detections_uncalibrated(tmp_path):
+    """ The detections of a file processed without a platepar (the automatic calibration had none yet) stay
+        uncalibrated in the merged FTPdetectinfo, the others are recalibrated. """
+
+    config = _config()
+    output_dir = str(tmp_path)
+    results_dirs = [_makeResults(output_dir, config, 'file1'), _makeResults(output_dir, config, 'file2',
+                                                                            start_s=600)]
+
+    # The second file has no calibration: its detections have no celestial coordinates
+    results_path = os.path.join(output_dir, results_dirs[1])
+    ftp_name = 'FTPdetectinfo_file2.txt'
+    entry = FTPdetectinfo.readFTPdetectinfo(results_path, ftp_name)[0]
+    picks = [[line[1], line[2], line[3], 0.0, 0.0, 0.0, 0.0] + list(line[8:]) for line in entry[11]]
+    FTPdetectinfo.writeFTPdetectinfo([[entry[0], 1, 10.0, 45.0, picks, entry[4]]], results_path, ftp_name,
+                                     results_path, 'XX0001', 32.0, calibration=None, celestial_coords_given=True)
+
+    night_dir = mnr.nightDirPath(output_dir, NIGHT, config)
+    merged = mnr.mergeNightResults(night_dir, output_dir, mnr.scanNights(output_dir, config)[NIGHT], config)
+
+    # The calibrated meteor is marked recalibrated, the other one uncalibrated
+    entries = FTPdetectinfo.readFTPdetectinfo(night_dir, merged.ftpdetectinfo_name)
+    assert [entry[11][0][0] for entry in entries] == [1, 0]
+    with open(os.path.join(night_dir, merged.ftpdetectinfo_name)) as f:
+        lines = f.read().splitlines()
+    status = [lines[i + 1] for i, line in enumerate(lines) if FFfile.validFFName(line)]
+    assert status[0].startswith('Recalibrated with RMS') and (status[1] == 'Uncalibrated')
+
+
 def test_matched_filter_results_are_merged_apart(tmp_path):
     """ The night report merges the finished results of the matched filter of every file into their own
         file in the matched-filter directory of the night, and the normal merged results only have the normal

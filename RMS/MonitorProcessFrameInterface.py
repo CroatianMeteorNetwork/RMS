@@ -790,7 +790,9 @@ def recalibrateResults(results_dir, config, platepar_path=None, proc_log=None):
 
 def backfillCalibration(output_dir, config, night_name, proc_log=None):
     """ Add the astrometry and the photometry to the files of a night which were processed without a platepar,
-        once the automatic calibration has fitted one (the detections themselves are not repeated).
+        once the automatic calibration has fitted one, and calibrate again the files whose platepar failed the
+        judgement of the automatic calibration with the newly installed platepar (the detections themselves are
+        not repeated).
 
     Arguments:
         output_dir: [str] Output directory of the monitor.
@@ -804,6 +806,7 @@ def backfillCalibration(output_dir, config, night_name, proc_log=None):
         [list] Results directories which were calibrated.
     """
 
+    from RMS.Astrometry.AutoCalibration import FILE_RESULT_NAME
     from RMS.MonitorNightReport import autoPlateparPath, readDoneFlag, scanNights
 
     proc_log = log if proc_log is None else proc_log
@@ -813,10 +816,14 @@ def backfillCalibration(output_dir, config, night_name, proc_log=None):
     if not os.path.isfile(platepar_path):
         return []
 
+    platepar_mtime = plateparTime(platepar_path)
     calibrated = []
     for results_dir, info in sorted(scanNights(output_dir, config).get(night_name, {}).items()):
 
-        if info.get('calibrated', True):
+        # A calibrated file is calibrated again only if its platepar failed and it is not the installed one
+        if info.get('calibrated', True) and ((info.get('platepar_mtime') == platepar_mtime)
+                                             or (not _plateparFailed(os.path.join(output_dir, results_dir),
+                                                                     FILE_RESULT_NAME))):
             continue
 
         # Recalibrate the detections of the file with the fitted platepar, and mark it as calibrated
@@ -828,7 +835,7 @@ def backfillCalibration(output_dir, config, night_name, proc_log=None):
             info = readDoneFlag(results_path)
             info['calibrated'] = True
             info['calibrated_later'] = True
-            info['platepar_mtime'] = plateparTime(platepar_path)
+            info['platepar_mtime'] = platepar_mtime
             writeDoneFlag(results_path, info)
             calibrated.append(results_dir)
 
@@ -840,10 +847,29 @@ def backfillCalibration(output_dir, config, night_name, proc_log=None):
 
     # Report how many files got the calibration
     if calibrated:
-        proc_log.info("Added the calibration to {:d} files of night {:s} processed without it".format(
-            len(calibrated), night_name))
+        proc_log.info("Added the calibration to {:d} files of night {:s} processed without it or with a failing "
+                      "platepar".format(len(calibrated), night_name))
 
     return calibrated
+
+
+def _plateparFailed(results_path, result_name):
+    """ Whether the platepar a file was judged with failed the judgement of the automatic calibration.
+
+    Arguments:
+        results_path: [str] Results directory of the file.
+        result_name: [str] Name of the file with the judgement (see AutoCalibration.FILE_RESULT_NAME).
+
+    Return:
+        [bool] True if the platepar failed, False if it passed or the file was not judged.
+    """
+
+    try:
+        with open(os.path.join(results_path, result_name)) as f:
+            return (json.load(f).get('current') or {}).get('ok') is False
+
+    except (OSError, ValueError):
+        return False
 
 
 
@@ -995,6 +1021,10 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
                 if os.path.isfile(stale_path):
                     os.remove(stale_path)
             results_platepar_path = None
+
+        # The version of the platepar the file is processed with, from its copy (the automatic calibration may
+        #   replace the platepar at the same path meanwhile)
+        platepar_mtime = plateparTime(results_platepar_path)
 
         # Copy the config file into the results directory
         results_config_path = os.path.join(results_dir, os.path.basename(config_path))
@@ -1200,10 +1230,10 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
         # Judge the calibration on the clear chunks of the file, and fit a platepar if there is none, if it fails,
         #   or periodically to check whether a better one can be fitted. A failure doesn't fail the file
         calibrated = results_platepar_path is not None
-        calibrated_with = platepar_path
         if config.monitor_auto_calibration:
-            calibrated, calibrated_with = autoCalibrationStep(results_dir, config, output_dir, given_platepar_path,
-                                                              platepar_path, calibrated, night_name, mask, proc_log)
+            calibrated, platepar_path, platepar_mtime = autoCalibrationStep(
+                results_dir, config, output_dir, given_platepar_path, platepar_path, platepar_mtime, calibrated,
+                night_name, mask, proc_log)
 
         # A file which changed while it was processed was still being written (e.g. the recording paused for a
         #   while in the middle of the file), so only a part of it was processed. It gets no done flag, so the
@@ -1223,7 +1253,7 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
             'dark_applied': dark is not None,
             'flat_applied': flat_struct is not None,
             'calibrated': calibrated,
-            'platepar_mtime': plateparTime(calibrated_with),
+            'platepar_mtime': platepar_mtime,
         })
 
         proc_log.info("Done processing: {} -> {}".format(file_name, results_dir))
@@ -1282,12 +1312,13 @@ def processFileWorker(*args, **kwargs):
     sys.exit(0 if success else 1)
 
 
-def autoCalibrationStep(results_dir, config, output_dir, given_platepar_path, platepar_path, calibrated,
-                        night_name, mask, proc_log):
+def autoCalibrationStep(results_dir, config, output_dir, given_platepar_path, platepar_path, platepar_mtime,
+                        calibrated, night_name, mask, proc_log):
     """ The automatic calibration of a processed file (see RMS.Astrometry.AutoCalibration.autoCalibrateFile). If a
-        platepar was installed meanwhile (by this or another worker) and the file was processed without a platepar
-        or its platepar fails, the file is recalibrated with the new platepar. After a new platepar is installed,
-        the files of the night which were processed without a platepar are calibrated too.
+        platepar was installed meanwhile (by this or another worker, also a new version at the same path) and the
+        file was processed without a platepar, its platepar fails, or the new one was fitted automatically, the file
+        is recalibrated with the new platepar. After a new platepar is installed, the files of the night which were
+        processed without a platepar or with a failing one are calibrated too.
 
     Arguments:
         results_dir: [str] Results directory of the file.
@@ -1295,35 +1326,43 @@ def autoCalibrationStep(results_dir, config, output_dir, given_platepar_path, pl
         output_dir: [str] Output directory of the monitor.
         given_platepar_path: [str] Platepar given to the monitor (it may not exist).
         platepar_path: [str] Platepar the file was processed with, None if there was none.
+        platepar_mtime: [float] Modification time of the version of the platepar the file was processed with (see
+            plateparTime), None if there was none.
         calibrated: [bool] Whether the file was calibrated.
         night_name: [str] Name of the night of the file.
         mask: [MaskStructure] Mask of the camera.
         proc_log: [Logger] Logger.
 
     Return:
-        (calibrated, platepar_path): [tuple] Whether the file is calibrated now, and the platepar it is calibrated
-            with.
+        (calibrated, platepar_path, platepar_mtime): [tuple] Whether the file is calibrated now, the platepar it
+            is calibrated with and the modification time of its version.
     """
 
     try:
         from RMS.Astrometry.AutoCalibration import autoCalibrateFile
+        from RMS.MonitorNightReport import autoPlateparPath
 
         # Judge the calibration on the clear chunks of the file, and fit a new platepar if needed
         judgement = autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=mask,
                                       dry_run=config.monitor_auto_calibration_dry_run,
                                       fit_vignetting=config.monitor_auto_calibration_fit_vignetting)
 
-        # The platepar the following files are processed with
+        # The platepar the following files are processed with, and whether it differs from the one this file was
+        #   processed with (another platepar, or a new version at the same path)
         new_platepar_path = selectPlatepar(output_dir, config, given_platepar_path)
+        new_platepar_mtime = plateparTime(new_platepar_path)
+        changed = (new_platepar_path is not None) and ((new_platepar_path != platepar_path)
+                                                       or (new_platepar_mtime != platepar_mtime))
         platepar_failed = judgement.get('current', {}).get('ok') is False
-        if (new_platepar_path is not None) and (new_platepar_path != platepar_path) \
-                and ((not calibrated) or platepar_failed):
+        fitted = (new_platepar_path == autoPlateparPath(output_dir, config))
+        if changed and ((not calibrated) or platepar_failed or fitted):
 
             # The detections of the file get the astrometry and the photometry of the new platepar
             proc_log.info("Recalibrating the file with the new platepar: {}".format(new_platepar_path))
             recalibrateResults(results_dir, config, platepar_path=new_platepar_path, proc_log=proc_log)
             calibrated = True
             platepar_path = new_platepar_path
+            platepar_mtime = new_platepar_mtime
 
         # The files of the night which were processed without a platepar
         if judgement.get('installed'):
@@ -1332,7 +1371,7 @@ def autoCalibrationStep(results_dir, config, output_dir, given_platepar_path, pl
     except Exception:
         proc_log.error("The automatic calibration failed:\n" + traceback.format_exc())
 
-    return calibrated, platepar_path
+    return calibrated, platepar_path, platepar_mtime
 
 
 def plateparTime(platepar_path):
