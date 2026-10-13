@@ -1605,6 +1605,182 @@ class InputTypeUWOVid(InputType):
 
 
 
+class InputTypeFrameBlock(InputType):
+    def __init__(self, file_path, config, detection=False, chunk_frames=128, flipud=False):
+        """ Input file type handle for frame block files (.fblk, see RMS.Formats.FrameBlock): one file per block
+            of frames, read through a memory map, with the time of every frame.
+
+        Arguments:
+            file_path: [str] Path to the block file.
+            config: [ConfigStruct object]
+
+        Keyword arguments:
+            detection: [bool] Indicates that the input is used for detection, which applies the binning. False
+                by default.
+            chunk_frames: [int] Number of frames to be used for averaging and maxpixels. 128 by default.
+            flipud: [bool] Flip the frames vertically. False by default.
+        """
+
+        from RMS.Formats.FrameBlock import FrameBlockReader
+
+        self.input_type = 'fblk'
+
+        self.block_path = file_path
+        self.dir_path, self.file_name = os.path.split(file_path)
+        self.config = config
+        self.detection = detection
+        self.chunk_frames = chunk_frames if chunk_frames is not None else 128
+        self.flipud = flipud
+        self.ff = None
+        self.require_calstars = False
+        self.byteswap = False
+
+        # The frames are read through a memory map; the values of a camera of fewer than 16 bits are shifted to
+        #   span 16 bits, as in the 16-bit FITS files of such cameras
+        self.reader = FrameBlockReader(file_path)
+        self.total_frames = self.reader.n_frames
+        self.frame_unix_times = self.reader.times
+        self.beginning_datetime = unixTime2Date(*self._unixTimeParts(self.frame_unix_times[0]), dt_obj=True)
+
+        self.current_frame_chunk = 0
+        self.current_frame = 0
+        self.current_fr_chunk_size = 0
+
+        # The image size, binned for the detection
+        self.nrows = self.reader.height
+        self.ncols = self.reader.width
+        if self.detection:
+            self.nrows = self.nrows//self.config.detection_binning_factor
+            self.ncols = self.ncols//self.config.detection_binning_factor
+
+        self.total_fr_chunks = max(1, self.total_frames//self.chunk_frames)
+        self.frame_chunk_unix_times = []
+        self.cache = {}
+
+        # The frame rate from the frame times, from the config if it can't be measured
+        self.fps = estimateFPS(list(self.frame_unix_times))
+        if self.fps is None:
+            self.fps = self.config.fps
+
+        self.loadChunk()
+
+    @staticmethod
+    def _unixTimeParts(unix_time):
+        """ Unix time as (seconds, microseconds). """
+
+        ts = int(unix_time)
+        return ts, int(round((unix_time - ts)*1000000))
+
+    def nextChunk(self):
+        """ Go to the next frame chunk. """
+
+        self.current_frame_chunk = (self.current_frame_chunk + 1)%self.total_fr_chunks
+        self.current_frame = self.current_frame_chunk*self.chunk_frames
+
+    def prevChunk(self):
+        """ Go to the previous frame chunk. """
+
+        self.current_frame_chunk = (self.current_frame_chunk - 1)%self.total_fr_chunks
+        self.current_frame = self.current_frame_chunk*self.chunk_frames
+
+    def _frame(self, i):
+        """ Frame i, binned and flipped as configured. """
+
+        frame = self.reader.frame(i, shift_to_16bit=True)
+        if self.detection and (self.config.detection_binning_factor > 1):
+            frame = Image.binImage(frame, self.config.detection_binning_factor,
+                                   self.config.detection_binning_method)
+        if self.flipud:
+            frame = np.flipud(frame)
+
+        return frame
+
+    def loadChunk(self, first_frame=None, read_nframes=None):
+        """ Load a chunk of frames into an FF-like structure (see InputTypeUWOVid.loadChunk). """
+
+        if read_nframes == -1:
+            first_frame = 0
+        else:
+            if first_frame is None:
+                first_frame = self.current_frame_chunk*self.chunk_frames
+            first_frame = first_frame%self.total_frames
+
+        frames_to_read = computeFramesToRead(read_nframes, self.total_frames, self.chunk_frames, first_frame)
+
+        cache_id = getCacheID(first_frame, frames_to_read)
+        if cache_id in self.cache:
+            frame, self.frame_chunk_unix_times, self.current_fr_chunk_size = self.cache[cache_id]
+            return frame
+
+        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, self.getTargetDtype(),
+                                           res_size=self.config.background_reservoir_size,
+                                           median_threads=self.config.median_threads)
+
+        self.frame_chunk_unix_times = []
+        n = 0
+        for i in range(first_frame, min(first_frame + frames_to_read, self.total_frames)):
+            frame = self._frame(i)
+            ff_struct_fake.addFrame(frame.astype(np.uint16))
+            if n == 0:
+                ff_struct_fake.dtype = self.getTargetDtype(frame)
+            self.frame_chunk_unix_times.append(float(self.frame_unix_times[i]))
+            n += 1
+
+        self.current_fr_chunk_size = n
+        ff_struct_fake.finish()
+
+        self.cache = {cache_id: [ff_struct_fake, self.frame_chunk_unix_times, self.current_fr_chunk_size]}
+        self.ff = ff_struct_fake
+
+        return ff_struct_fake
+
+    def name(self, beginning=False):
+        """ The time of the middle of the current chunk, or of the beginning of the block. """
+
+        if beginning:
+            return str(self.beginning_datetime)
+
+        return str(self.currentTime(dt_obj=True))
+
+    def currentTime(self, dt_obj=False, beginning=False):
+        """ The mean time of the current chunk, or its beginning. """
+
+        unix_time = self.frame_chunk_unix_times[0] if beginning else float(np.mean(self.frame_chunk_unix_times))
+
+        return unixTime2Date(*self._unixTimeParts(unix_time), dt_obj=dt_obj)
+
+    def loadFrame(self, avepixel=False):
+        """ Load the current frame. """
+
+        self.current_frame_time = unixTime2Date(*self._unixTimeParts(self.frame_unix_times[self.current_frame]),
+                                                dt_obj=True)
+
+        return self._frame(self.current_frame)
+
+    def getSequenceNumber(self):
+        """ The frame counter of the camera for the current frame. """
+
+        return int(self.reader.table['counter'][self.current_frame])
+
+    def currentFrameTime(self, frame_no=None, dt_obj=False):
+        """ The time of the start of the integration of a frame (the current one by default). """
+
+        i = self.current_frame if frame_no is None else frame_no
+        dt = unixTime2Date(*self._unixTimeParts(self.frame_unix_times[i]), dt_obj=True)
+
+        if dt_obj:
+            return dt
+
+        return (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000)
+
+    def hasAccurateTime(self):
+        """ Block files carry the time of every frame. """
+
+        return True
+
+
+
+
 class InputTypeImages(InputType):
     def __init__(self, dir_path, config, beginning_time=None, fps=None, detection=False, flipud=False,
                  chunk_frames=64):
@@ -2844,6 +3020,12 @@ def detectInputTypeFile(input_file, config, beginning_time=None, fps=None, detec
         img_handle = InputTypeVideo(input_file, config, beginning_time=beginning_time,
                                     detection=detection, preload_video=preload_video, flipud=flipud,
                                     chunk_frames=chunk_frames)
+
+    # Check if the given file is a frame block file
+    elif file_name.endswith('.fblk'):
+
+        img_handle = InputTypeFrameBlock(input_file, config, detection=detection, flipud=flipud,
+                                         chunk_frames=chunk_frames)
 
     # Check if the given files is the UWO .vid format
     elif file_name.endswith('.vid'):

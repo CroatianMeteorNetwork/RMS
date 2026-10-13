@@ -68,6 +68,7 @@ log = getLogger("logger")
 # File type to extension mapping
 FILE_TYPE_MAP = {
     'vid': ['.vid'],
+    'fblk': ['.fblk'],
     'ff':  None,  # Special handling via validFFName()
     'mkv': ['.mkv'],
     'mp4': ['.mp4'],
