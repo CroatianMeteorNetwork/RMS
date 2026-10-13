@@ -770,8 +770,11 @@ def recalibrateResults(results_dir, config, platepar_path=None, proc_log=None):
     # The detections of the separate matched-filter pass get the same platepar
     _recalibrateMatchedFilter(results_dir, config, os.path.join(results_dir, config.platepar_name), proc_log)
 
-    # The detections of the file, a file without detections has nothing to recalibrate
-    ftpdetect_files = glob.glob(os.path.join(results_dir, 'FTPdetectinfo_*.txt'))
+    # The detections of the file (not the backups which earlier recalibrations left), a file without detections
+    #   has nothing to recalibrate
+    from RMS.Formats.FTPdetectinfo import validDefaultFTPdetectinfo
+    ftpdetect_files = sorted(path for path in glob.glob(os.path.join(results_dir, 'FTPdetectinfo_*.txt'))
+                             if validDefaultFTPdetectinfo(os.path.basename(path)))
     if not ftpdetect_files:
         return False
 
@@ -811,7 +814,10 @@ def _recalibrateMatchedFilter(results_dir, config, platepar_path, proc_log):
         return
 
     for ftp_path in sorted(glob.glob(os.path.join(mf_dir, 'FTPdetectinfo_*.txt'))):
-        if not FTPdetectinfo.readFTPdetectinfo(mf_dir, os.path.basename(ftp_path)):
+
+        # The backups which earlier recalibrations left are not recalibrated (every recalibration makes one)
+        if (not FTPdetectinfo.validDefaultFTPdetectinfo(os.path.basename(ftp_path))) \
+                or (not FTPdetectinfo.readFTPdetectinfo(mf_dir, os.path.basename(ftp_path))):
             continue
 
         # As for the normal detections, the platepar is copied next to them first

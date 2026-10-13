@@ -1531,12 +1531,14 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
             log.info("Automatic calibration: the candidate was not confirmed ({:s})".format(reason))
 
         # Fit a candidate without a platepar or when it fails (retried after a while, or sooner with clearly more
-        #   clear chunks), and periodically
+        #   clear chunks), and periodically. A file older than the last attempt (a worker which finished late) makes
+        #   no decision, so the decisions never go back to an older window
         current_fails = (current is None) or (not result['current']['ok'])
         last = state.get('last_attempt_jd')
         interval = RETRY_MINUTES if current_fails else config.monitor_auto_calibration_interval
         more_evidence = current_fails and (len(window) >= RETRY_EVIDENCE_GROWTH*state.get('last_attempt_clear', 0))
-        if (last is not None) and (end_jd - last < interval/1440.0) and (end_jd >= last) and (not more_evidence):
+        if (last is not None) and ((end_jd < last)
+                                   or ((end_jd - last < interval/1440.0) and (not more_evidence))):
             result['action'] = 'judged'
             writeState(output_dir, state)
             return _saveFileResult(results_dir, result)

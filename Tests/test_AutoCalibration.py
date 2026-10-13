@@ -621,3 +621,24 @@ def test_passing_platepar_is_never_replaced_on_trial():
 
     assert ac.judgeScore(current)[0]
     assert not ac.candidateIsFarBetter(candidate, current)
+
+
+def test_older_file_finishing_late_makes_no_decision(camera, tmp_path):
+    """ A file older than the last decision (a worker which finished late) is judged and its chunks are kept, but
+        no platepar is fitted, installed or put on trial from its older window. """
+
+    config, output_dir, state, process = camera
+    good = _writePlatepar(str(tmp_path/'good.cal'), 0.95)
+
+    # A newer file makes the periodic attempt
+    state['jd'] += 60/1440.0
+    process('newer', good)
+    decided = ac.readState(output_dir)['last_attempt_jd']
+    assert state['fits'] == 1
+
+    # An older file finishes later: judged only, the state of the decisions doesn't go back
+    state['jd'] -= 60/1440.0
+    result = process('older', good)
+    assert result['action'] == 'judged'
+    assert state['fits'] == 1
+    assert ac.readState(output_dir)['last_attempt_jd'] == decided

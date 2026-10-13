@@ -1373,6 +1373,12 @@ def test_recalibration_includes_the_matched_filter_results(config_path, tmp_path
     with open(os.path.join(mf_dir, mfd.DONE_NAME), 'w') as f:
         f.write('{}')
 
+    # Backups which earlier recalibrations left next to both are not recalibrated
+    FTPdetectinfo.writeFTPdetectinfo(meteor, results_dir, 'FTPdetectinfo_file_backup_1.txt', results_dir, 'XX0001',
+                                     25.0, celestial_coords_given=True)
+    FTPdetectinfo.writeFTPdetectinfo(meteor, mf_dir, 'FTPdetectinfo_file_mf_backup_1.txt', mf_dir, 'XX0001', 25.0,
+                                     celestial_coords_given=True)
+
     recalibrated = []
     monkeypatch.setattr(mon, 'applyRecalibrate', lambda ftp_path, config, **kwargs: recalibrated.append(ftp_path))
 
