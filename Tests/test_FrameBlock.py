@@ -485,3 +485,22 @@ def test_preallocation_errors(tmp_path, monkeypatch, code, fails):
         with fb.FrameBlockWriter(path, 16, 10, max_frames=2) as w:
             w.write(np.zeros((10, 16), np.uint16), 0)
         assert fb.FrameBlockReader(path).n_frames == 1
+
+
+@pytest.mark.parametrize('frames', [0, -1])
+def test_convert_refuses_non_positive_block_lengths(tmp_path, frames):
+    """ A block length which is not positive is refused instead of converting nothing or everything. """
+
+    _writeFitsFrames(tmp_path/'fits', [np.full((10, 16), 4093, np.uint16)], ['2026-04-24T05:40:22+00:00'])
+    with pytest.raises(ValueError):
+        fb.convertFitsDirectory(str(tmp_path/'fits'), str(tmp_path/'out'), frames_per_block=frames)
+
+
+def test_matched_filter_finds_blocks_in_a_directory(tmp_path):
+    """ The matched filter takes the frame blocks of a directory as its inputs. """
+
+    from RMS.MatchedFilterDetection import findInputFiles
+
+    open(str(tmp_path/'XX0001_20251225_010203_000000.fblk'), 'wb').close()
+    open(str(tmp_path/'notes.txt'), 'w').close()
+    assert [os.path.basename(p) for p in findInputFiles([str(tmp_path)])] == ['XX0001_20251225_010203_000000.fblk']

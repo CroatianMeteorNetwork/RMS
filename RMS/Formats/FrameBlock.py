@@ -573,6 +573,8 @@ def convertFitsDirectory(fits_dir, out_dir, packing='mono12p', bit_depth=12, fra
                 break
         if shifted is None:
             raise ValueError('The frames do not show whether their values are shifted to 16 bits, give shifted')
+    if (frames_per_block is not None) and (frames_per_block < 1):
+        raise ValueError('A block holds at least one frame, {} given'.format(frames_per_block))
     frames_per_block = frames_per_block or len(paths)
     os.makedirs(out_dir, exist_ok=True)
 

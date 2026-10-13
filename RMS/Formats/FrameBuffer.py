@@ -17,7 +17,7 @@ from RMS.Routines.DynamicFTPCompressionCy import FFMimickInterface
 
 # Input types whose frames and chunks a segment gives exactly as the input itself does (their chunks are made of
 #   the frames which loadFrame returns)
-SEGMENT_INPUT_TYPES = ('vid',)
+SEGMENT_INPUT_TYPES = ('vid', 'fblk')
 
 
 def segmentFrames(img_handle, config, memory_gb):
@@ -45,6 +45,14 @@ def segmentFrames(img_handle, config, memory_gb):
     # A segment holds at least twice the blocks which the slow search compares, so that the last segment can
     #   begin early enough to hold them too (see segmentRanges). A smaller memory is not used
     if segment_frames < 2*segmentMinimum(config, img_handle):
+
+        # Except a frame block (e.g. 30 s of frames) which fits in the memory as a whole: it is one segment of all
+        #   its frames, nothing is cut, so the minimum of the segments of a long input doesn't apply
+        total_frames = int(getattr(img_handle, 'total_frames', 0) or 0)
+        if (img_handle.input_type == 'fblk') and (total_frames > 0) \
+                and (total_frames*frame_bytes <= memory_gb*1024**3):
+            return total_frames
+
         return 0
 
     return segment_frames

@@ -94,7 +94,7 @@ MATCHED_FILTER_SUFFIX = 'mf'
 DONE_NAME = 'matched_filter_done.json'
 
 # Extensions of the input files found in directories
-INPUT_EXTENSIONS = ('.vid', '.mkv', '.mp4', '.avi', '.mov')
+INPUT_EXTENSIONS = ('.vid', '.fblk', '.mkv', '.mp4', '.avi', '.mov')
 
 # Directories of FITS frames (one frame per file) are inputs too, as for the fitsdirs input of the monitor (the
 #   .fit files of FRIPON cameras are read with headers which other cameras don't have)
@@ -4328,7 +4328,11 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
 
     # The segments, which share the overlap (in whole blocks)
     overlap = -(-int(config.mf_segment_overlap)//unit)*unit
-    if overlap > segmentOverlap(segment_frames, overlap, unit):
+    if img_handle.total_frames <= segment_frames:
+
+        # The whole input is one segment, which overlaps nothing
+        overlap = 0
+    elif overlap > segmentOverlap(segment_frames, overlap, unit):
         log.warning('Matched filter: mf_segment_overlap {:d} is more than half of segments of {:d} frames, {:d} '
                     'used'.format(int(config.mf_segment_overlap), segment_frames,
                                   segmentOverlap(segment_frames, overlap, unit)))

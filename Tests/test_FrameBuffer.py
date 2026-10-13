@@ -76,8 +76,8 @@ def test_segment_ranges():
 
 
 def test_segment_frames():
-    """ The frames of a segment fit in the memory, in whole blocks of the matched filter, and only .vid inputs are
-        read in segments. """
+    """ The frames of a segment fit in the memory, in whole blocks of the matched filter, and only .vid inputs and
+        frame blocks are read in segments. """
 
     config = cr.Config()
     handle = _Input(size=(512, 512))
@@ -89,6 +89,53 @@ def test_segment_frames():
 
     handle.input_type = 'images'
     assert segmentFrames(handle, config, 4.0) == 0
+
+
+def test_whole_short_input_is_one_segment():
+    """ A frame block which fits in the memory as a whole is one segment of all its frames, also when the memory
+        is less than the fewest frames of a segment of a long input; one which doesn't fit isn't read in segments.
+    """
+
+    config = cr.Config()
+    handle = _Input(total_frames=450, size=(1080, 1920))
+    handle.input_type = 'fblk'
+    assert 2*segmentMinimum(config, handle)*1080*1920*2 > 2*1024**3
+
+    assert segmentFrames(handle, config, 2.0) == 450
+    assert segmentRanges(450, 450, 0, segmentUnit(config, handle)) == [(0, 450)]
+    assert segmentFrames(handle, config, 1.0) == 0
+
+
+def test_segment_of_a_frame_block(tmp_path):
+    """ A frame block read through a segment gives the frames, their times and the chunks of the block. """
+
+    import os
+    import RMS.Formats.FrameBlock as fb
+    from RMS.Formats.FrameInterface import detectInputTypeFile
+
+    config = cr.parse(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.config'))
+    config.width, config.height = 24, 16
+    path = str(tmp_path/('XX0001_20251225_010203_000000' + fb.EXTENSION))
+    rng = np.random.default_rng(3)
+    with fb.FrameBlockWriter(path, 24, 16, max_frames=300) as w:
+        for i in range(300):
+            w.write(rng.integers(0, 4096, (16, 24)), 1_766_624_523_000_000_000 + i*66_666_667)
+
+    handle = detectInputTypeFile(path, config, detection=True, chunk_frames=128)
+    reference = detectInputTypeFile(path, config, detection=True, chunk_frames=128)
+    buffer = SegmentBuffer(handle, 300)
+    buffer.load(0, 300)
+
+    for f in (0, 150, 299):
+        buffer.setFrame(f)
+        reference.setFrame(f)
+        assert np.array_equal(buffer.loadFrame(), reference.loadFrame())
+        assert buffer.currentFrameTime(frame_no=f, dt_obj=True) == reference.currentFrameTime(frame_no=f, dt_obj=True)
+
+    chunk = buffer.loadChunk(first_frame=128)
+    expected = reference.loadChunk(first_frame=128)
+    assert np.array_equal(np.asarray(chunk.maxpixel), np.asarray(expected.maxpixel))
+    assert np.array_equal(np.asarray(chunk.avepixel), np.asarray(expected.avepixel))
 
 
 def test_segment_minimum():
