@@ -319,7 +319,7 @@ def processAndUploadTimelapses(config, upload_manager, cutoff_utc=None):
 
 
 
-def splitSessionTimelapses(config, upload_manager, cutoff_utc, duration=None):
+def splitSessionTimelapses(config, upload_manager, cutoff_utc, duration=None, keep_paths=None):
     """ Free up disk space, then make the timelapses of the frames up to a capture session split (polar day or
         night) and put them up for upload.
 
@@ -335,6 +335,8 @@ def splitSessionTimelapses(config, upload_manager, cutoff_utc, duration=None):
     Keyword arguments:
         duration: [float] Duration of the next capture in seconds, passed to deleteOldObservations. None by
             default.
+        keep_paths: [list] Night directories and archives which must not be deleted, passed to
+            deleteOldObservations. None by default.
 
     Return:
         space_ok: [bool] True if there is enough disk space to continue capturing.
@@ -342,7 +344,7 @@ def splitSessionTimelapses(config, upload_manager, cutoff_utc, duration=None):
 
     log.info('Freeing up disk space...')
     space_ok = deleteOldObservations(config.data_dir, config.captured_dir, config.archived_dir, config,
-        duration=duration)
+        duration=duration, keep_paths=keep_paths)
 
     processAndUploadTimelapses(config, upload_manager, cutoff_utc=cutoff_utc)
 
@@ -350,7 +352,7 @@ def splitSessionTimelapses(config, upload_manager, cutoff_utc, duration=None):
     if not space_ok:
         log.info('Freeing up disk space again after making the timelapses...')
         space_ok = deleteOldObservations(config.data_dir, config.captured_dir, config.archived_dir, config,
-            duration=duration)
+            duration=duration, keep_paths=keep_paths)
 
     return space_ok
 
@@ -741,6 +743,11 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # Path to the archive directory of the processed night (stays None if the night was never processed)
     night_archive_dir = None
 
+    # Directories and archives of a night split off during the polar night. The new night starts right away,
+    #   while they are still being uploaded and used by the external script, so the disk cleanups up to the
+    #   start of the new night must not delete them
+    keep_paths = None
+
     # Value of the session split counter when the last split was handled (polar day/night, continuous mode)
     session_cut_handled = session_cut.value if session_cut is not None else None
 
@@ -776,10 +783,14 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             # Free up disk space for new capture
             log.info('Freeing up disk space...')
 
-            if not deleteOldObservations(config.data_dir, config.captured_dir, config.archived_dir, config, duration=duration):
+            if not deleteOldObservations(config.data_dir, config.captured_dir, config.archived_dir, config,
+                    duration=duration, keep_paths=keep_paths):
 
                 log.error('No more disk space can be freed up! Stopping capture...')
                 disk_full = True
+
+            # The split night is protected only until the new night starts, later cleanups can delete it
+            keep_paths = None
 
 
         # Continuous mode only: Daytime capture
@@ -1206,6 +1217,13 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                 if detector is not None:
                     detector.deleteBackupFiles()
 
+            # Polar night split: keep the night through the cleanups until the new night starts, with its
+            #   archives if it was processed (if not, its data is needed to reprocess it on the next startup)
+            if session_cut_utc is not None:
+                keep_paths = [night_data_dir, night_archive_dir]
+                if night_processed:
+                    keep_paths += files_to_add_list
+
 
             # frames -> timelapse(s) -> archive(s) -> upload
             if session_cut_utc is None:
@@ -1213,8 +1231,10 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
             # Polar night: the frames up to the session split are used. The disk space is freed first, as the
             #   next night directory is started right away and the cleanup there could otherwise delete the
-            #   new timelapses before they are uploaded
-            elif not splitSessionTimelapses(config, upload_manager, session_cut_utc, duration=duration):
+            #   new timelapses before they are uploaded. The night that was just processed is kept, as its
+            #   archives are still waiting to be uploaded and the external script still has to run on it
+            elif not splitSessionTimelapses(config, upload_manager, session_cut_utc, duration=duration,
+                    keep_paths=keep_paths):
                 log.error('No more disk space can be freed up! Stopping capture...')
                 disk_full = True
 
