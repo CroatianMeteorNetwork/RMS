@@ -16,7 +16,7 @@ from RMS.Routines.DynamicFTPCompressionCy import FFMimickInterface
 
 
 # Input types whose frames and chunks a segment gives exactly as the input itself does (their chunks are made of
-#   the frames which loadFrame returns)
+#   the frames which loadFrame returns): .vid files and frame blocks
 SEGMENT_INPUT_TYPES = ('vid', 'fblk')
 
 
