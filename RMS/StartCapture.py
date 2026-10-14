@@ -941,8 +941,9 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             # Free up disk space for new capture
             log.info('Freeing up disk space...')
 
+            # The new night directory is kept too, it would be the first to go if no older capture is left
             if not deleteOldObservations(config.data_dir, config.captured_dir, config.archived_dir, config,
-                    duration=duration, keep_paths=keep_paths):
+                    duration=duration, keep_paths=(keep_paths or []) + [night_data_dir]):
 
                 log.error('No more disk space can be freed up! Stopping capture...')
                 disk_full = True
@@ -1143,15 +1144,17 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
 
             # Polar night split: start the next night right away, so the capture goes on while the split night
-            #   is processed, which can take a long time
-            if (session_cut_utc is not None) and (not STOP_CAPTURE):
+            #   is processed, which can take a long time. Not if the station reboots after the processing, the
+            #   capture is stopped for the reboot anyway
+            if (session_cut_utc is not None) and (not STOP_CAPTURE) and (not config.reboot_after_processing):
 
                 next_night_data_dir = makeNightDataDir(config)
 
-                # Free up disk space for the next night, keeping the split night which is yet to be processed
+                # Free up disk space for the next night, keeping the split night which is yet to be processed and
+                #   the new night directory
                 log.info('Freeing up disk space...')
                 if deleteOldObservations(config.data_dir, config.captured_dir, config.archived_dir, config,
-                        duration=duration, keep_paths=[night_data_dir]):
+                        duration=duration, keep_paths=[night_data_dir, next_night_data_dir]):
 
                     next_detector, next_compressor = startNightCompression(config, next_night_data_dir,
                         (sharedArray, startTime, sharedArray2, start_time2), duration, nodetect=nodetect,
@@ -1413,6 +1416,11 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             # running, or two captures will run in parallel and save every frame twice, with the
             # old one stamping a stale day/night suffix (it holds the previous daytime_mode)
             if config.continuous_capture:
+
+                # A night started at a polar night split must not keep running either
+                stopStartedNight(next_night)
+                next_night = None
+
                 log.info('Ending capture before reboot...')
                 dropped_frames = bc.stopCapture()
                 log.info('Total number of late or dropped frames: ' + str(dropped_frames))

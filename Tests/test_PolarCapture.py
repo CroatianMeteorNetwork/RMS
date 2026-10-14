@@ -633,9 +633,9 @@ def test_runcapture_polar_night_keeps_split_night(monkeypatch, tmp_path):
     # Night directory, archive directory (the same in the fake processing) and the uploaded archive
     kept = [[d, d, os.path.basename(d) + '_detected.tar.bz2'] for d in h.processed_nights]
 
-    # Cleanups at the start of the second night (before the first is processed, only its directory exists),
-    #   at the first split, the start of the third night and the second split
-    split = [[d] for d in h.processed_nights]
+    # Cleanups at the start of the second night (before the first is processed, only its directory exists,
+    #   and the new night directory), at the first split, the start of the third night and the second split
+    split = [[d, n] for d, n in zip(h.processed_nights, h.processed_nights[1:])]
     assert h.delete_keeps == [split[0], kept[0], split[1], kept[1]]
 
 
@@ -647,7 +647,7 @@ def test_runcapture_polar_night_keeps_unprocessed_night(monkeypatch, tmp_path):
     h.processing_fails = True
     h.run(['cut', 'stop'])
 
-    assert h.delete_keeps == [[h.processed_nights[0]], [h.processed_nights[0], None]]
+    assert h.delete_keeps == [h.processed_nights[:2], [h.processed_nights[0], None]]
 
 
 def test_runcapture_polar_night_capture_goes_on(monkeypatch, tmp_path):
@@ -700,14 +700,31 @@ def test_runcapture_stop_during_split_processing(monkeypatch, tmp_path):
     assert len(h.processed_nights) == 1
 
 
-def test_runcapture_keeps_nothing_outside_polar_night(monkeypatch, tmp_path):
-    """ Normal nights and polar days do not change the cleanups. """
+def test_runcapture_reboot_after_split(monkeypatch, tmp_path):
+    """ With a reboot after the processing, the next night is not started at the split: the capture stops for
+        the reboot after the split night is processed. """
+
+    h = CaptureHarness(monkeypatch, tmp_path, start_daytime=False)
+    h.config.reboot_after_processing = True
+    h.script = ['cut']
+    sc.runCapture(h.config, upload_manager=h.upload_manager, daytime_mode=h.daytime_mode,
+        camera_mode_switch_trigger=h.trigger, session_cut=h.session_cut, session_cut_time=h.session_cut_time)
+
+    assert h.script == []
+    assert h.compressors == 1
+    assert h.compressor_stops == 1
+    assert len(h.processed_nights) == 1
+
+
+def test_runcapture_keeps_new_night_outside_polar_night(monkeypatch, tmp_path):
+    """ Outside the polar night only the directory of the night being started is kept by the cleanup. """
 
     h = CaptureHarness(monkeypatch, tmp_path, start_daytime=False)
     h.run(['day', 'cut', 'night', 'day', 'stop'])
 
-    assert h.deletes > 0
-    assert h.delete_keeps == [None]*h.deletes
+    # Only the polar day split cleans up without anything to keep, the start of the second night keeps just
+    #   its own new directory
+    assert h.delete_keeps == [None, [h.processed_nights[1]]]
 
 
 def test_runcapture_split_low_disk(monkeypatch, tmp_path):
