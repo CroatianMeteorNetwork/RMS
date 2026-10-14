@@ -1134,12 +1134,18 @@ def fitCandidate(chunk_dirs, section_chunks, held_out, catalog_stars, config, ma
         info['reason'] = 'only {:d} sections could be fitted'.format(len(fits))
         return None, info
 
-    # Every section is judged on the held-out chunks: a section fitted to a wrong solution fails there and is dropped
+    # Every section is judged on the held-out chunks: a section fitted to a wrong solution fails there and is
+    #   dropped. Its photometry is fitted first on the chunks of the sections, as the candidate's is (below): the
+    #   plate solver gives the default vignetting coefficient, which can be far from the camera's (e.g. a wide
+    #   camera without a flat), and every section would fail on the photometry alone
+    photometry_chunks = spreadChunks(section_chunks, 2*N_SECTIONS)
     scores = {}
     passing = []
     for name, jd, platepar, section in fits:
         if vignetting_coeff is not None:
             platepar.vignetting_coeff = vignetting_coeff
+        section['photometry'] = fitPhotometry(platepar, photometry_chunks, catalog_stars, config,
+                                              ff_frames=ff_frames, fit_vignetting=fit_vignetting)
         score = scorePlatepar(platepar, held_out, catalog_stars, config, ff_frames=ff_frames,
                               mask=getattr(mask, 'img', None))
         ok, reasons = judgeScore(score)
@@ -1181,12 +1187,11 @@ def fitCandidate(chunk_dirs, section_chunks, held_out, catalog_stars, config, ma
         if (best is None) or (key > best[0]):
             best = (key, i)
 
-    name, jd, platepar, _ = fits[best[1]]
+    name, jd, platepar, section = fits[best[1]]
     info['chosen_section'] = name
 
-    # The photometry is fitted on the chunks of the sections (the held-out chunks are kept for the judgement)
-    info['photometry'] = fitPhotometry(platepar, spreadChunks(section_chunks, 2*N_SECTIONS), catalog_stars, config,
-                                       ff_frames=ff_frames, fit_vignetting=fit_vignetting)
+    # The photometry was fitted on the chunks of the sections (the held-out chunks are kept for the judgement)
+    info['photometry'] = section['photometry']
 
     platepar.auto_recalibrated = False
 

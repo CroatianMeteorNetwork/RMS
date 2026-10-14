@@ -813,3 +813,53 @@ def test_sections_which_fail_on_held_out_chunks_are_dropped(monkeypatch):
     assert candidate.mag_lev == pytest.approx(0.95)
     assert len(info['agreeing_sections']) == 2
     assert sum(1 for s in info['sections'] if s.get('held_out_ok') is False) == 2
+
+
+def test_sections_are_judged_with_their_own_photometry(monkeypatch):
+    """ A new camera: the sections come from the plate solver with the default vignetting coefficient, which can be
+        far from the camera's (e.g. a wide 1080p camera without a flat). Every section's photometry, with its
+        vignetting, is fitted before it is judged on the held-out chunks, as the candidate is; otherwise every
+        section fails on the photometry alone. """
+
+    import RMS.Astrometry.AutoPlatepar as ap
+
+    config = cr.parse(REPO_CONFIG)
+    chunks = [('FF_XX0001_20251225_0100{:02d}_000_0000000.fits'.format(i), 2461000.5 + i/1440.0,
+               _stars(np.linspace(10, 500, 60), np.linspace(10, 500, 60))) for i in range(8)]
+
+    # The plate solver gives every section the default vignetting coefficient
+    def _fit(dir_path, config, catalog_stars, ff_name=None, **kwargs):
+        pp = _platepar()
+        pp.vignetting_coeff = 0.00067
+        return pp, list(range(80)), ff_name
+
+    monkeypatch.setattr(ap, 'autoFitPlatepar', _fit)
+
+    # The fitted photometry finds the camera's coefficient, with which the photometry passes; with the default one
+    #   the photometric residual of the outer zone fails the judgement
+    fitted = []
+
+    def _photometry(platepar, chunks, catalog_stars, config, ff_frames=256, fit_vignetting=False):
+        if fit_vignetting:
+            platepar.vignetting_coeff = 0.00027
+        fitted.append(fit_vignetting)
+        return {'vignetting_coeff': platepar.vignetting_coeff, 'vignetting_fitted': fit_vignetting}
+
+    def _scorePlatepar(pp, *args, **kwargs):
+        score = _score([0.95]*8)
+        if pp.vignetting_coeff != 0.00027:
+            score.zone_mag_residual = np.full(len(score.zones), -0.57)
+        return score
+
+    monkeypatch.setattr(ac, 'fitPhotometry', _photometry)
+    monkeypatch.setattr(ac, 'scorePlatepar', _scorePlatepar)
+    monkeypatch.setattr(ac, 'sectionDifference', lambda a, b, jd, fwhm: (0.0, 0.0))
+
+    candidate, info = ac.fitCandidate({c[0]: '.' for c in chunks}, chunks, chunks[:2], None, config,
+                                      fit_vignetting=True)
+
+    # Every section passes with its own photometry, and the candidate keeps the fitted coefficient
+    assert candidate is not None, info
+    assert all(s.get('held_out_ok') for s in info['sections'] if s['fitted'])
+    assert candidate.vignetting_coeff == pytest.approx(0.00027)
+    assert all(fitted)
