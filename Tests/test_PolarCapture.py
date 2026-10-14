@@ -446,6 +446,10 @@ class CaptureHarness(object):
         self.session_cut_time = multiprocessing.Value(ctypes.c_double, 0.0, lock=False)
 
         self.processed_nights = []
+        self.compressor_stops = 0
+
+        # Called with the harness when a night is processed, to change the state in the meantime
+        self.on_process = None
         self.timelapse_cutoffs = []
         self.deletes = 0
         self.compressors = 0
@@ -468,13 +472,18 @@ class CaptureHarness(object):
             def __init__(self, night_data_dir, *args, **kwargs):
                 FakeProcess.__init__(self)
                 harness.compressors += 1
+                harness.events.append('compress')
                 self.detector = kwargs.get('detector')
 
             def stop(self):
+                harness.compressor_stops += 1
                 return self.detector
 
         def fakeProcessNight(night_data_dir, config, detection_results=None, nodetect=False):
             harness.processed_nights.append(night_data_dir)
+            harness.events.append('process')
+            if harness.on_process is not None:
+                harness.on_process(harness)
             if harness.processing_fails:
                 raise RuntimeError("Processing failed")
             name = os.path.basename(night_data_dir)
@@ -492,9 +501,13 @@ class CaptureHarness(object):
             return harness.delete_results.pop(0) if harness.delete_results else True
 
         def fakeWait(duration, compressor, bc, video_file, daytime_mode=None, session_cut=None,
-                session_cut_handled=None):
+                session_cut_handled=None, mode_at_start=None):
 
-            mode_at_entry = daytime_mode.value
+            # Same as the real wait(): a mode which already differs from the session start ends the wait at once
+            mode_at_entry = daytime_mode.value if mode_at_start is None else mode_at_start
+            if daytime_mode.value != mode_at_entry:
+                return "mode_switch"
+
             action = harness.script.pop(0)
 
             if action == 'stop':
@@ -603,9 +616,10 @@ def test_runcapture_polar_night(monkeypatch, tmp_path):
     assert h.upload_manager.files == [nights[0], 'timelapse_1.tar', nights[1], 'timelapse_2.tar',
         nights[2], 'timelapse_3.tar']
 
-    # Every split frees disk space before the timelapses are made, and so does every new night directory
-    #   (it finds enough space then, and deletes nothing)
-    assert h.events == ['delete', 'timelapse', 'delete']*2 + ['timelapse']
+    # At every split the next night is started first (disk cleanup, compressor), then the split night is
+    #   processed and the disk is freed again before its timelapses are made
+    assert h.events == ['compress'] + ['delete', 'compress', 'process', 'delete', 'timelapse']*2 \
+        + ['process', 'timelapse']
 
 
 def test_runcapture_polar_night_keeps_split_night(monkeypatch, tmp_path):
@@ -619,8 +633,10 @@ def test_runcapture_polar_night_keeps_split_night(monkeypatch, tmp_path):
     # Night directory, archive directory (the same in the fake processing) and the uploaded archive
     kept = [[d, d, os.path.basename(d) + '_detected.tar.bz2'] for d in h.processed_nights]
 
-    # Cleanups at the first split, the second night start, the second split and the third night start
-    assert h.delete_keeps == [kept[0], kept[0], kept[1], kept[1]]
+    # Cleanups at the start of the second night (before the first is processed, only its directory exists),
+    #   at the first split, the start of the third night and the second split
+    split = [[d] for d in h.processed_nights]
+    assert h.delete_keeps == [split[0], kept[0], split[1], kept[1]]
 
 
 def test_runcapture_polar_night_keeps_unprocessed_night(monkeypatch, tmp_path):
@@ -631,7 +647,57 @@ def test_runcapture_polar_night_keeps_unprocessed_night(monkeypatch, tmp_path):
     h.processing_fails = True
     h.run(['cut', 'stop'])
 
-    assert h.delete_keeps == [[h.processed_nights[0], None]]*2
+    assert h.delete_keeps == [[h.processed_nights[0]], [h.processed_nights[0], None]]
+
+
+def test_runcapture_polar_night_capture_goes_on(monkeypatch, tmp_path):
+    """ The next night is compressed while the split night is processed, so no capture is lost, and the
+        night is processed once it ends. """
+
+    h = CaptureHarness(monkeypatch, tmp_path, start_daytime=False)
+    h.run(['cut', 'stop'])
+
+    assert h.events.index('compress', 1) < h.events.index('process')
+    assert h.compressors == 2
+    assert h.compressor_stops == 2
+    assert len(set(h.processed_nights)) == 2
+
+
+def test_runcapture_polar_night_ends_with_sunrise_during_processing(monkeypatch, tmp_path):
+    """ The Sun rose while the split night was processed: the night started at the split ends at once, is
+        processed, and the daytime capture starts. """
+
+    h = CaptureHarness(monkeypatch, tmp_path, start_daytime=False)
+
+    def sunrise(harness):
+        if len(harness.processed_nights) == 1:
+            harness.daytime_mode.value = True
+
+    h.on_process = sunrise
+    h.run(['cut', 'stop'])
+
+    assert len(set(h.processed_nights)) == 2
+    assert h.compressor_stops == 2
+
+    # The second night ended without waiting, the daytime capture took the 'stop' action
+    assert h.timelapse_cutoffs == [cutTime(h, 1), None]
+
+
+def test_runcapture_stop_during_split_processing(monkeypatch, tmp_path):
+    """ Capture stopped while the split night was processed: the compression of the night started at the
+        split is stopped too, so the program can exit (it is reprocessed on the next startup). """
+
+    h = CaptureHarness(monkeypatch, tmp_path, start_daytime=False)
+
+    def stop(harness):
+        sc.STOP_CAPTURE = True
+
+    h.on_process = stop
+    h.run(['cut'])
+
+    assert h.compressors == 2
+    assert h.compressor_stops == 2
+    assert len(h.processed_nights) == 1
 
 
 def test_runcapture_keeps_nothing_outside_polar_night(monkeypatch, tmp_path):
@@ -660,12 +726,21 @@ def test_runcapture_split_low_disk(monkeypatch, tmp_path):
     h.run(['cut'])
     assert h.events == ['delete', 'timelapse', 'delete']
 
-    # Polar night: still not enough space, capture stops at the split without starting a new night
+    # Polar night: not enough space for the next night at the split, so it is not started before the split
+    #   night is processed. Still not enough space after the timelapses, capture stops without a new night
     h = CaptureHarness(monkeypatch, tmp_path, start_daytime=False)
-    h.delete_results = [False, False]
+    h.delete_results = [False, False, False]
     h.run(['cut'])
-    assert h.events == ['delete', 'timelapse', 'delete']
+    assert h.events == ['compress', 'delete', 'process', 'delete', 'timelapse', 'delete']
     assert h.compressors == 1
+    assert len(os.listdir(os.path.join(str(tmp_path), h.config.captured_dir))) == 1
+
+    # Polar night: enough space once the timelapses are made, the next night starts after the processing
+    h = CaptureHarness(monkeypatch, tmp_path, start_daytime=False)
+    h.delete_results = [False, False, True]
+    h.run(['cut', 'stop'])
+    assert h.events == ['compress', 'delete', 'process', 'delete', 'timelapse', 'delete', 'delete', 'compress',
+        'process', 'timelapse']
 
 
 def test_runcapture_normal_and_transitions(monkeypatch, tmp_path):
