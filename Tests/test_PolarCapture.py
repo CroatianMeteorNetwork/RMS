@@ -468,6 +468,11 @@ class CaptureHarness(object):
 
         harness = self
 
+        class HarnessDetector(FakeDetector):
+            def __init__(self, *args, **kwargs):
+                FakeDetector.__init__(self)
+                harness.events.append('detect')
+
         class FakeCompressor(FakeProcess):
             def __init__(self, night_data_dir, *args, **kwargs):
                 FakeProcess.__init__(self)
@@ -538,7 +543,7 @@ class CaptureHarness(object):
             raise AssertionError("Scripted action {} did not end the wait".format(action))
 
         for name, value in [
-                ('BufferedCapture', FakeProcess), ('Compressor', FakeCompressor), ('QueuedPool', FakeDetector),
+                ('BufferedCapture', FakeProcess), ('Compressor', FakeCompressor), ('QueuedPool', HarnessDetector),
                 ('processNight', fakeProcessNight), ('processFramesFiles', fakeProcessFramesFiles),
                 ('deleteOldObservations', fakeDelete), ('wait', fakeWait),
                 ('runExternalScript', lambda *a, **k: None),
@@ -620,7 +625,8 @@ def test_runcapture_polar_night(monkeypatch, tmp_path):
     # At every split the disk is freed for the next night while the split night is still compressed, then
     #   the compressors are swapped, the split night is processed and the disk is freed again before its
     #   timelapses are made
-    assert h.events == ['compress'] + ['delete', 'stop', 'compress', 'process', 'delete', 'timelapse']*2 \
+    assert h.events == ['detect', 'compress'] \
+        + ['delete', 'detect', 'stop', 'compress', 'process', 'delete', 'timelapse']*2 \
         + ['stop', 'process', 'timelapse']
 
 
@@ -661,12 +667,12 @@ def test_runcapture_polar_night_capture_goes_on(monkeypatch, tmp_path):
     h = CaptureHarness(monkeypatch, tmp_path, start_daytime=False)
     h.run(['cut', 'stop'])
 
-    assert h.events.index('compress', 1) < h.events.index('process')
+    assert h.events.index('compress', 2) < h.events.index('process')
 
-    # The cleanup for the next night runs before the split night's compressor is stopped, and the next
-    #   compressor is started right after it
+    # The cleanup and the detector for the next night run before the split night's compressor is stopped,
+    #   and the next compressor is started right after it
     stop = h.events.index('stop')
-    assert h.events[stop - 1:stop + 2] == ['delete', 'stop', 'compress']
+    assert h.events[stop - 2:stop + 2] == ['delete', 'detect', 'stop', 'compress']
     assert h.compressors == 2
     assert h.compressor_stops == 2
     assert len(set(h.processed_nights)) == 2
@@ -757,7 +763,7 @@ def test_runcapture_split_low_disk(monkeypatch, tmp_path):
     h = CaptureHarness(monkeypatch, tmp_path, start_daytime=False)
     h.delete_results = [False, False, False]
     h.run(['cut'])
-    assert h.events == ['compress', 'delete', 'stop', 'process', 'delete', 'timelapse', 'delete']
+    assert h.events == ['detect', 'compress', 'delete', 'stop', 'process', 'delete', 'timelapse', 'delete']
     assert h.compressors == 1
     assert len(os.listdir(os.path.join(str(tmp_path), h.config.captured_dir))) == 1
 
@@ -765,8 +771,8 @@ def test_runcapture_split_low_disk(monkeypatch, tmp_path):
     h = CaptureHarness(monkeypatch, tmp_path, start_daytime=False)
     h.delete_results = [False, False, True]
     h.run(['cut', 'stop'])
-    assert h.events == ['compress', 'delete', 'stop', 'process', 'delete', 'timelapse', 'delete', 'delete',
-        'compress', 'stop', 'process', 'timelapse']
+    assert h.events == ['detect', 'compress', 'delete', 'stop', 'process', 'delete', 'timelapse', 'delete',
+        'delete', 'detect', 'compress', 'stop', 'process', 'timelapse']
 
 
 def test_runcapture_normal_and_transitions(monkeypatch, tmp_path):

@@ -541,15 +541,13 @@ def makeNightDataDir(config):
 
 
 
-def startNightCompression(config, night_data_dir, frame_buffers, duration, nodetect=False, detect_end=False,
-    resume_capture=False, video_file=None):
-    """ Start the detection and the compression of a night capture into the given directory.
+def startNightDetector(config, night_data_dir, duration, nodetect=False, detect_end=False,
+    resume_capture=False):
+    """ Start the detection of a night capture into the given directory.
 
     Arguments:
         config: [Config] Configuration object.
         night_data_dir: [str] Full path to the capture directory of the night.
-        frame_buffers: [tuple] Shared frame buffers and their start times as given to BufferedCapture,
-            (array1, start_time1, array2, start_time2).
         duration: [float] Duration of the capture in seconds, None if not known.
 
     Keyword arguments:
@@ -557,14 +555,10 @@ def startNightCompression(config, night_data_dir, frame_buffers, duration, nodet
         detect_end: [bool] If True, detection will be performed at the end of the night. False by default.
         resume_capture: [bool] If True, the FF files already in the directory are queued for detection. False
             by default.
-        video_file: [str] Path to the video file, if it was given as the video source. None by default.
 
     Return:
-        (detector, compressor): [QueuedPool, Compressor] The detector (None if detection is off) and the
-            running compressor.
+        detector: [QueuedPool] The running detector, None if detection is off.
     """
-
-    sharedArray, startTime, sharedArray2, start_time2 = frame_buffers
 
     # Check if the detection should be performed or not
     if nodetect:
@@ -626,6 +620,29 @@ def startNightCompression(config, night_data_dir, frame_buffers, duration, nodet
                 log.error("There was an error during removing the capture resume flag file: " \
                     + capture_resume_file_path)
 
+    return detector
+
+
+
+def startNightCompressor(config, night_data_dir, frame_buffers, detector, duration, video_file=None):
+    """ Start the compression of a night capture into the given directory.
+
+    Arguments:
+        config: [Config] Configuration object.
+        night_data_dir: [str] Full path to the capture directory of the night.
+        frame_buffers: [tuple] Shared frame buffers and their start times as given to BufferedCapture,
+            (array1, start_time1, array2, start_time2).
+        detector: [QueuedPool] Detector the compressed files are queued to, None if detection is off.
+        duration: [float] Duration of the capture in seconds, None if not known.
+
+    Keyword arguments:
+        video_file: [str] Path to the video file, if it was given as the video source. None by default.
+
+    Return:
+        compressor: [Compressor] The running compressor.
+    """
+
+    sharedArray, startTime, sharedArray2, start_time2 = frame_buffers
 
     # Initialize compression
     compressor = Compressor(night_data_dir, sharedArray, startTime, sharedArray2, start_time2, config,
@@ -637,6 +654,40 @@ def startNightCompression(config, night_data_dir, frame_buffers, duration, nodet
     # Open the observation summary report
     if video_file is None:
         log.info(startObservationSummaryReport(config, night_data_dir, duration, force_delete=False))
+
+    return compressor
+
+
+
+def startNightCompression(config, night_data_dir, frame_buffers, duration, nodetect=False, detect_end=False,
+    resume_capture=False, video_file=None):
+    """ Start the detection and the compression of a night capture into the given directory.
+
+    Arguments:
+        config: [Config] Configuration object.
+        night_data_dir: [str] Full path to the capture directory of the night.
+        frame_buffers: [tuple] Shared frame buffers and their start times as given to BufferedCapture,
+            (array1, start_time1, array2, start_time2).
+        duration: [float] Duration of the capture in seconds, None if not known.
+
+    Keyword arguments:
+        nodetect: [bool] If True, detection will not be performed. False by default.
+        detect_end: [bool] If True, detection will be performed at the end of the night. False by default.
+        resume_capture: [bool] If True, the FF files already in the directory are queued for detection. False
+            by default.
+        video_file: [str] Path to the video file, if it was given as the video source. None by default.
+
+    Return:
+        (detector, compressor): [QueuedPool, Compressor] The detector (None if detection is off) and the
+            running compressor.
+    """
+
+    # The detector is started first, the compressor queues the compressed files to it
+    detector = startNightDetector(config, night_data_dir, duration, nodetect=nodetect, detect_end=detect_end,
+        resume_capture=resume_capture)
+
+    compressor = startNightCompressor(config, night_data_dir, frame_buffers, detector, duration,
+        video_file=video_file)
 
     return detector, compressor
 
@@ -1145,6 +1196,12 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                     shutil.rmtree(next_night_data_dir, ignore_errors=True)
                     next_night_data_dir = None
 
+                # Start the next night's detection while the split night is still compressed, only the start of
+                #   the compressor is left for the handoff
+                else:
+                    next_detector = startNightDetector(config, next_night_data_dir, duration, nodetect=nodetect,
+                        detect_end=detect_end)
+
             # Stop the compressor
             log.debug('Stopping compression...')
             detector = compressor.stop()
@@ -1153,14 +1210,20 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             # Start the next night's compression right after the split night's stopped
             if (next_night_data_dir is not None) and (not STOP_CAPTURE):
 
-                next_detector, next_compressor = startNightCompression(config, next_night_data_dir,
-                    (sharedArray, startTime, sharedArray2, start_time2), duration, nodetect=nodetect,
-                    detect_end=detect_end, video_file=video_file)
+                next_compressor = startNightCompressor(config, next_night_data_dir,
+                    (sharedArray, startTime, sharedArray2, start_time2), next_detector, duration,
+                    video_file=video_file)
 
                 next_night = (next_night_data_dir, next_detector, next_compressor)
 
             # Capture was stopped in the meantime, the next night is not started
             elif next_night_data_dir is not None:
+
+                # Close its idle detector
+                if next_detector is not None:
+                    next_detector.closePool()
+                    next_detector.shutdownManager()
+
                 shutil.rmtree(next_night_data_dir, ignore_errors=True)
 
             if live_view is not None:
