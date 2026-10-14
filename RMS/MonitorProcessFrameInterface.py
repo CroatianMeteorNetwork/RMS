@@ -1789,6 +1789,48 @@ def fileState(file_path):
         return None
 
 
+# Configs whose star catalog was loaded by the monitor (see preloadStarCatalog)
+_PRELOADED_CATALOGS = set()
+
+
+def preloadStarCatalog(config_path, platepar_path=None):
+    """ Load the star catalog of a config once in the monitor. The workers are forked from the monitor for every
+        file, so they find the catalog already decompressed (and share its memory) instead of decompressing it
+        for every file (1.6 s for the full GMN catalog). Only with forked workers which use the catalog: with a
+        platepar to recalibrate, or with the automatic calibration, which fits one. A failure is left to the
+        workers, which report it.
+
+    Arguments:
+        config_path: [str] Path to the config file.
+
+    Keyword arguments:
+        platepar_path: [str] Path to the platepar the workers are given. None by default.
+    """
+
+    # Once per config, and only for forked workers (spawned workers start from nothing and load it themselves)
+    if (config_path in _PRELOADED_CATALOGS) or (multiprocessing.get_start_method(allow_none=True) != 'fork'):
+        return
+
+    # The catalog of the config, read as the workers read it (the decompressed catalog stays in the memory of
+    #   StarCatalog, whatever the epoch and the limiting magnitude of a reading)
+    try:
+        from RMS.Formats import StarCatalog
+        config = cr.parse(config_path)
+
+        # Workers without a platepar and without the automatic calibration don't use the catalog; this is checked
+        #   again for the next worker, e.g. once a platepar is there
+        has_platepar = (platepar_path is not None) and os.path.isfile(platepar_path)
+        if not (has_platepar or getattr(config, 'monitor_auto_calibration', False)):
+            return
+
+        _PRELOADED_CATALOGS.add(config_path)
+        StarCatalog.readStarCatalog(config.star_catalog_path, config.star_catalog_file,
+                                    lim_mag=config.catalog_mag_limit + 1,
+                                    mag_band_ratios=config.star_catalog_band_ratios)
+    except Exception:
+        log.warning('The star catalog could not be loaded in advance:\n' + traceback.format_exc())
+
+
 def startWorker(file_path, args, kwargs):
     """ Start a worker process which processes the given file (processFileWorker).
 
@@ -1802,6 +1844,10 @@ def startWorker(file_path, args, kwargs):
             start_time. None if the process could not be started (e.g. out of memory), the file is then tried
             again later.
     """
+
+    # The star catalog loaded before the fork, for this worker and the next ones (args[1] is the config path,
+    #   args[2] the platepar path)
+    preloadStarCatalog(args[1], args[2])
 
     proc = multiprocessing.Process(target=processFileWorker, args=args, kwargs=kwargs)
 

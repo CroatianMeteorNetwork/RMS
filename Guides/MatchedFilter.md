@@ -521,6 +521,20 @@ workers, set `mf_threads` to the number of CPU cores divided by the number of wo
 worker in addition to the normal processing. The sky quality takes about 1 s per minute of frames; on clouded
 sky it makes the matched filter faster, as the clouded regions are not searched.
 
+Large frames, measured on 30 s frame blocks of 1920x1080 frames at 15 FPS (449 frames, `.fblk`, 24-core
+workstation, one GPU), with the star extraction and the recalibration:
+
+| | One block alone | Blocks of 5 cameras, sustained |
+|---|---|---|
+| Before (one launch and copy per run, float64 sums on the GPU) | 38 s | 67 s per 5 blocks (5 workers) |
+| Now, 5 workers | 17 s | 35 s per 5 blocks |
+| Now, 9 workers | | 30 s per 5 blocks |
+
+The detections are the same. For such inputs, keep the normalized frames for the measurement
+(`mf_cache_memory: 6`, about 4.7 GB per 30 s block) and run more workers than cameras (`nproc` about twice the
+number of cameras, `mf_threads: 4`): the steps of the workers then overlap and the CPU cores and the GPU are used
+together. A worker needs about 8.5 GB of memory and up to 1.7 GB of GPU memory.
+
 
 ## Tests
 
@@ -585,6 +599,7 @@ All settings are in the `[MatchedFilter]` section, see the comments in `.config`
 | `mf_saturation_level` | 0 | Saturation level of the raw frames (ADU), 0 = 98% of the bit range |
 | `mf_gpu` | auto | Use the GPU: auto, on, off |
 | `mf_threads` | 0 | CPU threads, 0 = all cores |
+| `mf_cache_memory` | 0 | GB per file of normalized frames kept for the measurement, 0 = read them again |
 
 
 ## Limits

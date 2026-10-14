@@ -376,8 +376,9 @@ def loadGMNStarCatalog(file_path,
         additional_fields: [dict - optional] A dictionary of additional fields requested by the user.
     """
 
-    # Catalog data used for caching
-    cache_name = "_catalog_data_{:s}".format(catalog_file.replace(".", "_"))
+    # Catalog data used for caching, by the real path of the file (catalogs of the same name in different
+    #   directories, e.g. of the configs of two cameras, are kept apart)
+    cache_name = "_catalog_data_{:s}".format(os.path.realpath(file_path))
 
     # Step 1: Cache the catalog data to avoid repeated decompression
     if not hasattr(loadGMNStarCatalog, cache_name):
