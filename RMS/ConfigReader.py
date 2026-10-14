@@ -1009,6 +1009,9 @@ class Config:
         #   measurement) takes them from memory; neighbouring segments share mf_segment_overlap frames, and the
         #   detections found in both are joined. 0 reads the frames from the file for every pass
         self.mf_buffer_memory = 0.0
+
+        # Memory for the normalized frames kept from the search for the measurement of the tracks (GB per file),
+        #   which then doesn't read and normalize them again. 0 reads them again
         self.mf_cache_memory = 0.0
         self.mf_segment_overlap = 512
 

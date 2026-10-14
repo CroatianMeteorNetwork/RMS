@@ -1801,6 +1801,7 @@ def test_gpu_runs_agree_with_the_cpu():
     frames = rng.normal(0, 1, (40, 70, 150)).astype(np.float32)
     starts = [0, 8, 16, 24]
 
+    # The same motions stacked on the CPU and on the GPU
     cpu = VelocityStacker(velocities, 8, use_gpu=False)
     gpu = VelocityStacker(velocities, 8, use_gpu=True)
 
@@ -1837,9 +1838,12 @@ def test_kept_normalized_blocks_give_the_same_detections(config, monkeypatch, ca
     read = MatchedFilterDetector.readFrames
 
     def countingRead(self, first, n, step=1, saturation=False):
+        """ Read the frames as the detector does, counting them for the current run of the detector. """
+
         reads[-1] += n
         return read(self, first, n, step=step, saturation=saturation)
 
+    # The detector reads its frames through the counting function
     monkeypatch.setattr(MatchedFilterDetector, 'readFrames', countingRead)
 
     # The detector without and with the kept blocks
@@ -1868,8 +1872,11 @@ def test_cpu_search_streams_the_runs(config, monkeypatch):
 
     # The stacks of all runs at once are not used on the CPU
     def allRuns(self, frames, run_starts):
+        """ Fail the test if the stacks of all runs at once are asked for. """
+
         raise AssertionError('All runs stacked at once on the CPU')
 
+    # Any use of the stacks of all runs at once fails
     monkeypatch.setattr(VelocityStacker, 'stackMaxRuns', allRuns)
 
     # The faint object is found as with the stacks of all runs

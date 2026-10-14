@@ -1294,6 +1294,7 @@ class MatchedFilterDetector(object):
                     [generator] (first frame, stack_max, vel_idx) of every run.
                 """
 
+                # Every run is stacked when the search reaches it (the stacking time is counted as on the GPU)
                 for r0 in run_starts:
                     t1 = time()
                     stack_max, vel_idx = stacker.stackMax(zb[r0:r0 + run_frames])
@@ -2939,6 +2940,7 @@ class MatchedFilterDetector(object):
             if not active:
                 continue
 
+            # The normalized frames of the block (kept from the search, or read again) and the noise of its pixels
             z, saturated = self.normalizedBlock(k)
             noise = self.backgrounds[k].noise
 

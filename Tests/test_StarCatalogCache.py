@@ -11,6 +11,7 @@ import numpy as np
 import RMS.Formats.StarCatalog as StarCatalog
 
 
+# The bundled catalog, from which the catalogs of the test are made
 CATALOG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'Catalogs',
                        'GMN_StarCatalog_LM9.0.bin')
 

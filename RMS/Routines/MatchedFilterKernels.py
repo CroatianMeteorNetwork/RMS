@@ -366,6 +366,7 @@ class VelocityStacker(object):
                 (n_runs, height, width).
         """
 
+        # The number of runs to stack
         n_runs = len(run_starts)
 
         # On the CPU (or without runs), run by run, as stackMax computes them. The frames are then an array on the
