@@ -96,11 +96,13 @@ def test_whole_short_input_is_one_segment():
         is less than the fewest frames of a segment of a long input; one which doesn't fit isn't read in segments.
     """
 
+    # A block of 450 1080p frames; 2 GB is less than the fewest frames of two segments of a long input
     config = cr.Config()
     handle = _Input(total_frames=450, size=(1080, 1920))
     handle.input_type = 'fblk'
     assert 2*segmentMinimum(config, handle)*1080*1920*2 > 2*1024**3
 
+    # 2 GB holds the whole block, which is one segment; 1 GB doesn't, so it isn't read in segments
     assert segmentFrames(handle, config, 2.0) == 450
     assert segmentRanges(450, 450, 0, segmentUnit(config, handle)) == [(0, 450)]
     assert segmentFrames(handle, config, 1.0) == 0
@@ -113,6 +115,7 @@ def test_segment_of_a_frame_block(tmp_path):
     import RMS.Formats.FrameBlock as fb
     from RMS.Formats.FrameInterface import detectInputTypeFile
 
+    # A block of 300 random frames at 15 fps
     config = cr.parse(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.config'))
     config.width, config.height = 24, 16
     path = str(tmp_path/('XX0001_20251225_010203_000000' + fb.EXTENSION))
@@ -121,10 +124,13 @@ def test_segment_of_a_frame_block(tmp_path):
         for i in range(300):
             w.write(rng.integers(0, 4096, (16, 24)), 1_766_624_523_000_000_000 + i*66_666_667)
 
+    # The whole block in a segment, and the block read directly for reference
     handle = detectInputTypeFile(path, config, detection=True, chunk_frames=128)
     reference = detectInputTypeFile(path, config, detection=True, chunk_frames=128)
     buffer = SegmentBuffer(handle, 300)
     buffer.load(0, 300)
+
+    # The same frames and times
 
     for f in (0, 150, 299):
         buffer.setFrame(f)
@@ -132,6 +138,7 @@ def test_segment_of_a_frame_block(tmp_path):
         assert np.array_equal(buffer.loadFrame(), reference.loadFrame())
         assert buffer.currentFrameTime(frame_no=f, dt_obj=True) == reference.currentFrameTime(frame_no=f, dt_obj=True)
 
+    # The same chunk images
     chunk = buffer.loadChunk(first_frame=128)
     expected = reference.loadChunk(first_frame=128)
     assert np.array_equal(np.asarray(chunk.maxpixel), np.asarray(expected.maxpixel))

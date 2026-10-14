@@ -38,6 +38,7 @@ import json
 import os
 import struct
 import time
+import warnings
 
 import numpy as np
 
@@ -85,8 +86,11 @@ def frameBytes(width, height, packing):
         [int] Bytes per frame (without the alignment padding).
     """
 
+    # 16-bit values take 2 bytes per pixel
     if packing == 'uint16':
         return 2*width*height
+
+    # Mono12p packs two pixels in three bytes, so a frame needs an even number of pixels
     if packing == 'mono12p':
         if (width*height) % 2:
             raise ValueError('mono12p needs an even number of pixels')
@@ -100,6 +104,8 @@ def frameBytes(width, height, packing):
 def _pack12Numpy(frame):
     """ Pack 12-bit values (uint16, 0-4095) into Mono12p bytes. """
 
+    # The pixels in pairs, every pair packed into three bytes: the low 8 bits of the first pixel, its high 4 bits
+    #   with the low 4 bits of the second pixel, and the high 8 bits of the second pixel
     p = frame.reshape(-1, 2).astype(np.uint16)
     out = np.empty((p.shape[0], 3), dtype=np.uint8)
     out[:, 0] = p[:, 0] & 0xFF
@@ -112,20 +118,26 @@ def _pack12Numpy(frame):
 def _unpack12Numpy(buf, n_pixels, shift):
     """ Unpack Mono12p bytes to uint16 values, shifted left by shift bits. """
 
+    # Every three bytes are a pair of pixels (the reverse of _pack12Numpy)
     b = np.frombuffer(buf, dtype=np.uint8, count=3*n_pixels//2).reshape(-1, 3).astype(np.uint16)
     out = np.empty((b.shape[0], 2), dtype=np.uint16)
     out[:, 0] = b[:, 0] | ((b[:, 1] & 0x0F) << 8)
     out[:, 1] = (b[:, 1] >> 4) | (b[:, 2] << 4)
+
+    # The values shifted up, e.g. to span 16 bits
     if shift:
         out <<= shift
 
     return out.ravel()
 
 
+# The same packing and unpacking compiled, every pair of pixels in parallel (several times faster than numpy)
 if numba is not None:
 
     @numba.njit(parallel=True, cache=True)
     def _pack12Numba(values, out):
+        """ Pack 12-bit values into Mono12p bytes (see _pack12Numpy). """
+
         for i in numba.prange(values.shape[0]//2):
             a = values[2*i]
             c = values[2*i + 1]
@@ -135,6 +147,8 @@ if numba is not None:
 
     @numba.njit(parallel=True, cache=True)
     def _unpack12Numba(buf, out, shift):
+        """ Unpack Mono12p bytes to uint16 values shifted left by shift bits (see _unpack12Numpy). """
+
         for i in numba.prange(out.shape[0]//2):
             b0 = np.uint16(buf[3*i])
             b1 = np.uint16(buf[3*i + 1])
@@ -153,10 +167,12 @@ def pack12(frame):
         [ndarray] uint8 array of 3*width*height/2 bytes.
     """
 
+    # The values in one row, packed by numpy if numba is not available
     values = np.ascontiguousarray(frame, dtype=np.uint16).ravel()
     if numba is None:
         return _pack12Numpy(values)
 
+    # Packed by the compiled kernel
     out = np.empty(3*values.size//2, dtype=np.uint8)
     _pack12Numba(values, out)
 
@@ -178,10 +194,12 @@ def unpack12(buf, width, height, shift=0):
         [ndarray] uint16 frame (height x width).
     """
 
+    # Unpacked by numpy if numba is not available
     n = width*height
     if numba is None:
         return _unpack12Numpy(buf, n, shift).reshape(height, width)
 
+    # Unpacked by the compiled kernel
     out = np.empty(n, dtype=np.uint16)
     _unpack12Numba(np.frombuffer(buf, dtype=np.uint8, count=3*n//2), out, shift)
 
@@ -210,6 +228,7 @@ def _pwriteAll(fd, data, offset):
         else:
             os.lseek(fd, offset, os.SEEK_SET)
             n = os.write(fd, view)
+        # Nothing written is an error (e.g. a full disk), otherwise the rest is written next
         if n <= 0:
             raise OSError('Nothing could be written at byte {}'.format(offset))
         view = view[n:]
@@ -240,11 +259,14 @@ class FrameBlockWriter(object):
                 in the header. None by default.
         """
 
+        # The packing has to hold the values: at most 12 bits for Mono12p, 16 bits for uint16
         if packing not in PACKINGS:
             raise ValueError('Unknown packing: {}'.format(packing))
         if not (1 <= bit_depth <= (12 if packing == 'mono12p' else 16)):
             raise ValueError('{} can not hold {}-bit values'.format(packing, bit_depth))
 
+        # The layout: the header, the frame table after it, and the frames after the table, every section and every
+        #   frame starting at a multiple of ALIGNMENT bytes
         self.path = path
         self.part_path = path + '.part'
         self.width, self.height = int(width), int(height)
@@ -257,6 +279,7 @@ class FrameBlockWriter(object):
         self.data_offset = self.table_offset + _align(self.max_frames*FRAME_RECORD.itemsize)
         self.n_frames = 0
 
+        # The header describes the layout and keeps the metadata, as JSON in the first HEADER_SIZE bytes
         header = {'width': self.width, 'height': self.height, 'packing': packing, 'bit_depth': self.bit_depth,
                   'max_frames': self.max_frames, 'frame_bytes': self.frame_bytes, 'frame_stride': self.frame_stride,
                   'table_offset': self.table_offset, 'data_offset': self.data_offset,
@@ -283,13 +306,15 @@ class FrameBlockWriter(object):
                     raise
                 os.ftruncate(self.fd, total)
 
+            # The header, and the frame table cleared (no frame is valid yet)
             _pwriteAll(self.fd, MAGIC + struct.pack('<II', VERSION, HEADER_SIZE) + text, 0)
             _pwriteAll(self.fd, bytes(self.data_offset - self.table_offset), self.table_offset)
 
-        # A block which could not be started leaves no file and no open descriptor
+        # A block which could not be started leaves no file and no open descriptor (forgotten before it is closed,
+        #   see close)
         except Exception:
-            os.close(self.fd)
-            self.fd = None
+            fd, self.fd = self.fd, None
+            os.close(fd)
             os.remove(self.part_path)
             raise
 
@@ -312,10 +337,12 @@ class FrameBlockWriter(object):
             [int] Index of the frame in the block.
         """
 
+        # The block was laid out for max_frames frames
         if self.n_frames >= self.max_frames:
             raise IndexError('The block is full ({} frames)'.format(self.max_frames))
 
-        # The pixels as stored
+        # The pixels as stored: the bytes given (e.g. the camera's Mono12p buffer, which has to be a whole frame),
+        #   or a frame of values of the right size, packed here
         if packed:
             data = memoryview(frame).cast('B')
             if data.nbytes != self.frame_bytes:
@@ -332,7 +359,7 @@ class FrameBlockWriter(object):
             else:
                 data = np.ascontiguousarray(frame, dtype='<u2')
 
-        # The frame first, then its record, marked valid last
+        # The frame first, then its record, marked valid last: a reader never takes a frame which isn't complete
         i = self.n_frames
         _pwriteAll(self.fd, data, self.data_offset + i*self.frame_stride)
         record = np.zeros(1, dtype=FRAME_RECORD)
@@ -362,24 +389,31 @@ class FrameBlockWriter(object):
             self.abort()
             return
 
-        # The file is closed also when finishing it fails; it then stays unpublished as <name>.part
+        # The file is closed also when finishing it fails; it then stays unpublished as <name>.part. The descriptor
+        #   is forgotten before it is closed: after a failed close the system may give its number to another file,
+        #   which must never be truncated or closed by this writer
+        fd, self.fd = self.fd, None
         try:
-            os.ftruncate(self.fd, self.data_offset + self.n_frames*self.frame_stride)
+            os.ftruncate(fd, self.data_offset + self.n_frames*self.frame_stride)
             if fsync:
-                os.fsync(self.fd)
+                os.fsync(fd)
         finally:
-            os.close(self.fd)
-            self.fd = None
+            os.close(fd)
         os.replace(self.part_path, self.path)
 
         # The new name is in the directory, which is flushed too (on POSIX systems, where a directory can be
-        #   opened), so the block survives a power loss under its final name
+        #   opened), so the block survives a power loss under its final name. The block is published by now, so a
+        #   failure here is a warning: an error would look like the block was not written
         if fsync and (os.name == 'posix'):
-            dir_fd = os.open(os.path.dirname(os.path.abspath(self.path)), os.O_RDONLY)
             try:
-                os.fsync(dir_fd)
-            finally:
-                os.close(dir_fd)
+                dir_fd = os.open(os.path.dirname(os.path.abspath(self.path)), os.O_RDONLY)
+                try:
+                    os.fsync(dir_fd)
+                finally:
+                    os.close(dir_fd)
+            except OSError as e:
+                warnings.warn('{} is written, but its directory could not be flushed to the disk: {}'.format(
+                    self.path, e), RuntimeWarning)
 
     def abort(self):
         """ Stop writing without publishing the file: it stays as <name>.part, readable up to its last frame, and
@@ -389,16 +423,20 @@ class FrameBlockWriter(object):
         if self.fd is None:
             return
 
+        # The descriptor is forgotten before it is closed (see close)
+        fd, self.fd = self.fd, None
         try:
-            os.ftruncate(self.fd, self.data_offset + self.n_frames*self.frame_stride)
+            os.ftruncate(fd, self.data_offset + self.n_frames*self.frame_stride)
         finally:
-            os.close(self.fd)
-            self.fd = None
+            os.close(fd)
 
     def __enter__(self):
+        """ Use the writer as a context manager (see __exit__). """
+
         return self
 
     def __exit__(self, exc_type, *args):
+        """ Close the block at the end of a with block, or abort it if the with block raised an error. """
 
         # Only a block written without an error gets its final name
         if exc_type is None:
@@ -422,6 +460,7 @@ def readHeader(path):
     with open(path, 'rb') as f:
         head = f.read(HEADER_SIZE)
 
+    # The signature, the version and the size of the header, then the JSON description (padded with zeros)
     if head[:8] != MAGIC:
         raise ValueError('{} is not a frame block file'.format(path))
     version, header_size = struct.unpack('<II', head[8:16])
@@ -452,6 +491,7 @@ class FrameBlockReader(object):
             path: [str] Path of the file.
         """
 
+        # The header, with the size of the frames, their packing and the metadata
         self.path = path
         self.header = readHeader(path)
         h = self.header
@@ -462,8 +502,12 @@ class FrameBlockReader(object):
         # The frames which were written completely: the valid records, and only as many as the file holds
         self.mm = np.memmap(path, dtype=np.uint8, mode='r')
         table = np.frombuffer(self.mm, dtype=FRAME_RECORD, count=h['max_frames'], offset=h['table_offset'])
+
+        # The frames are written in order, so the valid ones are those before the first invalid record
         valid = (table['flags'] & FLAG_VALID) > 0
         n_valid = int(np.argmin(valid)) if not np.all(valid) else len(valid)
+
+        # A file cut short holds only the frames whose bytes are all in it
         n_in_file = max(0, (len(self.mm) - h['data_offset'])//h['frame_stride'])
         if (len(self.mm) - h['data_offset']) % h['frame_stride'] >= h['frame_bytes']:
             n_in_file += 1
@@ -481,6 +525,8 @@ class FrameBlockReader(object):
 
         if not (0 <= i < self.n_frames):
             raise IndexError('Frame {} is not in the block ({} frames)'.format(i, self.n_frames))
+
+        # The frames are frame_stride bytes apart after the frame table
         start = self.header['data_offset'] + i*self.header['frame_stride']
 
         return self.mm[start:start + self.header['frame_bytes']]
@@ -499,11 +545,15 @@ class FrameBlockReader(object):
             [ndarray] uint16 frame (height x width).
         """
 
+        # The values are shifted up by the bits which the bit depth doesn't use, if asked
         shift = (16 - self.bit_depth) if shift_to_16bit else 0
         buf = self.frameBuffer(i)
+
+        # Packed frames are unpacked (and shifted at the same time)
         if self.packing == 'mono12p':
             return unpack12(buf, self.width, self.height, shift=shift)
 
+        # 16-bit frames are read as they are stored, as a copy (not a view into the file)
         frame = np.frombuffer(buf, dtype='<u2').reshape(self.height, self.width)
         if shift:
             return frame << shift
@@ -546,6 +596,7 @@ def convertFitsDirectory(fits_dir, out_dir, packing='mono12p', bit_depth=12, fra
     from astropy.io import fits
 
     def _utc(date_obs):
+        """ The time of a DATE-OBS value as a datetime in UTC. """
 
         # DATE-OBS is UTC, also when it has no time zone
         t = datetime.datetime.fromisoformat(date_obs.strip().replace('Z', '+00:00'))
@@ -578,11 +629,14 @@ def convertFitsDirectory(fits_dir, out_dir, packing='mono12p', bit_depth=12, fra
                 break
         if shifted is None:
             raise ValueError('The frames do not show whether their values are shifted to 16 bits, give shifted')
+    # The number of frames of a block, all frames in one block if it is not given
     if (frames_per_block is not None) and (frames_per_block < 1):
         raise ValueError('A block holds at least one frame, {} given'.format(frames_per_block))
     frames_per_block = frames_per_block or len(paths)
     os.makedirs(out_dir, exist_ok=True)
 
+    # The frames block by block. A block is named by the station and the time of its first frame, as the
+    #   recorder names it
     written = []
     for start in range(0, len(paths), frames_per_block):
         chunk = paths[start:start + frames_per_block]
@@ -601,11 +655,13 @@ def convertFitsDirectory(fits_dir, out_dir, packing='mono12p', bit_depth=12, fra
         if os.path.exists(os.path.join(out_dir, name)) and not overwrite:
             raise FileExistsError('{} exists (convert with overwrite to replace it)'.format(
                 os.path.join(out_dir, name)))
+        # The FITS header values which describe the camera and the site are kept as the metadata of the block
         metadata = {k: header0[k] for k in ('TELESCOP', 'SITELAT', 'SITELONG', 'SITEELEV', 'XBINNING',
                                             'YBINNING', 'GAIN', 'FRAMERAT', 'PIXFMT') if k in header0}
         metadata['station_id'] = station
         metadata['source'] = 'converted from FITS frames'
 
+        # Every frame of the block with its values, time, exposure and gain from its FITS file
         width, height = header0['NAXIS1'], header0['NAXIS2']
         with FrameBlockWriter(os.path.join(out_dir, name), width, height, len(chunk), packing=packing,
                               bit_depth=bit_depth, metadata=metadata) as writer:
@@ -623,6 +679,8 @@ def convertFitsDirectory(fits_dir, out_dir, packing='mono12p', bit_depth=12, fra
                     values = values >> shift
                 if (values.min() < 0) or (values.max() > (2**bit_depth - 1)):
                     raise ValueError('{} has values outside {} bits'.format(path, bit_depth))
+
+                # The time of the frame in ns UTC; the frame number in the directory stands in for the counter
                 time_ns = int(round(times[path].timestamp()*1e9))
                 writer.write(values, time_ns, exposure_us=round(exposure*1e6), gain=gain, counter=start + i)
         written.append(os.path.join(out_dir, name))
@@ -650,12 +708,15 @@ def demoRecorder(out_dir, width=1920, height=1080, fps=25.0, block_seconds=30.0,
         [list] Paths of the written block files.
     """
 
+    # The simulated camera starts now, at the given frame rate
     os.makedirs(out_dir, exist_ok=True)
     rng = np.random.default_rng(0)
     frames_per_block = int(round(fps*block_seconds))
     t_ns = time.time_ns()
     written = []
     counter = 0
+
+    # A new block file every block_seconds, named by the time of its first frame
     for b in range(n_blocks):
         name = 'XX0001_{}{}'.format(time.strftime('%Y%m%d_%H%M%S', time.gmtime(t_ns/1e9)) + '_{:06d}'.format(
             (t_ns//1000) % 1000000), EXTENSION)
@@ -667,6 +728,8 @@ def demoRecorder(out_dir, width=1920, height=1080, fps=25.0, block_seconds=30.0,
                 # A frame from the camera: here sky noise around 200 ADU of 4095
                 frame = np.clip(rng.normal(200, 10, (height, width)), 0, 4095).astype(np.uint16)
                 writer.write(frame, t_ns, exposure_us=int(1e6/fps), gain=1.0, counter=counter)
+
+                # The next frame one frame period later
                 t_ns += int(1e9/fps)
                 counter += 1
         written.append(path)
@@ -678,6 +741,7 @@ if __name__ == '__main__':
 
     import argparse
 
+    # Three commands: info, convert and demo
     parser = argparse.ArgumentParser(description='Frame block files (.fblk).')
     sub = parser.add_subparsers(dest='command', required=True)
 
@@ -700,6 +764,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
+    # The header, the number of frames and the frame rate from the frame times
     if args.command == 'info':
         reader = FrameBlockReader(args.file)
         print(json.dumps(reader.header, indent=2, sort_keys=True))
@@ -709,6 +774,7 @@ if __name__ == '__main__':
             print('first frame: {:.6f}, last: {:.6f}, fps: {:.4f}'.format(t[0], t[-1],
                                                                           (reader.n_frames - 1)/(t[-1] - t[0])))
 
+    # A directory of FITS frames to block files
     elif args.command == 'convert':
         for path in convertFitsDirectory(args.fits_dir, args.out_dir, packing=args.packing, bit_depth=args.bits,
                                          frames_per_block=args.frames,
@@ -716,6 +782,7 @@ if __name__ == '__main__':
                                          overwrite=args.overwrite):
             print(path)
 
+    # Simulated frames recorded to block files
     elif args.command == 'demo':
         for path in demoRecorder(args.out_dir, packing=args.packing):
             print(path)

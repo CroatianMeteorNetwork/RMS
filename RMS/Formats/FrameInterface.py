@@ -1625,6 +1625,7 @@ class InputTypeFrameBlock(InputType):
 
         self.input_type = 'fblk'
 
+        # The file and the options of the handle, as for the other inputs
         self.block_path = file_path
         self.dir_path, self.file_name = os.path.split(file_path)
         self.config = config
@@ -1641,9 +1642,11 @@ class InputTypeFrameBlock(InputType):
         self.total_frames = self.reader.n_frames
         if self.total_frames == 0:
             raise ValueError('{} has no complete frames'.format(file_path))
+        # Every frame has its own time; the input begins at the first one
         self.frame_unix_times = self.reader.times
         self.beginning_datetime = unixTime2Date(*self._unixTimeParts(self.frame_unix_times[0]), dt_obj=True)
 
+        # Start at the first frame of the first chunk
         self.current_frame_chunk = 0
         self.current_frame = 0
         self.current_fr_chunk_size = 0
@@ -1655,6 +1658,7 @@ class InputTypeFrameBlock(InputType):
             self.nrows = self.nrows//self.config.detection_binning_factor
             self.ncols = self.ncols//self.config.detection_binning_factor
 
+        # The chunks of frames (the FF-like images), and the cache of the last chunk loaded
         self.total_fr_chunks = max(1, self.total_frames//self.chunk_frames)
         self.frame_chunk_unix_times = []
         self.cache = {}
@@ -1664,31 +1668,38 @@ class InputTypeFrameBlock(InputType):
         if self.fps is None:
             self.fps = self.config.fps
 
+        # The first chunk is loaded, as the other inputs do
         self.loadChunk()
 
     @staticmethod
     def _unixTimeParts(unix_time):
         """ Unix time as (seconds, microseconds). """
 
+        # Whole seconds, and the rest in microseconds
         ts = int(unix_time)
         return ts, int(round((unix_time - ts)*1000000))
 
     def nextChunk(self):
         """ Go to the next frame chunk. """
 
+        # After the last chunk comes the first one again
         self.current_frame_chunk = (self.current_frame_chunk + 1)%self.total_fr_chunks
         self.current_frame = self.current_frame_chunk*self.chunk_frames
 
     def prevChunk(self):
         """ Go to the previous frame chunk. """
 
+        # Before the first chunk comes the last one
         self.current_frame_chunk = (self.current_frame_chunk - 1)%self.total_fr_chunks
         self.current_frame = self.current_frame_chunk*self.chunk_frames
 
     def _frame(self, i):
         """ Frame i, binned and flipped as configured. """
 
+        # The values span 16 bits, as in the FITS frames of the same camera
         frame = self.reader.frame(i, shift_to_16bit=True)
+
+        # Binned for the detection, and flipped if configured
         if self.detection and (self.config.detection_binning_factor > 1):
             frame = Image.binImage(frame, self.config.detection_binning_factor,
                                    self.config.detection_binning_method)
@@ -1700,6 +1711,7 @@ class InputTypeFrameBlock(InputType):
     def loadChunk(self, first_frame=None, read_nframes=None):
         """ Load a chunk of frames into an FF-like structure (see InputTypeUWOVid.loadChunk). """
 
+        # The first frame of the chunk: the beginning of the input for all frames, or the current chunk
         if read_nframes == -1:
             first_frame = 0
         else:
@@ -1709,11 +1721,14 @@ class InputTypeFrameBlock(InputType):
 
         frames_to_read = computeFramesToRead(read_nframes, self.total_frames, self.chunk_frames, first_frame)
 
+        # The same chunk again comes from the cache
         cache_id = getCacheID(first_frame, frames_to_read)
         if cache_id in self.cache:
             frame, self.frame_chunk_unix_times, self.current_fr_chunk_size = self.cache[cache_id]
             return frame
 
+        # The frames of the chunk are added to an FF-like structure (max, average and standard deviation images),
+        #   with the time of every frame
         ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, self.getTargetDtype(),
                                            res_size=self.config.background_reservoir_size,
                                            median_threads=self.config.median_threads)
@@ -1730,6 +1745,7 @@ class InputTypeFrameBlock(InputType):
             self.frame_chunk_unix_times.append(float(self.frame_unix_times[i]))
             n += 1
 
+        # The images of the chunk, kept as the last chunk loaded
         self.current_fr_chunk_size = n
         ff_struct_fake.finish()
 
@@ -1741,6 +1757,7 @@ class InputTypeFrameBlock(InputType):
     def name(self, beginning=False):
         """ The time of the middle of the current chunk, or of the beginning of the block. """
 
+        # The beginning of the input, or the time of the current chunk
         if beginning:
             return str(self.beginning_datetime)
 
@@ -1749,6 +1766,7 @@ class InputTypeFrameBlock(InputType):
     def currentTime(self, dt_obj=False, beginning=False):
         """ The mean time of the current chunk, or its beginning. """
 
+        # The first frame of the chunk, or the mean time of its frames
         unix_time = self.frame_chunk_unix_times[0] if beginning else float(np.mean(self.frame_chunk_unix_times))
 
         return unixTime2Date(*self._unixTimeParts(unix_time), dt_obj=dt_obj)
@@ -1756,6 +1774,7 @@ class InputTypeFrameBlock(InputType):
     def loadFrame(self, avepixel=False):
         """ Load the current frame. """
 
+        # The time of the frame is kept for the caller, as the other inputs do
         self.current_frame_time = unixTime2Date(*self._unixTimeParts(self.frame_unix_times[self.current_frame]),
                                                 dt_obj=True)
 
@@ -1769,9 +1788,11 @@ class InputTypeFrameBlock(InputType):
     def currentFrameTime(self, frame_no=None, dt_obj=False):
         """ The time of the start of the integration of a frame (the current one by default). """
 
+        # The time of the frame from the frame table
         i = self.current_frame if frame_no is None else frame_no
         dt = unixTime2Date(*self._unixTimeParts(self.frame_unix_times[i]), dt_obj=True)
 
+        # As a datetime, or as a tuple with milliseconds
         if dt_obj:
             return dt
 

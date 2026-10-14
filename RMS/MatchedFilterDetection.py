@@ -4527,6 +4527,7 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
 
         # The whole input is one segment, which overlaps nothing
         overlap = 0
+    # A longer overlap than half a segment is shortened, so only neighbouring segments share frames
     elif overlap > segmentOverlap(segment_frames, overlap, unit):
         log.warning('Matched filter: mf_segment_overlap {:d} is more than half of segments of {:d} frames, {:d} '
                     'used'.format(int(config.mf_segment_overlap), segment_frames,
