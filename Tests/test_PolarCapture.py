@@ -454,6 +454,10 @@ class CaptureHarness(object):
         #   cleanups return (True when the list is empty)
         self.events = []
         self.delete_results = []
+
+        # Paths each disk cleanup was told to keep, and whether the night processing fails
+        self.delete_keeps = []
+        self.processing_fails = False
         self.upload_manager = FakeUploadManager()
         self.script = []
         self.clock = Clock(datetime(2026, 10, 10, 0, 0))
@@ -471,6 +475,8 @@ class CaptureHarness(object):
 
         def fakeProcessNight(night_data_dir, config, detection_results=None, nodetect=False):
             harness.processed_nights.append(night_data_dir)
+            if harness.processing_fails:
+                raise RuntimeError("Processing failed")
             name = os.path.basename(night_data_dir)
             return night_data_dir, name + '_detected.tar.bz2', None, None, None
 
@@ -482,6 +488,7 @@ class CaptureHarness(object):
         def fakeDelete(*args, **kwargs):
             harness.deletes += 1
             harness.events.append('delete')
+            harness.delete_keeps.append(kwargs.get('keep_paths'))
             return harness.delete_results.pop(0) if harness.delete_results else True
 
         def fakeWait(duration, compressor, bc, video_file, daytime_mode=None, session_cut=None,
@@ -599,6 +606,42 @@ def test_runcapture_polar_night(monkeypatch, tmp_path):
     # Every split frees disk space before the timelapses are made, and so does every new night directory
     #   (it finds enough space then, and deletes nothing)
     assert h.events == ['delete', 'timelapse', 'delete']*2 + ['timelapse']
+
+
+def test_runcapture_polar_night_keeps_split_night(monkeypatch, tmp_path):
+    """ The night split off is still being uploaded and used by the external script when the cleanups at
+        the split and at the start of the new night run, so they must not delete it or its archives. Later
+        cleanups can. """
+
+    h = CaptureHarness(monkeypatch, tmp_path, start_daytime=False)
+    h.run(['cut', 'cut', 'stop'])
+
+    # Night directory, archive directory (the same in the fake processing) and the uploaded archive
+    kept = [[d, d, os.path.basename(d) + '_detected.tar.bz2'] for d in h.processed_nights]
+
+    # Cleanups at the first split, the second night start, the second split and the third night start
+    assert h.delete_keeps == [kept[0], kept[0], kept[1], kept[1]]
+
+
+def test_runcapture_polar_night_keeps_unprocessed_night(monkeypatch, tmp_path):
+    """ A night whose processing failed is kept too, its data is needed to reprocess it on the next
+        startup. """
+
+    h = CaptureHarness(monkeypatch, tmp_path, start_daytime=False)
+    h.processing_fails = True
+    h.run(['cut', 'stop'])
+
+    assert h.delete_keeps == [[h.processed_nights[0], None]]*2
+
+
+def test_runcapture_keeps_nothing_outside_polar_night(monkeypatch, tmp_path):
+    """ Normal nights and polar days do not change the cleanups. """
+
+    h = CaptureHarness(monkeypatch, tmp_path, start_daytime=False)
+    h.run(['day', 'cut', 'night', 'day', 'stop'])
+
+    assert h.deletes > 0
+    assert h.delete_keeps == [None]*h.deletes
 
 
 def test_runcapture_split_low_disk(monkeypatch, tmp_path):
@@ -883,3 +926,75 @@ def test_switcher_thread_runs_now_at_aq000a():
     stop_event.set()
     thread.join(timeout=5)
     assert not thread.is_alive()
+
+
+def test_delete_old_observations_keeps_paths(monkeypatch, tmp_path):
+    """ The disk cleanup deletes everything it can except the kept night directories and archives, and
+        stops instead of waiting for more space when only kept objects are left. """
+
+    import RMS.DeleteOldObservations as dob
+
+    config = cr.parse(REPO_CONFIG)
+    config.data_dir = str(tmp_path)
+    config.quota_management_enabled = False
+
+    captured = os.path.join(str(tmp_path), config.captured_dir)
+    archived = os.path.join(str(tmp_path), config.archived_dir)
+
+    # Two nights, each with a captured and an archived directory and an archive file
+    nights = ['{:s}_2026101{:d}_000000_000000'.format(config.stationID, i) for i in (1, 2)]
+    for night in nights:
+        os.makedirs(os.path.join(captured, night))
+        os.makedirs(os.path.join(archived, night))
+        open(os.path.join(archived, night + '_detected.tar.bz2'), 'w').close()
+
+    # Never enough space, so everything that can be deleted is
+    monkeypatch.setattr(dob, 'availableSpace', lambda path: 0)
+    monkeypatch.setattr(dob.time, 'sleep', lambda t: None)
+
+    keep_paths = [os.path.join(captured, nights[1]), os.path.join(archived, nights[1]),
+        os.path.join(archived, nights[1] + '_detected.tar.bz2'), None]
+
+    space_ok = dob.deleteOldObservations(config.data_dir, config.captured_dir, config.archived_dir, config,
+        duration=3600, keep_paths=keep_paths)
+
+    assert not space_ok
+    assert sorted(os.listdir(captured)) == [nights[1]]
+    assert sorted(os.listdir(archived)) == sorted([nights[1], nights[1] + '_detected.tar.bz2'])
+
+
+def test_retention_keeps_paths(monkeypatch, tmp_path):
+    """ The count-based retention runs before the space check and must not delete the kept night either,
+        e.g. an older split night which failed to process, kept to be reprocessed on the next startup. """
+
+    import RMS.DeleteOldObservations as dob
+
+    config = cr.parse(REPO_CONFIG)
+    config.data_dir = str(tmp_path)
+    config.quota_management_enabled = False
+    config.arch_dirs_to_keep = 1
+    config.capt_dirs_to_keep = 1
+    config.bz2_files_to_keep = 1
+
+    captured = os.path.join(str(tmp_path), config.captured_dir)
+    archived = os.path.join(str(tmp_path), config.archived_dir)
+
+    # Three nights, the middle one is kept
+    nights = ['{:s}_2026101{:d}_000000_000000'.format(config.stationID, i) for i in (0, 1, 2)]
+    for night in nights:
+        os.makedirs(os.path.join(captured, night))
+        os.makedirs(os.path.join(archived, night))
+        open(os.path.join(archived, night + '_detected.tar.bz2'), 'w').close()
+
+    # Plenty of space, so only the retention deletes anything
+    monkeypatch.setattr(dob, 'availableSpace', lambda path: 1e15)
+
+    keep_paths = [os.path.join(captured, nights[1]), os.path.join(archived, nights[1]),
+        os.path.join(archived, nights[1] + '_detected.tar.bz2')]
+
+    assert dob.deleteOldObservations(config.data_dir, config.captured_dir, config.archived_dir, config,
+        duration=3600, keep_paths=keep_paths)
+
+    # The newest night is within the counts to keep, the kept one is on top of them, the oldest is deleted
+    assert sorted(os.listdir(captured)) == nights[1:]
+    assert sorted(os.listdir(archived)) == sorted(nights[1:] + [n + '_detected.tar.bz2' for n in nights[1:]])
