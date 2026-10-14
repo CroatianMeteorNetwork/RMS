@@ -32,12 +32,20 @@ from RMS.Astrometry.Conversions import raDec2AltAz
 from RMS.Formats import StarCatalog
 from RMS.PatchPhotometry import APERTURE_HALF, EDGE_MARGIN, RING_OFFSETS
 from RMS.Routines.Response import responseOf
+from RMS.StarLightCurvesCy import boxPhotometry
 
 
 SCHEMA_VERSION = 1
 
 APERTURE_SIZE = 2*APERTURE_HALF + 1
 APERTURE_AREA = float(APERTURE_SIZE**2)
+RING = np.array(RING_OFFSETS, dtype=np.intp)
+
+# The catalog is projected in full only every FIELD_REFRESH_S of sky time; the stars that can be
+# in the frame until the next refresh (their own motion over the interval plus FIELD_MARGIN px)
+# are projected for every block
+FIELD_REFRESH_S = 600.0
+FIELD_MARGIN = 40.0
 
 # Offset fit: bright stars centroided on the block's average image
 OFFSET_MAG_MAX = 5.0        # catalog magnitude limit of the centroid stars
@@ -104,14 +112,61 @@ class StarField(object):
         self.avoid_ra = avoid[:, 0].astype(np.float64)
         self.avoid_dec = avoid[:, 1].astype(np.float64)
 
+        # Stars that can be in the frame until valid_until (indices into the catalogs)
+        self.near = np.arange(len(self.ra), dtype=np.intp)
+        self.near_avoid = np.arange(len(self.avoid_ra), dtype=np.intp)
+        self.valid_until = None
+
+
+    def refresh(self, t, w, h):
+        """ Select the stars that can be within FIELD_MARGIN px of the w x h frame between t and
+        t + FIELD_REFRESH_S. """
+
+        def near(ra, dec):
+            x0, y0 = self._project(ra, dec, t)
+            x1, y1 = self._project(ra, dec, t + FIELD_REFRESH_S)
+            m = FIELD_MARGIN + np.nan_to_num(np.hypot(x1 - x0, y1 - y0), nan=0.0)
+            keep = np.zeros(len(ra), dtype=bool)
+            for x, y in ((x0, y0), (x1, y1)):
+                with np.errstate(invalid='ignore'):
+                    keep |= (x > -m) & (x < w + m) & (y > -m) & (y < h + m)
+            return np.flatnonzero(keep).astype(np.intp)
+
+        self.near = near(self.ra, self.dec)
+        self.near_avoid = near(self.avoid_ra, self.avoid_dec)
+        self.valid_until = t + FIELD_REFRESH_S
+
+        # The probe-avoidance stars move linearly enough over the interval (they only need to be
+        # placed to well within PROBE_CLEAR), so they are interpolated between its two ends
+        ra, dec = self.avoid_ra[self.near_avoid], self.avoid_dec[self.near_avoid]
+        self.avoid_t0 = t
+        self.avoid_xy0 = np.array(self._project(ra, dec, t))
+        self.avoid_xy1 = np.array(self._project(ra, dec, t + FIELD_REFRESH_S))
+
 
     def project(self, t, avoid=False):
-        """ Image positions of the catalog stars (or of the probe-avoidance stars) at unix time t;
-        NaN behind the camera. """
+        """ Image positions at unix time t of the selected catalog stars (or of the probe-avoidance
+        stars); NaN behind the camera.
+
+        Return:
+            (idx, x, y): idx [ndarray np.intp] indices into the catalog, x, y their positions.
+        """
+
+        if avoid:
+            idx = self.near_avoid
+            a = (t - self.avoid_t0)/FIELD_REFRESH_S
+            x, y = self.avoid_xy0 + a*(self.avoid_xy1 - self.avoid_xy0)
+        else:
+            idx = self.near
+            x, y = self._project(self.ra[idx], self.dec[idx], t)
+
+        return idx, x, y
+
+
+    def _project(self, ra, dec, t):
 
         jd = float(unixToJD(t))
         pp = self.platepar
-        ra, dec = (self.avoid_ra, self.avoid_dec) if avoid else (self.ra, self.dec)
         x, y = raDecToXYPP(ra, dec, jd, pp)
 
         # The distortion polynomial folds stars far off the axis back into the frame (see
@@ -127,35 +182,11 @@ class StarField(object):
         return x, y
 
 
-def apertureWeights(c):
-    """ First pixel index and the 1D weights of the APERTURE_SIZE px box centred on c.
-
-    The box [c - APERTURE_SIZE/2, c + APERTURE_SIZE/2] covers APERTURE_SIZE + 1 pixels; the inner
-    ones fully, the two end ones by u and 1 - u.
-
-    Arguments:
-        c: [ndarray] Fractional centres (float64).
-
-    Return:
-        (i0, w): i0 [ndarray np.intp] first pixel, w [ndarray float32] (..., APERTURE_SIZE + 1).
-    """
-
-    left = c - APERTURE_SIZE/2.0
-    i0 = np.floor(left + 0.5).astype(np.intp)
-    u = (left + 0.5 - i0).astype(np.float32)
-
-    w = np.ones(c.shape + (APERTURE_SIZE + 1,), dtype=np.float32)
-    w[..., 0] = 1.0 - u
-    w[..., -1] = u
-
-    return i0, w
-
-
 def ringBackground(img, x, y):
     """ Median of the PatchPhotometry ring pixels around the rounded positions (1D x, y). """
 
-    xi = np.round(x).astype(np.intp)
-    yi = np.round(y).astype(np.intp)
+    xi = np.floor(x + 0.5).astype(np.intp)
+    yi = np.floor(y + 0.5).astype(np.intp)
     ring = np.stack([img[yi + oy, xi + ox] for oy, ox in RING_OFFSETS], axis=-1)
 
     return np.median(ring, axis=-1)
@@ -328,98 +359,87 @@ class StarLightCurves(object):
         n_frames, h, w = frames.shape
         t_frames = np.asarray(t_frames, dtype=np.float64)
 
+        if (self.field.valid_until is None) or (t_frames[-1] > self.field.valid_until):
+            self.field.refresh(t_frames[0], w, h)
+
         # Positions at the first and the last frame, linear in between
-        x_a, y_a = self.field.project(t_frames[0])
-        x_b, y_b = self.field.project(t_frames[-1])
+        idx, x_a, y_a = self.field.project(t_frames[0])
+        _, x_b, y_b = self.field.project(t_frames[-1])
         frac = ((t_frames - t_frames[0])/(t_frames[-1] - t_frames[0])).astype(np.float64)
 
-        # Offset from the block's average image (linear), at the block's mid position
-        ave_lin = self.response.decode(ave16/256.0).astype(np.float32)*255.0
-        x_mid = 0.5*(x_a + x_b)
-        y_mid = 0.5*(y_a + y_b)
-        off = self.fitOffset(ave_lin, x_mid, y_mid, self.field.mag)
+        # The block's average image, linear: the decode table interpolated at the 8.8 fixed-point
+        # codes (the piecewise-linear ResponseCurve.decode)
+        ave = np.asarray(ave16)
+        i = (ave >> 8).astype(np.intp)
+        ave_lin = self.lut[i] + (ave & 0xFF).astype(np.float32)/256.0 \
+            *(self.lut[np.minimum(i + 1, 255)] - self.lut[i])
+
+        # Offset from the block's average image, at the block's mid position
+        off = self.fitOffset(ave_lin, 0.5*(x_a + x_b), 0.5*(y_a + y_b), self.field.mag[idx])
         x_a = x_a + self.offset[0]
         x_b = x_b + self.offset[0]
         y_a = y_a + self.offset[1]
         y_b = y_b + self.offset[1]
 
-        # Stars whose aperture and ring stay inside the frame for the whole block
+        # Stars whose aperture and ring stay inside the frame for the whole block. Positions are
+        # interpolated from the end points as stored (float32), so a stored block reproduces them
         lo = EDGE_MARGIN
-        inside = (np.isfinite(x_a) & np.isfinite(x_b)
-                  & (np.minimum(x_a, x_b) >= lo) & (np.maximum(x_a, x_b) < w - lo)
-                  & (np.minimum(y_a, y_b) >= lo) & (np.maximum(y_a, y_b) < h - lo))
-        sel = np.flatnonzero(inside).astype(np.intp)
+        with np.errstate(invalid='ignore'):
+            inside = (np.isfinite(x_a) & np.isfinite(x_b)
+                      & (np.minimum(x_a, x_b) >= lo) & (np.maximum(x_a, x_b) < w - lo)
+                      & (np.minimum(y_a, y_b) >= lo) & (np.maximum(y_a, y_b) < h - lo))
+        k = np.flatnonzero(inside).astype(np.intp)
+        sel = idx[k]
+        xa, xb, ya, yb = (v[k].astype(np.float32) for v in (x_a, x_b, y_a, y_b))
 
-        # (frame, star) positions, from the end points as stored (float32), so a stored block
-        # reproduces them exactly
-        xa, xb = (v[sel].astype(np.float32).astype(np.float64) for v in (x_a, x_b))
-        ya, yb = (v[sel].astype(np.float32).astype(np.float64) for v in (y_a, y_b))
-        x = xa[None, :] + frac[:, None]*(xb - xa)[None, :]
-        y = ya[None, :] + frac[:, None]*(yb - ya)[None, :]
-
-        flux, bg, nsat = self.photometry(frames, x, y)
+        flux, bg, nsat = self.photometry(frames, xa, xb, ya, yb, frac)
 
         # The block's background around each star from the average image (256x less noisy than a
         # frame's ring)
-        bg_ave = ringBackground(ave_lin, 0.5*(x[0] + x[-1]), 0.5*(y[0] + y[-1])).astype(np.float32)
+        bg_ave = ringBackground(ave_lin, 0.5*(xa.astype(np.float64) + xb),
+                                0.5*(ya.astype(np.float64) + yb)).astype(np.float32)
 
         # Sky probes, clear of every catalog star to PROBE_AVOID_MAG during the block
         sx, sy = [], []
         for t in (t_frames[0], t_frames[-1]):
-            ax, ay = self.field.project(t, avoid=True)
+            _, ax, ay = self.field.project(t, avoid=True)
             fin = np.isfinite(ax) & np.isfinite(ay)
             sx.append(ax[fin] + self.offset[0])
             sy.append(ay[fin] + self.offset[1])
         px, py = skyProbes(w, h, np.concatenate(sx), np.concatenate(sy))
-        p_flux, p_bg, _ = self.photometry(frames, np.broadcast_to(px, (n_frames, len(px))),
-                                          np.broadcast_to(py, (n_frames, len(py))))
+        px, py = px.astype(np.float32), py.astype(np.float32)
+        p_flux, p_bg, _ = self.photometry(frames, px, px, py, py, frac)
 
         return {'sel': sel, 'oid': self.field.oid[sel], 'ra': self.field.ra[sel],
                 'dec': self.field.dec[sel], 'mag': self.field.mag[sel],
-                'x_first': x[0].astype(np.float32), 'y_first': y[0].astype(np.float32),
-                'x_last': x[-1].astype(np.float32), 'y_last': y[-1].astype(np.float32),
+                'x_first': xa, 'y_first': ya, 'x_last': xb, 'y_last': yb,
                 'flux': flux, 'bg': bg, 'bg_ave': bg_ave, 'n_sat': nsat, 'offset': off,
-                'probe_x': px.astype(np.float32), 'probe_y': py.astype(np.float32),
-                'probe_flux': p_flux, 'probe_bg': p_bg}
+                'probe_x': px, 'probe_y': py, 'probe_flux': p_flux, 'probe_bg': p_bg}
 
 
-    def photometry(self, frames, x, y):
-        """ Linear aperture sums, ring backgrounds and saturated-frame counts.
-
-        Arguments:
-            frames: [3D ndarray uint8] (N, H, W).
-            x, y: [2D ndarray] (N, S) star positions on each frame.
+    def photometry(self, frames, x_first, x_last, y_first, y_last, frac):
+        """ Linear aperture sums, ring backgrounds and saturated-frame counts of positions moving
+        linearly from (x_first, y_first) to (x_last, y_last) over the block (frame n at fraction
+        frac[n]); see RMS.StarLightCurvesCy.boxPhotometry.
 
         Return:
             (flux, bg, n_sat): flux [N, S] float32 aperture sum, bg [N, S] float32 ring median
                 (per pixel), n_sat [S] uint16 frames with a code-255 pixel in the aperture.
         """
 
-        n_frames, h, w = frames.shape
-        flat = frames.reshape(-1)
-        lut = self.lut
+        # Measured in row order, which keeps the frame accesses local (4x faster than catalog
+        # order at 2000 stars), and returned in the caller's order
+        order = np.argsort(np.asarray(y_first) + np.asarray(y_last), kind='stable')
+        f64 = lambda v: np.ascontiguousarray(np.asarray(v)[order], dtype=np.float64)
 
-        ix0, wx = apertureWeights(x)
-        iy0, wy = apertureWeights(y)
-        k = np.arange(APERTURE_SIZE + 1, dtype=np.intp)
+        flux, bg, nsat = boxPhotometry(np.ascontiguousarray(frames), self.lut, f64(x_first),
+            f64(x_last), f64(y_first), f64(y_last), np.ascontiguousarray(frac, dtype=np.float64),
+            APERTURE_HALF, RING)
 
-        # (N, S, 6, 6) footprint codes, gathered through one flat index per pixel
-        base = (np.arange(n_frames, dtype=np.intp)[:, None]*h + iy0)*w + ix0
-        offs = (k[:, None]*w + k[None, :]).reshape(-1)
-        codes = flat[base[..., None] + offs].reshape(x.shape + (APERTURE_SIZE + 1, APERTURE_SIZE + 1))
-        flux = np.einsum('nsij,nsi,nsj->ns', lut[codes], wy, wx, dtype=np.float32)
+        inv = np.empty_like(order)
+        inv[order] = np.arange(len(order), dtype=order.dtype)
 
-        # Saturation: a code 255 inside the aperture (weight > 0)
-        wgt = (wy[..., :, None]*wx[..., None, :]) > 0
-        nsat = np.count_nonzero(((codes == 255) & wgt).any(axis=(2, 3)), axis=0).astype(np.uint16)
-
-        xi = np.round(x).astype(np.intp)
-        yi = np.round(y).astype(np.intp)
-        base = (np.arange(n_frames, dtype=np.intp)[:, None]*h + yi)*w + xi
-        roffs = np.array([oy*w + ox for oy, ox in RING_OFFSETS], dtype=np.intp)
-        bg = np.median(lut[flat[base[..., None] + roffs]], axis=-1).astype(np.float32)
-
-        return flux, bg, nsat
+        return flux[:, inv], bg[:, inv], nsat[inv]
 
 
 def saveBlock(path, res, t_frames, frame_seq, header):
