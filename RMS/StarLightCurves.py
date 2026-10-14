@@ -49,6 +49,15 @@ OFFSET_N_MIN = 5            # good centroids needed to update the offset
 OFFSET_CLIP = 1.0           # px; centroids further than this from the median offset are dropped
 CENTROID_RADIUS = 3         # px; centroid window half-width
 
+# Sky probes: blank-sky positions measured exactly like stars, one per cell of a PROBE_NX x
+# PROBE_NY grid, at least PROBE_CLEAR px from every catalog star over the whole block. They give
+# the per-frame noise of the aperture statistic (PatchPhotometry's frame-noise floor, and the
+# spatially correlated aperture noise that the per-pixel sigma does not show) per region
+PROBE_NX = 24
+PROBE_NY = 16
+PROBE_CLEAR = 8.0
+PROBE_AVOID_MAG = 8.5       # catalog stars to this magnitude are kept clear of the probes
+
 
 def unixToJD(t):
     return np.asarray(t, dtype=np.float64)/86400.0 + 2440587.5
@@ -88,17 +97,26 @@ class StarField(object):
         self.designation = np.asarray(extras['designation'])
         self.preferred_name = np.asarray(extras['preferred_name'])
 
+        # Deeper positions, only to keep the sky probes clear of fainter stars
+        avoid, _, _ = StarCatalog.readStarCatalog(config.star_catalog_path,
+            config.star_catalog_file, years_from_J2000=years_from_J2000,
+            lim_mag=max(PROBE_AVOID_MAG, self.lim_mag), mag_band_ratios=config.star_catalog_band_ratios)
+        self.avoid_ra = avoid[:, 0].astype(np.float64)
+        self.avoid_dec = avoid[:, 1].astype(np.float64)
 
-    def project(self, t):
-        """ Image positions of all catalog stars at unix time t; NaN behind the camera. """
+
+    def project(self, t, avoid=False):
+        """ Image positions of the catalog stars (or of the probe-avoidance stars) at unix time t;
+        NaN behind the camera. """
 
         jd = float(unixToJD(t))
         pp = self.platepar
-        x, y = raDecToXYPP(self.ra, self.dec, jd, pp)
+        ra, dec = (self.avoid_ra, self.avoid_dec) if avoid else (self.ra, self.dec)
+        x, y = raDecToXYPP(ra, dec, jd, pp)
 
         # The distortion polynomial folds stars far off the axis back into the frame (see
         # Utils.StillsSampler.inFrontOfCamera)
-        az, alt = raDec2AltAz(self.ra, self.dec, jd, pp.lat, pp.lon)
+        az, alt = raDec2AltAz(ra, dec, jd, pp.lat, pp.lon)
         az, alt = np.radians(az), np.radians(alt)
         az_c, alt_c = np.radians(pp.az_centre), np.radians(pp.alt_centre)
         front = (np.sin(alt)*np.sin(alt_c) + np.cos(alt)*np.cos(alt_c)*np.cos(az - az_c)) > 0.3
@@ -141,6 +159,37 @@ def ringBackground(img, x, y):
     ring = np.stack([img[yi + oy, xi + ox] for oy, ox in RING_OFFSETS], axis=-1)
 
     return np.median(ring, axis=-1)
+
+
+def skyProbes(w, h, star_x, star_y):
+    """ One blank-sky position per cell of the PROBE_NX x PROBE_NY grid: the first of a fixed list
+    of candidates in the cell (centre first) that is PROBE_CLEAR px from every star position given
+    and inside the measurable area. Cells without such a candidate get no probe.
+
+    Return:
+        (x, y): [ndarray float64] probe positions (integers, so the box sum is a plain 5x5 sum).
+    """
+
+    from scipy.spatial import cKDTree
+
+    cw, ch = w/float(PROBE_NX), h/float(PROBE_NY)
+    fr = np.array([(0.5, 0.5), (0.25, 0.25), (0.75, 0.25), (0.25, 0.75), (0.75, 0.75),
+                   (0.5, 0.25), (0.5, 0.75), (0.25, 0.5), (0.75, 0.5)])
+    gx, gy = np.meshgrid(np.arange(PROBE_NX), np.arange(PROBE_NY))
+    cand_x = np.floor((gx.reshape(-1, 1) + fr[None, :, 0])*cw)
+    cand_y = np.floor((gy.reshape(-1, 1) + fr[None, :, 1])*ch)
+
+    ok = ((cand_x >= EDGE_MARGIN) & (cand_x < w - EDGE_MARGIN)
+          & (cand_y >= EDGE_MARGIN) & (cand_y < h - EDGE_MARGIN))
+    if len(star_x):
+        d, _ = cKDTree(np.column_stack([star_x, star_y])).query(
+            np.column_stack([cand_x.ravel(), cand_y.ravel()]))
+        ok &= (d.reshape(cand_x.shape) >= PROBE_CLEAR)
+
+    cell = np.flatnonzero(ok.any(axis=1))
+    first = np.argmax(ok[cell], axis=1)
+
+    return cand_x[cell, first], cand_y[cell, first]
 
 
 def peak(img, x, y, half):
@@ -314,11 +363,24 @@ class StarLightCurves(object):
         # frame's ring)
         bg_ave = ringBackground(ave_lin, 0.5*(x[0] + x[-1]), 0.5*(y[0] + y[-1])).astype(np.float32)
 
+        # Sky probes, clear of every catalog star to PROBE_AVOID_MAG during the block
+        sx, sy = [], []
+        for t in (t_frames[0], t_frames[-1]):
+            ax, ay = self.field.project(t, avoid=True)
+            fin = np.isfinite(ax) & np.isfinite(ay)
+            sx.append(ax[fin] + self.offset[0])
+            sy.append(ay[fin] + self.offset[1])
+        px, py = skyProbes(w, h, np.concatenate(sx), np.concatenate(sy))
+        p_flux, p_bg, _ = self.photometry(frames, np.broadcast_to(px, (n_frames, len(px))),
+                                          np.broadcast_to(py, (n_frames, len(py))))
+
         return {'sel': sel, 'oid': self.field.oid[sel], 'ra': self.field.ra[sel],
                 'dec': self.field.dec[sel], 'mag': self.field.mag[sel],
                 'x_first': x[0].astype(np.float32), 'y_first': y[0].astype(np.float32),
                 'x_last': x[-1].astype(np.float32), 'y_last': y[-1].astype(np.float32),
-                'flux': flux, 'bg': bg, 'bg_ave': bg_ave, 'n_sat': nsat, 'offset': off}
+                'flux': flux, 'bg': bg, 'bg_ave': bg_ave, 'n_sat': nsat, 'offset': off,
+                'probe_x': px.astype(np.float32), 'probe_y': py.astype(np.float32),
+                'probe_flux': p_flux, 'probe_bg': p_bg}
 
 
     def photometry(self, frames, x, y):
@@ -369,6 +431,8 @@ def saveBlock(path, res, t_frames, frame_seq, header):
         n_sat [S] uint16 frames with a saturated aperture pixel.
         bg_ave [S] float32 ring median per pixel on the block's average image.
         flux [N, S] float32 aperture sum (linear codes); bg [N, S] float32 ring median per pixel.
+        probe_x, probe_y [P] float32 sky-probe positions (static over the block).
+        probe_flux, probe_bg [N, P] float32 the probes' aperture sums and ring medians.
         t [N] float64 unix start of integration of row 0; frame_seq [N] int64 camera frame number.
         header: JSON string.
     """
@@ -376,5 +440,6 @@ def saveBlock(path, res, t_frames, frame_seq, header):
     np.savez(path, header=json.dumps(header), oid=res['oid'], ra=res['ra'], dec=res['dec'],
              mag=res['mag'], x_first=res['x_first'], y_first=res['y_first'], x_last=res['x_last'],
              y_last=res['y_last'], n_sat=res['n_sat'], bg_ave=res['bg_ave'], flux=res['flux'],
-             bg=res['bg'],
+             bg=res['bg'], probe_x=res['probe_x'], probe_y=res['probe_y'],
+             probe_flux=res['probe_flux'], probe_bg=res['probe_bg'],
              t=np.asarray(t_frames, dtype=np.float64), frame_seq=np.asarray(frame_seq, dtype=np.int64))
