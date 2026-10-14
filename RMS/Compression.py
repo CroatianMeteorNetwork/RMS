@@ -389,7 +389,7 @@ class Compressor(multiprocessing.Process):
                     break
 
                 action = stopAction(stableDoubleRead(self.start_time1), stableDoubleRead(self.start_time2),
-                    self.exit_time.value)
+                    stableDoubleRead(self.exit_time))
 
                 if action == 'exit':
                     break
@@ -427,7 +427,7 @@ class Compressor(multiprocessing.Process):
 
             # Pick the block to compress, when stopping only one which started before the stop request
             buffer_index = blockToCompress(start_time1_val, start_time2_val,
-                exit_time=(self.exit_time.value if stopping else None))
+                exit_time=(stableDoubleRead(self.exit_time) if stopping else None))
 
             if buffer_index == 1:
 
