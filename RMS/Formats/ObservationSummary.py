@@ -47,7 +47,7 @@ import argparse
 from RMS.ConfigReader import parse
 from RMS.Misc import niceFormat, isRaspberryPi, sanitise, getRMSStyleFileName, getRmsRootDir, \
     UTCFromTimestamp
-from RMS.Misc import runGitCommand, GitCommandTimeout, hostReachable, gitUrlHost, \
+from RMS.Misc import runGitCommand, GitCommandTimeout, hostReachable, gitProxyConfigured, gitUrlHost, \
     gitUrlHostAndPort, sanitiseGitUrl, anonymousHttpsGitUrl, GIT_ALLOWED_HOSTS, \
     GIT_NETWORK_TIMEOUT, GIT_LOCAL_TIMEOUT
 from RMS.Logger import getLogger
@@ -1179,12 +1179,19 @@ def updateCommitHistoryDirectory(remote_urls, target_directory, timeout=GIT_NETW
     # Set once the first remote has been cloned successfully
     commit_repo_directory = None
 
+    # Behind a proxy the host may not be reachable directly, while git still gets through. The git
+    # timeout alone bounds the clone then
+    check_reachability = not gitProxyConfigured()
+
+    if not check_reachability:
+        log.info("A proxy is configured for git, the git hosts are not checked for reachability")
+
     for local_name, url in remote_urls:
 
         host, port = gitUrlHostAndPort(url)
 
         # Fail fast if the host cannot even be reached, instead of waiting out the git timeout
-        if not hostReachable(host, port):
+        if check_reachability and (not hostReachable(host, port)):
             log.warning("Skipping git remote {:s}, the host {:s} is not reachable".format(
                 local_name, str(host)))
             continue
@@ -1199,10 +1206,11 @@ def updateCommitHistoryDirectory(remote_urls, target_directory, timeout=GIT_NETW
                     ["clone", url, "--filter=blob:none", "--no-checkout", clone_directory],
                     timeout=timeout, network=True)
 
-                # Try the next remote if this one did not work
+                # Try the next remote if this one did not work, from a clean directory
                 if returncode != 0:
                     log.warning("Cloning the commit history from {:s} failed with code {:d}: {:s}"
                                 .format(sanitiseGitUrl(url), returncode, stderr.strip()[:500]))
+                    shutil.rmtree(clone_directory, ignore_errors=True)
                     continue
 
                 commit_repo_directory = clone_directory
@@ -1247,6 +1255,12 @@ def updateCommitHistoryDirectory(remote_urls, target_directory, timeout=GIT_NETW
         # A remote which went quiet halfway through should not hold up the whole night
         except GitCommandTimeout as e:
             log.warning("Git operation on the remote {:s} timed out: {:s}".format(local_name, repr(e)))
+
+            # A clone killed on the timeout leaves a partial directory behind, which the clone from the
+            # next remote would refuse to overwrite
+            if commit_repo_directory is None:
+                shutil.rmtree(clone_directory, ignore_errors=True)
+
             continue
 
     # Every remote was unreachable or refused the clone

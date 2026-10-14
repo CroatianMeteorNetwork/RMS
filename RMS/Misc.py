@@ -656,6 +656,34 @@ def gitUrlHostAndPort(url):
     return host, 443
 
 
+def gitProxyConfigured():
+    """ Check if git connects to remotes through a proxy, set either in the environment or in the global
+        git configuration (http.proxy, https.proxy or a per-URL http.<url>.proxy).
+
+        A direct connection check of the remote host says nothing in that case, as the host may only be
+        reachable through the proxy.
+
+    Return:
+        [bool] True if a proxy is configured.
+    """
+
+    # The proxy variables which git (libcurl) uses for the http(s) transports
+    for name in ("https_proxy", "HTTPS_PROXY", "http_proxy", "HTTP_PROXY", "all_proxy", "ALL_PROXY"):
+        if os.environ.get(name, "").strip():
+            return True
+
+    # A proxy set in the git configuration. Git exits with 1 when no key matches
+    try:
+        returncode, stdout, _ = runGitCommand(["config", "--get-regexp", r"^https?\..*proxy$"],
+                                              timeout=GIT_LOCAL_TIMEOUT)
+
+    except Exception as e:
+        log.debug("Could not read the git proxy configuration: " + repr(e))
+        return False
+
+    return (returncode == 0) and (len(stdout.strip()) > 0)
+
+
 def hostReachable(host, port=443, timeout=GIT_REACHABILITY_TIMEOUT):
     """ Check that a TCP connection to the given host and port can be established.
 
