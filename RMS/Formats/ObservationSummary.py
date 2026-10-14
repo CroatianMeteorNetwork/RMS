@@ -61,11 +61,16 @@ import subprocess
 
 import dvrip as dvr
 
-# File locking for the per-night working JSON (POSIX only; degrade gracefully elsewhere)
+# File locking for the per-night working JSON: fcntl on POSIX, msvcrt on Windows
 try:
     import fcntl
 except ImportError:
     fcntl = None
+
+try:
+    import msvcrt
+except ImportError:
+    msvcrt = None
 
 # Get the logger from the main module
 log = getLogger("rmslogger")
@@ -1704,10 +1709,10 @@ def saveObservationSummaryDict(d, night_dir=None):
     The working JSON is read-modify-written by several processes (the capture child writes
     media_backend while the main process writes the start-of-session values, and Reprocess runs
     later). To avoid lost updates and torn reads (the failure class behind issue #882) this:
-      - takes an exclusive file lock (POSIX; degrades gracefully where fcntl is unavailable),
+      - takes an exclusive file lock (fcntl on POSIX, msvcrt on Windows),
       - merges the in-memory dict on top of whatever is already on disk (so concurrent writers
         adding distinct keys do not clobber each other),
-      - writes to a temp file and atomically replaces the target.
+      - writes to a temp file of its own (named by the process) and atomically replaces the target.
     The caller's dict is updated in place to stay consistent with what was written.
 
     Arguments:
@@ -1734,9 +1739,9 @@ def saveObservationSummaryDict(d, night_dir=None):
     lock_path = observation_summary_json_path + ".lock"
 
     lock_f = open(lock_path, "w")
+    locked = False
     try:
-        if fcntl is not None:
-            fcntl.flock(lock_f, fcntl.LOCK_EX)
+        locked = _lockFile(lock_f)
 
         # Merge with whatever is already on disk; in-memory values win for the keys they set.
         merged = {}
@@ -1752,7 +1757,8 @@ def saveObservationSummaryDict(d, night_dir=None):
         d.clear()
         d.update(merged)
 
-        tmp_path = observation_summary_json_path + ".tmp"
+        # The temporary file is the writer's own, so concurrent writers never share one
+        tmp_path = "{:s}.{:d}.tmp".format(observation_summary_json_path, os.getpid())
         with open(tmp_path, "w") as f:
             json.dump(merged, f, default=lambda o: o.__dict__, indent=4, sort_keys=True)
             f.flush()
@@ -1764,12 +1770,62 @@ def saveObservationSummaryDict(d, night_dir=None):
         log.error("".join(traceback.format_exception(*sys.exc_info())))
 
     finally:
-        if fcntl is not None:
-            try:
-                fcntl.flock(lock_f, fcntl.LOCK_UN)
-            except Exception:
-                pass
+        if locked:
+            _unlockFile(lock_f)
         lock_f.close()
+
+
+def _lockFile(lock_f, timeout=30.0):
+    """ Take an exclusive lock of an open file: fcntl on POSIX, msvcrt on Windows (whose blocking lock gives up
+        after 10 s, so the non-blocking lock is retried until the timeout).
+
+    Arguments:
+        lock_f: [file] The open lock file.
+
+    Keyword arguments:
+        timeout: [float] Seconds to wait for the lock on Windows. 30 by default.
+
+    Return:
+        [bool] True if the file is locked, False if no locking is available or the lock could not be taken (the
+            write goes ahead unlocked, as before).
+    """
+
+    try:
+        if fcntl is not None:
+            fcntl.flock(lock_f, fcntl.LOCK_EX)
+            return True
+
+        if msvcrt is not None:
+
+            # The first byte of the file is locked
+            lock_f.seek(0)
+            t_end = time.time() + timeout
+            while True:
+                try:
+                    msvcrt.locking(lock_f.fileno(), msvcrt.LK_NBLCK, 1)
+                    return True
+                except OSError:
+                    if time.time() > t_end:
+                        raise
+                    time.sleep(0.05)
+
+    except Exception as e:
+        log.warning("Locking the observation summary failed: " + repr(e))
+
+    return False
+
+
+def _unlockFile(lock_f):
+    """ Release the lock taken by _lockFile. """
+
+    try:
+        if fcntl is not None:
+            fcntl.flock(lock_f, fcntl.LOCK_UN)
+        elif msvcrt is not None:
+            lock_f.seek(0)
+            msvcrt.locking(lock_f.fileno(), msvcrt.LK_UNLCK, 1)
+    except Exception:
+        pass
 
 def startObservationSummaryReport(config, night_data_dir, duration, force_delete=False, reprocessing=False):
     """ Enters the parameters known at the start of observation into the database.
