@@ -813,7 +813,7 @@ def deleteOldObservations(data_dir, captured_dir, archived_dir, config, duration
 
     # next purge out any old ArchivedFiles folders, compressed files, and video clips
     log.info('clearing down old data')
-    deleteOldDirs(data_dir, config)
+    deleteOldDirs(data_dir, config, keep=keep)
 
 
     if config.quota_management_enabled:
@@ -1089,18 +1089,30 @@ def deleteByQuota(archived_dir, capt_dir_quota, captured_dir, config, keep=None)
     log.info(quotaReport(capt_dir_quota, config, after=True))
 
 
-def deleteOldDirs(data_dir, config):
+def deleteOldDirs(data_dir, config, keep=None):
+    """ Deletes the oldest night directories, raw data and archives above the configured counts to keep.
+
+    Arguments:
+        data_dir: [str] Path to the RMS data directory.
+        config: [Configuration object]
+
+    Keyword arguments:
+        keep: [set] Real paths of the night directories and archive files which must not be deleted (see
+            keptPathSet). They do not count towards the numbers to keep. None by default.
+    """
 
     # Deleting old archived dirs
     archived_dir = os.path.join(data_dir, config.archived_dir)
     orig_count = 0
     final_count = 0
     if config.arch_dirs_to_keep > 0:
-        archdir_list = getNightDirs(archived_dir, config.stationID)
+        # The kept directories are neither counted nor deleted
+        archdir_list = [dir_name for dir_name in getNightDirs(archived_dir, config.stationID)
+            if not isKept(os.path.join(archived_dir, dir_name), keep)]
         orig_count = len(archdir_list)
         while len(archdir_list) > config.arch_dirs_to_keep:
             prev_length = len(archdir_list)
-            archdir_list = deleteNightFolders(archived_dir, config)
+            archdir_list = deleteNightFolders(archived_dir, config, keep=keep)
             if len(archdir_list) == prev_length:
                 log.error("Failed to delete folder from ArchivedFiles. Exiting loop.")
                 break
@@ -1113,11 +1125,13 @@ def deleteOldDirs(data_dir, config):
     final_count = 0
     captured_dir = os.path.join(data_dir, config.captured_dir)
     if config.capt_dirs_to_keep > 0:
-        captdir_list = getNightDirs(captured_dir, config.stationID)
+        # The kept directories are neither counted nor deleted
+        captdir_list = [dir_name for dir_name in getNightDirs(captured_dir, config.stationID)
+            if not isKept(os.path.join(captured_dir, dir_name), keep)]
         orig_count = len(captdir_list)
         while len(captdir_list) > config.capt_dirs_to_keep:
             prev_length = len(captdir_list)
-            captdir_list = deleteNightFolders(captured_dir, config)
+            captdir_list = deleteNightFolders(captured_dir, config, keep=keep)
             if len(captdir_list) == prev_length:
                 log.error("Failed to delete folder from CapturedFiles. Exiting loop.")
                 break
@@ -1180,7 +1194,9 @@ def deleteOldDirs(data_dir, config):
     orig_count = 0
     final_count = 0
     if config.bz2_files_to_keep > 0:
-        bz2_list = getBz2Files(archived_dir, config.stationID)
+        # The kept archives are neither counted nor deleted
+        bz2_list = [file_name for file_name in getBz2Files(archived_dir, config.stationID)
+            if not isKept(os.path.join(archived_dir, file_name), keep)]
         orig_count = len(bz2_list)
         while len(bz2_list) > config.bz2_files_to_keep:
             try:

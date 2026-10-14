@@ -961,3 +961,40 @@ def test_delete_old_observations_keeps_paths(monkeypatch, tmp_path):
     assert not space_ok
     assert sorted(os.listdir(captured)) == [nights[1]]
     assert sorted(os.listdir(archived)) == sorted([nights[1], nights[1] + '_detected.tar.bz2'])
+
+
+def test_retention_keeps_paths(monkeypatch, tmp_path):
+    """ The count-based retention runs before the space check and must not delete the kept night either,
+        e.g. an older split night which failed to process, kept to be reprocessed on the next startup. """
+
+    import RMS.DeleteOldObservations as dob
+
+    config = cr.parse(REPO_CONFIG)
+    config.data_dir = str(tmp_path)
+    config.quota_management_enabled = False
+    config.arch_dirs_to_keep = 1
+    config.capt_dirs_to_keep = 1
+    config.bz2_files_to_keep = 1
+
+    captured = os.path.join(str(tmp_path), config.captured_dir)
+    archived = os.path.join(str(tmp_path), config.archived_dir)
+
+    # Three nights, the middle one is kept
+    nights = ['{:s}_2026101{:d}_000000_000000'.format(config.stationID, i) for i in (0, 1, 2)]
+    for night in nights:
+        os.makedirs(os.path.join(captured, night))
+        os.makedirs(os.path.join(archived, night))
+        open(os.path.join(archived, night + '_detected.tar.bz2'), 'w').close()
+
+    # Plenty of space, so only the retention deletes anything
+    monkeypatch.setattr(dob, 'availableSpace', lambda path: 1e15)
+
+    keep_paths = [os.path.join(captured, nights[1]), os.path.join(archived, nights[1]),
+        os.path.join(archived, nights[1] + '_detected.tar.bz2')]
+
+    assert dob.deleteOldObservations(config.data_dir, config.captured_dir, config.archived_dir, config,
+        duration=3600, keep_paths=keep_paths)
+
+    # The newest night is within the counts to keep, the kept one is on top of them, the oldest is deleted
+    assert sorted(os.listdir(captured)) == nights[1:]
+    assert sorted(os.listdir(archived)) == sorted(nights[1:] + [n + '_detected.tar.bz2' for n in nights[1:]])
