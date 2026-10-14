@@ -13,6 +13,15 @@ The 'check' command rebuilds those blocks, runs RMS.CompressionCy.compressFrames
 station's gamma and the night's camera response table, writes the FF with the capture code
 (RMS.Compression.Compressor.saveFF) and compares it with the station's FF.
 
+Two things stand between a replay and a byte-identical FF (US05E1, 2026-10-14):
+- camera_response.json stores the decode table rounded to 9 decimals, while capture compressed
+  with the camera's unrounded reply; the rounding flips AVERESID on ~80 px per block. Pass the
+  camera's raw 'gamma decode' reply (--camera-reply) to decode exactly.
+- compressFrames draws MAXFRAME of a pixel whose maximum is tied over several frames from a
+  generator seeded with an uninitialised byte (randomN[0] of np.empty). One seed (240 on the
+  station's compressor, constant over the blocks tested; varying in a replay process) reproduces
+  the station's MAXFRAME exactly; 'check' verifies the tied pixels instead.
+
 H.264 decoding is bit exact, so the CPU decoder (avdec_h264) gives the same frames as the
 station's vaapih264dec (same caps and colorimetry, BGR identical on US05E1 2026-10-14) and the
 replay does not compete with the live captures for the GPU decoder.
@@ -367,6 +376,7 @@ def check(args):
     stub = types.SimpleNamespace(config=config, data_dir=tmp_dir)
 
     n_ok = 0
+    n_ties = 0
     n_bad = 0
     n_skip = 0
     try:
@@ -422,18 +432,30 @@ def check(args):
                     dt_ft = "  FT-replay {:+.1f}..{:+.1f} us".format(-d.max(), -d.min())
 
             ok = res['hdus_identical'] and not res['header_diff']
+            ties_only = (not ok) and (not res['header_diff']) \
+                and all(v == 0 for k, v in res['plane_mismatch'].items() if k != 'MAXFRAME') \
+                and (res.get('maxframe_unique_max_mismatch', 1) == 0) \
+                and (res.get('maxframe_station_not_a_max', 1) == 0)
+            if ok:
+                verdict = 'IDENTICAL'
+            elif ties_only:
+                verdict = 'IDENTICAL except MAXFRAME of {:d} tied px'.format(
+                    res['plane_mismatch']['MAXFRAME'])
+            else:
+                verdict = 'DIFFERS {}'.format(res)
             n_ok += ok
-            n_bad += not ok
+            n_ties += ties_only
+            n_bad += not (ok or ties_only)
             print("{:s}  seq {:d}..{:d}  {:s}  compress {:.2f} s  t0 replay-FF {:+.1f} us{:s}".format(
-                name, blk['seq_first'], blk['seq_last'],
-                'IDENTICAL' if ok else 'DIFFERS {}'.format(res), t_comp, dt_ff_us, dt_ft))
+                name, blk['seq_first'], blk['seq_last'], verdict, t_comp, dt_ff_us, dt_ft))
 
             os.remove(replay)
 
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
-    print("identical {:d}, different {:d}, not reproducible {:d}".format(n_ok, n_bad, n_skip))
+    print("identical {:d}, identical except MAXFRAME ties {:d}, different {:d}, not reproducible {:d}"
+          .format(n_ok, n_ties, n_bad, n_skip))
 
     return n_bad == 0
 
