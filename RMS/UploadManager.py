@@ -483,15 +483,20 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
                         
                         tracker.last_percent = percent_complete
             
+            # Upload the file under a temporary name and give it its final name only once complete. The
+            #   server picks up uploads by name and can take a file that is still being written over a slow
+            #   link (it ignores the .part name)
+            temp_remote_file = remote_file + '.part'
+
             # Upload the file to the server if it isn't already there
             log.info('Starting upload of ' \
                      + local_file + ' ({}) to '.format(formatSize(local_file_size)) + remote_file)
-            sftp.put(local_file, remote_file, callback=progressCallback)
+            sftp.put(local_file, temp_remote_file, callback=progressCallback)
             log.debug("Upload completed, verifying...")
 
             # Check that the size of the remote file is correct, indicating a successful upload
-            remote_info = sftp.lstat(remote_file)
-            
+            remote_info = sftp.lstat(temp_remote_file)
+
             # If the remote and the local file are of the same size, skip it
             if local_file_size != remote_info.st_size:
                 log.error('File verification failed: local size {} != remote size {}'.format(
@@ -499,6 +504,9 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
                 return False
 
             log.debug("File upload verified: {:s}".format(remote_file))
+
+            # posix_rename replaces a file of the same name, which a plain SFTP rename refuses
+            sftp.posix_rename(temp_remote_file, remote_file)
             
         return True
 
