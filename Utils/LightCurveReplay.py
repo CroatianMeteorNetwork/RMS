@@ -511,10 +511,13 @@ def run(args):
     pp = Platepar()
     pp.read(args.platepar, use_flat=config.use_flat)
 
+    from RMS.HotPixels import loadHotPixelCoords
+
     lim_mag = args.lim_mag if args.lim_mag else config.catalog_mag_limit
-    lc = StarLightCurves(config, pp, lim_mag)
-    print("Catalog {:s}, lim mag {:.2f}: {:d} stars".format(lc.field.catalog_name, lim_mag,
-                                                             len(lc.field.oid)))
+    hot = loadHotPixelCoords(args.night_dir, config)
+    lc = StarLightCurves(config, pp, lim_mag, hot_pixels=hot)
+    print("Catalog {:s}, lim mag {:.2f}: {:d} stars; {:d} hot pixels".format(lc.field.catalog_name,
+                                                                         lim_mag, len(lc.field.oid), len(hot)))
 
     paths = sorted(p for d in args.video for p in (glob.glob(os.path.join(d, '*.mkv'))
                                                     if os.path.isdir(d) else [d]))
@@ -553,6 +556,7 @@ def run(args):
         header = {'schema_version': SCHEMA_VERSION, 'stationID': config.stationID, 'ff': name,
                   'catalog': lc.field.catalog_name, 'lim_mag': lim_mag,
                   'platepar': os.path.basename(args.platepar), 'response': lc.response_id,
+                  'hot_pixels': int(len(hot)),
                   'gamma': config.gamma, 'aperture': '5x5 box at the fractional position',
                   'ring': 'median of 8 px at +/-7 px', 'offset': res['offset'],
                   't_row_ns': int(index['t_row_ns'][int(index['file'][sel[0]])]),

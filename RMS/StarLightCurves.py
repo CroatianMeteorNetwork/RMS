@@ -192,6 +192,47 @@ def ringBackground(img, x, y):
     return np.median(ring, axis=-1)
 
 
+def hotPixelFlags(x_first, x_last, y_first, y_last, hot_xy):
+    """ Which positions have a blacklisted hot pixel (RMS.HotPixels) in their box (bit 0) or on
+    their ring (bit 1) at any time of the block. A hot pixel's level is not constant: on US05E1
+    they drop for 2-3 s at a time, and every strong false dip of a clear hour was one in a star's
+    box.
+
+    Return:
+        [ndarray uint8] (S,) flags.
+    """
+
+    flags = np.zeros(len(x_first), dtype=np.uint8)
+    if (hot_xy is None) or (len(hot_xy) == 0) or (len(x_first) == 0):
+        return flags
+
+    from scipy.spatial import cKDTree
+
+    x0, x1 = np.minimum(x_first, x_last), np.maximum(x_first, x_last)
+    y0, y1 = np.minimum(y_first, y_last), np.maximum(y_first, y_last)
+    reach = max(abs(oy) for oy, _ in RING_OFFSETS) + 1.5
+    radius = reach*np.sqrt(2) + np.hypot(x1 - x0, y1 - y0)
+    tree = cKDTree(hot_xy)
+    box = APERTURE_HALF + 1.0
+    for i, cand in enumerate(tree.query_ball_point(np.column_stack([0.5*(x0 + x1), 0.5*(y0 + y1)]), radius)):
+        if not cand:
+            continue
+        hx, hy = hot_xy[cand, 0], hot_xy[cand, 1]
+
+        # Box: the pixels it touches over the block
+        if np.any((hx >= x0[i] - box) & (hx <= x1[i] + box) & (hy >= y0[i] - box) & (hy <= y1[i] + box)):
+            flags[i] |= 1
+
+        # Ring: within a pixel of a ring point
+        for oy, ox in RING_OFFSETS:
+            if np.any((hx >= x0[i] + ox - 1) & (hx <= x1[i] + ox + 1) & (hy >= y0[i] + oy - 1)
+                      & (hy <= y1[i] + oy + 1)):
+                flags[i] |= 2
+                break
+
+    return flags
+
+
 def skyProbes(w, h, star_x, star_y):
     """ One blank-sky position per cell of the PROBE_NX x PROBE_NY grid: the first of a fixed list
     of candidates in the cell (centre first) that is PROBE_CLEAR px from every star position given
@@ -270,17 +311,22 @@ def centroid(img, x, y, half):
 
 class StarLightCurves(object):
 
-    def __init__(self, config, platepar, lim_mag):
+    def __init__(self, config, platepar, lim_mag, hot_pixels=None):
         """ The per-block light-curve pass of one station.
 
         Arguments:
             config: [Config] Station config.
             platepar: [Platepar] Station astrometry.
             lim_mag: [float] Catalog limiting magnitude of the measured stars.
+
+        Keyword arguments:
+            hot_pixels: [ndarray] (N, 2) blacklisted hot pixel (x, y) (RMS.HotPixels.loadHotPixelCoords),
+                flagged on the stars and kept clear of the sky probes.
         """
 
         self.config = config
         self.field = StarField(config, platepar, lim_mag)
+        self.hot_pixels = np.empty((0, 2)) if hot_pixels is None else np.asarray(hot_pixels, dtype=np.float64)
 
         response = responseOf(config)
         self.response_id = response.ident() if not response.isPower else ''
@@ -399,8 +445,11 @@ class StarLightCurves(object):
         bg_ave = ringBackground(ave_lin, 0.5*(xa.astype(np.float64) + xb),
                                 0.5*(ya.astype(np.float64) + yb)).astype(np.float32)
 
-        # Sky probes, clear of every catalog star to PROBE_AVOID_MAG during the block
-        sx, sy = [], []
+        hot = hotPixelFlags(xa, xb, ya, yb, self.hot_pixels)
+
+        # Sky probes, clear of every catalog star to PROBE_AVOID_MAG during the block and of the hot
+        # pixels
+        sx, sy = [self.hot_pixels[:, 0]], [self.hot_pixels[:, 1]]
         for t in (t_frames[0], t_frames[-1]):
             _, ax, ay = self.field.project(t, avoid=True)
             fin = np.isfinite(ax) & np.isfinite(ay)
@@ -414,7 +463,7 @@ class StarLightCurves(object):
         return {'sel': sel, 'oid': self.field.oid[sel], 'ra': self.field.ra[sel],
                 'dec': self.field.dec[sel], 'mag': self.field.mag[sel],
                 'x_first': xa, 'y_first': ya, 'x_last': xb, 'y_last': yb,
-                'flux': flux, 'bg': bg, 'bg_ave': bg_ave, 'n_sat': nsat, 'offset': off,
+                'flux': flux, 'bg': bg, 'bg_ave': bg_ave, 'n_sat': nsat, 'hot': hot, 'offset': off,
                 'probe_x': px, 'probe_y': py, 'probe_flux': p_flux, 'probe_bg': p_bg,
                 'probe_bg_ave': p_bg_ave}
 
@@ -451,6 +500,7 @@ def saveBlock(path, res, t_frames, frame_seq, header):
         oid [S] int32 catalog object id; ra, dec [S] float64 deg; mag [S] float32 catalog mag.
         x_first, y_first, x_last, y_last [S] float32 position on the first and last frame.
         n_sat [S] uint16 frames with a saturated aperture pixel.
+        hot [S] uint8 a blacklisted hot pixel in the box (bit 0) or on the ring (bit 1).
         bg_ave [S] float32 ring median per pixel on the block's average image.
         flux [N, S] float32 aperture sum (linear codes); bg [N, S] float32 ring median per pixel.
         probe_x, probe_y [P] float32 sky-probe positions (static over the block).
@@ -462,7 +512,7 @@ def saveBlock(path, res, t_frames, frame_seq, header):
 
     np.savez(path, header=json.dumps(header), oid=res['oid'], ra=res['ra'], dec=res['dec'],
              mag=res['mag'], x_first=res['x_first'], y_first=res['y_first'], x_last=res['x_last'],
-             y_last=res['y_last'], n_sat=res['n_sat'], bg_ave=res['bg_ave'], flux=res['flux'],
+             y_last=res['y_last'], n_sat=res['n_sat'], hot=res['hot'], bg_ave=res['bg_ave'], flux=res['flux'],
              bg=res['bg'], probe_x=res['probe_x'], probe_y=res['probe_y'],
              probe_flux=res['probe_flux'], probe_bg=res['probe_bg'], probe_bg_ave=res['probe_bg_ave'],
              t=np.asarray(t_frames, dtype=np.float64), frame_seq=np.asarray(frame_seq, dtype=np.int64))

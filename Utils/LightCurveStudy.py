@@ -22,6 +22,21 @@ import numpy as np
 from RMS.StarLightCurves import APERTURE_AREA
 
 
+HOT_XY = None
+
+
+def hotFlags(d):
+    """ The block's hot-pixel flags: stored by the pass, or computed with the same function for
+    blocks replayed before the pass flagged them (HOT_XY set from the night's hotpixels.json). """
+
+    if 'hot' in d.files:
+        return d['hot']
+
+    from RMS.StarLightCurves import hotPixelFlags
+
+    return hotPixelFlags(d['x_first'], d['x_last'], d['y_first'], d['y_last'], HOT_XY)
+
+
 def blockStats(path, probe_radius=150.0):
     """ Reduce one block file to per-star statistics.
 
@@ -64,7 +79,7 @@ def blockStats(path, probe_radius=150.0):
         lag1 = (f[1:]*f[:-1]).mean(axis=0)/(f*f).mean(axis=0)
 
     return {'oid': d['oid'], 'mag': d['mag'], 'ra': d['ra'], 'dec': d['dec'], 'x': x, 'y': y,
-            't': float(np.mean(d['t'])), 'n_sat': d['n_sat'], 'bg_ave': bg_ave,
+            't': float(np.mean(d['t'])), 'n_sat': d['n_sat'], 'hot': hotFlags(d), 'bg_ave': bg_ave,
             'F_fr': net_fr.mean(axis=0) - local(p_mean_fr),
             'F_ave': net_ave.mean(axis=0) - local(p_mean_ave),
             'sig_fr': net_fr.std(axis=0, ddof=1), 'sig_ave': net_ave.std(axis=0, ddof=1),
@@ -122,6 +137,7 @@ def photometry(args):
     keys = ('F_fr', 'F_ave', 'sig_fr', 'sig_ave', 'sky_fr', 'sky_ave', 'lag1', 'x', 'y', 'bg_ave')
     acc = {k: [[] for _ in oids] for k in keys}
     nsat = np.zeros(len(oids), dtype=np.int64)
+    nhot = np.zeros(len(oids), dtype=np.int64)
     alt = [[] for _ in oids]
     for b in blocks:
         jd = b['t']/86400.0 + 2440587.5
@@ -132,6 +148,7 @@ def photometry(args):
                 acc[k][i].append(b[k][j])
             alt[i].append(a[j])
             nsat[i] += int(b['n_sat'][j])
+            nhot[i] += int(b['hot'][j] > 0)
     med = {k: np.array([np.nanmedian(v) if len(v) else np.nan for v in acc[k]]) for k in keys}
     nblk = np.array([len(v) for v in acc['F_ave']])
     alt = np.array([np.median(v) for v in alt])
@@ -153,10 +170,10 @@ def photometry(args):
     airmass = 1.0/np.sin(np.radians(np.clip(alt, 5, 90)))
     r2 = ((med['x'] - pp.X_res/2.0)**2 + (med['y'] - pp.Y_res/2.0)**2)/(pp.Y_res/2.0)**2
 
-    clean = (nsat == 0) & ~crowded & ~variable & (nblk >= max(3, len(blocks)//2))
-    print("stars: {:d} measured, {:d} clean (unsaturated {:d}, uncrowded {:d}, non-variable {:d})"
-          .format(len(oids), int(clean.sum()), int((nsat == 0).sum()), int((~crowded).sum()),
-                  int((~variable).sum())))
+    clean = (nsat == 0) & (nhot == 0) & ~crowded & ~variable & (nblk >= max(3, len(blocks)//2))
+    print("stars: {:d} measured, {:d} clean (unsaturated {:d}, no hot pixel {:d}, uncrowded {:d}, non-variable {:d})"
+          .format(len(oids), int(clean.sum()), int((nsat == 0).sum()), int((nhot == 0).sum()),
+                  int((~crowded).sum()), int((~variable).sum())))
 
     # 1) Linearity: instrumental vs catalog magnitude. The GMN catalog's Gaia BP/RP are unreliable
     # brighter than G ~3.5 (saturation), which spoils both the band magnitude and the colour
@@ -293,7 +310,7 @@ def clouds(args):
         Fb = Ff[:n_bins*BIN_FRAMES].reshape(n_bins, BIN_FRAMES, -1).mean(axis=1)
 
         # Usable for the block cloud metric: block S/N of the clear-sky flux >= 10
-        use = (Fm/(s['sky_fr']/np.sqrt(Ff.shape[0])) >= 10) & (d['n_sat'] == 0)
+        use = (Fm/(s['sky_fr']/np.sqrt(Ff.shape[0])) >= 10) & (d['n_sat'] == 0) & (s['hot'] == 0)
         T = Ff.mean(axis=0)/Fm
         blk_t.append(float(np.mean(t)))
         blk_t0.append(float(t[0]))
@@ -516,7 +533,7 @@ def limitingMagnitude(args):
         Ff = d['flux'] - APERTURE_AREA*d['bg_ave'][None, :] - s['probe_bias_ave'][None, :]
         n_bins = Ff.shape[0]//BIN_FRAMES
         Tb = Ff[:n_bins*BIN_FRAMES].reshape(n_bins, BIN_FRAMES, -1).mean(axis=1)/Fm[None, :]
-        use = (Fm/(s['sky_ave']/np.sqrt(Ff.shape[0])) >= 10) & (d['n_sat'] == 0)
+        use = (Fm/(s['sky_ave']/np.sqrt(Ff.shape[0])) >= 10) & (d['n_sat'] == 0) & (s['hot'] == 0)
         scx = np.clip((s['x']/(W/float(CELL_NX))).astype(np.intp), 0, CELL_NX - 1)
         scy = np.clip((s['y']/(H/float(CELL_NY))).astype(np.intp), 0, CELL_NY - 1)
         snr_star = Ff.mean(axis=0)/s['sky_ave']
@@ -538,7 +555,7 @@ def limitingMagnitude(args):
                          + model['v4']*r2c[j, i]**2 + model['colour']*col_med + model['zp'])
 
                 # Empirical: the stars of the cell (all, not only 'use'), S/N vs magnitude
-                ke = (scy == j) & (scx == i) & (d['n_sat'] == 0) & (snr_star > 0)
+                ke = (scy == j) & (scx == i) & (d['n_sat'] == 0) & (s['hot'] == 0) & (snr_star > 0)
                 lm_emp = np.nan
                 if ke.sum() >= 8:
                     c = np.polyfit(d['mag'][ke], np.log10(snr_star[ke]), 1)
@@ -653,7 +670,8 @@ def occultation(args):
     if args.max_blocks:
         paths = paths[:args.max_blocks]
 
-    zmax_real, mag_real = [], []
+    zmax_real, mag_real, hot_real = [], [], []
+    n_star_blocks_clean = 0
     inj = []
     n_star_blocks = 0
     for p in paths:
@@ -668,12 +686,16 @@ def occultation(args):
         F = np.median(x, axis=0)
         sigma = 1.4826*np.median(np.abs(x - F[None, :]), axis=0)
         ok = (d['n_sat'] == 0) & (sigma > 0) & np.isfinite(sigma)
+        hot = s['hot'] > 0
         n_star_blocks += int(ok.sum())
+        n_star_blocks_clean += int((ok & ~hot).sum())
 
         # False dips: the real curves
         z, _, _ = dipSearch(x[:, ok], sigma[ok])
         zmax_real.append(z)
         mag_real.append(d['mag'][ok])
+        hot_real.append(hot[ok])
+        ok = ok & ~hot
 
         # Injections: one per star in a random subset, total dip of a random duration, sub-frame
         # ingress; the star's signal is removed and the sky noise kept at its full level with the
@@ -705,15 +727,20 @@ def occultation(args):
 
     zr = np.concatenate(zmax_real)
     mr = np.concatenate(mag_real)
+    hr = np.concatenate(hot_real)
     hours = len(paths)*256/25.0/3600.0
-    print("{:d} blocks ({:.2f} h), {:d} star-blocks".format(len(paths), hours, n_star_blocks))
+    print("{:d} blocks ({:.2f} h), {:d} star-blocks ({:d} without a hot pixel in box or ring)".format(
+          len(paths), hours, n_star_blocks, n_star_blocks_clean))
     print("\nfalse dips on the real curves (largest box-dip significance per star and block):")
-    print("  z_thr   dips   per star-hour   by mag (<4 / 4-5 / 5-6 / >6)")
+    print("  z_thr   all stars: dips  per star-hour | no hot pixel: dips  per star-hour  by mag (<4 / 4-5 / 5-6 / >6)")
     sh = n_star_blocks*256/25.0/3600.0
+    shc = n_star_blocks_clean*256/25.0/3600.0
     for thr in (5, 6, 7, 8, 10):
         k = zr >= thr
-        print("  {:5.1f} {:6d}   {:.2e}       {}".format(thr, int(k.sum()), k.sum()/sh,
-              " / ".join(str(int((k & (mr >= lo) & (mr < hi)).sum())) for lo, hi in ((-9, 4), (4, 5), (5, 6), (6, 99)))))
+        kc = k & ~hr
+        print("  {:5.1f} {:15d}  {:.2e}    | {:16d}  {:.2e}      {}".format(thr, int(k.sum()), k.sum()/sh,
+              int(kc.sum()), kc.sum()/shc,
+              " / ".join(str(int((kc & (mr >= lo) & (mr < hi)).sum())) for lo, hi in ((-9, 4), (4, 5), (5, 6), (6, 99)))))
 
     a = np.array(inj, dtype=np.float64)
     print("\ninjected total dips (depth {:.2f}), detected at z >= {:.1f} overlapping the dip; timing error of the "
@@ -745,18 +772,18 @@ def coincidence(args):
             d = np.load(p)
             s, _ = blockStats(p)
             x = d['flux'] - (APERTURE_AREA*d['bg_ave'] + s['probe_bias_ave'])[None, :]
-            out[float(d['t'][0])] = (d['t'], d['oid'], x, d['mag'], d['n_sat'])
+            out[float(d['t'][0])] = (d['t'], d['oid'], x, d['mag'], d['n_sat'], s['hot'])
         return out
 
     a, b = load(args.lc_dir), load(args.other)
     tb = np.array(sorted(b.keys()))
     corr, z_pairs, n_common, dt_frames = [], [], 0, []
-    for t0, (ta, oa, xa, ma, sa) in sorted(a.items()):
+    for t0, (ta, oa, xa, ma, sa, ha) in sorted(a.items()):
         j = int(np.argmin(np.abs(tb - t0)))
         tb0 = tb[j]
         if abs(tb0 - t0) > 5.0:
             continue
-        tbv, ob, xb, mb, sb = b[tb0]
+        tbv, ob, xb, mb, sb, hb = b[tb0]
 
         # Frame alignment by time (the two cameras run free; nearest frames)
         idx = np.searchsorted(tbv, ta)
@@ -766,7 +793,7 @@ def coincidence(args):
         dt_frames.append(np.median(tbv[idx[good]] - ta[good]))
 
         common, ia, ib = np.intersect1d(oa, ob, return_indices=True)
-        keep = (sa[ia] == 0) & (sb[ib] == 0)
+        keep = (sa[ia] == 0) & (sb[ib] == 0) & (ha[ia] == 0) & (hb[ib] == 0)
         ia, ib = ia[keep], ib[keep]
         n_common += len(ia)
         if not len(ia):
@@ -858,7 +885,16 @@ def main(argv=None):
     k.add_argument('--other', required=True, help="the other camera's light-curve directory")
     k.set_defaults(func=coincidence)
 
+    for sp in (p, c, m, o, k):
+        sp.add_argument('--hot-pixels', help="the night's hotpixels.json, to flag blocks replayed before the "
+                        "pass flagged hot pixels")
+
     args = ap.parse_args(argv)
+    if args.hot_pixels:
+        global HOT_XY
+        from RMS.HotPixels import hotPixelCoords
+        with open(args.hot_pixels) as f:
+            HOT_XY = hotPixelCoords(json.load(f))
     args.func(args)
 
     return 0
