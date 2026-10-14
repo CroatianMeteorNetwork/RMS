@@ -631,12 +631,12 @@ def startNightCompression(config, night_data_dir, frame_buffers, duration, nodet
     compressor = Compressor(night_data_dir, sharedArray, startTime, sharedArray2, start_time2, config,
         detector=detector)
 
+    # Start the compressor first, the observation summary report can take a while (it queries the camera)
+    compressor.start()
+
     # Open the observation summary report
     if video_file is None:
         log.info(startObservationSummaryReport(config, night_data_dir, duration, force_delete=False))
-
-    # Start the compressor
-    compressor.start()
 
     return detector, compressor
 
@@ -1125,10 +1125,43 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                 else:
                     break
 
+            # Polar night split: the next night is started right away, so the capture goes on while the split
+            #   night is processed, which can take a long time. Its directory is made and the disk space freed
+            #   while this night's compression still runs, so the next compressor starts right after this one
+            #   stops. Not if the station reboots after the processing, the capture is stopped for it anyway
+            next_night_data_dir = None
+            if (session_cut_utc is not None) and (not STOP_CAPTURE) and (not config.reboot_after_processing):
+
+                next_night_data_dir = makeNightDataDir(config)
+
+                # Free up disk space for the next night, keeping the split night which is yet to be processed and
+                #   the new night directory
+                log.info('Freeing up disk space...')
+                if not deleteOldObservations(config.data_dir, config.captured_dir, config.archived_dir, config,
+                        duration=duration, keep_paths=[night_data_dir, next_night_data_dir]):
+
+                    # Not enough space yet: the next night is started after the split night was processed, as
+                    #   before (making the timelapses of the split night frees up more space)
+                    shutil.rmtree(next_night_data_dir, ignore_errors=True)
+                    next_night_data_dir = None
+
             # Stop the compressor
             log.debug('Stopping compression...')
             detector = compressor.stop()
             log.debug('Compression stopped')
+
+            # Start the next night's compression right after the split night's stopped
+            if (next_night_data_dir is not None) and (not STOP_CAPTURE):
+
+                next_detector, next_compressor = startNightCompression(config, next_night_data_dir,
+                    (sharedArray, startTime, sharedArray2, start_time2), duration, nodetect=nodetect,
+                    detect_end=detect_end, video_file=video_file)
+
+                next_night = (next_night_data_dir, next_detector, next_compressor)
+
+            # Capture was stopped in the meantime, the next night is not started
+            elif next_night_data_dir is not None:
+                shutil.rmtree(next_night_data_dir, ignore_errors=True)
 
             if live_view is not None:
 
@@ -1141,31 +1174,6 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                 live_view = None
 
                 log.debug('Live view stopped')
-
-
-            # Polar night split: start the next night right away, so the capture goes on while the split night
-            #   is processed, which can take a long time. Not if the station reboots after the processing, the
-            #   capture is stopped for the reboot anyway
-            if (session_cut_utc is not None) and (not STOP_CAPTURE) and (not config.reboot_after_processing):
-
-                next_night_data_dir = makeNightDataDir(config)
-
-                # Free up disk space for the next night, keeping the split night which is yet to be processed and
-                #   the new night directory
-                log.info('Freeing up disk space...')
-                if deleteOldObservations(config.data_dir, config.captured_dir, config.archived_dir, config,
-                        duration=duration, keep_paths=[night_data_dir, next_night_data_dir]):
-
-                    next_detector, next_compressor = startNightCompression(config, next_night_data_dir,
-                        (sharedArray, startTime, sharedArray2, start_time2), duration, nodetect=nodetect,
-                        detect_end=detect_end, video_file=video_file)
-
-                    next_night = (next_night_data_dir, next_detector, next_compressor)
-
-                # Not enough space yet: the next night is started after the split night was processed, as
-                #   before (making the timelapses of the split night frees up more space)
-                else:
-                    shutil.rmtree(next_night_data_dir, ignore_errors=True)
 
 
         # Manage capture termination:

@@ -477,6 +477,7 @@ class CaptureHarness(object):
 
             def stop(self):
                 harness.compressor_stops += 1
+                harness.events.append('stop')
                 return self.detector
 
         def fakeProcessNight(night_data_dir, config, detection_results=None, nodetect=False):
@@ -616,10 +617,11 @@ def test_runcapture_polar_night(monkeypatch, tmp_path):
     assert h.upload_manager.files == [nights[0], 'timelapse_1.tar', nights[1], 'timelapse_2.tar',
         nights[2], 'timelapse_3.tar']
 
-    # At every split the next night is started first (disk cleanup, compressor), then the split night is
-    #   processed and the disk is freed again before its timelapses are made
-    assert h.events == ['compress'] + ['delete', 'compress', 'process', 'delete', 'timelapse']*2 \
-        + ['process', 'timelapse']
+    # At every split the disk is freed for the next night while the split night is still compressed, then
+    #   the compressors are swapped, the split night is processed and the disk is freed again before its
+    #   timelapses are made
+    assert h.events == ['compress'] + ['delete', 'stop', 'compress', 'process', 'delete', 'timelapse']*2 \
+        + ['stop', 'process', 'timelapse']
 
 
 def test_runcapture_polar_night_keeps_split_night(monkeypatch, tmp_path):
@@ -658,6 +660,11 @@ def test_runcapture_polar_night_capture_goes_on(monkeypatch, tmp_path):
     h.run(['cut', 'stop'])
 
     assert h.events.index('compress', 1) < h.events.index('process')
+
+    # The cleanup for the next night runs before the split night's compressor is stopped, and the next
+    #   compressor is started right after it
+    stop = h.events.index('stop')
+    assert h.events[stop - 1:stop + 2] == ['delete', 'stop', 'compress']
     assert h.compressors == 2
     assert h.compressor_stops == 2
     assert len(set(h.processed_nights)) == 2
@@ -748,7 +755,7 @@ def test_runcapture_split_low_disk(monkeypatch, tmp_path):
     h = CaptureHarness(monkeypatch, tmp_path, start_daytime=False)
     h.delete_results = [False, False, False]
     h.run(['cut'])
-    assert h.events == ['compress', 'delete', 'process', 'delete', 'timelapse', 'delete']
+    assert h.events == ['compress', 'delete', 'stop', 'process', 'delete', 'timelapse', 'delete']
     assert h.compressors == 1
     assert len(os.listdir(os.path.join(str(tmp_path), h.config.captured_dir))) == 1
 
@@ -756,8 +763,8 @@ def test_runcapture_split_low_disk(monkeypatch, tmp_path):
     h = CaptureHarness(monkeypatch, tmp_path, start_daytime=False)
     h.delete_results = [False, False, True]
     h.run(['cut', 'stop'])
-    assert h.events == ['compress', 'delete', 'process', 'delete', 'timelapse', 'delete', 'delete', 'compress',
-        'process', 'timelapse']
+    assert h.events == ['compress', 'delete', 'stop', 'process', 'delete', 'timelapse', 'delete', 'delete',
+        'compress', 'stop', 'process', 'timelapse']
 
 
 def test_runcapture_normal_and_transitions(monkeypatch, tmp_path):
