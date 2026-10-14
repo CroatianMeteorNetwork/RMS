@@ -791,8 +791,10 @@ def nightProcessingState(config, captured_dir_path):
     already on disk. For those the archive cannot be told apart from one deleted by retention,
     which is why acting on a missing archive is left to reprocess_if_archive_missing.
 
-    Detection backups (rms_queue_bkup_*.pickle) are deliberately NOT treated as evidence of
-    incomplete processing. They are a resume aid for detection, and a caller which finishes the
+    For a legacy night with leftover detection backups, detections alone are not enough: without the
+    final summary it also needs its archive, as it may have crashed after the detection and before
+    archiving. Otherwise detection backups (rms_queue_bkup_*.pickle) are deliberately NOT treated as
+    evidence of incomplete processing. They are a resume aid for detection, and a caller which finishes the
     night but fails to delete them would otherwise make a complete night look partial - this was
     the cause of issue #418.
 
@@ -841,8 +843,12 @@ def nightProcessingState(config, captured_dir_path):
         state = NIGHT_INCOMPLETE
 
     # No record: a night from before this was written. Fall back to the outputs it does have, so
-    #   upgrading does not reprocess every captured directory on the first start
-    elif has_final_summary or ((not has_working_summary) and has_ftpdetectinfo):
+    #   upgrading does not reprocess every captured directory on the first start. Detections alone
+    #   don't show that a night with leftover backups was finished (it may have crashed before
+    #   archiving), so such a night also needs its archive; otherwise it stays incomplete and is
+    #   resumed from the backups
+    elif has_final_summary or ((not has_working_summary) and has_ftpdetectinfo
+                               and ((not pickle_files) or has_archive_dir)):
         state = NIGHT_LEGACY_PROCESSED
 
     else:
@@ -905,11 +911,16 @@ def cleanupTempArtifacts(config):
                     log.warning("Failed to remove %s: %s", tmpFile, exc)
 
 
-def processFramesFiles(config):
+def processFramesFiles(config, cutoff_utc=None):
     """Convert saved frame files into timelapse videos and archive them.
 
     Arguments:
         config: [Config] Loaded configuration object.
+
+    Keyword arguments:
+        cutoff_utc: [datetime] Naive UTC time, only frames before it are used. None by default, in which
+            case the cutoff is the last night-to-day switch (end of the night just captured). Given when
+            the capture session is split during polar day or night.
 
     Return:
         archive_paths: [list[str] | None] Paths to the .tar archives produced,
@@ -925,19 +936,24 @@ def processFramesFiles(config):
     log.info("Generating timelapse(s) from saved frames...")
 
     try:
-        # Get sunrise time and maximum possible cutoff (sunrise + inertia)
-        sunrise_utc, max_cutoff_utc = lastNightToDaySwitch(config)
 
-        # Find the actual last night frame in the inertia window
-        # This prevents day frames captured during inertia from being included
-        last_night_frame_ts = findLastNightFrameInWindow(frame_dir, sunrise_utc, max_cutoff_utc)
+        if cutoff_utc is None:
 
-        # Use the last night frame timestamp (+ 1 second to include it) as cutoff,
-        # or fall back to sunrise if no night frames were found in the window
-        if last_night_frame_ts is not None:
-            cutoff_utc = last_night_frame_ts + timedelta(seconds=1)
-        else:
-            cutoff_utc = sunrise_utc
+            # Get sunrise time and maximum possible cutoff (sunrise + inertia)
+            sunrise_utc, max_cutoff_utc = lastNightToDaySwitch(config)
+
+            # Find the actual last night frame in the inertia window
+            # This prevents day frames captured during inertia from being included
+            last_night_frame_ts = findLastNightFrameInWindow(frame_dir, sunrise_utc, max_cutoff_utc)
+
+            # Use the last night frame timestamp (+ 1 second to include it) as cutoff,
+            # or fall back to sunrise if no night frames were found in the window
+            if last_night_frame_ts is not None:
+                cutoff_utc = last_night_frame_ts + timedelta(seconds=1)
+            else:
+                cutoff_utc = sunrise_utc
+
+        log.info("Using frames captured before %s", cutoff_utc)
 
         image_blocks = listImageBlocksBefore(cutoff_utc, frame_dir)
 
