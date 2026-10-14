@@ -409,12 +409,14 @@ class StarLightCurves(object):
         px, py = skyProbes(w, h, np.concatenate(sx), np.concatenate(sy))
         px, py = px.astype(np.float32), py.astype(np.float32)
         p_flux, p_bg, _ = self.photometry(frames, px, px, py, py, frac)
+        p_bg_ave = ringBackground(ave_lin, px.astype(np.float64), py.astype(np.float64)).astype(np.float32)
 
         return {'sel': sel, 'oid': self.field.oid[sel], 'ra': self.field.ra[sel],
                 'dec': self.field.dec[sel], 'mag': self.field.mag[sel],
                 'x_first': xa, 'y_first': ya, 'x_last': xb, 'y_last': yb,
                 'flux': flux, 'bg': bg, 'bg_ave': bg_ave, 'n_sat': nsat, 'offset': off,
-                'probe_x': px, 'probe_y': py, 'probe_flux': p_flux, 'probe_bg': p_bg}
+                'probe_x': px, 'probe_y': py, 'probe_flux': p_flux, 'probe_bg': p_bg,
+                'probe_bg_ave': p_bg_ave}
 
 
     def photometry(self, frames, x_first, x_last, y_first, y_last, frac):
@@ -453,6 +455,7 @@ def saveBlock(path, res, t_frames, frame_seq, header):
         flux [N, S] float32 aperture sum (linear codes); bg [N, S] float32 ring median per pixel.
         probe_x, probe_y [P] float32 sky-probe positions (static over the block).
         probe_flux, probe_bg [N, P] float32 the probes' aperture sums and ring medians.
+        probe_bg_ave [P] float32 the probes' ring medians on the block's average image.
         t [N] float64 unix start of integration of row 0; frame_seq [N] int64 camera frame number.
         header: JSON string.
     """
@@ -461,5 +464,5 @@ def saveBlock(path, res, t_frames, frame_seq, header):
              mag=res['mag'], x_first=res['x_first'], y_first=res['y_first'], x_last=res['x_last'],
              y_last=res['y_last'], n_sat=res['n_sat'], bg_ave=res['bg_ave'], flux=res['flux'],
              bg=res['bg'], probe_x=res['probe_x'], probe_y=res['probe_y'],
-             probe_flux=res['probe_flux'], probe_bg=res['probe_bg'],
+             probe_flux=res['probe_flux'], probe_bg=res['probe_bg'], probe_bg_ave=res['probe_bg_ave'],
              t=np.asarray(t_frames, dtype=np.float64), frame_seq=np.asarray(frame_seq, dtype=np.int64))
