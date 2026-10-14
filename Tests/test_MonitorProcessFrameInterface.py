@@ -1495,7 +1495,7 @@ def test_backfill_of_a_replaced_platepar_covers_unreported_nights(config_path, t
 
 
 @pytest.mark.parametrize('start_method, expected', [('fork', 1), ('spawn', 0)])
-def test_star_catalog_loaded_once_before_forked_workers(monkeypatch, start_method, expected):
+def test_star_catalog_loaded_once_before_forked_workers(tmp_path, monkeypatch, start_method, expected):
     """ The monitor loads the star catalog of a config once, before the first worker is forked (the forked
         workers then find it decompressed), and not at all when the workers are not forked. """
 
@@ -1509,10 +1509,41 @@ def test_star_catalog_loaded_once_before_forked_workers(monkeypatch, start_metho
     monkeypatch.setattr(multiprocessing, 'get_start_method', lambda allow_none=False: start_method)
     monkeypatch.setattr(mpfi, '_PRELOADED_CATALOGS', set())
 
-    # Three workers started with the same config
+    # Three workers started with the same config and a platepar
     config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.config')
+    platepar_path = str(tmp_path/'platepar_cmn2010.cal')
+    open(platepar_path, 'w').close()
     for _ in range(3):
-        mpfi.preloadStarCatalog(config_path)
+        mpfi.preloadStarCatalog(config_path, platepar_path)
 
     # One reading for forked workers, none for spawned ones
+    assert len(calls) == expected
+
+
+@pytest.mark.parametrize('platepar, auto_calibration, expected', [(False, False, 0), (True, False, 1), (False, True, 1)])
+def test_star_catalog_preloaded_only_when_the_workers_use_it(tmp_path, monkeypatch, platepar, auto_calibration,
+                                                              expected):
+    """ The catalog is loaded in advance only for workers which use it: with a platepar to recalibrate, or with the
+        automatic calibration, which fits one. """
+
+    import multiprocessing
+    import RMS.ConfigReader as cr
+    import RMS.MonitorProcessFrameInterface as mpfi
+    from RMS.Formats import StarCatalog
+
+    # The readings of the catalog are counted, with forked workers and no catalog loaded yet
+    calls = []
+    monkeypatch.setattr(StarCatalog, 'readStarCatalog', lambda *args, **kwargs: calls.append(args))
+    monkeypatch.setattr(multiprocessing, 'get_start_method', lambda allow_none=False: 'fork')
+    monkeypatch.setattr(mpfi, '_PRELOADED_CATALOGS', set())
+
+    # The default config with the automatic calibration on or off, and a platepar which exists or not
+    config = cr.parse(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.config'))
+    config.monitor_auto_calibration = auto_calibration
+    monkeypatch.setattr(cr, 'parse', lambda path: config)
+    platepar_path = str(tmp_path/'platepar_cmn2010.cal')
+    if platepar:
+        open(platepar_path, 'w').close()
+
+    mpfi.preloadStarCatalog(str(tmp_path/'.config'), platepar_path)
     assert len(calls) == expected
