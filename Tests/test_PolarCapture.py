@@ -632,8 +632,10 @@ def test_runcapture_polar_night_keeps_split_night(monkeypatch, tmp_path):
     h = CaptureHarness(monkeypatch, tmp_path, start_daytime=False)
     h.run(['cut', 'cut', 'stop'])
 
-    # Night directory, archive directory (the same in the fake processing) and the uploaded archive
-    kept = [[d, d, os.path.basename(d) + '_detected.tar.bz2'] for d in h.processed_nights]
+    # Night directory, archive directory (the same in the fake processing), the uploaded archive and the
+    #   directory of the next night, which is already being captured
+    kept = [[d, d, os.path.basename(d) + '_detected.tar.bz2', n] for d, n
+        in zip(h.processed_nights, h.processed_nights[1:])]
 
     # Cleanups at the start of the second night (before the first is processed, only its directory exists,
     #   and the new night directory), at the first split, the start of the third night and the second split
@@ -649,7 +651,7 @@ def test_runcapture_polar_night_keeps_unprocessed_night(monkeypatch, tmp_path):
     h.processing_fails = True
     h.run(['cut', 'stop'])
 
-    assert h.delete_keeps == [h.processed_nights[:2], [h.processed_nights[0], None]]
+    assert h.delete_keeps == [h.processed_nights[:2], [h.processed_nights[0], None, h.processed_nights[1]]]
 
 
 def test_runcapture_polar_night_capture_goes_on(monkeypatch, tmp_path):

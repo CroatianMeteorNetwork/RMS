@@ -1359,6 +1359,10 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                 if night_processed:
                     keep_paths += files_to_add_list
 
+                # The next night is already being captured into its directory
+                if next_night is not None:
+                    keep_paths.append(next_night[0])
+
 
             # frames -> timelapse(s) -> archive(s) -> upload
             if session_cut_utc is None:
