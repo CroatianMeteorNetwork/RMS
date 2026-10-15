@@ -979,6 +979,10 @@ def test_extent_concentration_fast_streak():
         blob = np.exp(-0.5*(xx**2 + yy**2)/6.0**2)
         assert mfd.extentConcentration(blob + 0.3*streak, PSF_SIGMA, motion=motion) < 0.6
 
+    # A PSF so wide that its streak covers the whole ring: the whole ring is used, the concentration is a number
+    wide = np.exp(-0.5*(xx**2 + yy**2)/5.0**2)
+    assert np.isfinite(mfd.extentConcentration(wide, 5.0, motion=(3.0, 1.0)))
+
     # Without the motion, the long streak reaches the ring (as before the motion was used)
     motion = 22.0*np.array([np.cos(0.3), np.sin(0.3)])
     streak = sum(np.exp(-0.5*((xx - motion[0]*d)**2 + (yy - motion[1]*d)**2)/PSF_SIGMA**2)
@@ -999,6 +1003,11 @@ def test_pieces_of_the_same_object_on_its_path():
     assert mfd.onPath(piece, path, 5.0) and mfd.onPath(path, piece, 5.0)
     assert mfd.onPath(ahead, path, 5.0) and mfd.onPath(path, ahead, 5.0)
     assert not mfd.onPath(beside, path, 5.0) and not mfd.onPath(path, beside, 5.0)
+
+    # Positions 22 px apart along the path (a frame apart): a track 12 px beside it is not on it
+    fast = (f, 100 + 22.0*f, 50 + 0.0*f)
+    beside_fast = (f[20:40], 100 + 22.0*f[20:40], 62 + 0.0*f[20:40])
+    assert not mfd.onPath(beside_fast, fast, 6.0)
 
 
 def test_extent_line_fast_object_not_a_line():

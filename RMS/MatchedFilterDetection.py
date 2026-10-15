@@ -3206,15 +3206,23 @@ def onPath(track, path, radius):
     if (len(x) == 0) or (len(px) == 0):
         return False
 
-    # The distance of every position of the track (subsampled, enough for the median) from the nearest position
-    #   of the path
+    # The positions of the track (subsampled, enough for the median)
     step = max(1, len(x)//50)
-    d = np.min(np.hypot(x[::step, None] - px[None, :], y[::step, None] - py[None, :]), axis=1)
+    qx, qy = x[::step, None], y[::step, None]
 
-    # The positions of the path are one frame apart, so a point on the line through them can be up to half the
-    #   motion per frame from the nearest one
-    spacing = float(np.median(np.hypot(np.diff(px), np.diff(py)))) if len(px) > 1 else 0.0
-    return float(np.median(d)) <= radius + 0.5*spacing
+    # A path of one position: the distance from it
+    if len(px) < 2:
+        d = np.hypot(qx[:, 0] - px[0], qy[:, 0] - py[0])
+        return float(np.median(d)) <= radius
+
+    # The distance of every position from the nearest segment between consecutive positions of the path (the
+    #   positions of the path are a frame apart, which can be many px)
+    ax, ay = px[None, :-1], py[None, :-1]
+    sx, sy = np.diff(px)[None, :], np.diff(py)[None, :]
+    length2 = np.maximum(sx*sx + sy*sy, 1e-12)
+    t = np.clip(((qx - ax)*sx + (qy - ay)*sy)/length2, 0.0, 1.0)
+    d = np.min(np.hypot(qx - (ax + t*sx), qy - (ay + t*sy)), axis=1)
+    return float(np.median(d)) <= radius
 
 
 def streakMask(r, psf_sigma, motion):
@@ -3267,10 +3275,11 @@ def extentConcentration(stack, psf_sigma, motion=None):
     yy, xx = np.mgrid[-r:r + 1, -r:r + 1]
     d = np.hypot(xx, yy)
 
-    # The ring, without the streak of a fast object, which is the object's own light
+    # The ring, without the streak of a fast object, which is the object's own light (unless the streak covers
+    #   all of it, e.g. for a very wide PSF)
     ring = (d >= EXTENT_RING[0]) & (d <= EXTENT_RING[1])
     streak = streakMask(r, psf_sigma, motion)
-    if streak is not None:
+    if (streak is not None) and np.any(ring & ~streak):
         ring &= ~streak
 
     # The mean of the core (within 1.5 PSF sigmas, at least 1 px) and of the ring. The PSF of a point source is
