@@ -995,6 +995,11 @@ class Config:
         self.mf_tier_speed = 2.0
         self.mf_max_bin = 8
 
+        # A fast object is a streak in every frame: sum the whole streak of every frame (several samples per frame
+        #   along the motion, see velocitySamples), instead of only its middle. More sensitive to fast objects, at
+        #   the cost of more search time
+        self.mf_streak_search = False
+
         # Saturation level of the raw frames (ADU): the saturated pixels are left out of the position fits and
         #   counted in the saturation column of the detections. 0 uses 98% of the range of the bit depth (some
         #   cameras saturate well below it)
@@ -2382,7 +2387,7 @@ def parseMatchedFilter(config, parser):
     if not parser.has_section(section):
         return
 
-    for name in ("mf_enable", "mf_velocity_search", "mf_replace_detection", "mf_cloud_filter"):
+    for name in ("mf_enable", "mf_velocity_search", "mf_replace_detection", "mf_cloud_filter", "mf_streak_search"):
         if parser.has_option(section, name):
             setattr(config, name, parser.getboolean(section, name))
 

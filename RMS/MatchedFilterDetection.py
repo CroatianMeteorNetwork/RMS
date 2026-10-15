@@ -140,6 +140,11 @@ SHADOW_OVERLAP = 0.8
 DUPLICATE_ALONG = 10.0
 CONNECTED_LEVEL = 5.0
 
+# Smallest F statistic of the curvature of a short track (see curvatureSignificant): about a 5 sigma improvement
+#   of the fit by the quadratic. The tracks of faint objects have no measurable curvature over a short time, and
+#   a quadratic would fit their noise
+CURVATURE_MIN_F = 25.0
+
 # Shape of the detections (see extentConcentration): the frames are stacked along the track (every EXTENT_STEP-th
 #   frame) within EXTENT_RADIUS px, and the concentration of the light at the centre tells a point source from an
 #   extended structure (e.g. a cloud). Only detections below EXTENT_MAX_SIGNIFICANCE are tested. On recorded data,
@@ -168,6 +173,10 @@ LINE_MIN_SIGNIFICANCE = 5.0
 MIN_CONCENTRATION_ALONE = 0.6
 COMOVING_MIN = 1
 COMOVING_TOLERANCE = 0.15
+
+# A track within SAME_PATH_FWHM PSF FWHMs (at least 3 px) of the path of another one is a piece of the same object
+#   (see onPath), not another structure moving with it
+SAME_PATH_FWHM = 2.0
 
 # Smallest sigma of the smoothing of the frames in the search (px), see searchSigma
 SEARCH_MIN_SIGMA = 1.0
@@ -376,6 +385,7 @@ class MatchedFilterOptions(object):
         # Tiers of the velocity search: the largest speed of a tier in binned px per frame, and the coarsest bin
         #   (see MatchedFilterDetector.searchTiers)
         self.tier_speed = config.mf_tier_speed
+        self.streak_search = config.mf_streak_search
         self.max_bin = config.mf_max_bin
 
         # Saturation level of the raw frames (ADU), 98% of the range of the bit depth if not given
@@ -1421,6 +1431,10 @@ class MatchedFilterDetector(object):
         n_block = self.opts.block_frames
         b = self.search_bin
 
+        # The smoothing of the search (px), for the weights of the sums of the streak samples, whose noise depends
+        #   on it (see velocitySamples). The PSF sigma is measured later; until then 1 px is used, as below
+        search_sigma = max(self.psf_sigma if self.psf_sigma is not None else 1.0, SEARCH_MIN_SIGMA)
+
         # The stackers of the runs: the short runs (8 and 16 frames) search all velocities up to the largest
         #   speed, in tiers of binning (see searchTiers); the long run (32 frames) only the small velocities, at
         #   most 4 binned px over the run, where its longer integration gains the most (a slow object stays within
@@ -1430,7 +1444,7 @@ class MatchedFilterDetector(object):
             for tier_bin, speed_lo, speed_hi in self.searchTiers():
                 stackers.append((run_frames, tier_bin, VelocityStacker(
                     velocityGrid(speed_hi, run_frames, tier_bin, speed_min=speed_lo), run_frames,
-                    use_gpu=self.opts.use_gpu)))
+                    use_gpu=self.opts.use_gpu, streak=self.opts.streak_search, smooth_sigma=search_sigma/tier_bin)))
         if self.opts.slow_run_frames > max(self.opts.run_frames):
             slow_speed = min(4.0/self.opts.slow_run_frames*b, self.opts.speed_max)
             stackers.append((self.opts.slow_run_frames, b, VelocityStacker(
@@ -1489,6 +1503,11 @@ class MatchedFilterDetector(object):
                     self.psf_sigma = sigma
                     psf_measured = True
                     log.info('Matched filter: PSF sigma {:.2f} px (block {:d})'.format(self.psf_sigma, k))
+
+                    # The weights of the streak samples depend on the smoothing of the search, which now follows
+                    #   the measured PSF
+                    for _, tier_bin, st in stackers:
+                        st.setSmoothing(self.searchSigma()/tier_bin)
 
             # The mean of the block (for the photometry of the stars), the static mask, and the frames normalized to
             #   unit noise (in place, the raw frames are not needed any more)
@@ -2372,6 +2391,10 @@ class MatchedFilterDetector(object):
             linked = self.mergeTracks(linked + slow_tracks)
         self.timing['slow_search'] = time() - t1
 
+        # The hits of a track whose velocity disagrees with the motion of the track are not of the object (e.g.
+        #   the sums of other velocities through a bright object, linked to its track by their position)
+        linked = [cleanTrackHits(tr, min_hits=self.opts.min_hits) for tr in linked]
+
         # Keep the tracks in the speed range which move far enough, without the ones following stronger tracks
         tracks = self.removeShadows([tr for tr in linked if self.acceptTrack(tr)])
 
@@ -2898,7 +2921,8 @@ class MatchedFilterDetector(object):
 
             # The time in which the object moves by 3 PSF widths (at least 16 frames): the same positions are
             #   taken that many frames before and after the track, and the frames outside the input dropped
-            speed = math.hypot(xs[-1] - xs[0], ys[-1] - ys[0])/max(frames[-1] - frames[0], 1)
+            span = max(frames[-1] - frames[0], 1)
+            speed = math.hypot(xs[-1] - xs[0], ys[-1] - ys[0])/span
             shift = int(math.ceil(max(3*fwhm/max(speed, 1e-3), 16)))
             off = [(frames + d, xs, ys) for d in (-shift, shift)]
             off = [(f[(f >= 0) & (f < self.total_frames)], x[(f >= 0) & (f < self.total_frames)],
@@ -2916,9 +2940,13 @@ class MatchedFilterDetector(object):
             reord = (np.tile(frames, len(orders)), np.concatenate([xs[o] for o in orders]),
                      np.concatenate([ys[o] for o in orders]))
 
+            # The motion during a frame, for the shape of the streak of a fast object in the PSF-weighted sums (only
+            #   with the streak search; the same streak at the positions of all three tests)
+            motion = ((xs[-1] - xs[0])/span, (ys[-1] - ys[0])/span) if self.opts.streak_search else (0.0, 0.0)
+
             # The sums of the three tests (sum(g*z), sum(g^2), see forcedTrackSignal), the photometry of every
             #   frame (the intensity, saturated pixels and noise), and the stack of the frames along the track
-            checks.append({'on': (frames, xs, ys), 'off': (off_f, off_x, off_y), 'reord': reord,
+            checks.append({'on': (frames, xs, ys), 'off': (off_f, off_x, off_y), 'reord': reord, 'motion': motion,
                            'on_sum': [0.0, 0.0], 'off_sum': [0.0, 0.0], 'reord_sum': [0.0, 0.0],
                            'phot': np.zeros(n), 'phot_sat': np.zeros(n, dtype=np.int64),
                            'phot_noise': np.zeros(n),
@@ -2958,13 +2986,16 @@ class MatchedFilterDetector(object):
             #   frames are only read), so they are run in parallel threads
             def verifyBlock(c):
 
-                # The PSF-weighted sums of the three tests at their positions in the frames of this block
+                # The PSF-weighted sums of the three tests at their positions in the frames of this block, with the
+                #   PSF smeared along the streak of a fast object (the patch then includes half the streak)
+                vx, vy = c['motion']
+                radius_streak = radius + int(math.ceil(0.5*math.hypot(vx, vy)))
                 for key in ('on', 'off', 'reord'):
                     fr, x, y = c[key]
                     sel = c[key + '_idx'].get(k)
                     if sel is not None:
-                        sgz, sgg = forcedTrackSignal(z, fr[sel] - first, x[sel], y[sel], self.psf_sigma, radius,
-                                                     excluded)
+                        sgz, sgg = forcedTrackSignal(z, fr[sel] - first, x[sel], y[sel], self.psf_sigma,
+                                                     radius_streak, excluded, vx, vy)
                         c[key + '_sum'][0] += sgz
                         c[key + '_sum'][1] += sgg
 
@@ -3031,7 +3062,7 @@ class MatchedFilterDetector(object):
             fr, xs, ys = c['on']
             span = max(fr[-1] - fr[0], 1)
             velocity = np.array([(xs[-1] - xs[0])/span, (ys[-1] - ys[0])/span])
-            concentration = extentConcentration(c['stack']/max(c['stack_n'], 1), self.psf_sigma)
+            concentration = extentConcentration(c['stack']/max(c['stack_n'], 1), self.psf_sigma, motion=velocity)
             line = extentLine(c['stack']/max(c['stack_n'], 1), self.psf_sigma, c['stack_n'], motion=velocity)
             results.append((cent, c, min(tests), tests, concentration, velocity, line))
 
@@ -3048,14 +3079,17 @@ class MatchedFilterDetector(object):
             if significance < EXTENT_MAX_SIGNIFICANCE:
 
                 # Count the other tracks which overlap this one in time and have the same velocity (within
-                #   COMOVING_TOLERANCE of the speed, at least the slowest speed of the search)
+                #   COMOVING_TOLERANCE of the speed, at least the slowest speed of the search). A track on the path
+                #   of this one is a piece of the same object (e.g. of a bright one, measured in pieces), not
+                #   another structure moving with it
                 together = 0
                 for j, other in enumerate(results):
                     if (j == i) or (other[0][-1, 0] < cent[0, 0]) or (other[0][0, 0] > cent[-1, 0]):
                         continue
                     if np.hypot(*(other[5] - velocity)) <= max(COMOVING_TOLERANCE*np.hypot(*velocity),
                                                                  self.opts.speed_min):
-                        together += 1
+                        if not onPath(other[1]['on'], c['on'], max(SAME_PATH_FWHM*fwhm, 3.0)):
+                            together += 1
                 # Rejected if the light is much less concentrated than for a point source, or somewhat less but
                 #   other tracks move with it
                 extended = (concentration < MIN_CONCENTRATION_ALONE) or \
@@ -3150,7 +3184,76 @@ def blockIndices(frames, starts, end=None):
     return out
 
 
-def extentConcentration(stack, psf_sigma):
+def onPath(track, path, radius):
+    """ Whether two tracks lie on the same path: the median distance of the positions of the shorter one from
+        the nearest positions of the longer one is within radius (symmetric). A piece of the same object is on
+        its path, also when it is ahead of or behind the object along it.
+
+    Arguments:
+        track: [tuple] (frames, xs, ys) of the track.
+        path: [tuple] (frames, xs, ys) of the other track, one position per frame.
+        radius: [float] Largest median distance (px).
+
+    Return:
+        [bool] True if the track is on the path.
+    """
+
+    # The shorter track is compared with the path of the longer one (the longer one extends beyond a piece)
+    if len(track[1]) > len(path[1]):
+        track, path = path, track
+    _, x, y = track
+    _, px, py = path
+    if (len(x) == 0) or (len(px) == 0):
+        return False
+
+    # The positions of the track (subsampled, enough for the median)
+    step = max(1, len(x)//50)
+    qx, qy = x[::step, None], y[::step, None]
+
+    # A path of one position: the distance from it
+    if len(px) < 2:
+        d = np.hypot(qx[:, 0] - px[0], qy[:, 0] - py[0])
+        return float(np.median(d)) <= radius
+
+    # The distance of every position from the nearest segment between consecutive positions of the path (the
+    #   positions of the path are a frame apart, which can be many px)
+    ax, ay = px[None, :-1], py[None, :-1]
+    sx, sy = np.diff(px)[None, :], np.diff(py)[None, :]
+    length2 = np.maximum(sx*sx + sy*sy, 1e-12)
+    t = np.clip(((qx - ax)*sx + (qy - ay)*sy)/length2, 0.0, 1.0)
+    d = np.min(np.hypot(qx - (ax + t*sx), qy - (ay + t*sy)), axis=1)
+    return float(np.median(d)) <= radius
+
+
+def streakMask(r, psf_sigma, motion):
+    """ The pixels of a stack along a track which the object lights during a frame: within 2 PSF sigmas of the
+        segment it moves along in a frame, centred on it. Only an object which moves far enough during a frame to
+        reach the ring of the shape tests (see extentConcentration) has a streak.
+
+    Arguments:
+        r: [int] Half size of the stack (px).
+        psf_sigma: [float] PSF sigma (px).
+        motion: [tuple] Motion of the object (px per frame), or None.
+
+    Return:
+        [ndarray] Boolean mask of the stack, or None if the object has no streak reaching the ring.
+    """
+
+    # Without the motion, or if the streak of a frame doesn't reach the ring, there is nothing to leave out
+    if motion is None:
+        return None
+    speed = math.hypot(*motion)
+    if 0.5*speed + 2*psf_sigma < EXTENT_RING[0]:
+        return None
+
+    # The distance of every pixel from the segment of the frame along the motion
+    yy, xx = np.mgrid[-r:r + 1, -r:r + 1]
+    ux, uy = motion[0]/speed, motion[1]/speed
+    t = np.clip(xx*ux + yy*uy, -0.5*speed, 0.5*speed)
+    return np.hypot(xx - t*ux, yy - t*uy) <= 2*psf_sigma
+
+
+def extentConcentration(stack, psf_sigma, motion=None):
     """ How much of the light of an object is at its centre: the mean of the stack along its track within
         1.5 PSF sigmas of the centre, minus the mean in a ring EXTENT_RING px from it, over the mean at the
         centre. About 1 for a point source, near 0 for an extended structure (e.g. a cloud).
@@ -3158,6 +3261,11 @@ def extentConcentration(stack, psf_sigma):
     Arguments:
         stack: [ndarray] Mean of the normalized frames along the track, centred on the object.
         psf_sigma: [float] PSF sigma (px).
+
+    Keyword arguments:
+        motion: [tuple] Motion of the object (px per frame). An object which moves far enough during a frame is a
+            streak in every frame, which reaches into the ring along its motion: the pixels of the streak are
+            then left out of the ring (see streakMask). None by default (the whole ring is used).
 
     Return:
         [float] Concentration (1 if the centre is not above the ring, as the shape is then not measurable).
@@ -3168,11 +3276,18 @@ def extentConcentration(stack, psf_sigma):
     yy, xx = np.mgrid[-r:r + 1, -r:r + 1]
     d = np.hypot(xx, yy)
 
+    # The ring, without the streak of a fast object, which is the object's own light (unless the streak covers
+    #   all of it, e.g. for a very wide PSF)
+    ring = (d >= EXTENT_RING[0]) & (d <= EXTENT_RING[1])
+    streak = streakMask(r, psf_sigma, motion)
+    if (streak is not None) and np.any(ring & ~streak):
+        ring &= ~streak
+
     # The mean of the core (within 1.5 PSF sigmas, at least 1 px) and of the ring. The PSF of a point source is
     #   negligible in the ring, so its ring is at the level of the background (0 in normalized frames) and
     #   the concentration is ~1. An extended structure is as bright in the ring as in the core, giving ~0
     core = np.mean(stack[d <= max(1.5*psf_sigma, 1.0)])
-    ring = np.mean(stack[(d >= EXTENT_RING[0]) & (d <= EXTENT_RING[1])])
+    ring = np.mean(stack[ring])
     if core <= 0:
         return 1.0
 
@@ -3209,15 +3324,8 @@ def extentLine(stack, psf_sigma, n_frames, motion=None):
     d = np.hypot(xx, yy)
     ring = (d >= EXTENT_RING[0]) & (d <= EXTENT_RING[1])
 
-    # The streak of the object in a frame: the pixels within 2 PSF sigmas of the segment it moves along during
-    #   the frame (centred on it), if that reaches the ring
-    streak = None
-    if motion is not None:
-        speed = math.hypot(*motion)
-        if 0.5*speed + 2*psf_sigma >= EXTENT_RING[0]:
-            ux, uy = motion[0]/speed, motion[1]/speed
-            t = np.clip(xx*ux + yy*uy, -0.5*speed, 0.5*speed)
-            streak = np.hypot(xx - t*ux, yy - t*uy) <= 2*psf_sigma
+    # The streak of the object in a frame, if it reaches the ring (see streakMask)
+    streak = streakMask(r, psf_sigma, motion)
 
     # The mean of the ring along every axis: the pixels of the ring close to the line through the centre in
     #   that direction (on both sides of the centre). The axes which are mostly on the streak are left out
@@ -3352,9 +3460,103 @@ def perFrameRows(cent, max_frames, phot=None):
     return np.array(rows)
 
 
+def curvatureSignificant(t, x, y, f_min=CURVATURE_MIN_F):
+    """ Whether a track is clearly curved in time (its position is not linear in time): an F-test of a quadratic
+        against a line, fitted to x(t) and y(t) together. The noise of the measurements is taken from the
+        residuals of the quadratic, so the test needs no position errors, and only a curvature well above the
+        scatter of the measurements passes.
+
+    Arguments:
+        t: [ndarray] Times of the measurements (frames).
+        x, y: [ndarray] Positions of the measurements (px).
+
+    Keyword arguments:
+        f_min: [float] Smallest F statistic of a significant curvature. CURVATURE_MIN_F by default.
+
+    Return:
+        [bool] True if the quadratic is significantly better than the line.
+    """
+
+    # The quadratic has 2 more parameters than the line (one per axis), and leaves 2n - 6 degrees of freedom
+    n = len(t)
+    if n < 6:
+        return False
+
+    # The residual sums of squares of the line and of the quadratic, of both axes. The time is centred for a
+    #   well-conditioned fit
+    tc = t - t.mean()
+    rss = []
+    for deg in (1, 2):
+        rss.append(sum(float(np.sum((v - np.polyval(np.polyfit(tc, v, deg), tc))**2)) for v in (x, y)))
+    rss_line, rss_quad = rss
+
+    # The improvement of the fit per added parameter, in units of the scatter left by the quadratic. A tiny
+    #   floor keeps exact (noise-free) positions from dividing by zero
+    scatter = max(rss_quad/(2*n - 6), 1e-12)
+    return (rss_line - rss_quad)/2.0/scatter > f_min
+
+
+def cleanTrackHits(hits, min_kept=0.5, min_hits=3):
+    """ The hits of a track without the ones whose velocity disagrees with the motion of the track. The velocity
+        of a hit is the velocity of the search whose sum was the largest there. A very bright object makes the
+        sums of many other velocities large too, at positions near its track (they pass over it in some frames),
+        and such hits can be linked to the track by their position, where they pull the motion model of the
+        measurement away from the object.
+
+    A hit is kept if its velocity is within 30% of the speed of the track, or within 3 steps of the velocity grid
+    of its search (bin/(run - 1) px per frame) for slow tracks. The velocity of the track is the median of the
+    velocities of its hits weighted by their significance: the hits of other velocities can be as many as the hits
+    of the object, but they collect only part of its light. A track whose hits mostly disagree (by their weight)
+    is kept as it is (e.g. a track whose speed changes a lot), so a track is never cut down to a few hits.
+
+    Arguments:
+        hits: [ndarray] Hits of the track, rows [frame, x, y, z, vx, vy, run, bin].
+
+    Keyword arguments:
+        min_kept: [float] Smallest fraction of the weight of the hits which has to be kept. 0.5 by default.
+        min_hits: [int] Smallest number of hits of a track (at least 3): a track is not cut below it. 3 by
+            default.
+
+    Return:
+        [ndarray] The kept hits.
+    """
+
+    # Too few hits to judge them, or hits without the velocity and the bin of their search
+    if (len(hits) < 6) or (hits.shape[1] < 8):
+        return hits
+
+    # The motion of the track: the median velocity of its hits, weighted by their significance
+    weights = np.maximum(hits[:, 3], 0.0)
+    if weights.sum() <= 0:
+        return hits
+    v = np.array([weightedMedian(hits[:, 4], weights), weightedMedian(hits[:, 5], weights)])
+    speed = math.hypot(*v)
+
+    # The tolerance of every hit: 30% of the speed, at least 3 steps of the velocity grid of its own search
+    step = hits[:, 7]/np.maximum(hits[:, 6] - 1, 1)
+    tolerance = np.maximum(0.3*speed, 3.0*step)
+    keep = np.hypot(hits[:, 4] - v[0], hits[:, 5] - v[1]) <= tolerance
+
+    # A track which would keep too few hits, or less than min_kept of their weight, is kept as it is
+    if (keep.sum() < max(3, min_hits)) or (weights[keep].sum() < min_kept*weights.sum()):
+        return hits
+
+    return hits[keep]
+
+
+def weightedMedian(values, weights):
+    """ The median of the values weighted by the weights: the value at which half of the weight is reached. """
+
+    # The values sorted, and the first one at which their cumulative weight reaches half of the total
+    order = np.argsort(values)
+    cumulative = np.cumsum(weights[order])
+    return float(values[order][np.searchsorted(cumulative, 0.5*cumulative[-1])])
+
+
 def smoothTrack(cent, frames, segment=512):
     """ Smooth positions of a track at the given frames: a quadratic fit of the measurements in every segment
-        of the track (lines for short segments). The model is stiff, so it cannot follow the noise.
+        of the track (lines for short segments, unless their curvature is clearly measured). The model is stiff,
+        so it cannot follow the noise.
 
     Arguments:
         cent: [ndarray] Centroids, rows [frame, x, y, ...], sorted by frame.
@@ -3385,8 +3587,15 @@ def smoothTrack(cent, frames, segment=512):
         tt = t[sel]
 
         # A quadratic needs enough measurements over a long enough time (otherwise its curvature fits the
-        #   noise): a line for short segments, a constant if all measurements are in the same frame
-        deg = 2 if (len(tt) >= 6) and (np.ptp(tt) > 128) else (1 if np.ptp(tt) > 0 else 0)
+        #   noise): a line for short segments, a constant if all measurements are in the same frame. A short
+        #   segment is quadratic too if its curvature is clearly measured (a bright fast object whose apparent
+        #   speed changes, which a line misses by several px in the middle and at the ends)
+        if (len(tt) >= 6) and (np.ptp(tt) > 128):
+            deg = 2
+        elif np.ptp(tt) > 0:
+            deg = 2 if curvatureSignificant(tt, cent[sel, 1], cent[sel, 2]) else 1
+        else:
+            deg = 0
 
         # The time is centred on the segment, for a well-conditioned fit
         t0 = tt.mean()

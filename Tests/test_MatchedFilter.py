@@ -365,6 +365,82 @@ def test_smooth_track_follows_curve():
     assert np.max(np.abs(ys - (50 - 0.05*f))) < 0.05
 
 
+def test_smooth_track_short_accelerating_track_with_gap():
+    """ A bright fast object whose apparent speed changes (6.25 to 7 px/frame over 108 frames, a short track) and
+        which was not measured in the middle of its track: the smooth track follows its curvature, also in the
+        gap, instead of a line which misses it by several px in the middle and at the ends.
+    """
+
+    # Positions along a line with a constant acceleration, measured in every frame but 37 - 71
+    f_all = np.arange(0, 108.0)
+    accel = (7.0 - 6.25)/107
+    s_all = 6.25*f_all + 0.5*accel*f_all**2
+    u = np.array([-0.33, -0.94])/np.hypot(0.33, 0.94)
+    measured = (f_all < 37) | (f_all > 71)
+    rng = np.random.default_rng(4)
+    cent = np.column_stack([f_all[measured], 1364 + s_all[measured]*u[0] + rng.normal(0, 0.05, measured.sum()),
+                            722 + s_all[measured]*u[1] + rng.normal(0, 0.05, measured.sum())])
+
+    xs, ys = smoothTrack(cent, f_all.astype(int))
+    err = np.hypot(xs - (1364 + s_all*u[0]), ys - (722 + s_all*u[1]))
+    assert np.max(err) < 0.2
+
+
+def test_curvature_of_noisy_short_tracks_not_fitted():
+    """ Faint straight short tracks (position errors of 0.5 px): the curvature is not significant, so the smooth
+        track stays a line and doesn't follow the noise; a clearly curved bright one is found curved.
+    """
+
+    rng = np.random.default_rng(5)
+    t = np.arange(0, 100.0, 2)
+    n_curved = 0
+    for _ in range(200):
+        x = 10 + 0.3*t + rng.normal(0, 0.5, len(t))
+        y = 40 - 0.2*t + rng.normal(0, 0.5, len(t))
+        n_curved += mfd.curvatureSignificant(t, x, y)
+
+    # A false curvature at the 5 sigma level is very rare
+    assert n_curved <= 1
+
+    # 1 px of curvature over the track, measured to 0.05 px
+    x = 10 + 0.3*t + 4.0/100**2*(t - 50)**2 + rng.normal(0, 0.05, len(t))
+    y = 40 - 0.2*t + rng.normal(0, 0.05, len(t))
+    assert mfd.curvatureSignificant(t, x, y)
+
+
+def test_hits_with_another_velocity_removed_from_a_track():
+    """ Hits linked to a track by their position but found with a very different velocity (the sums of other
+        velocities through a bright object) are removed; a track whose speed changes keeps its hits, and a track
+        whose hits mostly disagree is kept as it is.
+    """
+
+    f = np.arange(0, 120, 4.0)
+    good = np.column_stack([f, 100 + 3.0*f, 50 - 0.4*f, np.full(len(f), 50.0), np.full(len(f), 3.0),
+                            np.full(len(f), -0.4), np.full(len(f), 16.0), np.full(len(f), 2.0)])
+    ghosts = np.array([[8.0, 125.0, 30.0, 30.0, 4.6, -10.3, 8.0, 4.0], [40.0, 220.0, 70.0, 30.0, 5.7, 12.0, 8.0, 4.0]])
+    hits = np.vstack([good, ghosts])
+    hits = hits[np.argsort(hits[:, 0], kind='stable')]
+    cleaned = mfd.cleanTrackHits(hits)
+    assert len(cleaned) == len(good) and not np.any(np.isin(cleaned[:, 5], [-10.3, 12.0]))
+
+    # A track whose speed changes by 25% keeps all its hits
+    accel = good.copy()
+    accel[:, 4] = np.linspace(2.7, 3.4, len(f))
+    assert len(mfd.cleanTrackHits(accel)) == len(accel)
+
+    # As many hits of other velocities as of the object, but much weaker: they are still removed
+    many = np.vstack([good, np.tile(ghosts, (len(good)//2 + 1, 1))])
+    many = many[np.argsort(many[:, 0], kind='stable')]
+    assert len(mfd.cleanTrackHits(many)) == len(good)
+
+    # A track is not cut below the smallest number of hits of a track: then it is kept as it is
+    assert len(mfd.cleanTrackHits(hits, min_hits=len(good) + 1)) == len(hits)
+
+    # Hits which mostly disagree by their weight: the track is kept as it is
+    mixed = np.vstack([good[:5], np.tile(ghosts*[1, 1, 1, 3, 1, 1, 1, 1], (4, 1))])
+    assert len(mfd.cleanTrackHits(mixed)) == len(mixed)
+
+
 def test_smooth_positions_reduce_errors_without_bias():
     """ Noisy positions along a curved track (a bend of 4 px over 400 frames, as across a distorted field):
         combining them over +-64 frames reduces the error several times and does not follow the noise.
@@ -881,6 +957,57 @@ def test_extent_line_tells_points_from_lines():
     # Noise alone: the brightest axis is not significant
     significances = [mfd.extentLine(rng.normal(0, 1/np.sqrt(n), xx.shape), PSF_SIGMA, n)[1] for _ in range(50)]
     assert max(significances) < mfd.LINE_MIN_SIGNIFICANCE
+
+
+def test_extent_concentration_fast_streak():
+    """ An object moving fast enough to be a long streak in every frame (up to 22 px/frame) lights the ring of the
+        concentration along its motion: with the motion given, its streak is left out and it is a point source,
+        while a cloud-like structure moving the same way is still extended.
+    """
+
+    r = mfd.EXTENT_RADIUS
+    yy, xx = np.mgrid[-r:r + 1, -r:r + 1].astype(float)
+    for speed in (6.0, 10.0, 15.0, 22.0):
+        motion = speed*np.array([np.cos(0.3), np.sin(0.3)])
+
+        # The PSF smeared over the frame along the motion
+        streak = sum(np.exp(-0.5*((xx - motion[0]*d)**2 + (yy - motion[1]*d)**2)/PSF_SIGMA**2)
+                     for d in np.linspace(-0.5, 0.5, 41))/41
+        assert mfd.extentConcentration(streak, PSF_SIGMA, motion=motion) > 0.95
+
+        # A smooth structure as wide as the stack, with the streak on top of it
+        blob = np.exp(-0.5*(xx**2 + yy**2)/6.0**2)
+        assert mfd.extentConcentration(blob + 0.3*streak, PSF_SIGMA, motion=motion) < 0.6
+
+    # A PSF so wide that its streak covers the whole ring: the whole ring is used, the concentration is a number
+    wide = np.exp(-0.5*(xx**2 + yy**2)/5.0**2)
+    assert np.isfinite(mfd.extentConcentration(wide, 5.0, motion=(3.0, 1.0)))
+
+    # Without the motion, the long streak reaches the ring (as before the motion was used)
+    motion = 22.0*np.array([np.cos(0.3), np.sin(0.3)])
+    streak = sum(np.exp(-0.5*((xx - motion[0]*d)**2 + (yy - motion[1]*d)**2)/PSF_SIGMA**2)
+                 for d in np.linspace(-0.5, 0.5, 41))/41
+    assert mfd.extentConcentration(streak, PSF_SIGMA) < 0.85
+
+
+def test_pieces_of_the_same_object_on_its_path():
+    """ A track on the path of another (a piece of the same object, also ahead of it along the path) is on its
+        path; a track moving the same way 15 px beside it is not.
+    """
+
+    f = np.arange(0, 100)
+    path = (f, 100 + 6.0*f, 50 + 2.0*f)
+    piece = (f[20:40], 100 + 6.0*f[20:40] + 0.4, 50 + 2.0*f[20:40] - 0.3)
+    ahead = (f[20:40], 100 + 6.0*(f[20:40] + 3), 50 + 2.0*(f[20:40] + 3))
+    beside = (f[20:40], 100 + 6.0*f[20:40] - 15*2.0/np.hypot(6, 2), 50 + 2.0*f[20:40] + 15*6.0/np.hypot(6, 2))
+    assert mfd.onPath(piece, path, 5.0) and mfd.onPath(path, piece, 5.0)
+    assert mfd.onPath(ahead, path, 5.0) and mfd.onPath(path, ahead, 5.0)
+    assert not mfd.onPath(beside, path, 5.0) and not mfd.onPath(path, beside, 5.0)
+
+    # Positions 22 px apart along the path (a frame apart): a track 12 px beside it is not on it
+    fast = (f, 100 + 22.0*f, 50 + 0.0*f)
+    beside_fast = (f[20:40], 100 + 22.0*f[20:40], 62 + 0.0*f[20:40])
+    assert not mfd.onPath(beside_fast, fast, 6.0)
 
 
 def test_extent_line_fast_object_not_a_line():
@@ -1713,6 +1840,22 @@ def test_fast_object_found_on_coarse_tier(config):
     assert len(detections) == 0
 
 
+def test_fast_accelerating_object_kept(config):
+    """ A bright fast object whose speed changes along its short track (1.2 to 1.8 px/frame over 80 frames) is
+        kept and measured accurately: the smooth track used to test its shape follows the change of speed.
+    """
+
+    config.mf_ang_vel_max = 3.0
+    accel = (1.8 - 1.2)/80
+    obj = {'snr': 15.0, 'f0': 100, 'f1': 180,
+           'pos': lambda f: (10 + (1.2*(f - 100) + 0.5*accel*(f - 100)**2)*0.8,
+                             15 + (1.2*(f - 100) + 0.5*accel*(f - 100)**2)*0.6)}
+    det, detections = runDetector(_SynthHandle([obj], total_frames=256), config)
+
+    assert len(detections) == 1
+    assert np.sqrt(np.mean(truthError(detections[0][2], obj)**2)) < 0.3
+
+
 def test_coarse_tier_keeps_nearby_peaks(config):
     """ The local maxima of the hits are found within +-4 unbinned px on every tier: 5x5 pixels of 2x2 bins, the
         3x3 neighbours on 4x4 bins, so two objects 8 px apart give two hits on 4x4 bins (a 5x5 neighbourhood of
@@ -1783,6 +1926,103 @@ def test_merged_detections_keep_their_calibration(tmp_path, calibrated):
     entries = FTPdetectinfo.readFTPdetectinfo(os.path.dirname(merged), os.path.basename(merged))
     assert len(entries) == 2
     assert all(meas[0] == int(all(calibrated)) for entry in entries for meas in entry[11])
+
+
+def test_streak_samples():
+    """ Without the streak every frame is one sample at the shift of the middle of the frame, with the weight 1.
+        With it, a velocity of L px per frame samples every frame round(L) times along the motion, centred on the
+        middle of the frame, with the weight 1/sqrt(samples per frame).
+    """
+
+    from RMS.Routines.MatchedFilterKernels import velocityShifts, velocitySamples
+    vel = np.array([[0.0, 0.0], [0.4, 0.2], [3.0, 0.0], [2.0, -2.0]])
+    shifts = velocityShifts(vel, 8)
+    samples, counts, weights = velocitySamples(vel, 8)
+    assert np.all(counts == 8) and np.all(weights == 1.0)
+    assert np.array_equal(samples[:, :8, :2], shifts) and np.array_equal(samples[0, :8, 2], np.arange(8))
+
+    samples, counts, weights = velocitySamples(vel, 8, streak=True)
+    per_frame = [1, 1, 3, 3]
+    assert list(counts) == [8*m for m in per_frame]
+    assert np.allclose(weights, 1/np.sqrt(per_frame))
+
+    # On smoothed frames the noise of neighbouring samples is correlated, and their sum is weighted less
+    _, _, weights_smooth = velocitySamples(vel, 8, streak=True, smooth_sigma=0.5)
+    assert np.allclose(weights_smooth[:2], 1.0) and np.all(weights_smooth[2:] < weights[2:])
+
+    # The 3 samples of a frame of the velocity (3, 0) are 1 px apart around the middle of the frame
+    v = 2
+    for k in range(8):
+        dx = samples[v, 3*k:3*k + 3, 0]
+        assert np.all(samples[v, 3*k:3*k + 3, 2] == k)
+        assert np.array_equal(dx - dx[1], [-1, 0, 1]) and dx[1] == shifts[v, k, 0]
+
+
+def test_streak_search_collects_the_streak():
+    """ A fast object, a streak of 4 px in every frame: summing the whole streak raises its stack above the noise
+        by about sqrt(4)/2 more than the middle alone (the streak sampling adds the light of the whole streak, and
+        the noise of the stack stays the same).
+    """
+
+    rng = np.random.default_rng(11)
+    n = 8
+    v = np.array([4.0, 0.0])
+    frames = rng.normal(0, 1, (n, 64, 64)).astype(np.float32)
+    clean = np.zeros_like(frames)
+    for k in range(n):
+        renderObject(clean[k], 20 + v[0]*(k - (n - 1)/2.0) + 12, 32, 3.0, vx=v[0], vy=v[1], n_sub=21)
+    frames += clean
+
+    vel = np.array([[4.0, 0.0]])
+    plain, _ = VelocityStacker(vel, n).stackMax(frames)
+    streak, _ = VelocityStacker(vel, n, streak=True).stackMax(frames)
+    noise_plain, _ = VelocityStacker(vel, n).stackMax(frames - clean)
+    noise_streak, _ = VelocityStacker(vel, n, streak=True).stackMax(frames - clean)
+
+    # The noise of the two stacks is the same, the signal of the streak stack higher
+    assert abs(np.std(noise_streak)/np.std(noise_plain) - 1) < 0.1
+    snr_plain = plain[32, 32]/np.std(noise_plain)
+    snr_streak = streak[32, 32]/np.std(noise_streak)
+    assert snr_streak > 1.4*snr_plain
+
+    # The same on smoothed frames (correlated noise of neighbouring pixels), with the weights of that smoothing
+    sigma = 0.7
+    sm = np.array([cv2.GaussianBlur(f, (0, 0), sigma) for f in frames])
+    sm_noise = np.array([cv2.GaussianBlur(f, (0, 0), sigma) for f in frames - clean])
+    noise_plain, _ = VelocityStacker(vel, n).stackMax(sm_noise)
+    noise_streak, _ = VelocityStacker(vel, n, streak=True, smooth_sigma=sigma).stackMax(sm_noise)
+    assert abs(np.std(noise_streak)/np.std(noise_plain) - 1) < 0.1
+
+
+def test_streak_weights_follow_the_smoothing():
+    """ The weights of the streak samples can be set again for another smoothing (e.g. after the PSF was
+        measured), and are then the same as for a stacker made with that smoothing.
+    """
+
+    vel = velocityGrid(6.0, 8, 2)
+    stacker = VelocityStacker(vel, 8, streak=True, smooth_sigma=0.5)
+    stacker.setSmoothing(0.8)
+    assert np.array_equal(stacker.weights, VelocityStacker(vel, 8, streak=True, smooth_sigma=0.8).weights)
+
+
+@pytest.mark.skipif(not CUDA_AVAILABLE, reason="CUDA is not available")
+def test_gpu_streak_stacks_agree_with_the_cpu():
+    """ With the streak samples, the stacks of the GPU (single and runs) agree with the CPU. The velocity of the
+        largest sum may differ where several velocities give nearly the same sum (many fast velocities sample
+        nearly the same pixels, and the CPU rounds differently), so a small fraction of the indices may differ.
+    """
+
+    rng = np.random.default_rng(12)
+    frames = rng.normal(0, 1, (24, 48, 80)).astype(np.float32)
+    vel = velocityGrid(6.0, 8, 2)
+    cpu = VelocityStacker(vel, 8, use_gpu=False, streak=True)
+    gpu = VelocityStacker(vel, 8, use_gpu=True, streak=True)
+    m_cpu, i_cpu = cpu.stackMax(frames[:8])
+    m_gpu, i_gpu = gpu.stackMax(frames[:8])
+    assert np.allclose(m_cpu, m_gpu, atol=1e-4) and np.mean(i_cpu == i_gpu) > 0.99
+    r_cpu, _ = cpu.stackMaxRuns(frames, [0, 8, 16])
+    r_gpu, _ = gpu.stackMaxRuns(frames, [0, 8, 16])
+    assert np.allclose(r_cpu, r_gpu, atol=1e-4)
 
 
 @pytest.mark.skipif(not CUDA_AVAILABLE, reason='No GPU')
