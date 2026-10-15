@@ -771,7 +771,12 @@ def coincidence(args):
     """ The same stars on two cameras (by catalog oid, same blocks by time): correlation of their
     per-frame fluctuations, and whether the strongest dips of one camera recur on the other. """
 
-    def load(lc_dir):
+    def load(lc_dir, hot_json):
+        global HOT_XY
+        if hot_json:
+            from RMS.HotPixels import hotPixelCoords
+            with open(hot_json) as f:
+                HOT_XY = hotPixelCoords(json.load(f))
         out = {}
         for p in sorted(glob.glob(os.path.join(lc_dir, 'LC_*.npz'))):
             d = np.load(p)
@@ -780,7 +785,7 @@ def coincidence(args):
             out[float(d['t'][0])] = (d['t'], d['oid'], x, d['mag'], d['n_sat'], s['hot'])
         return out
 
-    a, b = load(args.lc_dir), load(args.other)
+    a, b = load(args.lc_dir, args.hot_pixels), load(args.other, args.hot_pixels_other)
     tb = np.array(sorted(b.keys()))
     corr, z_pairs, n_common, dt_frames = [], [], 0, []
     for t0, (ta, oa, xa, ma, sa, ha) in sorted(a.items()):
@@ -888,6 +893,7 @@ def main(argv=None):
     k = sub.add_parser('coincidence', help="the same stars on two cameras")
     k.add_argument('--lc-dir', required=True)
     k.add_argument('--other', required=True, help="the other camera's light-curve directory")
+    k.add_argument('--hot-pixels-other', help="the other camera's hotpixels.json")
     k.set_defaults(func=coincidence)
 
     for sp in (p, c, m, o, k):
