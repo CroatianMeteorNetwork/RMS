@@ -5,6 +5,7 @@ from __future__ import print_function, division, absolute_import
 import os
 import zlib
 import sys
+import tempfile
 
 # Import the requests library for downloading the GMN star catalog
 try:
@@ -21,8 +22,88 @@ from RMS.Misc import RmsDateTime
 from datetime import datetime
 
 
+# Data structure for the GMN catalog (v1 - 18 columns, legacy format)
+GMN_CATALOG_DTYPE_V1 = np.dtype([
+    ('designation', 'S30'),
+    ('ra', 'f8'),
+    ('dec', 'f8'),
+    ('pmra', 'f8'),
+    ('pmdec', 'f8'),
+    ('phot_g_mean_mag', 'f4'),
+    ('phot_bp_mean_mag', 'f4'),
+    ('phot_rp_mean_mag', 'f4'),
+    ('classprob_dsc_specmod_star', 'f4'),
+    ('classprob_dsc_specmod_binarystar', 'f4'),
+    ('spectraltype_esphs', 'S8'),
+    ('B', 'f4'),
+    ('V', 'f4'),
+    ('R', 'f4'),
+    ('Ic', 'f4'),
+    ('oid', 'i4'),
+    ('preferred_name', 'S30'),
+    ('Simbad_OType', 'S30')
+])
+
+# Data structure for the GMN catalog (v2 - 20 columns, with common_name and bayer_name)
+GMN_CATALOG_DTYPE_V2 = np.dtype([
+    ('designation', 'S30'),
+    ('ra', 'f8'),
+    ('dec', 'f8'),
+    ('pmra', 'f8'),
+    ('pmdec', 'f8'),
+    ('phot_g_mean_mag', 'f4'),
+    ('phot_bp_mean_mag', 'f4'),
+    ('phot_rp_mean_mag', 'f4'),
+    ('classprob_dsc_specmod_star', 'f4'),
+    ('classprob_dsc_specmod_binarystar', 'f4'),
+    ('spectraltype_esphs', 'S8'),
+    ('B', 'f4'),
+    ('V', 'f4'),
+    ('R', 'f4'),
+    ('Ic', 'f4'),
+    ('oid', 'i4'),
+    ('preferred_name', 'S30'),
+    ('common_name', 'S30'),
+    ('bayer_name', 'S30'),
+    ('Simbad_OType', 'S30')
+])
+
+
+def gmnCatalogDtype(num_columns):
+    """ Select the GMN catalog dtype based on the number of columns declared in the header. """
+    if num_columns >= 20:
+        return GMN_CATALOG_DTYPE_V2
+    return GMN_CATALOG_DTYPE_V1
+
+
+def removeFileSilently(path):
+    """ Remove a file, ignoring the error if it does not exist. """
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
 def downloadCatalog(url, dir_path, file_name):
-    """ Download a catalog file from a given URL and save it to the specified directory. """
+    """ Download a catalog file from a given URL and save it to the specified directory.
+
+    The file is first written to a unique temporary ".part" file in the same directory and only
+    moved into its final location once the download has completed (and, when the server reports a
+    Content-Length, once the full size has been received). This guarantees that an interrupted
+    download can never leave a partial/corrupt catalog at the destination path. The temp name is
+    made unique (via tempfile.mkstemp) so concurrent processes downloading the same catalog do not
+    clobber each other's temp file.
+
+    Note: if the server reports no Content-Length and closes the connection cleanly but early, the
+    truncation cannot be detected here (there is no expected size to check against).
+    """
+
+    dest_path = os.path.join(dir_path, file_name)
+
+    # Create a unique temp file in the same directory (so os.replace stays atomic on one filesystem).
+    # Close the descriptor immediately and reopen by path below, so an early failure cannot leak the fd.
+    tmp_fd, tmp_path = tempfile.mkstemp(prefix=file_name + ".", suffix=".part", dir=dir_path)
+    os.close(tmp_fd)
 
     try:
         response = urlopen(url)
@@ -30,27 +111,109 @@ def downloadCatalog(url, dir_path, file_name):
         block_size = 1024 * 1024  # 1 MB
         downloaded_size = 0
 
-        with open(os.path.join(dir_path, file_name), 'wb') as f:
+        with open(tmp_path, 'wb') as f:
             while True:
                 data = response.read(block_size)
                 if not data:
                     break
                 downloaded_size += len(data)
                 f.write(data)
-                print("\rDownloading: {:.2f}%".format(100 * float(downloaded_size) / total_size), end='')
-                sys.stdout.flush()
+                if total_size > 0:
+                    print("\rDownloading: {:.2f}%".format(100 * float(downloaded_size) / total_size), end='')
+                    sys.stdout.flush()
+
+        # If the server declared the size, make sure the whole file was received
+        if (total_size > 0) and (downloaded_size != total_size):
+            print("\nIncomplete download: received {} of {} bytes.".format(downloaded_size, total_size))
+            removeFileSilently(tmp_path)
+            return False
+
+        # Atomically move the completed file into place (atomic when on the same filesystem)
+        try:
+            os.replace(tmp_path, dest_path)
+        except AttributeError:
+            # Python 2 fallback: os.replace is unavailable, emulate the overwrite
+            removeFileSilently(dest_path)
+            os.rename(tmp_path, dest_path)
 
         print(" - Done!")  # Move to the next line after download completes
 
         return True
-    
+
     except HTTPError as e:
         print("HTTP Error: ", e.code, url)
+        removeFileSilently(tmp_path)
         return False
-    
+
     except URLError as e:
         print("URL Error: ", e.reason, url)
+        removeFileSilently(tmp_path)
         return False
+
+    except Exception as e:
+        # Any other failure (e.g. a connection reset mid-stream) must not leave a partial file
+        print("\nError downloading catalog: {}".format(e))
+        removeFileSilently(tmp_path)
+        return False
+
+
+# Exceptions raised by loadGMNStarCatalog when the catalog file is truncated or corrupt
+# (bad header, failed zlib decompression, buffer smaller than the declared record count, etc.).
+CORRUPT_CATALOG_ERRORS = (zlib.error, ValueError, OSError, EOFError, IndexError)
+
+
+def loadGMNCatalog(dir_path, use_full_catalog, full_name, full_url, fallback_name, load_kwargs):
+    """ Load the GMN star catalog, lazily downloading and repairing the full catalog as needed.
+
+    The full (LM+12.0) catalog is downloaded only if it is missing. Integrity is checked lazily:
+    the file is simply loaded, and only if the load fails (a truncated/corrupt file, e.g. from an
+    interrupted download) is it deleted and downloaded once more. This avoids reading and
+    decompressing the catalog twice on every start-up, which matters on worn SD cards. If the full
+    catalog still cannot be loaded, the bundled LM+9.0 catalog is used instead.
+
+    Arguments:
+        dir_path: [str] Directory holding the catalog files.
+        use_full_catalog: [bool] Whether the full (LM+12.0) catalog is required.
+        full_name: [str] File name of the full (LM+12.0) catalog.
+        full_url: [str] URL to download the full catalog from.
+        fallback_name: [str] File name of the catalog to use if the full one is unavailable.
+        load_kwargs: [dict] Keyword arguments passed through to loadGMNStarCatalog.
+
+    Return:
+        Whatever loadGMNStarCatalog returns for the catalog that was successfully loaded.
+    """
+
+    if use_full_catalog:
+
+        full_path = os.path.join(dir_path, full_name)
+
+        # Download the full catalog if it is not present yet
+        if not os.path.exists(full_path):
+            print("The full catalog ({}) is being downloaded from the GMN server...".format(full_name))
+            downloadCatalog(full_url, dir_path, full_name)
+
+        # Try to load the full catalog; repair it once if the load reveals corruption
+        if os.path.exists(full_path):
+
+            try:
+                return loadGMNStarCatalog(full_path, catalog_file=full_name, **load_kwargs)
+
+            except CORRUPT_CATALOG_ERRORS as e:
+                print("Full star catalog '{}' is corrupt ({}) - re-downloading.".format(full_name, e))
+                removeFileSilently(full_path)
+
+                if downloadCatalog(full_url, dir_path, full_name):
+                    try:
+                        return loadGMNStarCatalog(full_path, catalog_file=full_name, **load_kwargs)
+                    except CORRUPT_CATALOG_ERRORS as e2:
+                        print("Re-downloaded catalog still unreadable ({}).".format(e2))
+                        removeFileSilently(full_path)
+
+        print("Could not obtain the full catalog, loading '{}' instead.".format(fallback_name))
+
+    # Load the fallback (LM+9.0) catalog
+    fallback_path = os.path.join(dir_path, fallback_name)
+    return loadGMNStarCatalog(fallback_path, catalog_file=fallback_name, **load_kwargs)
 
 @memoizeSingle
 def readBSC(file_path, file_name, years_from_J2000=0):
@@ -219,28 +382,6 @@ def loadGMNStarCatalog(file_path,
     # Step 1: Cache the catalog data to avoid repeated decompression
     if not hasattr(loadGMNStarCatalog, cache_name):
 
-        # Define the data structure for the catalog
-        data_types = [
-            ('designation', 'S30'),
-            ('ra', 'f8'),
-            ('dec', 'f8'),
-            ('pmra', 'f8'),
-            ('pmdec', 'f8'),
-            ('phot_g_mean_mag', 'f4'),
-            ('phot_bp_mean_mag', 'f4'),
-            ('phot_rp_mean_mag', 'f4'),
-            ('classprob_dsc_specmod_star', 'f4'),
-            ('classprob_dsc_specmod_binarystar', 'f4'),
-            ('spectraltype_esphs', 'S8'),
-            ('B', 'f4'),
-            ('V', 'f4'),
-            ('R', 'f4'),
-            ('Ic', 'f4'),
-            ('oid', 'i4'),
-            ('preferred_name', 'S30'),
-            ('Simbad_OType', 'S30')
-        ]
-
         with open(file_path, 'rb') as fid:
 
             # Read the catalog header
@@ -248,6 +389,9 @@ def loadGMNStarCatalog(file_path,
             num_rows = int(np.fromfile(fid, dtype=np.uint32, count=1)[0])
             num_columns = int(np.fromfile(fid, dtype=np.uint32, count=1)[0])
             fid.read(declared_header_size - 12)  # Skip column names
+
+            # Select data types based on number of columns (v1=18, v2=20)
+            data_types = gmnCatalogDtype(num_columns)
 
             # Read and decompress the catalog data
             compressed_data = fid.read()
@@ -263,19 +407,52 @@ def loadGMNStarCatalog(file_path,
 
     # Step 2: Compute synthetic magnitudes if required
     if mag_band_ratios is not None:
-        
-        # Compute synthetic magnitudes if band ratios are provided
+
+        # Validate band_ratios length - GMN catalog expects 7 bands [B, V, R, I, G, BP, RP]
+        if len(mag_band_ratios) != 7:
+            # If wrong length, fall back to V band only
+            print("Warning: GMN catalog expects 7 band ratios (B,V,R,I,G,BP,RP), "
+                  "got {}. Using V band only.".format(len(mag_band_ratios)))
+            mag_band_ratios = None
+
+    if mag_band_ratios is not None:
+        # Compute synthetic magnitudes by combining fluxes (not magnitudes).
+        # The camera integrates photon flux across its bandpass, so the correct
+        # combination is: m = -2.5*log10(sum(r_i * 10^(-0.4*m_i)))
         total_ratio = sum(mag_band_ratios)
         rb, rv, rr, ri, rg, rbp, rrp = [x/total_ratio for x in mag_band_ratios]
-        synthetic_mag = (
-            rb*catalog_data['B'] +
-            rv*catalog_data['V'] +
-            rr*catalog_data['R'] +
-            ri*catalog_data['Ic'] +
-            rg*catalog_data['phot_g_mean_mag'] +
-            rbp*catalog_data['phot_bp_mean_mag'] +
-            rrp*catalog_data['phot_rp_mean_mag']
-        )
+
+        band_mags = [
+            (rb,  catalog_data['B']),
+            (rv,  catalog_data['V']),
+            (rr,  catalog_data['R']),
+            (ri,  catalog_data['Ic']),
+            (rg,  catalog_data['phot_g_mean_mag']),
+            (rbp, catalog_data['phot_bp_mean_mag']),
+            (rrp, catalog_data['phot_rp_mean_mag']),
+        ]
+
+        # Sum weighted fluxes from all bands with nonzero ratios.
+        # Skip bands where magnitude is 0.0 (old sentinel for missing data) or NaN,
+        # and renormalize the remaining ratios per-star so that missing bands don't
+        # artificially brighten or dim the synthetic magnitude.
+        total_flux = np.zeros(len(catalog_data), dtype=np.float64)
+        valid_ratio_sum = np.zeros(len(catalog_data), dtype=np.float64)
+
+        for ratio, mags in band_mags:
+            if ratio > 0:
+                valid = np.isfinite(mags) & (mags != 0.0)
+                total_flux += np.where(valid, ratio * np.power(10, -0.4 * mags), 0.0)
+                valid_ratio_sum += np.where(valid, ratio, 0.0)
+
+        # Renormalize for stars with missing bands
+        valid_ratio_sum = np.maximum(valid_ratio_sum, 1e-30)
+        total_flux /= valid_ratio_sum
+
+        # Convert combined flux back to magnitude
+        # Stars where ALL requested bands are missing get ~75 mag and are filtered by LM cut
+        total_flux = np.maximum(total_flux, 1e-30)
+        synthetic_mag = -2.5 * np.log10(total_flux)
         mag_mask = synthetic_mag <= lim_mag
 
     else:
@@ -328,14 +505,12 @@ def loadGMNStarCatalog(file_path,
         else:
             requested = list(additional_fields)
 
-        # Sanity-check
+        # Filter to only fields that exist in this catalog version (backward compatibility)
         valid = set(catalog_data.dtype.names)
-        unknown = [n for n in requested if n not in valid]
-        if unknown:
-            raise ValueError("Unknown field(s) in additional_fields:" + ', '.join(unknown))
+        available = [n for n in requested if n in valid]
 
-        # Populate dict
-        for name in requested:
+        # Populate dict with available fields only
+        for name in available:
             extras_dict[name] = catalog_data[name]
 
     # Stack core fields for legacy callers
@@ -363,10 +538,12 @@ def loadGMNStarCatalog(file_path,
         mag_band_string = mag_band_string.strip()
 
     # Step 8: Return the filtered data, magnitude band string, and band ratios
+    # GMN catalog uses 7 bands: B, V, R, I, G, BP, RP - default to V band only
+    default_gmn_ratios = [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     if additional_fields:
-        return core_data, mag_band_string, tuple(mag_band_ratios or [0.0, 1.0, 0.0, 0.0]), extras_dict
+        return core_data, mag_band_string, tuple(mag_band_ratios or default_gmn_ratios), extras_dict
     else:
-        return core_data, mag_band_string, tuple(mag_band_ratios or [0.0, 1.0, 0.0, 0.0])
+        return core_data, mag_band_string, tuple(mag_band_ratios or default_gmn_ratios)
 
 
 def readStarCatalog(dir_path, file_name, years_from_J2000=0, lim_mag=None,
@@ -382,9 +559,9 @@ def readStarCatalog(dir_path, file_name, years_from_J2000=0, lim_mag=None,
             correction.
         lim_mag: [float] Limiting magnitude. Stars fainter than this magnitude will be filtered out. None by
             default.
-        mag_band_ratios: [list] A list of relative contributions of every photometric band (BVRI) to the 
-            final camera-bandpass magnitude. The list should contain 4 numbers, one for every band: 
-                [B, V, R, I].
+        mag_band_ratios: [list] A list of relative contributions of every photometric band to the
+            final camera-bandpass magnitude. For the GMN catalog, 7 numbers: [B, V, R, I, G, BP, RP].
+            Legacy catalogs use only the first 4 elements [B, V, R, I].
         additional_fields: [list | str | None] Extra GMN column names to return, or "all".
             Passed straight through to `loadGMNStarCatalog`. Ignored for other catalog types.
     
@@ -425,9 +602,6 @@ def readStarCatalog(dir_path, file_name, years_from_J2000=0, lim_mag=None,
         gmn_starcat_lm9 = "GMN_StarCatalog_LM9.0.bin"
         gmn_starcat_lm12 = "GMN_StarCatalog_LM12.0.bin"
 
-        # Check the existence of the LM 12.0 catalog file
-        gmn_starcat_lm12_exists = os.path.exists(os.path.join(dir_path, gmn_starcat_lm12))
-
         # Ensure mag_band_ratios is a tuple for caching
         if (mag_band_ratios is not None) and isinstance(mag_band_ratios, list):
             mag_band_ratios = tuple(mag_band_ratios)
@@ -436,46 +610,24 @@ def readStarCatalog(dir_path, file_name, years_from_J2000=0, lim_mag=None,
         if (additional_fields is not None) and isinstance(additional_fields, list):
             additional_fields = tuple(additional_fields)
 
-        # Determine which catalog file to use based on the limiting magnitude
-        if (lim_mag is not None) and (lim_mag <= 9.0):
-            catalog_to_load = gmn_starcat_lm9
+        # URL to the LM+12.0 catalog
+        gmn_starcat_lm12_url = "https://globalmeteornetwork.org/projects/gmn_star_catalog/GMN_StarCatalog_LM12.0.bin"
 
-        else:
+        # The full (LM+12.0) catalog is only needed when stars fainter than mag 9.0 are requested
+        use_full_catalog = (lim_mag is None) or (lim_mag > 9.0)
 
-            # If the full catalog is missing, post a notification and load the LM9.0 catalog
-            if gmn_starcat_lm12_exists:
-
-                catalog_to_load = gmn_starcat_lm12
-
-            else:
-
-                # URL to the LM+12.0 catalog
-                gmn_starcat_lm12_url = "https://globalmeteornetwork.org/projects/gmn_star_catalog/GMN_StarCatalog_LM12.0.bin"
-
-                # Display a warning message that the catalog will be downloaded
-                print("The full catalog (LM+12.0) is beind downloaded from the GMN server... ")
-
-                # Download the full catalog from the GMN server
-                download_status = downloadCatalog(gmn_starcat_lm12_url, dir_path, gmn_starcat_lm12)
-
-                if download_status:
-                    catalog_to_load = gmn_starcat_lm12
-
-                else:
-                    print("Error downloading the full catalog, loading the LM+9.0 catalog instead. ")
-                    catalog_to_load = gmn_starcat_lm9
-
-
-        file_path = os.path.join(dir_path, catalog_to_load)
-
-        return loadGMNStarCatalog(
-            file_path, 
-            years_from_J2000=years_from_J2000, 
-            lim_mag=lim_mag, 
+        # Lazily load the catalog: the full catalog is downloaded if missing, and re-downloaded
+        # only if a load attempt reveals it is corrupt (e.g. an interrupted download), falling
+        # back to the LM+9.0 catalog if it cannot be obtained.
+        load_kwargs = dict(
+            years_from_J2000=years_from_J2000,
+            lim_mag=lim_mag,
             mag_band_ratios=mag_band_ratios,
-            catalog_file=catalog_to_load,
-            additional_fields=additional_fields
+            additional_fields=additional_fields,
         )
+
+        return loadGMNCatalog(dir_path, use_full_catalog, gmn_starcat_lm12,
+                              gmn_starcat_lm12_url, gmn_starcat_lm9, load_kwargs)
 
 
     ### Default to loading the SKY2000 catalog ###
@@ -540,8 +692,12 @@ def readStarCatalog(dir_path, file_name, years_from_J2000=0, lim_mag=None,
                     rr /= ratio_sum
                     ri /= ratio_sum
 
-                    # Calculate the camera-band magnitude
-                    mag_spectrum = rb*mag_b + rv*mag_v + rr*mag_r + ri*mag_i
+                    # Calculate the camera-band magnitude by combining fluxes
+                    total_flux = 0
+                    for ratio, mag in [(rb, mag_b), (rv, mag_v), (rr, mag_r), (ri, mag_i)]:
+                        if ratio > 0:
+                            total_flux += ratio * 10**(-0.4 * mag)
+                    mag_spectrum = -2.5 * np.log10(max(total_flux, 1e-30))
 
 
                 else:

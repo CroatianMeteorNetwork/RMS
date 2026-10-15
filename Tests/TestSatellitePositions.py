@@ -4,6 +4,7 @@ import os
 import shutil
 import datetime
 import tempfile
+import glob
 from unittest.mock import patch
 
 from RMS.Routines.SatellitePositions import loadTLEs, SatellitePredictor, SKYFIELD_AVAILABLE
@@ -21,34 +22,100 @@ class TestSatellitePositions(unittest.TestCase):
             self.skipTest("Skyfield not installed")
             
         cache_file = "test_tle.txt"
-        cache_path = os.path.join(self.test_dir, cache_file)
         
-        # Test download
-        with patch('urllib.request.urlretrieve') as mock_download:
-             # Create a dummy file so load.tle_file doesn't fail
-            with open(cache_path, 'w') as f:
-                f.write("DUMMY TLE DATA")
-            
-            # 1. File exists and is new -> No download
-            with patch('os.path.getmtime') as mock_mtime:
-                mock_mtime.return_value = datetime.datetime.now().timestamp()
+        # Test 1: Daily cache mode - should create date-stamped files
+        def createDummyTle(url, filepath):
+            """Side effect for mock to actually create a file"""
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+            with open(filepath, 'w') as f:
+                f.write("DUMMY TLE DATA\n")
+        
+        with patch('urllib.request.urlretrieve', side_effect=createDummyTle) as mock_download:
+            with patch('RMS.Routines.SatellitePositions.loadRobustTLEs') as mock_load:
+                mock_load.return_value = []
                 
-                with patch('skyfield.api.load.tle_file') as mock_load:
-                    mock_load.return_value = []
-                    loadTLEs(self.test_dir, cache_file, max_age_hours=24)
-                    mock_download.assert_not_called()
-                    
-            # 2. File exists and is old -> Download
-            with patch('os.path.getmtime') as mock_mtime:
-                # 25 hours ago
-                mock_mtime.return_value = (datetime.datetime.now() - datetime.timedelta(hours=25)).timestamp()
+                # First call should download and create a new date-stamped file
+                loadTLEs(self.test_dir, cache_file, max_age_hours=24, use_daily_cache=True)
+                mock_download.assert_called_once()
                 
-                with patch('skyfield.api.load.tle_file') as mock_load:
-                    mock_load.return_value = []
-                     # We need to simulate the file existing for the check
-                    loadTLEs(self.test_dir, cache_file, max_age_hours=24)
-                    mock_download.assert_called()
+                # Check that a date-stamped file was created
+                cache_files = glob.glob(os.path.join(self.test_dir, f"TLE_*_{cache_file}"))
+                self.assertEqual(len(cache_files), 1, "Should create one date-stamped cache file")
+                self.assertIn("TLE_", os.path.basename(cache_files[0]), "Cache file should have TLE_ prefix")
+                
+                mock_download.reset_mock()
+                
+                # Second call on same day should use existing cache (not download)
+                loadTLEs(self.test_dir, cache_file, max_age_hours=24, use_daily_cache=True)
+                mock_download.assert_not_called()
+                
+                # Still should be only one file
+                cache_files = glob.glob(os.path.join(self.test_dir, f"TLE_*_{cache_file}"))
+                self.assertEqual(len(cache_files), 1, "Should still have only one cache file")
+        
+        # Test 2: Legacy mode - should use single cache file (backward compatibility)
+        with patch('urllib.request.urlretrieve', side_effect=createDummyTle) as mock_download:
+            with patch('RMS.Routines.SatellitePositions.loadRobustTLEs') as mock_load:
+                mock_load.return_value = []
+                
+                # Clear test directory
+                shutil.rmtree(self.test_dir)
+                os.makedirs(self.test_dir)
+                
+                # With use_daily_cache=False, should use legacy behavior
+                loadTLEs(self.test_dir, cache_file, max_age_hours=24, use_daily_cache=False)
+                mock_download.assert_called_once()
+                
+                # Check that regular cache file was created (not date-stamped)
+                cache_path = os.path.join(self.test_dir, cache_file)
+                self.assertTrue(os.path.exists(cache_path), "Should create non-timestamped cache file")
+                
+                mock_download.reset_mock()
+                
+                # Second call should use existing cache
+                loadTLEs(self.test_dir, cache_file, max_age_hours=24, use_daily_cache=False)
+                mock_download.assert_not_called()
 
+
+                mock_download.assert_not_called()
+
+
+    def test_load_tles_with_time(self):
+        if not SKYFIELD_AVAILABLE:
+            self.skipTest("Skyfield not installed")
+            
+        cache_file = "active.txt"
+        
+        # Create two dummy cached files with timestamps
+        # File 1: 2020-01-01 (Old)
+        date_str_1 = "20200101"
+        file_1 = os.path.join(self.test_dir, f"TLE_{date_str_1}_000000_{cache_file}")
+        with open(file_1, 'w') as f:
+            f.write("DUMMY OLD TLE\n")
+            
+        # File 2: 2023-01-01 (Newer)
+        date_str_2 = "20230101"
+        file_2 = os.path.join(self.test_dir, f"TLE_{date_str_2}_000000_{cache_file}")
+        with open(file_2, 'w') as f:
+            f.write("DUMMY NEW TLE\n")
+            
+        # Mock loadRobustTLEs to avoid parsing error
+        with patch('RMS.Routines.SatellitePositions.loadRobustTLEs') as mock_load:
+            mock_load.return_value = []
+            
+            # Case 1: Ask for time near File 1 (2020)
+            target_time_1 = datetime.datetime(2020, 1, 1, 12, 0, 0, tzinfo=datetime.timezone.utc)
+            loadTLEs(self.test_dir, cache_file, time_of_interest=target_time_1)
+            
+            # Should load file 1
+            mock_load.assert_called_with(file_1)
+            
+            # Case 2: Ask for time near File 2 (2023)
+            target_time_2 = datetime.datetime(2023, 1, 1, 12, 0, 0, tzinfo=datetime.timezone.utc)
+            loadTLEs(self.test_dir, cache_file, time_of_interest=target_time_2)
+            
+            # Should load file 2
+            mock_load.assert_called_with(file_2)
     def test_satellite_predictor(self):
         if not SKYFIELD_AVAILABLE:
             self.skipTest("Skyfield not installed")

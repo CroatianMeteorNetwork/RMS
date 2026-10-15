@@ -5,6 +5,9 @@ import numpy as np
 
 # Cython import
 cimport numpy as np
+
+# Initialize the NumPy C API (explicit for clarity: Cython 3 (required to build against NumPy 2) emits it itself)
+np.import_array()
 cimport cython
 
 # Import the Python bool type
@@ -73,6 +76,8 @@ cpdef double angularSeparation(double ra1, double dec1, double ra2, double dec2)
 
     Source of the equation: http://www.astronomycafe.net/qadir/q1890.html (May 1, 2016)
 
+    Note that RMS.Math.angularSeparation has the same name but takes and returns radians.
+
     @param ra1: [float] right ascension of the first stars (in degrees)
     @param dec1: [float] declination of the first star (in degrees)
     @param ra2: [float] right ascension of the decons stars (in degrees)
@@ -84,6 +89,7 @@ cpdef double angularSeparation(double ra1, double dec1, double ra2, double dec2)
     cdef double deldec2
     cdef double delra2
     cdef double sindis
+    cdef double cos_sep
 
     # Convert input coordinates to radians
     ra1 = radians(ra1)
@@ -93,7 +99,19 @@ cpdef double angularSeparation(double ra1, double dec1, double ra2, double dec2)
 
 
     # Classical method
-    return degrees(acos(sin(dec1)*sin(dec2) + cos(dec1)*cos(dec2)*cos(ra2 - ra1)))
+    # Rounding can push the cosine slightly above 1 for (nearly) coincident directions, which
+    # would make acos return NaN, so clamp it to the closed interval [-1, 1]. The explicit
+    # comparisons are used instead of fmax(-1.0, fmin(1.0, cos_sep)) because the C fmin/fmax
+    # return the non-NaN operand, which would silently turn a NaN input into 0 or 180 deg.
+    # Mirrors the clip in RMS.Math.angularSeparation (which takes radians, not degrees).
+    cos_sep = sin(dec1)*sin(dec2) + cos(dec1)*cos(dec2)*cos(ra2 - ra1)
+
+    if cos_sep > 1.0:
+        cos_sep = 1.0
+    elif cos_sep < -1.0:
+        cos_sep = -1.0
+
+    return degrees(acos(cos_sep))
 
 
     # # Compute the angular separation using the haversine formula
@@ -194,75 +212,6 @@ def subsetCatalog(np.ndarray[FLOAT_TYPE_t, ndim=2] catalog_list, double ra_c, do
 
 
 
-@cython.boundscheck(False)
-@cython.wraparound(False)
-def matchStars(np.ndarray[FLOAT_TYPE_t, ndim=2] stars_list, np.ndarray[FLOAT_TYPE_t, ndim=1] cat_x_array, \
-    np.ndarray[FLOAT_TYPE_t, ndim=1] cat_y_array, np.ndarray[INT_TYPE_t, ndim=1] cat_good_indices, \
-    double max_radius):
-        
-
-    cdef int i, j
-    cdef unsigned int cat_idx
-    cdef int k = 0
-    cdef double min_dist, dist
-    cdef double cat_match_indx, im_star_y, im_star_x, cat_x, cat_y
-
-    # Get the lengths of input arrays
-    cdef int stars_len = stars_list.shape[0]
-    cdef int cat_len = cat_good_indices.shape[0]
-    
-    # List for matched indices
-    cdef np.ndarray[FLOAT_TYPE_t, ndim=2] matched_indices = np.zeros(shape=(stars_list.shape[0], 3), \
-        dtype=FLOAT_TYPE)
-
-    
-    ### Match image and catalog stars ###
-
-    # Go through all image stars
-    for i in range(stars_len):
-
-        # Extract image star coordinates
-        im_star_y = stars_list[i, 0]
-        im_star_x = stars_list[i, 1]
-
-        min_dist = max_radius
-        cat_match_indx = -1
-
-        # Check for the best match among catalog stars
-        for j in range(cat_len):
-
-            cat_idx = cat_good_indices[j]
-
-            # Extract catalog coordinates
-            cat_x = cat_x_array[cat_idx]
-            cat_y = cat_y_array[cat_idx]
-
-
-            # Calculate the distance between stars
-            dist = sqrt((im_star_x - cat_x)**2 + (im_star_y - cat_y)**2)
-
-            # Set the catalog star as the best match if it is the closest to the image star than any previous
-            if (dist < min_dist):
-                min_dist = dist
-                cat_match_indx = cat_idx
-
-
-        # Take the best matched star if the distance was within the maximum radius
-        if min_dist < max_radius:
-            
-            # Add the matched indices to the output list
-            matched_indices[k, 0] = i
-            matched_indices[k, 1] = cat_match_indx
-            matched_indices[k, 2] = min_dist
-
-            k += 1
-
-
-    
-    # Cut the output list to the number of matched stars
-    matched_indices = matched_indices[:k]
-
-    return matched_indices
 
 
 
@@ -312,7 +261,7 @@ cpdef (double, double) equatorialCoordPrecession(double start_epoch, double fina
         (ra, dec): [tuple of floats] Precessed equatorial coordinates (radians).
     """
 
-    cdef double T, t, zeta, z, theta, A, B, C, ra_corr, dec_corr
+    cdef double T, t, zeta, z, theta, A, B, C, ra_corr, dec_corr, cos_pole_dist
 
 
     T = (start_epoch - J2000_DAYS )/36525.0
@@ -338,7 +287,15 @@ cpdef (double, double) equatorialCoordPrecession(double start_epoch, double fina
 
     # Calculate declination (apply a different equation if close to the pole, closer then 0.5 degrees)
     if (pi/2 - fabs(dec)) < radians(0.5):
-        dec_corr = sign(dec)*acos(sqrt(A**2 + B**2))
+
+        # A, B and C are components of a unit vector, so sqrt(A**2 + B**2) is in [0, 1], but
+        #   rounding can push it just above 1 and make acos return NaN
+        cos_pole_dist = sqrt(A**2 + B**2)
+
+        if cos_pole_dist > 1.0:
+            cos_pole_dist = 1.0
+
+        dec_corr = sign(dec)*acos(cos_pole_dist)
     else:
         dec_corr = asin(C)
 

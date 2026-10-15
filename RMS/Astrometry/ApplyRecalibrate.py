@@ -11,6 +11,7 @@ import json
 import os
 import shutil
 import sys
+import traceback
 import logging
 from collections import OrderedDict
 
@@ -26,11 +27,14 @@ from RMS.Astrometry.ApplyAstrometry import (
     applyAstrometryFTPdetectinfo,
     applyPlateparToCentroids,
     extinctionCorrectionTrueToApparent,
+    getFOVSelectionRadius,
     photometryFitRobust,
     rotationWrtHorizon,
+    xyToRaDecPP,
 )
-from RMS.Astrometry.Conversions import date2JD, raDec2AltAz
-from RMS.Astrometry.FFTalign import alignPlatepar
+from RMS.Astrometry.CyFunctions import subsetCatalog
+from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
+from RMS.Astrometry.NNalign import alignPlatepar
 from RMS.Formats import CALSTARS, FFfile, FTPdetectinfo, Platepar, StarCatalog
 from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile, validDefaultFTPdetectinfo
 from RMS.Math import angularSeparation
@@ -105,6 +109,7 @@ def recalibrateFF(
     lim_mag=None,
     ignore_distance_threshold=False,
     ignore_max_stars=False,
+    min_match_fraction=None,
 ):
     """Given the platepar and a list of stars on one image, try to recalibrate the platepar to achieve
         the best match by brute force star matching.
@@ -118,10 +123,15 @@ def recalibrateFF(
     Keyword arguments:
         max_match_radius: [float] Maximum radius used for star matching. None by default, which uses all 
             hardcoded values.
-        force_platepar_save: [bool] Skip the goodness of fit check and save the platepar.
+        force_platepar_save: [bool] Skip the goodness of fit check and save the platepar. Note that
+            the star coverage gate (min_match_fraction) still applies, so a fit that matched only a
+            small fraction of the detected stars is rejected even when this is True.
         ignore_distance_threshold: [bool] Don't consider the recalib as failed if the median distance
             is larger than the threshold.
         ignore_max_stars: [bool] Ignore the maximum number of image stars for recalibration.
+        min_match_fraction: [float] Minimum fraction of the detected stars that the fit must match
+            to be accepted. None by default, which uses config.recalibration_min_match_fraction.
+            Set to 0 to disable the coverage gate (e.g. for interactive use).
 
     Return:
         result: [?] A Platepar instance if refinement is successful, None if it failed.
@@ -129,6 +139,10 @@ def recalibrateFF(
     """
 
     working_platepar = copy.deepcopy(working_platepar)
+
+    # Resolve the coverage gate threshold from the config unless explicitly given
+    if min_match_fraction is None:
+        min_match_fraction = config.recalibration_min_match_fraction
 
     # If there more stars than a set limit, sample them randomly using the same seed for reproducibility
     if not ignore_max_stars and len(star_dict_ff[jd]) > config.recalibration_max_stars:
@@ -204,8 +218,28 @@ def recalibrateFF(
 
     ##########
 
+    # Pre-filter catalog to FOV region. This avoids re-subsetting the full catalog (potentially
+    # 50k+ stars) on every optimizer iteration. Safe because matched stars are always well inside
+    # the FOV boundary — stars aren't detected within ~15 px of image edges and the max match
+    # radius is 10 px, so stars entering/leaving the subset boundary can never affect matching.
+    fov_radius = getFOVSelectionRadius(working_platepar)
+    _, RA_c, dec_c, _ = xyToRaDecPP(
+        [jd2Date(jd)], [working_platepar.X_res/2], [working_platepar.Y_res/2], [1],
+        working_platepar, extinction_correction=False
+    )
+    effective_lim_mag = lim_mag if lim_mag is not None else config.catalog_mag_limit
+    _, catalog_stars = subsetCatalog(
+        catalog_stars, RA_c[0], dec_c[0], jd,
+        working_platepar.lat, working_platepar.lon,
+        fov_radius, effective_lim_mag
+    )
+
+    log.info('Pre-filtered catalog to {:d} stars within {:.1f} deg FOV radius'.format(
+        len(catalog_stars), fov_radius))
+
     # Go through all radii and match the stars
     min_match_radius = None
+    matched_stars_good = None
     for match_radius in radius_list:
 
         # Skip radiuses that are too small if the radius filter is on
@@ -257,12 +291,14 @@ def recalibrateFF(
         # Compute the minimization tolerance
         fatol, xatol_ang = CheckFit.computeMinimizationTolerances(config, working_platepar, len(star_dict_ff))
 
+        simplex = CheckFit.buildNelderMeadSimplex(p0, working_platepar.dec_d, mode="floor")
+
         res = scipy.optimize.minimize(
             CheckFit._calcImageResidualsAstro,
             p0,
             args=(config, working_platepar, catalog_stars, star_dict_ff, match_radius),
             method='Nelder-Mead',
-            options={'fatol': fatol, 'xatol': xatol_ang},
+            options={'fatol': fatol, 'xatol': xatol_ang, 'initial_simplex': simplex},
         )
 
         ###
@@ -317,6 +353,11 @@ def recalibrateFF(
             # Keep track of the minimum match radius
             min_match_radius = match_radius
 
+            # Keep the matched stars from this successful iteration - a later iteration that fails
+            #   overwrites matched_stars with matches of a platepar that was never accepted, and
+            #   those must not feed the coverage gate or the photometry fit below
+            matched_stars_good = matched_stars
+
             log.info('{:d}/{:d} match with avg distance {:.2f} px within radius {:.2f} px!'.format(
                 n_matched, len(star_dict_ff[jd]), dist, match_radius
             ))
@@ -334,10 +375,38 @@ def recalibrateFF(
         or force_platepar_save
     ):
 
+        # If no fit iteration succeeded, there is no matched star set consistent with the platepar,
+        #   so neither the coverage gate nor the photometry fit can run - reject the platepar (the
+        #   caller will fall back to the previous one)
+        if matched_stars_good is None:
+            log.info('Rejecting refined platepar, no successful fit iteration to take matched '
+                     'stars from')
+            return None, min_match_radius
+
+        # Get a list of matched image and catalog stars, taken from the last successful fit
+        #   iteration so that they are consistent with the platepar being saved
+        image_stars, matched_catalog_stars, _ = matched_stars_good[jd]
+
+        # Coverage gate: reject a fit that only matched a small fraction of the detected stars.
+        # The goodness check above only weighs the residuals of the stars that matched, so a
+        # sparse spurious subset (e.g. 29 of 308 detections aligned at a wrong pointing) can pass
+        # it. When such a fit is stamped auto_recalibrated and chained forward as the seed for the
+        # next FF, the pointing walks away over a marginal/cloudy night. Requiring a real coverage
+        # fraction rejects those fits (the frame keeps the previous good platepar) while accepting
+        # genuine fits - including after a real camera move, which re-matches the whole field at
+        # the new pointing.
+        n_detected = len(star_dict_ff[jd])
+        match_fraction = len(image_stars)/n_detected if n_detected > 0 else 0.0
+
+        if match_fraction < min_match_fraction:
+            log.info('Rejecting refined platepar, only {:d}/{:d} = {:.2f} of detected stars '
+                     'matched within {:.2f} px (< {:.2f})'.format(len(image_stars), n_detected,
+                                                                  match_fraction, min_match_radius,
+                                                                  min_match_fraction))
+            return None, min_match_radius
+
         ### PHOTOMETRY FIT ###
 
-        # Get a list of matched image and catalog stars
-        image_stars, matched_catalog_stars, _ = matched_stars[jd]
         star_intensities = image_stars[:, 2]
         ra_catalog, dec_catalog, catalog_mags = matched_catalog_stars.T
 
@@ -485,25 +554,24 @@ def recalibratePlateparsForFF(
                 ignore_max_stars=ignore_max_stars,
             )
 
-            # If the recalibration failed, try using FFT alignment
+            # If the recalibration failed, try using NN alignment
             if result is None:
 
-                log.info('Running FFT alignment...')
+                log.info('Running NN alignment...')
 
-                # Run FFT alignment
-                calstars_coords = np.array(star_dict_ff[jd])[:, :2]
-                calstars_coords[:, [0, 1]] = calstars_coords[:, [1, 0]]
-                test_platepar = alignPlatepar(
-                    config, prev_platepar, calstars_time, calstars_coords, show_plot=False
+                # Run NN alignment - pass full CALSTARS data so alignPlatepar can infer catalog LM
+                calstars_data = np.array(star_dict_ff[jd])
+                test_platepar, _ = alignPlatepar(
+                    config, prev_platepar, calstars_time, calstars_data, show_plot=False
                 )
 
-                # Try to recalibrate after FFT alignment
+                # Try to recalibrate after NN alignment
                 result, _ = recalibrateFF(
-                    config, test_platepar, jd, star_dict_ff, catalog_stars, lim_mag=lim_mag, 
+                    config, test_platepar, jd, star_dict_ff, catalog_stars, lim_mag=lim_mag,
                     ignore_distance_threshold=True
                 )
 
-                # If the FFT alignment failed, align the previous platepar using the smallest radius that 
+                # If the NN alignment failed, align the previous platepar using the smallest radius that
                 # matched and force save the the platepar
                 if (result is None) and (min_match_radius is not None):
                     log.info(
@@ -534,7 +602,7 @@ def recalibratePlateparsForFF(
                 working_platepar = result
 
 
-            # If the working platepar keeps failing, try using the original platepar before any FFT alignment
+            # If the working platepar keeps failing, try using the original platepar before any NN alignment
             if result is None:
                 log.info('Recalibration failed, trying to use the original platepar...')
                 result, _ = recalibrateFF(
@@ -907,9 +975,25 @@ def recalibrateIndividualFFsAndApplyAstrometry(
                         if ff_name_tmp in recalibrated_platepars:
 
                             # Get the computed photometric offset and stddev
-                            photom_offset_tmp_list.append(recalibrated_platepars[ff_name_tmp].mag_lev)
-                            photom_offset_std_tmp_list.append(recalibrated_platepars[ff_name_tmp].mag_lev_stddev)
+                            mag_lev_tmp = recalibrated_platepars[ff_name_tmp].mag_lev
+                            mag_lev_stddev_tmp = recalibrated_platepars[ff_name_tmp].mag_lev_stddev
+
+                            # Only use neighbours with a usable photometric solution. Averaging in a
+                            #   non-finite value would make the average non-finite and, as the average is
+                            #   written back to all neighbours, the non-finite value would spread to all
+                            #   FF files of the night through overlapping neighbourhoods
+                            if not (np.isfinite(mag_lev_tmp) and np.isfinite(mag_lev_stddev_tmp)):
+                                continue
+
+                            photom_offset_tmp_list.append(mag_lev_tmp)
+                            photom_offset_std_tmp_list.append(mag_lev_stddev_tmp)
                             neighboring_ffs.append(ff_name_tmp)
+
+                # If no neighbour had a usable photometric solution, keep the individual values as they are
+                if len(photom_offset_tmp_list) == 0:
+                    log.warning('No finite photometric offsets among the neighbours of {:s}, skipping the '
+                                'photometric offset averaging!'.format(ff_name))
+                    continue
 
                 # Compute the new photometric offset and improved standard deviation (assume equal sample size)
                 #   Source: https://stats.stackexchange.com/questions/55999/is-it-possible-to-find-the-combined-standard-deviation
@@ -1053,13 +1137,22 @@ def recalibrateIndividualFFsAndApplyAstrometry(
         ff_dt = FFfile.filenameToDatetime(ff_name)
         dt_list.append(ff_dt)
 
-        # Compute the angular separation from the reference platepar
+        # Compute the angular separation from the reference platepar by projecting
+        # both FOV centres at the FF file's observation time. This correctly handles
+        # platepars with different JD reference epochs.
+        ff_time = FFfile.getMiddleTimeFF(ff_name, config.fps, ret_milliseconds=True)
+        _, ref_ra, ref_dec, _ = xyToRaDecPP(
+            [ff_time], [platepar.X_res / 2], [platepar.Y_res / 2], [1], platepar,
+            extinction_correction=False)
+        _, temp_ra, temp_dec, _ = xyToRaDecPP(
+            [ff_time], [pp_temp.X_res / 2], [pp_temp.Y_res / 2], [1], pp_temp,
+            extinction_correction=False)
         ang_dist = np.degrees(
             angularSeparation(
-                np.radians(platepar.RA_d),
-                np.radians(platepar.dec_d),
-                np.radians(pp_temp.RA_d),
-                np.radians(pp_temp.dec_d),
+                np.radians(ref_ra[0]),
+                np.radians(ref_dec[0]),
+                np.radians(temp_ra[0]),
+                np.radians(temp_dec[0]),
             )
         )
         ang_dists.append(ang_dist*60)
@@ -1076,84 +1169,115 @@ def recalibrateIndividualFFsAndApplyAstrometry(
         photom_offset_std_list.append(pp_temp.mag_lev_stddev)
 
 
+    # The plots are only informative, so a failure to generate them must never abort the processing of
+    #   the night (the astrometry has already been applied and the recalibrated platepars written out)
     if generate_plot:
 
-        # Generate the name the plots
-        plot_name = os.path.basename(ftpdetectinfo_path).replace('FTPdetectinfo_', '').replace('.txt', '')
+        try:
 
-        ### Plot difference from reference platepar in angular distance from (0, 0) vs rotation ###
+            # Generate the name the plots
+            plot_name = os.path.basename(ftpdetectinfo_path).replace('FTPdetectinfo_', '').replace('.txt', '')
 
-        plt.figure(figsize=(6, 5))
+            ### Plot difference from reference platepar in angular distance from (0, 0) vs rotation ###
 
-        plt.scatter(0, 0, marker='o', edgecolor='k', label='Reference platepar', s=100, c='none', zorder=3)
+            plt.figure(figsize=(6, 5))
 
-        plt.scatter(ang_dists, rot_angles, c=hour_list, zorder=3)
-        plt.colorbar(label="Hours from first FF file")
+            plt.scatter(0, 0, marker='o', edgecolor='k', label='Reference platepar', s=100, c='none', \
+                zorder=3)
 
-        plt.xlabel("Angular distance from reference (arcmin)")
-        plt.ylabel("Rotation from reference (arcmin)")
+            plt.scatter(ang_dists, rot_angles, c=hour_list, zorder=3)
+            plt.colorbar(label="Hours from first FF file")
 
-        plt.title("FOV centre drift starting at {:s}".format(first_dt.strftime("%Y/%m/%d %H:%M:%S")))
+            plt.xlabel("Angular distance from reference (arcmin)")
+            plt.ylabel("Rotation from reference (arcmin)")
 
-        plt.grid()
-        plt.legend()
+            plt.title("FOV centre drift starting at {:s}".format(first_dt.strftime("%Y/%m/%d %H:%M:%S")))
 
-        # Scale the aspect ratio so X and Y units are the same but the plot is not too narrow
-        plt.axis('scaled')
+            plt.grid()
+            plt.legend()
 
-        # Make the plot square by adjusting the limits to the maximum
-        min_lim = min(plt.xlim()[0], plt.ylim()[0])
-        max_lim = max(plt.xlim()[1], plt.ylim()[1])
-        abs_lim = max_lim - min_lim
-        plt.xlim(-0.1*abs_lim, 0.9*abs_lim)
-        plt.ylim(min_lim, max_lim)
+            # Scale the aspect ratio so X and Y units are the same but the plot is not too narrow
+            plt.axis('scaled')
+
+            # Make the plot square by adjusting the limits to the maximum
+            min_lim = min(plt.xlim()[0], plt.ylim()[0])
+            max_lim = max(plt.xlim()[1], plt.ylim()[1])
+            abs_lim = max_lim - min_lim
+            plt.xlim(-0.1*abs_lim, 0.9*abs_lim)
+            plt.ylim(min_lim, max_lim)
 
 
-        plt.tight_layout()
+            plt.tight_layout()
 
-        plt.savefig(os.path.join(dir_path, plot_name + '_calibration_variation.png'), dpi=150)
+            plt.savefig(os.path.join(dir_path, plot_name + '_calibration_variation.png'), dpi=150)
 
-        # plt.show()
+            # plt.show()
 
-        plt.clf()
-        plt.close()
+            plt.clf()
+            plt.close()
 
-        ### ###
+            ### ###
 
-        ### Plot the photometric offset variation ###
+            ### Plot the photometric offset variation ###
 
-        plt.figure()
+            # Skip the plot if there are not enough points (platepars which failed the fit are skipped
+            #   above, so fewer points can remain than there are recalibrated platepars)
+            if len(dt_list) < 2:
 
-        plt.errorbar(
-            dt_list,
-            photom_offset_list,
-            yerr=photom_offset_std_list,
-            fmt="o",
-            ecolor='lightgray',
-            elinewidth=2,
-            capsize=0,
-            ms=2,
-        )
+                log.info('Less than 2 photometric offsets available, skipping the photometry plot...')
 
-        # Format datetimes
-        plt.gca().xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
+            else:
 
-        # rotate and align the tick labels so they look better
-        plt.gcf().autofmt_xdate()
+                # Sanitize the error bars. Non-finite values break the error bar plotting in older
+                #   versions of matplotlib (they raise a StopIteration), so replace them with zeros and
+                #   omit the error bars completely if none of the values are usable
+                photom_offset_std_arr = np.array(photom_offset_std_list, dtype=np.float64)
+                if np.any(np.isfinite(photom_offset_std_arr)):
+                    yerr = np.where(np.isfinite(photom_offset_std_arr), photom_offset_std_arr, 0.0)
 
-        plt.xlabel("UTC time")
-        plt.ylabel("Photometric offset")
+                else:
+                    yerr = None
 
-        plt.title("Photometric offset variation")
+                plt.figure()
 
-        plt.grid()
+                plt.errorbar(
+                    dt_list,
+                    photom_offset_list,
+                    yerr=yerr,
+                    fmt="o",
+                    ecolor='lightgray',
+                    elinewidth=2,
+                    capsize=0,
+                    ms=2,
+                )
 
-        plt.tight_layout()
+                # Format datetimes
+                plt.gca().xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
 
-        plt.savefig(os.path.join(dir_path, plot_name + '_photometry_variation.png'), dpi=150)
+                # rotate and align the tick labels so they look better
+                plt.gcf().autofmt_xdate()
 
-        plt.clf()
-        plt.close()
+                plt.xlabel("UTC time")
+                plt.ylabel("Photometric offset")
+
+                plt.title("Photometric offset variation")
+
+                plt.grid()
+
+                plt.tight_layout()
+
+                plt.savefig(os.path.join(dir_path, plot_name + '_photometry_variation.png'), dpi=150)
+
+                plt.clf()
+                plt.close()
+
+        except Exception as e:
+
+            log.warning('Generating the recalibration plots failed with the message:\n' + repr(e))
+            log.debug(repr(traceback.format_exception(*sys.exc_info())))
+
+            # Close any half-built figure so that it doesn't leak into the plots generated later
+            plt.close('all')
 
     ### ###
 
