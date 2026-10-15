@@ -2393,7 +2393,7 @@ class MatchedFilterDetector(object):
 
         # The hits of a track whose velocity disagrees with the motion of the track are not of the object (e.g.
         #   the sums of other velocities through a bright object, linked to its track by their position)
-        linked = [cleanTrackHits(tr) for tr in linked]
+        linked = [cleanTrackHits(tr, min_hits=self.opts.min_hits) for tr in linked]
 
         # Keep the tracks in the speed range which move far enough, without the ones following stronger tracks
         tracks = self.removeShadows([tr for tr in linked if self.acceptTrack(tr)])
@@ -3185,9 +3185,9 @@ def blockIndices(frames, starts, end=None):
 
 
 def onPath(track, path, radius):
-    """ Whether a track lies on the path of another one: the median distance of its positions from the nearest
-        positions of the path is within radius. A piece of the same object is on the path, also when it is ahead
-        of or behind the object along it.
+    """ Whether two tracks lie on the same path: the median distance of the positions of the shorter one from
+        the nearest positions of the longer one is within radius (symmetric). A piece of the same object is on
+        its path, also when it is ahead of or behind the object along it.
 
     Arguments:
         track: [tuple] (frames, xs, ys) of the track.
@@ -3198,6 +3198,9 @@ def onPath(track, path, radius):
         [bool] True if the track is on the path.
     """
 
+    # The shorter track is compared with the path of the longer one (the longer one extends beyond a piece)
+    if len(track[1]) > len(path[1]):
+        track, path = path, track
     _, x, y = track
     _, px, py = path
     if (len(x) == 0) or (len(px) == 0):
@@ -3483,7 +3486,7 @@ def curvatureSignificant(t, x, y, f_min=CURVATURE_MIN_F):
     return (rss_line - rss_quad)/2.0/scatter > f_min
 
 
-def cleanTrackHits(hits, min_kept=0.5):
+def cleanTrackHits(hits, min_kept=0.5, min_hits=3):
     """ The hits of a track without the ones whose velocity disagrees with the motion of the track. The velocity
         of a hit is the velocity of the search whose sum was the largest there. A very bright object makes the
         sums of many other velocities large too, at positions near its track (they pass over it in some frames),
@@ -3501,6 +3504,8 @@ def cleanTrackHits(hits, min_kept=0.5):
 
     Keyword arguments:
         min_kept: [float] Smallest fraction of the weight of the hits which has to be kept. 0.5 by default.
+        min_hits: [int] Smallest number of hits of a track (at least 3): a track is not cut below it. 3 by
+            default.
 
     Return:
         [ndarray] The kept hits.
@@ -3522,7 +3527,7 @@ def cleanTrackHits(hits, min_kept=0.5):
     tolerance = np.maximum(0.3*speed, 3.0*step)
     keep = np.hypot(hits[:, 4] - v[0], hits[:, 5] - v[1]) <= tolerance
 
-    if (keep.sum() < 3) or (weights[keep].sum() < min_kept*weights.sum()):
+    if (keep.sum() < max(3, min_hits)) or (weights[keep].sum() < min_kept*weights.sum()):
         return hits
 
     return hits[keep]

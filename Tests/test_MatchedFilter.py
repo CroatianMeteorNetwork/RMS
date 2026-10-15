@@ -433,6 +433,9 @@ def test_hits_with_another_velocity_removed_from_a_track():
     many = many[np.argsort(many[:, 0], kind='stable')]
     assert len(mfd.cleanTrackHits(many)) == len(good)
 
+    # A track is not cut below the smallest number of hits of a track: then it is kept as it is
+    assert len(mfd.cleanTrackHits(hits, min_hits=len(good) + 1)) == len(hits)
+
     # Hits which mostly disagree by their weight: the track is kept as it is
     mixed = np.vstack([good[:5], np.tile(ghosts*[1, 1, 1, 3, 1, 1, 1, 1], (4, 1))])
     assert len(mfd.cleanTrackHits(mixed)) == len(mixed)
@@ -993,9 +996,9 @@ def test_pieces_of_the_same_object_on_its_path():
     piece = (f[20:40], 100 + 6.0*f[20:40] + 0.4, 50 + 2.0*f[20:40] - 0.3)
     ahead = (f[20:40], 100 + 6.0*(f[20:40] + 3), 50 + 2.0*(f[20:40] + 3))
     beside = (f[20:40], 100 + 6.0*f[20:40] - 15*2.0/np.hypot(6, 2), 50 + 2.0*f[20:40] + 15*6.0/np.hypot(6, 2))
-    assert mfd.onPath(piece, path, 5.0)
-    assert mfd.onPath(ahead, path, 5.0)
-    assert not mfd.onPath(beside, path, 5.0)
+    assert mfd.onPath(piece, path, 5.0) and mfd.onPath(path, piece, 5.0)
+    assert mfd.onPath(ahead, path, 5.0) and mfd.onPath(path, ahead, 5.0)
+    assert not mfd.onPath(beside, path, 5.0) and not mfd.onPath(path, beside, 5.0)
 
 
 def test_extent_line_fast_object_not_a_line():
