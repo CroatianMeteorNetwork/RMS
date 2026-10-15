@@ -1928,7 +1928,6 @@ def test_merged_detections_keep_their_calibration(tmp_path, calibrated):
     assert all(meas[0] == int(all(calibrated)) for entry in entries for meas in entry[11])
 
 
-@pytest.mark.skipif(not CUDA_AVAILABLE, reason='No GPU')
 def test_streak_samples():
     """ Without the streak every frame is one sample at the shift of the middle of the frame, with the weight 1.
         With it, a velocity of L px per frame samples every frame round(L) times along the motion, centred on the
@@ -2026,6 +2025,7 @@ def test_gpu_streak_stacks_agree_with_the_cpu():
     assert np.allclose(r_cpu, r_gpu, atol=1e-4)
 
 
+@pytest.mark.skipif(not CUDA_AVAILABLE, reason='No GPU')
 def test_gpu_runs_agree_with_the_cpu():
     """ The stacks of several runs computed at once on the GPU (frames copied there once) are the stacks of every
         run on the CPU, also when the frames on the GPU are padded more than the stacker needs. """
