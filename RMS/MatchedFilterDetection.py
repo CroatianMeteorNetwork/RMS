@@ -2940,12 +2940,12 @@ class MatchedFilterDetector(object):
             reord = (np.tile(frames, len(orders)), np.concatenate([xs[o] for o in orders]),
                      np.concatenate([ys[o] for o in orders]))
 
-            # The sums of the three tests (sum(g*z), sum(g^2), see forcedTrackSignal), the photometry of every
-            #   frame (the intensity, saturated pixels and noise), and the stack of the frames along the track
             # The motion during a frame, for the shape of the streak of a fast object in the PSF-weighted sums (only
             #   with the streak search; the same streak at the positions of all three tests)
             motion = ((xs[-1] - xs[0])/span, (ys[-1] - ys[0])/span) if self.opts.streak_search else (0.0, 0.0)
 
+            # The sums of the three tests (sum(g*z), sum(g^2), see forcedTrackSignal), the photometry of every
+            #   frame (the intensity, saturated pixels and noise), and the stack of the frames along the track
             checks.append({'on': (frames, xs, ys), 'off': (off_f, off_x, off_y), 'reord': reord, 'motion': motion,
                            'on_sum': [0.0, 0.0], 'off_sum': [0.0, 0.0], 'reord_sum': [0.0, 0.0],
                            'phot': np.zeros(n), 'phot_sat': np.zeros(n, dtype=np.int64),
@@ -3239,6 +3239,7 @@ def streakMask(r, psf_sigma, motion):
         [ndarray] Boolean mask of the stack, or None if the object has no streak reaching the ring.
     """
 
+    # Without the motion, or if the streak of a frame doesn't reach the ring, there is nothing to leave out
     if motion is None:
         return None
     speed = math.hypot(*motion)
@@ -3536,6 +3537,7 @@ def cleanTrackHits(hits, min_kept=0.5, min_hits=3):
     tolerance = np.maximum(0.3*speed, 3.0*step)
     keep = np.hypot(hits[:, 4] - v[0], hits[:, 5] - v[1]) <= tolerance
 
+    # A track which would keep too few hits, or less than min_kept of their weight, is kept as it is
     if (keep.sum() < max(3, min_hits)) or (weights[keep].sum() < min_kept*weights.sum()):
         return hits
 
@@ -3545,6 +3547,7 @@ def cleanTrackHits(hits, min_kept=0.5, min_hits=3):
 def weightedMedian(values, weights):
     """ The median of the values weighted by the weights: the value at which half of the weight is reached. """
 
+    # The values sorted, and the first one at which their cumulative weight reaches half of the total
     order = np.argsort(values)
     cumulative = np.cumsum(weights[order])
     return float(values[order][np.searchsorted(cumulative, 0.5*cumulative[-1])])

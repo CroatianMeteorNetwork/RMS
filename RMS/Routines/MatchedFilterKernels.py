@@ -93,6 +93,7 @@ def velocitySamples(velocities, n_frames, streak=False, smooth_sigma=0.0):
             a velocity are ordered by frame.
     """
 
+    # The velocities as rows (vx, vy)
     velocities = np.asarray(velocities, dtype=np.float64).reshape(-1, 2)
     n_vel = len(velocities)
 
@@ -101,9 +102,12 @@ def velocitySamples(velocities, n_frames, streak=False, smooth_sigma=0.0):
     per_frame = np.maximum(1, np.rint(speed)).astype(np.int32) if streak else np.ones(n_vel, dtype=np.int32)
     n_max = n_frames*int(per_frame.max()) if n_vel else n_frames
 
+    # The samples of every velocity (a slower velocity uses only the first of them, the rest are not summed), their
+    #   number, and the weights (1 for one sample per frame)
     samples = np.zeros((n_vel, n_max, 3), dtype=np.int32)
     counts = (n_frames*per_frame).astype(np.int32)
     weights = np.ones(n_vel, dtype=np.float32)
+
     # The shift of the middle of every frame, as in velocityShifts
     shifts = velocityShifts(velocities, n_frames)
 
@@ -411,8 +415,11 @@ class VelocityStacker(object):
             smooth_sigma: [float] Sigma of the smoothing (px).
         """
 
+        # The weights of the same samples for the new smoothing
         _, _, self.weights = velocitySamples(self.velocities, self.n_frames, streak=self.streak,
                                              smooth_sigma=smooth_sigma)
+
+        # On the GPU, the weights are copied to the GPU memory again
         if self.use_gpu:
             self.d_weights = cuda.to_device(self.weights)
 
