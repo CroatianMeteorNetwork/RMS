@@ -610,6 +610,10 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # Per-block SEI photometric provenance (exposure/gains/QP/WB), one array per frame buffer
     sei_meta1 = multiprocessing.Array('d', SEI_META_N, lock=False)
     sei_meta2 = multiprocessing.Array('d', SEI_META_N, lock=False)
+    # Time of every frame of the block in each buffer (start of integration of row 0, unix s), for
+    # the per-star light curves (RMS.StarLightCurves)
+    frame_times1 = multiprocessing.Array('d', frame_buffer_shape[0], lock=False)
+    frame_times2 = multiprocessing.Array('d', frame_buffer_shape[0], lock=False)
 
     log.info('Initializing frame buffers done!')
 
@@ -617,6 +621,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # Initialize buffered capture
     bc = BufferedCapture(sharedArray, startTime, sharedArray2, start_time2, config, video_file=video_file,
                          soc_temp1=soc_temp1, soc_temp2=soc_temp2, sei_meta1=sei_meta1, sei_meta2=sei_meta2,
+                         frame_times1=frame_times1, frame_times2=frame_times2,
                          night_data_dir=night_data_dir, saved_frames_dir=saved_frames_dir, 
                          daytime_mode=daytime_mode, camera_mode_switch_trigger=camera_mode_switch_trigger)
     bc.startCapture()
@@ -718,6 +723,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                     # Create and start new BufferedCapture with same parameters
                     bc = BufferedCapture(sharedArray, startTime, sharedArray2, start_time2, config,
                                          soc_temp1=soc_temp1, soc_temp2=soc_temp2, sei_meta1=sei_meta1, sei_meta2=sei_meta2,
+                                         frame_times1=frame_times1, frame_times2=frame_times2,
                                          video_file=video_file, night_data_dir=night_data_dir,
                                          saved_frames_dir=saved_frames_dir, daytime_mode=daytime_mode,
                                          camera_mode_switch_trigger=camera_mode_switch_trigger)
@@ -812,7 +818,8 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
 
             # Initialize compression
             compressor = Compressor(night_data_dir, sharedArray, startTime, sharedArray2, start_time2, config,
-                detector=detector, soc_temp1=soc_temp1, soc_temp2=soc_temp2, sei_meta1=sei_meta1, sei_meta2=sei_meta2)
+                detector=detector, soc_temp1=soc_temp1, soc_temp2=soc_temp2, sei_meta1=sei_meta1, sei_meta2=sei_meta2,
+                frame_times1=frame_times1, frame_times2=frame_times2, platepar=platepar)
 
             # Open the observation summary report
             if video_file is None:
@@ -867,6 +874,7 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                     # Create and start new BufferedCapture with same parameters
                     bc = BufferedCapture(sharedArray, startTime, sharedArray2, start_time2, config,
                                          soc_temp1=soc_temp1, soc_temp2=soc_temp2, sei_meta1=sei_meta1, sei_meta2=sei_meta2,
+                                         frame_times1=frame_times1, frame_times2=frame_times2,
                                          video_file=video_file, night_data_dir=night_data_dir,
                                          saved_frames_dir=saved_frames_dir, daytime_mode=daytime_mode,
                                          camera_mode_switch_trigger=camera_mode_switch_trigger)

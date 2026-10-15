@@ -241,7 +241,8 @@ class BufferedCapture(Process):
     
     def __init__(self, array1, start_time1, array2, start_time2, config, video_file=None, night_data_dir=None,
                  saved_frames_dir=None, daytime_mode=None, camera_mode_switch_trigger=None,
-                 soc_temp1=None, soc_temp2=None, sei_meta1=None, sei_meta2=None):
+                 soc_temp1=None, soc_temp2=None, sei_meta1=None, sei_meta2=None, frame_times1=None,
+                 frame_times2=None):
         """ Populate arrays with (startTime, frames) after startCapture is called.
         
         Arguments:
@@ -257,10 +258,12 @@ class BufferedCapture(Process):
             saved_frames_dir: [str] Path to the directory where saved frames are stored. None by default.
             daytime_mode: [multiprocessing.Value] Shared boolean variable to communicate camera mode switch
                 direction (daytime or nighttime).
-            camera_mode_switch_trigger: [multiprocessing.Value] Shared boolean variable to trigger camera 
+            camera_mode_switch_trigger: [multiprocessing.Value] Shared boolean variable to trigger camera
                 mode switch at the right time.
+            frame_times1, frame_times2: [multiprocessing.Array 'd'] Shared time of every frame of the
+                block in array1/array2, written as each frame is stored. None to not record them.
         """
-        
+
         super(BufferedCapture, self).__init__()
         
         # Store configuration and paths (immutable data is safe to pass to child process)
@@ -302,6 +305,9 @@ class BufferedCapture(Process):
         # Per-block SEI photometric provenance (exposure/gains/QP/WB), see RMS.SEIBlockMeta
         self.sei_meta1 = sei_meta1
         self.sei_meta2 = sei_meta2
+        # Per-frame times of each block, for the star light curves (RMS.StarLightCurves)
+        self.frame_times1 = frame_times1
+        self.frame_times2 = frame_times2
         self._sei_blk = SEIBlockAccumulator()
         self._sei_blk_seq = 0
         self._sei_seen = False
@@ -2967,8 +2973,12 @@ class BufferedCapture(Process):
                     t1_assign = time.time()
                     if buffer_one:
                         self.array1[i, :gray.shape[0], :gray.shape[1]] = gray
+                        if self.frame_times1 is not None:
+                            self.frame_times1[i] = frame_timestamp
                     else:
                         self.array2[i, :gray.shape[0], :gray.shape[1]] = gray
+                        if self.frame_times2 is not None:
+                            self.frame_times2[i] = frame_timestamp
 
                     t_assignment = time.time() - t1_assign
 

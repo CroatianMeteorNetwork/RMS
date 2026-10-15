@@ -500,7 +500,7 @@ def run(args):
     """ Replay blocks through the compressor and the light-curve pass, one output file per block. """
 
     from RMS.Formats.Platepar import Platepar
-    from RMS.StarLightCurves import SCHEMA_VERSION, StarLightCurves, saveBlock
+    from RMS.StarLightCurves import StarLightCurves, saveBlock
 
     config = cr.parse(args.config)
     useNightResponse(config, args.night_dir)
@@ -553,17 +553,11 @@ def run(args):
         dt = time.time() - t1
         t_lc.append(dt)
 
-        header = {'schema_version': SCHEMA_VERSION, 'stationID': config.stationID, 'ff': name,
-                  'catalog': lc.field.catalog_name, 'lim_mag': lim_mag,
-                  'platepar': os.path.basename(args.platepar), 'response': lc.response_id,
-                  'hot_pixels': int(len(hot)),
-                  'gamma': config.gamma, 'aperture': '5x5 box at the fractional position',
-                  'ring': 'median of 8 px at +/-7 px', 'offset': res['offset'],
-                  't_row_ns': int(index['t_row_ns'][int(index['file'][sel[0]])]),
-                  'exp_s': float(np.nanmedian(index['exp_s'][sel])),
-                  'seq_first': blk['seq_first'], 'seq_last': blk['seq_last']}
+        header = lc.blockHeader(name, os.path.basename(args.platepar), res['offset'],
+                                index['t_row_ns'][int(index['file'][sel[0]])],
+                                np.nanmedian(index['exp_s'][sel]), blk['seq_first'], blk['seq_last'])
         out = os.path.join(args.out, 'LC_' + name.replace('FF_', '').replace('.fits', '.npz'))
-        saveBlock(out, res, t_frames, index['seq'][sel], header)
+        saveBlock(out, res, t_frames, header, frame_seq=index['seq'][sel])
 
         ref = ''
         if args.reference_every and (nb % args.reference_every == 0):
@@ -592,6 +586,187 @@ def run(args):
             float(np.median(t_lc)), float(np.max(t_lc)), len(t_lc)))
 
     return True
+
+
+def compressorRun(args):
+    """ Replay blocks through RMS.Compression.Compressor.run the way live capture hands them over:
+    the frames into the shared ping-pong buffers, each frame's time, the block's SEI metadata (from
+    the station FF's cards), then the block start time as the ready signal; star light curves on.
+    Every FF plane is checked against the station's FF (MAXFRAME at tied pixels excepted, see
+    check) and every LC file against the pass run directly on the same block in this process. """
+
+    import ctypes
+    import json
+    import multiprocessing
+
+    from RMS.Formats.FFfits import joinAvepixel16
+    from RMS.Formats.Platepar import Platepar
+    from RMS.HotPixels import loadHotPixelCoords
+    from RMS.Logger import initLogging
+    from RMS.Misc import frameBufferShape
+    from RMS.SEIBlockMeta import SEI_META_FIELDS, SEI_META_N, publishSeiMeta
+    from RMS.StarLightCurves import StarLightCurves
+
+    config = cr.parse(args.config)
+    useNightResponse(config, args.night_dir)
+    if args.camera_reply:
+        with open(args.camera_reply) as f:
+            config.response = ResponseCurve.fromCameraReply(f.read(), gamma=config.gamma)
+
+    # The compressor writes and logs into args.out only; its hot pixels come from there, as live
+    # capture's come from the night directory
+    if not os.path.isdir(args.out):
+        os.makedirs(args.out)
+    config.data_dir = args.out
+    config.star_light_curves = True
+    if args.lim_mag:
+        config.star_light_curves_lim_mag = args.lim_mag
+    config.enable_fireball_detection = False
+    config.live_jpg = False
+    hp = os.path.join(args.night_dir, getattr(config, 'hot_pixels_file', 'hotpixels.json'))
+    if os.path.isfile(hp):
+        shutil.copy(hp, args.out)
+    initLogging(config, 'lcreplay_')
+
+    pp = Platepar()
+    pp.read(args.platepar, use_flat=config.use_flat)
+    config.platepar_name = os.path.basename(args.platepar)
+
+    paths = sorted(p for d in args.video for p in (glob.glob(os.path.join(d, '*.mkv'))
+                                                    if os.path.isdir(d) else [d]))
+    index = indexVideo(paths, os.path.join(args.work, 'sei_index'))
+    ff_paths = sorted(glob.glob(os.path.join(args.ff_dir, 'FF_{:s}_*.fits'.format(config.stationID))))
+    blocks = [b for b in ffBlocks(ff_paths)
+              if (b['seq_first'] >= index['seq'].min()) and (b['seq_last'] <= index['seq'].max())]
+    if args.first:
+        blocks = [b for b in blocks if os.path.basename(b['path']) >= args.first]
+    blocks = blocks[:args.max_blocks] if args.max_blocks else blocks
+
+    # The shared state StartCapture creates
+    shape = frameBufferShape(config)
+    bases = [multiprocessing.Array(ctypes.c_uint8, int(np.prod(shape))) for _ in range(2)]
+    views = [np.ctypeslib.as_array(b.get_obj()).reshape(shape) for b in bases]
+    start_times = [multiprocessing.Value('d', 0.0, lock=False) for _ in range(2)]
+    sei_meta = [multiprocessing.Array('d', SEI_META_N, lock=False) for _ in range(2)]
+    frame_times = [multiprocessing.Array('d', shape[0], lock=False) for _ in range(2)]
+
+    comp = Compressor(args.out, bases[0], start_times[0], bases[1], start_times[1], config,
+                      sei_meta1=sei_meta[0], sei_meta2=sei_meta[1], frame_times1=frame_times[0],
+                      frame_times2=frame_times[1], platepar=pp)
+    comp.start()
+
+    direct = StarLightCurves(config, pp, config.star_light_curves_lim_mag,
+                             hot_pixels=loadHotPixelCoords(args.out, config))
+
+    n_ok = n_bad = 0
+    k = 0
+    for blk, frames, sel in iterBlocks(paths, index, blocks, threads=args.threads):
+
+        name = os.path.basename(blk['path'])
+        if frames is None:
+            print("{:s}: not reproducible from the video, skipped".format(name))
+            continue
+
+        # Hand the block over as capture does: wait for the buffer, fill it, then the ready signal
+        b = k % 2
+        while start_times[b].value != 0:
+            time.sleep(0.01)
+        n, h, w = frames.shape
+        views[b][:, :h, :w] = frames
+        t_frames = index['int_start'][sel]
+        frame_times[b][:n] = [float(v) for v in t_frames]
+        hdr = fits.getheader(blk['path'])
+        meta = {'nfrm': n, 'exp_mean': hdr.get('EXPTIME', 0), 'exp_min': hdr.get('EXPMIN', 0),
+                'exp_max': hdr.get('EXPMAX', 0), 't_row_ns': hdr.get('TROWNS', 0),
+                'vmax': hdr.get('VMAX', 0), 'seq_first': blk['seq_first'], 'seq_last': blk['seq_last'],
+                'seq_lost': hdr.get('SEQLOST', 0), 'time_src': 1, 'seq': k + 1}
+        vals = [0.0]*SEI_META_N
+        for key, v in meta.items():
+            vals[SEI_META_FIELDS.index(key)] = float(v)
+        publishSeiMeta(sei_meta[b], vals)
+        start_times[b].value = float(t_frames[0])
+        k += 1
+
+        # Wait for this block's LC file (written after its FF)
+        t_wait = time.time()
+        while (len(glob.glob(os.path.join(args.out, 'LC_*.npz'))) < k) and (time.time() - t_wait < 120):
+            time.sleep(0.05)
+        lc_files = sorted(glob.glob(os.path.join(args.out, 'LC_*.npz')))
+        if len(lc_files) < k:
+            print("{:s}: no LC file from the compressor".format(name))
+            n_bad += 1
+            break
+        lc_path = lc_files[-1]
+        ff_path = os.path.join(args.out, os.path.basename(lc_path).replace('LC_', 'FF_')
+                               .replace('.npz', '.' + config.ff_format))
+
+        # The FF planes against the station's
+        mism = {}
+        with fits.open(blk['path']) as hs, fits.open(ff_path) as hr:
+            for p in ('MAXPIXEL', 'AVEPIXEL', 'AVERESID', 'STDPIXEL', 'STDRESID', 'MAXFRAME'):
+                mism[p] = int(np.count_nonzero(hs[p].data != hr[p].data))
+            yy, xx = np.nonzero(hs['MAXFRAME'].data != hr['MAXFRAME'].data)
+            ties = np.count_nonzero(frames == hs['MAXPIXEL'].data[None], axis=0)
+            untied = int(np.count_nonzero(ties[yy, xx] == 1))
+            ave16 = joinAvepixel16(hr['AVEPIXEL'].data, hr['AVERESID'].data)
+
+        # The pass run directly on the same block, and the field prepared the same way after it
+        res = direct.measureBlock(frames, ave16, t_frames)
+        period = (t_frames[-1] - t_frames[0])/(len(t_frames) - 1)
+        direct.prepareNext(t_frames[-1] + period, period*len(t_frames), w, h)
+
+        d = np.load(lc_path)
+        diff = [key for key in ('oid', 'ra', 'dec', 'mag', 'x_first', 'y_first', 'x_last', 'y_last',
+                                'n_sat', 'hot', 'bg_ave', 'flux', 'bg', 'probe_x', 'probe_y',
+                                'probe_flux', 'probe_bg', 'probe_bg_ave')
+                if not np.array_equal(d[key], res[key], equal_nan=True)]
+        if not np.array_equal(d['t'], t_frames):
+            diff.append('t')
+        h_lc = json.loads(str(d['header']))
+        h_direct = json.loads(json.dumps(direct.blockHeader(os.path.basename(ff_path), config.platepar_name,
+                                         res['offset'], meta['t_row_ns'], meta['exp_mean'],
+                                         meta['seq_first'], meta['seq_last'])))
+        if h_lc != h_direct:
+            diff.append('header')
+
+        planes_ok = all(v == 0 for p, v in mism.items() if p != 'MAXFRAME') and (untied == 0)
+        ok = planes_ok and not diff
+        n_ok += ok
+        n_bad += not ok
+        print("{:s}: FF planes {:s} (MAXFRAME differs at {:d} tied px, {:d} untied), LC {:d} stars "
+              "{:s}".format(name, 'identical' if planes_ok else 'DIFFER {}'.format(mism),
+                            mism['MAXFRAME'], untied, len(res['oid']),
+                            'identical to the direct pass' if not diff else 'DIFFERS in {}'.format(diff)),
+              flush=True)
+
+    # Stop the compressor the way capture does: the exit flag once both buffers are released
+    while (start_times[0].value != 0) or (start_times[1].value != 0):
+        time.sleep(0.05)
+    comp.exit.set()
+    comp.join(60)
+
+    # The compressor's own timing, from its log
+    comp_t, lc_t = [], []
+    for log_path in glob.glob(os.path.join(args.out, config.log_dir, '*.log')):
+        with open(log_path) as f:
+            for line in f:
+                if 'Compression time:' in line:
+                    comp_t.append(float(line.split('Compression time:')[1].split()[0]))
+                elif 'Star light curves:' in line and 'measuring' in line:
+                    lc_t.append([float(v) for v in
+                                 (line.split('measuring ')[1].split()[0], line.split('saving ')[1].split()[0],
+                                  line.split('field ')[1].split()[0])])
+    if comp_t and lc_t:
+        lc_t = np.array(lc_t)
+        print("Compressor: compression time (with the pass) median {:.3f} s, max {:.3f} s; pass "
+              "median {:.3f} s, max {:.3f} s; LC saving median {:.3f} s; field refresh max {:.3f} s "
+              "({:d} blocks)".format(np.median(comp_t), np.max(comp_t), np.median(lc_t[:, 0]),
+                                     np.max(lc_t[:, 0]), np.median(lc_t[:, 1]), np.max(lc_t[:, 2]),
+                                     len(comp_t)))
+
+    print("{:d} blocks identical, {:d} differ".format(n_ok, n_bad))
+
+    return n_bad == 0
 
 
 def main(argv=None):
@@ -633,6 +808,24 @@ def main(argv=None):
     r.add_argument('--reference-frames', type=int, default=16,
                    help="frames of a block checked against the reference")
     r.set_defaults(func=run)
+
+    m = sub.add_parser('compressor', help="replay blocks through Compressor.run as live capture "
+                       "hands them over, star light curves on")
+    m.add_argument('--config', required=True, help="station .config")
+    m.add_argument('--night-dir', required=True, help="night directory (camera_response.json, "
+                   "hot pixels)")
+    m.add_argument('--camera-reply', help="the camera's raw 'gamma decode' reply")
+    m.add_argument('--platepar', required=True, help="station platepar")
+    m.add_argument('--lim-mag', type=float, help="catalog limiting magnitude (default: "
+                   "star_light_curves_lim_mag of the config)")
+    m.add_argument('--ff-dir', required=True, help="directory of the station's FF files")
+    m.add_argument('--video', required=True, nargs='+', help="mkv files or directories")
+    m.add_argument('--work', required=True, help="work directory (SEI index cache)")
+    m.add_argument('--out', required=True, help="the compressor's output directory")
+    m.add_argument('--first', help="first FF file name")
+    m.add_argument('--max-blocks', type=int, default=0)
+    m.add_argument('--threads', type=int, default=2, help="decoder threads")
+    m.set_defaults(func=compressorRun)
 
     args = ap.parse_args(argv)
 

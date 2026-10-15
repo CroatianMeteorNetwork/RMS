@@ -338,6 +338,44 @@ class StarLightCurves(object):
         self.offset_good = False
 
 
+    def prepareNext(self, t_next, block_s, w, h):
+        """ Refresh the field ahead of the next block when that block would end past the current
+        field's validity, so the refresh runs outside the capture handshake (measureBlock refreshes
+        only when no field covers its block yet, i.e. the first block or after a gap).
+
+        Arguments:
+            t_next: [float] Expected start of the next block [unix s].
+            block_s: [float] Duration of a block [s].
+            w, h: [int] Image size [px].
+        """
+
+        if (self.field.valid_until is None) or (t_next + block_s > self.field.valid_until):
+            self.field.refresh(t_next, w, h)
+
+
+    def blockHeader(self, ff_name, platepar_name, offset, t_row_ns, exp_s, seq_first, seq_last):
+        """ The JSON header of one block's file (saveBlock).
+
+        Arguments:
+            ff_name: [str] Name of the block's FF file.
+            platepar_name: [str] Name of the platepar the positions come from.
+            offset: [dict] The block offset provenance (measureBlock 'offset').
+            t_row_ns: [int] Sensor line period [ns] (rolling shutter: row y starts y*t_row_ns
+                after row 0), 0 if unknown.
+            exp_s: [float] Exposure of the block's frames [s], nan if unknown.
+            seq_first, seq_last: [int] Camera frame_seq of the block's first and last frame, -1 if
+                unknown.
+        """
+
+        return {'schema_version': SCHEMA_VERSION, 'stationID': self.config.stationID, 'ff': ff_name,
+                'catalog': self.field.catalog_name, 'lim_mag': self.field.lim_mag,
+                'platepar': platepar_name, 'response': self.response_id,
+                'hot_pixels': int(len(self.hot_pixels)), 'gamma': self.config.gamma,
+                'aperture': '5x5 box at the fractional position', 'ring': 'median of 8 px at +/-7 px',
+                'offset': offset, 't_row_ns': int(t_row_ns), 'exp_s': float(exp_s),
+                'seq_first': int(seq_first), 'seq_last': int(seq_last)}
+
+
     def fitOffset(self, ave_lin, x_mid, y_mid, mag):
         """ Fit the block offset (measured - predicted) from the bright stars on the block's linear
         average image. Updates self.offset when at least OFFSET_N_MIN stars centroid.
@@ -483,7 +521,9 @@ class StarLightCurves(object):
         order = np.argsort(np.asarray(y_first) + np.asarray(y_last), kind='stable')
         f64 = lambda v: np.ascontiguousarray(np.asarray(v)[order], dtype=np.float64)
 
-        flux, bg, nsat = boxPhotometry(np.ascontiguousarray(frames), self.lut, f64(x_first),
+        # The frames go in as they are: the kernel only needs contiguous rows, so the compressor's
+        # buffer cropped to the image (padded on some Pis) is read in place, never copied
+        flux, bg, nsat = boxPhotometry(frames, self.lut, f64(x_first),
             f64(x_last), f64(y_first), f64(y_last), np.ascontiguousarray(frac, dtype=np.float64),
             APERTURE_HALF, RING)
 
@@ -493,7 +533,7 @@ class StarLightCurves(object):
         return flux[:, inv], bg[:, inv], nsat[inv]
 
 
-def saveBlock(path, res, t_frames, frame_seq, header):
+def saveBlock(path, res, t_frames, header, frame_seq=None):
     """ Write one block's light curves (test format: everything, uncompressed npz).
 
     Arrays:
@@ -506,13 +546,19 @@ def saveBlock(path, res, t_frames, frame_seq, header):
         probe_x, probe_y [P] float32 sky-probe positions (static over the block).
         probe_flux, probe_bg [N, P] float32 the probes' aperture sums and ring medians.
         probe_bg_ave [P] float32 the probes' ring medians on the block's average image.
-        t [N] float64 unix start of integration of row 0; frame_seq [N] int64 camera frame number.
+        t [N] float64 unix start of integration of row 0.
+        frame_seq [N] int64 camera frame number (replayed blocks only; live capture records the
+            block's first and last in the header).
         header: JSON string.
     """
 
-    np.savez(path, header=json.dumps(header), oid=res['oid'], ra=res['ra'], dec=res['dec'],
-             mag=res['mag'], x_first=res['x_first'], y_first=res['y_first'], x_last=res['x_last'],
-             y_last=res['y_last'], n_sat=res['n_sat'], hot=res['hot'], bg_ave=res['bg_ave'], flux=res['flux'],
-             bg=res['bg'], probe_x=res['probe_x'], probe_y=res['probe_y'],
-             probe_flux=res['probe_flux'], probe_bg=res['probe_bg'], probe_bg_ave=res['probe_bg_ave'],
-             t=np.asarray(t_frames, dtype=np.float64), frame_seq=np.asarray(frame_seq, dtype=np.int64))
+    arrays = {'oid': res['oid'], 'ra': res['ra'], 'dec': res['dec'], 'mag': res['mag'],
+              'x_first': res['x_first'], 'y_first': res['y_first'], 'x_last': res['x_last'],
+              'y_last': res['y_last'], 'n_sat': res['n_sat'], 'hot': res['hot'], 'bg_ave': res['bg_ave'],
+              'flux': res['flux'], 'bg': res['bg'], 'probe_x': res['probe_x'], 'probe_y': res['probe_y'],
+              'probe_flux': res['probe_flux'], 'probe_bg': res['probe_bg'],
+              'probe_bg_ave': res['probe_bg_ave'], 't': np.asarray(t_frames, dtype=np.float64)}
+    if frame_seq is not None:
+        arrays['frame_seq'] = np.asarray(frame_seq, dtype=np.int64)
+
+    np.savez(path, header=json.dumps(header), **arrays)

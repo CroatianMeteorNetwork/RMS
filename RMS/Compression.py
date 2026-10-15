@@ -66,7 +66,8 @@ class Compressor(multiprocessing.Process):
     running = False
     
     def __init__(self, data_dir, array1, start_time1, array2, start_time2, config, detector=None,
-                 soc_temp1=None, soc_temp2=None, sei_meta1=None, sei_meta2=None):
+                 soc_temp1=None, soc_temp2=None, sei_meta1=None, sei_meta2=None, frame_times1=None,
+                 frame_times2=None, platepar=None):
         """
 
         Arguments:
@@ -80,6 +81,9 @@ class Compressor(multiprocessing.Process):
         Keyword arguments:
             detector: [Detector object] Handle to Detector object used for running star extraction and
                 meteor detection.
+            frame_times1, frame_times2: [multiprocessing.Array 'd'] Time of every frame of the block
+                in array1/array2 (BufferedCapture), for the star light curves.
+            platepar: [Platepar] Station astrometry, for the star light curves.
 
         """
         
@@ -101,6 +105,9 @@ class Compressor(multiprocessing.Process):
         self.soc_temp2 = soc_temp2
         self.sei_meta1 = sei_meta1
         self.sei_meta2 = sei_meta2
+        self.frame_times1 = frame_times1
+        self.frame_times2 = frame_times2
+        self.platepar = platepar
         self.config = config
 
         self.detector = detector
@@ -402,6 +409,27 @@ class Compressor(multiprocessing.Process):
         self.array1 = np.ctypeslib.as_array(self.array1_base.get_obj()).reshape(frame_buffer_shape)
         self.array2 = np.ctypeslib.as_array(self.array2_base.get_obj()).reshape(frame_buffer_shape)
 
+        # Per-star light curves (RMS.StarLightCurves), measured on each block before its buffer is
+        # released. Imported only when enabled, so a station without them never loads the extension
+        light_curves = None
+        if self.config.star_light_curves:
+            if (self.platepar is None) or (self.frame_times1 is None) or (self.frame_times2 is None):
+                log.warning('Star light curves need the platepar and the frame times, not measured')
+            else:
+                try:
+                    from RMS.HotPixels import loadHotPixelCoords
+                    from RMS.StarLightCurves import StarLightCurves, saveBlock
+                    light_curves = StarLightCurves(self.config, self.platepar,
+                        self.config.star_light_curves_lim_mag,
+                        hot_pixels=loadHotPixelCoords(self.data_dir, self.config))
+                    log.info('Star light curves: {:s} to mag {:.2f}, {:d} stars, {:d} hot pixels'.format(
+                        light_curves.field.catalog_name, light_curves.field.lim_mag,
+                        len(light_curves.field.oid), len(light_curves.hot_pixels)))
+                except Exception as e:
+                    log.error('Star light curves could not be set up, not measured: ' + repr(e))
+                    log.debug(repr(traceback.format_exception(*sys.exc_info())))
+                    light_curves = None
+
         n = 0
         exit_wait_start = None
 
@@ -496,6 +524,7 @@ class Compressor(multiprocessing.Process):
 
                 # Copy frames
                 frames = self.array1
+                frame_times = self.frame_times1
 
                 # Tell the capture thread to wait until the compression is completed by setting this to -1
                 self.start_time1.value = -1
@@ -510,6 +539,7 @@ class Compressor(multiprocessing.Process):
 
                 # Copy frames
                 frames = self.array2
+                frame_times = self.frame_times2
 
                 # Tell the capture thread to wait until the compression is completed
                 self.start_time2.value = -1
@@ -581,6 +611,28 @@ class Compressor(multiprocessing.Process):
 
                     np.copyto(snapshot[1], frames)
 
+            # Star light curves: every star on every frame, while the block is still held. The
+            # frame times are copied out before the release too; they must be this block's
+            lc_res = None
+            t_frames = None
+            t_lc = 0.0
+            if light_curves is not None:
+                t_lc = time.time()
+                try:
+                    t_frames = np.array(frame_times[:frames.shape[0]], dtype=np.float64)
+                    if abs(t_frames[0] - startTime) > 1e-6:
+                        log.warning('Star light curves: frame times start at {:.6f}, the block at '
+                            '{:.6f}, block not measured'.format(t_frames[0], startTime))
+                    else:
+                        lc_res = light_curves.measureBlock(
+                            frames[:, :self.config.height, :self.config.width],
+                            ave16[:self.config.height, :self.config.width], t_frames)
+                except Exception as e:
+                    log.error('Star light curves failed on this block: ' + repr(e))
+                    log.debug(repr(traceback.format_exception(*sys.exc_info())))
+                    lc_res = None
+                t_lc = time.time() - t_lc
+
             # Once the compression is done, tell the capture thread to keep filling the buffer
             if buffer_one:
                 self.start_time1.value = 0
@@ -627,6 +679,30 @@ class Compressor(multiprocessing.Process):
             # Fully format the filename (this could not have been done before as the extractor has to add
             # the FR prefix to the given file name)
             filename = "FF_" + filename_millis + "." + self.config.ff_format
+
+
+            # Save the block's light curves next to its FF, then refresh the star field ahead of
+            # the next block; both outside the capture handshake
+            if lc_res is not None:
+                t_lc_save = time.time()
+                try:
+                    sm = seiMeta if seiMeta is not None else {}
+                    header = light_curves.blockHeader(filename, self.config.platepar_name,
+                        lc_res['offset'], max(sm.get('t_row_ns', 0), 0),
+                        sm['exp_mean'] if sm.get('exp_mean', 0) > 0 else float('nan'),
+                        sm.get('seq_first', -1), sm.get('seq_last', -1))
+                    saveBlock(os.path.join(self.data_dir, "LC_" + filename_millis + ".npz"), lc_res,
+                        t_frames, header)
+                    t_save = time.time() - t_lc_save
+                    period = (t_frames[-1] - t_frames[0])/(len(t_frames) - 1)
+                    light_curves.prepareNext(t_frames[-1] + period, period*len(t_frames),
+                        self.config.width, self.config.height)
+                    log.info("Star light curves: {:d} stars, {:d} probes, measuring {:.3f} s (in the "
+                        "compression time), saving {:.3f} s, field {:.3f} s".format(len(lc_res['oid']),
+                        len(lc_res['probe_x']), t_lc, t_save, time.time() - t_lc_save - t_save))
+                except Exception as e:
+                    log.error('Star light curves could not be saved: ' + repr(e))
+                    log.debug(repr(traceback.format_exception(*sys.exc_info())))
 
 
             # Run the detection on the file, if the detector handle was given
