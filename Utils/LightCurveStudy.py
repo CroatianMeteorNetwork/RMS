@@ -144,14 +144,18 @@ def photometry(args):
         _, a = raDec2AltAz(b['ra'], b['dec'], jd, pp.lat, pp.lon)
         for j, o in enumerate(b['oid']):
             i = pos[int(o)]
+
+            # A block with a hot pixel in the star's box or ring is left out of its statistics
+            if b['hot'][j] > 0:
+                nhot[i] += 1
+                continue
             for k in keys:
                 acc[k][i].append(b[k][j])
             alt[i].append(a[j])
             nsat[i] += int(b['n_sat'][j])
-            nhot[i] += int(b['hot'][j] > 0)
     med = {k: np.array([np.nanmedian(v) if len(v) else np.nan for v in acc[k]]) for k in keys}
     nblk = np.array([len(v) for v in acc['F_ave']])
-    alt = np.array([np.median(v) for v in alt])
+    alt = np.array([np.median(v) if len(v) else np.nan for v in alt])
 
     ci = np.array([row[int(o)] for o in oids])
     mag = cat[ci, 2]
@@ -162,7 +166,8 @@ def photometry(args):
 
     # Crowding: another measured star within 10 px brighter than mag + 2.5
     from scipy.spatial import cKDTree
-    xy = np.column_stack([med['x'], med['y']])
+    # (stars left out of every block have no position; they fail the block count anyway)
+    xy = np.nan_to_num(np.column_stack([med['x'], med['y']]), nan=-1e6)
     crowded = np.zeros(len(oids), dtype=bool)
     for i, nb in enumerate(cKDTree(xy).query_ball_point(xy, 10.0)):
         crowded[i] = any((j != i) and (mag[j] < mag[i] + 2.5) for j in nb)
@@ -170,10 +175,10 @@ def photometry(args):
     airmass = 1.0/np.sin(np.radians(np.clip(alt, 5, 90)))
     r2 = ((med['x'] - pp.X_res/2.0)**2 + (med['y'] - pp.Y_res/2.0)**2)/(pp.Y_res/2.0)**2
 
-    clean = (nsat == 0) & (nhot == 0) & ~crowded & ~variable & (nblk >= max(3, len(blocks)//2))
-    print("stars: {:d} measured, {:d} clean (unsaturated {:d}, no hot pixel {:d}, uncrowded {:d}, non-variable {:d})"
-          .format(len(oids), int(clean.sum()), int((nsat == 0).sum()), int((nhot == 0).sum()),
-                  int((~crowded).sum()), int((~variable).sum())))
+    clean = (nsat == 0) & ~crowded & ~variable & (nblk >= max(3, len(blocks)//10))
+    print("stars: {:d} measured, {:d} clean (unsaturated {:d}, uncrowded {:d}, non-variable {:d}); {:d} "
+          "star-blocks with a hot pixel left out".format(len(oids), int(clean.sum()), int((nsat == 0).sum()),
+          int((~crowded).sum()), int((~variable).sum()), int(nhot.sum())))
 
     # 1) Linearity: instrumental vs catalog magnitude. The GMN catalog's Gaia BP/RP are unreliable
     # brighter than G ~3.5 (saturation), which spoils both the band magnitude and the colour
