@@ -473,3 +473,87 @@ def testLoggingRestartBackoffPacesDeadListenerRestarts():
     for _ in range(5):
         assert mgr.checkLoggingHealth() is False
     assert len(spawns) == 1
+
+
+# ---------------------------------------------------------------------------
+# Logging queue wedged by a process which died holding its write lock
+
+
+_WEDGE_SCRIPT = r'''
+import os, sys, time, logging
+sys.path.insert(0, sys.argv[1])
+import RMS.ConfigReader as cr
+from RMS.Logger import LoggingManager, getLogger
+
+config = cr.Config()
+config.data_dir = sys.argv[2]
+config.log_dir = 'logs'
+config.stationID = 'XX0001'
+
+manager = LoggingManager()
+manager.initLogging(config, 'wedge_')
+log = getLogger('rmslogger')
+log.info('before the wedge')
+time.sleep(1.0)
+
+# A child dies while it holds the write lock of the logging queue (e.g. a worker killed while it was logging)
+pid = os.fork()
+if pid == 0:
+    manager.logging_queue._wlock.acquire()
+    os._exit(0)
+os.waitpid(pid, 0)
+
+# The records of this process can't be written any more, and the process exits
+for i in range(5):
+    log.info('after the wedge %d', i)
+# Straight to the terminal: print() may go to the (wedged) log
+os.write(1, b'exiting\n')
+'''
+
+
+@pytest.mark.skipif(not hasattr(os, 'fork'), reason='needs fork')
+def testExitNotBlockedByWedgedLoggingQueue(tmp_path):
+    """ A process whose logging queue was wedged by another process dying with the queue's write lock still exits:
+        its records can't be written, and waiting at exit for them to be flushed would block it forever (seen as a
+        monitor which didn't stop on Ctrl+C). """
+
+    import subprocess
+    script = tmp_path/'wedge.py'
+    script.write_text(_WEDGE_SCRIPT)
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    proc = subprocess.Popen([sys.executable, str(script), repo, str(tmp_path)], stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT)
+    try:
+        out, _ = proc.communicate(timeout=60)
+        exited = True
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        out, _ = proc.communicate()
+        exited = False
+
+    assert b'exiting' in out
+    assert exited, out.decode(errors='replace')[-2000:]
+
+
+def testLoggingStallRestartsOnFrozenListenerWithSmallBacklog():
+    """ A wedged queue in a quiet process (e.g. an idle monitor) holds only a few records: no listener progress with
+        any records waiting is a stall, or the process stays log-dark for hours. """
+
+    mgr = _stallManager(backlogs=[3], processed=[77])
+
+    for _ in range(1 + 3):      # first sample only establishes the baseline
+        _sample(mgr)
+
+    assert len(mgr.restarts) == 1
+
+
+def testLoggingNoStallWhenIdle():
+    """ An empty queue with no listener progress is an idle process, not a stall. """
+
+    mgr = _stallManager(backlogs=[0], processed=[77])
+
+    for _ in range(1 + 5):
+        _sample(mgr)
+
+    assert mgr.restarts == []
