@@ -364,8 +364,11 @@ class CustomHandler(logging.handlers.TimedRotatingFileHandler):
 # in production when a process died while holding the queue's shared write lock)
 LOG_QUEUE_MAXSIZE = 30000
 
-# Backlog size above which the listener pipeline is considered stalled
-LOG_QUEUE_STALL_THRESHOLD = 500
+# Backlog size above which the listener pipeline is considered stalled (with no listener progress). Any waiting
+#   record counts: a queue wedged by a process which died holding its write lock gets only a few records in a
+#   quiet process (e.g. an idle monitor), which would otherwise stay log-dark for hours. The progress of the
+#   listener tells a stall from a listener which is busy
+LOG_QUEUE_STALL_THRESHOLD = 0
 
 # Number of consecutive health checks the backlog must persist before the pipeline is restarted
 LOG_STALL_STRIKES = 3
@@ -734,7 +737,9 @@ class LoggingManager:
             if not self.is_initialized:
                 return
             
-            # Stop the listener process
+            # Stop the listener process. A listener which ends cleanly took the sentinel, so every record put
+            #   before it was written
+            listener_stopped = False
             if self.listener_process and self.listener_process.is_alive():
                 print("Shutting down logging...") # Added for visibility during shutdown
                 # Sentinel to stop the listener loop. Never block on a possibly wedged queue -
@@ -746,7 +751,18 @@ class LoggingManager:
                 self.listener_process.join(timeout=5)
                 if self.listener_process.is_alive():
                     self.listener_process.terminate()
-            
+                else:
+                    listener_stopped = (self.listener_process.exitcode == 0)
+
+            # Without a listener which took the sentinel, the records of this process may never get into the
+            #   queue (e.g. it was wedged by a process which died holding its write lock): the exit must not wait
+            #   for them to be flushed, which would block it forever
+            if (not listener_stopped) and (self.logging_queue is not None):
+                try:
+                    self.logging_queue.cancel_join_thread()
+                except Exception:
+                    pass
+
             self.is_initialized = False
             print("Logging shutdown complete.")
 
