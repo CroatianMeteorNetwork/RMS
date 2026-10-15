@@ -65,8 +65,79 @@ def velocityShifts(velocities, n_frames):
     return np.ascontiguousarray(shifts)
 
 
+def velocitySamples(velocities, n_frames, streak=False, smooth_sigma=0.0):
+    """ The pixels which the stack of every velocity sums: a sample (dx, dy, k) is the frame k shifted by
+        (dx, dy). Without the streak, every frame is one sample, at the shift of velocityShifts. With the streak,
+        an object which moves L px during a frame is a streak of that length in every frame, and the frame is
+        sampled round(L) times along it (at the middles of equal parts of the frame time), so the stack collects
+        the light of the whole streak and not only of its middle.
+
+    The sum of a velocity is weighted by one over its noise relative to one sample per frame, which keeps the
+    noise of all velocities the same, so their largest sum is taken at the same noise level and the thresholds of
+    the search don't change. The samples of a frame are neighbouring pixels of frames smoothed by a Gaussian, so
+    their noise is correlated: the variance of their sum is the sum of the correlations of all pairs of samples,
+    exp(-d^2/(4*sigma^2)) for samples d px apart (1 for a sample with itself).
+
+    Arguments:
+        velocities: [ndarray] Velocities (vx, vy) in px per frame, shape (n_vel, 2).
+        n_frames: [int] Number of frames in the stack.
+
+    Keyword arguments:
+        streak: [bool] Sample the streak of every frame. False by default (one sample per frame).
+        smooth_sigma: [float] Sigma of the Gaussian smoothing of the frames (px), for the correlation of the noise
+            of neighbouring samples. 0 by default (independent pixels).
+
+    Return:
+        (samples, counts, weights): int32 samples (dx, dy, k) of shape (n_vel, n_max, 3), the int32 number of
+            samples of every velocity (n_vel,), and the float32 weight of every velocity (n_vel,). The samples of
+            a velocity are ordered by frame.
+    """
+
+    velocities = np.asarray(velocities, dtype=np.float64).reshape(-1, 2)
+    n_vel = len(velocities)
+
+    # The samples per frame: the length of the streak in px (the motion during a frame), at least 1
+    speed = np.hypot(velocities[:, 0], velocities[:, 1])
+    per_frame = np.maximum(1, np.rint(speed)).astype(np.int32) if streak else np.ones(n_vel, dtype=np.int32)
+    n_max = n_frames*int(per_frame.max()) if n_vel else n_frames
+
+    samples = np.zeros((n_vel, n_max, 3), dtype=np.int32)
+    counts = (n_frames*per_frame).astype(np.int32)
+    weights = np.ones(n_vel, dtype=np.float32)
+    # The shift of the middle of every frame, as in velocityShifts
+    shifts = velocityShifts(velocities, n_frames)
+
+    for v in range(n_vel):
+
+        # The offsets of the samples of a frame from its middle: the motion at the middles of per_frame equal
+        #   parts of the frame, in whole pixels (rounded half up, so the samples of a frame are different
+        #   pixels, symmetric around the middle when that is possible)
+        m = per_frame[v]
+        tau = (np.arange(m) + 0.5)/m - 0.5
+        off_x = np.floor(velocities[v, 0]*tau + 0.5).astype(np.int32)
+        off_y = np.floor(velocities[v, 1]*tau + 0.5).astype(np.int32)
+
+        # The samples frame by frame: the shift of the frame plus the offsets, and the frame of every sample
+        samples[v, :n_frames*m, 0] = (shifts[v, :, 0][:, None] + off_x[None, :]).ravel()
+        samples[v, :n_frames*m, 1] = (shifts[v, :, 1][:, None] + off_y[None, :]).ravel()
+        samples[v, :n_frames*m, 2] = np.repeat(np.arange(n_frames), m)
+
+        # The variance of the sum of the samples of a frame, relative to one sample: the correlations of all pairs
+        #   (pixels further apart than a few sigmas are independent, and without smoothing only a sample with
+        #   itself counts)
+        if m > 1:
+            d2 = (off_x[:, None] - off_x[None, :])**2 + (off_y[:, None] - off_y[None, :])**2
+            if smooth_sigma > 0:
+                corr = np.exp(-d2/(4.0*smooth_sigma**2))
+            else:
+                corr = (d2 == 0).astype(np.float64)
+            weights[v] = 1.0/math.sqrt(float(np.sum(corr)))
+
+    return np.ascontiguousarray(samples), counts, weights
+
+
 @numba.njit(parallel=True, fastmath=True, cache=True)
-def velocityStackMaxCPU(frames, pad, shifts, out_max, out_idx):
+def velocityStackMaxCPU(frames, pad, samples, counts, weights, out_max, out_idx):
     """ For every pixel, the largest mean of the frames along the velocities, and the index of that velocity.
         The frames are zero-padded, so whole rows are summed for every velocity without bounds checks (pixels
         shifted outside the image add zero).
@@ -75,15 +146,17 @@ def velocityStackMaxCPU(frames, pad, shifts, out_max, out_idx):
         frames: [ndarray] float32 frames of the stack, padded by pad px on every side, shape
             (n_frames, height + 2*pad, width + 2*pad).
         pad: [int] Padding (px), at least the largest shift.
-        shifts: [ndarray] int32 shifts of every frame for every velocity, shape (n_vel, n_frames, 2), as
-            given by velocityShifts.
+        samples: [ndarray] int32 samples (dx, dy, k) of every velocity, shape (n_vel, n_max, 3), as given by
+            velocitySamples.
+        counts: [ndarray] int32 number of samples of every velocity.
+        weights: [ndarray] float32 weight of the sum of every velocity.
         out_max: [ndarray] float32 output image of the largest mean (height, width).
         out_idx: [ndarray] int32 output image of the index of the velocity with the largest mean.
     """
 
     n_frames = frames.shape[0]
     height, width = out_max.shape
-    n_vel = shifts.shape[0]
+    n_vel = samples.shape[0]
 
     # Every row of the output is computed by one thread. For a row, the stacks of all velocities are computed one
     #   after the other, a whole row at a time, which reads the frames in memory order
@@ -103,16 +176,19 @@ def velocityStackMaxCPU(frames, pad, shifts, out_max, out_idx):
             #   k. A row of the stack is therefore a shifted row of every frame (in the padded frames, the shift
             #   never goes outside the array)
             acc[:] = 0.0
-            for k in range(n_frames):
-                ys = y + pad + shifts[v, k, 1]
-                x0 = pad + shifts[v, k, 0]
+            for s in range(counts[v]):
+                k = samples[v, s, 2]
+                ys = y + pad + samples[v, s, 1]
+                x0 = pad + samples[v, s, 0]
                 for x in range(width):
                     acc[x] += frames[k, ys, x0 + x]
 
-            # Keep the largest sum over the velocities for every pixel
+            # Keep the largest weighted sum over the velocities for every pixel (the weight keeps the noise of
+            #   the sums of all velocities the same, see velocitySamples)
+            w = weights[v]
             for x in range(width):
-                if acc[x] > best[x]:
-                    best[x] = acc[x]
+                if acc[x]*w > best[x]:
+                    best[x] = acc[x]*w
                     best_idx[x] = v
 
         # The mean instead of the sum, so the stacks of runs of different lengths are on the same scale (the
@@ -158,7 +234,7 @@ if CUDA_AVAILABLE:
 
 
     @cuda.jit(cache=True)
-    def _velocityStackRunsKernel(frames, pad, run_starts, n_frames, shifts, out_max, out_idx):
+    def _velocityStackRunsKernel(frames, pad, run_starts, n_frames, samples, counts, weights, out_max, out_idx):
         """ The velocity stacks of several runs of a block of padded frames on the GPU: the run is the z index
             of the grid, and every thread computes GPU_PX pixels of a row, GPU_TX px apart. The sums are in single
             precision as on the CPU (velocityStackMaxCPU), and the padding removes the bounds checks.
@@ -190,27 +266,29 @@ if CUDA_AVAILABLE:
             best_idx[j] = 0
 
         # Sum of the frames along every velocity, keeping the largest sum and its velocity for every pixel
-        for v in range(shifts.shape[0]):
+        for v in range(samples.shape[0]):
 
             # The sums of this velocity start at zero (in single precision: a float literal would make the sums
             #   double precision, which consumer GPUs compute many times slower)
             for j in range(GPU_PX):
                 acc[j] = numba.float32(0.0)
 
-            # The frame k of the run is read shifted by the motion of the velocity v at its time (see
-            #   velocityShifts), so an object moving with v adds up at its position at the middle of the run. The
+            # Every sample is a frame k of the run read shifted by the motion of the velocity v at its time (see
+            #   velocitySamples), so an object moving with v adds up at its position at the middle of the run. The
             #   padding is at least the largest shift, so the shifted pixels are always inside the array (pixels
             #   shifted outside the image read zeros) and no bounds have to be checked
-            for k in range(n_frames):
-                ys = yy + shifts[v, k, 1]
-                xs = x0 + pad + shifts[v, k, 0]
+            for s in range(counts[v]):
+                ys = yy + samples[v, s, 1]
+                xs = x0 + pad + samples[v, s, 0]
+                k = k0 + samples[v, s, 2]
                 for j in range(GPU_PX):
-                    acc[j] += frames[k0 + k, ys, xs + j*GPU_TX]
+                    acc[j] += frames[k, ys, xs + j*GPU_TX]
 
-            # Keep the largest sum of every pixel and its velocity
+            # Keep the largest weighted sum of every pixel and its velocity (see velocitySamples)
+            w = weights[v]
             for j in range(GPU_PX):
-                if acc[j] > best[j]:
-                    best[j] = acc[j]
+                if acc[j]*w > best[j]:
+                    best[j] = acc[j]*w
                     best_idx[j] = v
 
         # The mean over the frames, as on the CPU, written for the pixels of the thread which are in the image (the
@@ -224,7 +302,7 @@ if CUDA_AVAILABLE:
 
 
     @cuda.jit(cache=True)
-    def _velocityStackMaxKernel(frames, shifts, out_max, out_idx):
+    def _velocityStackMaxKernel(frames, samples, counts, weights, out_max, out_idx):
         """ The GPU version of velocityStackMaxCPU: every thread computes one pixel of the output, for all
             velocities. The frames are not padded, pixels shifted outside the image are skipped (they add zero,
             as in the padded frames of the CPU version).
@@ -239,13 +317,14 @@ if CUDA_AVAILABLE:
         # Sum of the frames along every velocity, keeping the largest sum and its velocity
         best = -1e30
         best_idx = 0
-        for v in range(shifts.shape[0]):
+        for v in range(samples.shape[0]):
             acc = 0.0
-            for k in range(n_frames):
-                xs = x + shifts[v, k, 0]
-                ys = y + shifts[v, k, 1]
+            for s in range(counts[v]):
+                xs = x + samples[v, s, 0]
+                ys = y + samples[v, s, 1]
                 if (xs >= 0) and (xs < width) and (ys >= 0) and (ys < height):
-                    acc += frames[k, ys, xs]
+                    acc += frames[samples[v, s, 2], ys, xs]
+            acc *= weights[v]
             if acc > best:
                 best = acc
                 best_idx = v
@@ -287,7 +366,7 @@ class DeviceFrames(object):
 
 
 class VelocityStacker(object):
-    def __init__(self, velocities, n_frames, use_gpu=False):
+    def __init__(self, velocities, n_frames, use_gpu=False, streak=False, smooth_sigma=0.0):
         """ Velocity stacks of runs of n_frames frames, on the CPU or on the GPU.
 
         Arguments:
@@ -296,22 +375,31 @@ class VelocityStacker(object):
 
         Keyword arguments:
             use_gpu: [bool] Run on the GPU (only if CUDA is available). False by default.
+            streak: [bool] Sum the streak of a fast object in every frame (see velocitySamples). False by
+                default.
+            smooth_sigma: [float] Sigma of the Gaussian smoothing of the frames (px), for the weights of the streak
+                samples (see velocitySamples). 0 by default.
         """
 
         self.velocities = np.asarray(velocities, dtype=np.float64)
         self.n_frames = n_frames
 
-        # The shifts of every frame for every velocity are the same for all runs, so they are computed once
+        # The shifts of every frame for every velocity (at the middles of the frames), and the samples which the
+        #   stacks sum, are the same for all runs, so they are computed once
         self.shifts = velocityShifts(self.velocities, n_frames)
+        self.samples, self.counts, self.weights = velocitySamples(self.velocities, n_frames, streak=streak,
+                                                                  smooth_sigma=smooth_sigma)
 
         # The padding of the frames on the CPU: the largest shift, so no shifted pixel is outside the array
-        self.pad = int(np.abs(self.shifts).max()) if self.shifts.size else 0
+        self.pad = int(np.abs(self.samples[:, :, :2]).max()) if self.samples.size else 0
 
         self.use_gpu = use_gpu and CUDA_AVAILABLE
 
-        # On the GPU, the shifts are copied to the GPU memory once
+        # On the GPU, the samples are copied to the GPU memory once
         if self.use_gpu:
-            self.d_shifts = cuda.to_device(self.shifts)
+            self.d_samples = cuda.to_device(self.samples)
+            self.d_counts = cuda.to_device(self.counts)
+            self.d_weights = cuda.to_device(self.weights)
 
 
     def stackMax(self, frames):
@@ -338,7 +426,8 @@ class VelocityStacker(object):
             d_idx = cuda.device_array((height, width), dtype=np.int32)
             threads = (16, 16)
             blocks = ((width + threads[0] - 1)//threads[0], (height + threads[1] - 1)//threads[1])
-            _velocityStackMaxKernel[blocks, threads](d_frames, self.d_shifts, d_max, d_idx)
+            _velocityStackMaxKernel[blocks, threads](d_frames, self.d_samples, self.d_counts, self.d_weights, d_max,
+                                                     d_idx)
             d_max.copy_to_host(out_max)
             d_idx.copy_to_host(out_idx)
 
@@ -348,7 +437,7 @@ class VelocityStacker(object):
             pad = self.pad
             padded = np.zeros((frames.shape[0], height + 2*pad, width + 2*pad), dtype=np.float32)
             padded[:, pad:pad + height, pad:pad + width] = frames
-            velocityStackMaxCPU(padded, pad, self.shifts, out_max, out_idx)
+            velocityStackMaxCPU(padded, pad, self.samples, self.counts, self.weights, out_max, out_idx)
 
         return out_max, out_idx
 
@@ -401,7 +490,8 @@ class VelocityStacker(object):
         #   the image, and a layer of blocks per run
         blocks = ((width + GPU_TX*GPU_PX - 1)//(GPU_TX*GPU_PX), (height + GPU_TY - 1)//GPU_TY, n_runs)
         _velocityStackRunsKernel[blocks, (GPU_TX, GPU_TY)](d_frames.d_frames, d_frames.pad, d_starts, self.n_frames,
-                                                            self.d_shifts, d_max, d_idx)
+                                                            self.d_samples, self.d_counts, self.d_weights, d_max,
+                                                            d_idx)
 
         # The stacks of all runs copied back at once (which waits for the kernel to finish)
         return d_max.copy_to_host(), d_idx.copy_to_host()
@@ -671,7 +761,7 @@ def fitMovingPSF(frames, skip, x_pred, y_pred, dt, vx, vy, sigma, radius, max_it
 
 
 @numba.njit(cache=True, nogil=True)
-def forcedTrackSignal(frames, frame_idx, xs, ys, sigma, radius, excluded):
+def forcedTrackSignal(frames, frame_idx, xs, ys, sigma, radius, excluded, vx=0.0, vy=0.0):
     """ PSF-weighted sums along a fixed track, for the combined significance of a detection. For every frame,
         the sum of the PSF-weighted data and the sum of the squared weights at the given position.
 
@@ -689,6 +779,11 @@ def forcedTrackSignal(frames, frame_idx, xs, ys, sigma, radius, excluded):
         radius: [int] Half size of the patch (px).
         excluded: [ndarray] uint8 image, pixels which are not 0 are left out of the sums (e.g. stars).
 
+    Keyword arguments:
+        vx, vy: [float] Motion of the object during a frame (px). An object which moves during the frame is a
+            streak: the PSF is then smeared along the segment it moves along, centred on the position (the
+            radius has to include half the segment). 0 by default (a point source).
+
     Return:
         (sum_gz, sum_gg): [tuple of float] Sums over all frames.
     """
@@ -698,6 +793,15 @@ def forcedTrackSignal(frames, frame_idx, xs, ys, sigma, radius, excluded):
     inv_s2 = 1.0/(sigma*sigma)
     sum_gz = 0.0
     sum_gg = 0.0
+
+    # The streak of a moving object: its length and direction. The PSF smeared along a segment of length L is a
+    #   Gaussian across the segment times the difference of the error functions at its ends along it (shorter
+    #   than 0.1 px it is the PSF itself)
+    length = math.sqrt(vx*vx + vy*vy)
+    streak = length > 0.1
+    ux = vx/length if streak else 1.0
+    uy = vy/length if streak else 0.0
+    erf_scale = 1.0/(math.sqrt(2.0)*sigma)
 
     for k in range(n_frames):
 
@@ -714,10 +818,18 @@ def forcedTrackSignal(frames, frame_idx, xs, ys, sigma, radius, excluded):
                 if (ix < 0) or (ix >= width) or (excluded[iy, ix] != 0):
                     continue
 
-                # The weight of the pixel is the PSF (a Gaussian with peak 1) centred on the position
+                # The weight of the pixel is the PSF (a Gaussian with peak 1) centred on the position, or the
+                #   PSF smeared along the streak (the scale of the weights doesn't change the signal-to-noise
+                #   ratio)
                 dx = ix - xs[k]
                 dy = iy - ys[k]
-                g = math.exp(-0.5*(dx*dx + dy*dy)*inv_s2)
+                if streak:
+                    along = dx*ux + dy*uy
+                    across = -dx*uy + dy*ux
+                    g = math.exp(-0.5*across*across*inv_s2)*0.5*(math.erf((0.5*length - along)*erf_scale)
+                                                                - math.erf((-0.5*length - along)*erf_scale))
+                else:
+                    g = math.exp(-0.5*(dx*dx + dy*dy)*inv_s2)
                 sum_gz += g*frames[f, iy, ix]
                 sum_gg += g*g
 
