@@ -513,7 +513,7 @@ def run(args):
 
     from RMS.HotPixels import loadHotPixelCoords
 
-    lim_mag = args.lim_mag if args.lim_mag else config.catalog_mag_limit
+    lim_mag = args.lim_mag if args.lim_mag else config.catalog_mag_limit_configured
     hot = loadHotPixelCoords(args.night_dir, config)
     lc = StarLightCurves(config, pp, lim_mag, hot_pixels=hot)
     print("Catalog {:s}, lim mag {:.2f}: {:d} stars; {:d} hot pixels".format(lc.field.catalog_name,
@@ -620,7 +620,7 @@ def compressorRun(args):
     config.data_dir = args.out
     config.star_light_curves = True
     if args.lim_mag:
-        config.star_light_curves_lim_mag = args.lim_mag
+        config.catalog_mag_limit_configured = args.lim_mag
     config.enable_fireball_detection = False
     config.live_jpg = False
     hp = os.path.join(args.night_dir, getattr(config, 'hot_pixels_file', 'hotpixels.json'))
@@ -655,7 +655,7 @@ def compressorRun(args):
                       frame_times2=frame_times[1], platepar=pp)
     comp.start()
 
-    direct = StarLightCurves(config, pp, config.star_light_curves_lim_mag,
+    direct = StarLightCurves(config, pp, config.catalog_mag_limit_configured,
                              hot_pixels=loadHotPixelCoords(args.out, config))
 
     n_ok = n_bad = 0
@@ -717,8 +717,8 @@ def compressorRun(args):
 
         d = np.load(lc_path)
         diff = [key for key in ('oid', 'ra', 'dec', 'mag', 'x_first', 'y_first', 'x_last', 'y_last',
-                                'n_sat', 'hot', 'bg_ave', 'flux', 'bg', 'probe_x', 'probe_y',
-                                'probe_flux', 'probe_bg', 'probe_bg_ave')
+                                'n_sat', 'hot', 'bg_ave', 'bg_ann', 'flux', 'bg', 'probe_x', 'probe_y',
+                                'probe_flux', 'probe_bg', 'probe_bg_ave', 'probe_bg_ann')
                 if not np.array_equal(d[key], res[key], equal_nan=True)]
         if not np.array_equal(d['t'], t_frames):
             diff.append('t')
@@ -817,7 +817,7 @@ def main(argv=None):
     m.add_argument('--camera-reply', help="the camera's raw 'gamma decode' reply")
     m.add_argument('--platepar', required=True, help="station platepar")
     m.add_argument('--lim-mag', type=float, help="catalog limiting magnitude (default: "
-                   "star_light_curves_lim_mag of the config)")
+                   "catalog_mag_limit of the config)")
     m.add_argument('--ff-dir', required=True, help="directory of the station's FF files")
     m.add_argument('--video', required=True, nargs='+', help="mkv files or directories")
     m.add_argument('--work', required=True, help="work directory (SEI index cache)")

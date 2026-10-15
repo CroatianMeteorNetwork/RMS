@@ -406,11 +406,9 @@ class Config:
         self.save_frame_times = True
 
         # Per-star light curves measured on every frame of each block at compression time
-        # (RMS.StarLightCurves), saved as LC_*.npz next to each FF
+        # (RMS.StarLightCurves), saved as LC_*.npz next to each FF. The stars are those of the
+        # catalog to catalog_mag_limit as configured
         self.star_light_curves = False
-
-        # Catalog limiting magnitude of the stars measured for the light curves
-        self.star_light_curves_lim_mag = 5.5
 
         # Toggle saving video frames at a set interval to the frame_dir
         self.save_frames = True
@@ -1404,9 +1402,6 @@ def parseCapture(config, parser):
     # Per-star light curves at compression time
     if parser.has_option(section, "star_light_curves"):
         config.star_light_curves = parser.getboolean(section, "star_light_curves")
-
-    if parser.has_option(section, "star_light_curves_lim_mag"):
-        config.star_light_curves_lim_mag = parser.getfloat(section, "star_light_curves_lim_mag")
     
     # obtain the path to a working ffmpeg, if available
     config.ffmpeg_binary = isFfmpegWorking()

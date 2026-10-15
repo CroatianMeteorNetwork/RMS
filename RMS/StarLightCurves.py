@@ -35,7 +35,7 @@ from RMS.Routines.Response import responseOf
 from RMS.StarLightCurvesCy import boxPhotometry
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 APERTURE_SIZE = 2*APERTURE_HALF + 1
 APERTURE_AREA = float(APERTURE_SIZE**2)
@@ -65,6 +65,17 @@ PROBE_NX = 24
 PROBE_NY = 16
 PROBE_CLEAR = 8.0
 PROBE_AVOID_MAG = 8.5       # catalog stars to this magnitude are kept clear of the probes
+
+# Block background: clipped mean of an annulus on the block's average image. The 8 px ring is kept
+# (per frame, and on the average image), but on the average image its median of 8 px is one error
+# for the whole block that binned curves cannot average down; the annulus has ~34x the pixels
+ANNULUS_IN = 6.0            # px
+ANNULUS_OUT = 11.0          # px
+ANNULUS_CLIP = 3.0          # one clipping pass at this many sigma (1.4826 MAD) about the median
+_dy, _dx = np.mgrid[-int(ANNULUS_OUT):int(ANNULUS_OUT) + 1, -int(ANNULUS_OUT):int(ANNULUS_OUT) + 1]
+_in_annulus = (np.hypot(_dy, _dx) >= ANNULUS_IN) & (np.hypot(_dy, _dx) <= ANNULUS_OUT)
+ANNULUS_DY = _dy[_in_annulus].astype(np.intp)
+ANNULUS_DX = _dx[_in_annulus].astype(np.intp)
 
 
 def unixToJD(t):
@@ -190,6 +201,52 @@ def ringBackground(img, x, y):
     ring = np.stack([img[yi + oy, xi + ox] for oy, ox in RING_OFFSETS], axis=-1)
 
     return np.median(ring, axis=-1)
+
+
+def annulusBackground(img, x, y):
+    """ Clipped mean per pixel of the annulus ANNULUS_IN..ANNULUS_OUT px around the rounded
+    positions (1D x, y): one pass dropping the pixels further than ANNULUS_CLIP sigma (1.4826 MAD)
+    from the median, then the mean of the rest. Pixels outside the image do not count.
+
+    Return:
+        [ndarray] float64, nan where no pixel is kept.
+    """
+
+    h, w = img.shape
+    xi = np.floor(np.asarray(x, dtype=np.float64) + 0.5).astype(np.intp)
+    yi = np.floor(np.asarray(y, dtype=np.float64) + 0.5).astype(np.intp)
+    yy = yi[:, None] + ANNULUS_DY[None, :]
+    xx = xi[:, None] + ANNULUS_DX[None, :]
+    inside = (yy >= 0) & (yy < h) & (xx >= 0) & (xx < w)
+    v = img[np.clip(yy, 0, h - 1), np.clip(xx, 0, w - 1)].astype(np.float64)
+
+    # Rows touching the image edge carry nan for their outside pixels (the slower nan-aware median)
+    edge = ~inside.all(axis=1)
+    v[~inside] = np.nan
+
+    def rowMedian(a):
+        m = np.empty(len(a))
+        m[~edge] = np.median(a[~edge], axis=1)
+        if edge.any():
+            m[edge] = np.nanmedian(a[edge], axis=1)
+        return m
+
+    with np.errstate(invalid='ignore'):
+        med = rowMedian(v)
+        dev = np.abs(v - med[:, None])
+        keep = dev <= ANNULUS_CLIP*1.4826*rowMedian(dev)[:, None]
+        n = keep.sum(axis=1)
+        return np.where(n > 0, np.where(keep, v, 0.0).sum(axis=1)/np.maximum(n, 1), np.nan)
+
+
+def linearAverage(lut, ave16):
+    """ The block's average image, linear: the decode table interpolated at the 8.8 fixed-point
+    codes (the piecewise-linear ResponseCurve.decode), float32. """
+
+    ave = np.asarray(ave16)
+    i = (ave >> 8).astype(np.intp)
+
+    return lut[i] + (ave & 0xFF).astype(np.float32)/256.0*(lut[np.minimum(i + 1, 255)] - lut[i])
 
 
 def hotPixelFlags(x_first, x_last, y_first, y_last, hot_xy):
@@ -372,6 +429,8 @@ class StarLightCurves(object):
                 'platepar': platepar_name, 'response': self.response_id,
                 'hot_pixels': int(len(self.hot_pixels)), 'gamma': self.config.gamma,
                 'aperture': '5x5 box at the fractional position', 'ring': 'median of 8 px at +/-7 px',
+                'annulus': 'mean of {:g}-{:g} px on the average image, clipped at {:g} sigma'.format(
+                    ANNULUS_IN, ANNULUS_OUT, ANNULUS_CLIP),
                 'offset': offset, 't_row_ns': int(t_row_ns), 'exp_s': float(exp_s),
                 'seq_first': int(seq_first), 'seq_last': int(seq_last)}
 
@@ -451,12 +510,7 @@ class StarLightCurves(object):
         _, x_b, y_b = self.field.project(t_frames[-1])
         frac = ((t_frames - t_frames[0])/(t_frames[-1] - t_frames[0])).astype(np.float64)
 
-        # The block's average image, linear: the decode table interpolated at the 8.8 fixed-point
-        # codes (the piecewise-linear ResponseCurve.decode)
-        ave = np.asarray(ave16)
-        i = (ave >> 8).astype(np.intp)
-        ave_lin = self.lut[i] + (ave & 0xFF).astype(np.float32)/256.0 \
-            *(self.lut[np.minimum(i + 1, 255)] - self.lut[i])
+        ave_lin = linearAverage(self.lut, ave16)
 
         # Offset from the block's average image, at the block's mid position
         off = self.fitOffset(ave_lin, 0.5*(x_a + x_b), 0.5*(y_a + y_b), self.field.mag[idx])
@@ -480,8 +534,9 @@ class StarLightCurves(object):
 
         # The block's background around each star from the average image (256x less noisy than a
         # frame's ring)
-        bg_ave = ringBackground(ave_lin, 0.5*(xa.astype(np.float64) + xb),
-                                0.5*(ya.astype(np.float64) + yb)).astype(np.float32)
+        x_mid, y_mid = 0.5*(xa.astype(np.float64) + xb), 0.5*(ya.astype(np.float64) + yb)
+        bg_ave = ringBackground(ave_lin, x_mid, y_mid).astype(np.float32)
+        bg_ann = annulusBackground(ave_lin, x_mid, y_mid).astype(np.float32)
 
         hot = hotPixelFlags(xa, xb, ya, yb, self.hot_pixels)
 
@@ -497,13 +552,14 @@ class StarLightCurves(object):
         px, py = px.astype(np.float32), py.astype(np.float32)
         p_flux, p_bg, _ = self.photometry(frames, px, px, py, py, frac)
         p_bg_ave = ringBackground(ave_lin, px.astype(np.float64), py.astype(np.float64)).astype(np.float32)
+        p_bg_ann = annulusBackground(ave_lin, px, py).astype(np.float32)
 
         return {'sel': sel, 'oid': self.field.oid[sel], 'ra': self.field.ra[sel],
                 'dec': self.field.dec[sel], 'mag': self.field.mag[sel],
                 'x_first': xa, 'y_first': ya, 'x_last': xb, 'y_last': yb,
-                'flux': flux, 'bg': bg, 'bg_ave': bg_ave, 'n_sat': nsat, 'hot': hot, 'offset': off,
-                'probe_x': px, 'probe_y': py, 'probe_flux': p_flux, 'probe_bg': p_bg,
-                'probe_bg_ave': p_bg_ave}
+                'flux': flux, 'bg': bg, 'bg_ave': bg_ave, 'bg_ann': bg_ann, 'n_sat': nsat, 'hot': hot,
+                'offset': off, 'probe_x': px, 'probe_y': py, 'probe_flux': p_flux, 'probe_bg': p_bg,
+                'probe_bg_ave': p_bg_ave, 'probe_bg_ann': p_bg_ann}
 
 
     def photometry(self, frames, x_first, x_last, y_first, y_last, frac):
@@ -542,10 +598,13 @@ def saveBlock(path, res, t_frames, header, frame_seq=None):
         n_sat [S] uint16 frames with a saturated aperture pixel.
         hot [S] uint8 a blacklisted hot pixel in the box (bit 0) or on the ring (bit 1).
         bg_ave [S] float32 ring median per pixel on the block's average image.
+        bg_ann [S] float32 annulus clipped mean per pixel on the block's average image
+            (annulusBackground).
         flux [N, S] float32 aperture sum (linear codes); bg [N, S] float32 ring median per pixel.
         probe_x, probe_y [P] float32 sky-probe positions (static over the block).
         probe_flux, probe_bg [N, P] float32 the probes' aperture sums and ring medians.
         probe_bg_ave [P] float32 the probes' ring medians on the block's average image.
+        probe_bg_ann [P] float32 the probes' annulus clipped means on the block's average image.
         t [N] float64 unix start of integration of row 0.
         frame_seq [N] int64 camera frame number (replayed blocks only; live capture records the
             block's first and last in the header).
@@ -555,9 +614,10 @@ def saveBlock(path, res, t_frames, header, frame_seq=None):
     arrays = {'oid': res['oid'], 'ra': res['ra'], 'dec': res['dec'], 'mag': res['mag'],
               'x_first': res['x_first'], 'y_first': res['y_first'], 'x_last': res['x_last'],
               'y_last': res['y_last'], 'n_sat': res['n_sat'], 'hot': res['hot'], 'bg_ave': res['bg_ave'],
-              'flux': res['flux'], 'bg': res['bg'], 'probe_x': res['probe_x'], 'probe_y': res['probe_y'],
-              'probe_flux': res['probe_flux'], 'probe_bg': res['probe_bg'],
-              'probe_bg_ave': res['probe_bg_ave'], 't': np.asarray(t_frames, dtype=np.float64)}
+              'bg_ann': res['bg_ann'], 'flux': res['flux'], 'bg': res['bg'], 'probe_x': res['probe_x'],
+              'probe_y': res['probe_y'], 'probe_flux': res['probe_flux'], 'probe_bg': res['probe_bg'],
+              'probe_bg_ave': res['probe_bg_ave'], 'probe_bg_ann': res['probe_bg_ann'],
+              't': np.asarray(t_frames, dtype=np.float64)}
     if frame_seq is not None:
         arrays['frame_seq'] = np.asarray(frame_seq, dtype=np.int64)
 

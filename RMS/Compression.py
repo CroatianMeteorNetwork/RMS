@@ -410,7 +410,9 @@ class Compressor(multiprocessing.Process):
         self.array2 = np.ctypeslib.as_array(self.array2_base.get_obj()).reshape(frame_buffer_shape)
 
         # Per-star light curves (RMS.StarLightCurves), measured on each block before its buffer is
-        # released. Imported only when enabled, so a station without them never loads the extension
+        # released, of the catalog stars to the configured catalog_mag_limit (processing may change
+        # catalog_mag_limit itself at run time). Imported only when enabled, so a station without
+        # them never loads the extension
         light_curves = None
         if self.config.star_light_curves:
             if (self.platepar is None) or (self.frame_times1 is None) or (self.frame_times2 is None):
@@ -420,7 +422,7 @@ class Compressor(multiprocessing.Process):
                     from RMS.HotPixels import loadHotPixelCoords
                     from RMS.StarLightCurves import StarLightCurves, saveBlock
                     light_curves = StarLightCurves(self.config, self.platepar,
-                        self.config.star_light_curves_lim_mag,
+                        self.config.catalog_mag_limit_configured,
                         hot_pixels=loadHotPixelCoords(self.data_dir, self.config))
                     log.info('Star light curves: {:s} to mag {:.2f}, {:d} stars, {:d} hot pixels'.format(
                         light_curves.field.catalog_name, light_curves.field.lim_mag,
