@@ -522,14 +522,15 @@ def testExitNotBlockedByWedgedLoggingQueue(tmp_path):
     script.write_text(_WEDGE_SCRIPT)
     repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+    # The script runs in its own process group, so a hang kills its logging listener too (it holds the pipe)
     proc = subprocess.Popen([sys.executable, str(script), repo, str(tmp_path)], stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT)
+                            stderr=subprocess.STDOUT, start_new_session=True)
     try:
         out, _ = proc.communicate(timeout=60)
         exited = True
     except subprocess.TimeoutExpired:
-        proc.kill()
-        out, _ = proc.communicate()
+        os.killpg(proc.pid, signal.SIGKILL)
+        out, _ = proc.communicate(timeout=30)
         exited = False
 
     assert b'exiting' in out
