@@ -1420,6 +1420,35 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
             shutil.rmtree(os.path.dirname(processing_path), ignore_errors=True)
 
 
+def inputVanished(file_path):
+    """ Whether an input was removed: the path is not found while its directory can still be read. Any other error
+        (e.g. a network share which is unavailable for a while, a permission or I/O error) is not a removal, as the
+        input can come back.
+
+    Arguments:
+        file_path: [str] Path of the input file or directory.
+
+    Return:
+        [bool] True if the input was removed.
+    """
+
+    try:
+        os.stat(file_path)
+        return False
+
+    # Not found: removed, if the directory it was in can still be read
+    except FileNotFoundError:
+        try:
+            os.listdir(os.path.dirname(os.path.abspath(file_path)))
+            return True
+        except OSError:
+            return False
+
+    # Another error of the lookup, e.g. an unavailable network share
+    except OSError:
+        return False
+
+
 def processFileWorker(*args, **kwargs):
     """ Worker process target which runs processFile and turns its result into the process exit code, so
         the monitor can tell failed files apart and retry them. Takes the same arguments as processFile.
@@ -1463,7 +1492,7 @@ def processFileWorker(*args, **kwargs):
 
     # A failed input which existed at the start and is gone now (e.g. deleted or moved away while it was read)
     #   is not processed again
-    if (not success) and existed and (not os.path.exists(file_path)):
+    if (not success) and existed and inputVanished(file_path):
         print("WARNING: {} disappeared while it was processed".format(file_path))
         sys.exit(VANISHED_EXIT_CODE)
 

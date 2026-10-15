@@ -630,6 +630,28 @@ def test_processFileWorker_vanished_input(monkeypatch, tmp_path):
     assert exc_info.value.code == 1
 
 
+def test_input_vanished_only_if_not_found(monkeypatch, tmp_path):
+    """ An input counts as removed only if it is not found while its directory can be read; an I/O error (e.g.
+        a network share which is gone for a while) or an unreadable directory leaves it to be retried.
+    """
+
+    present = tmp_path/'block'
+    present.mkdir()
+    assert not mon.inputVanished(str(present))
+    assert mon.inputVanished(str(tmp_path/'removed'))
+    assert not mon.inputVanished(str(tmp_path/'missing_share'/'block'))
+
+    real_stat = os.stat
+
+    def _stale(path, *args, **kwargs):
+        if str(path) == str(present):
+            raise OSError(116, 'Stale file handle')
+        return real_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(mon.os, 'stat', _stale)
+    assert not mon.inputVanished(str(present))
+
+
 def test_input_file_is_staged_locally(tmp_path, monkeypatch):
 
     input_dir = tmp_path/'nfs'
