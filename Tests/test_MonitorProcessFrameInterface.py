@@ -580,6 +580,56 @@ def test_walkInput_skips_monitor_output(tmp_path):
     assert _walked(input_dir, str(tmp_path/'output')) == sorted(all_dirs)
 
 
+def test_hidden_inputs_skipped(tmp_path):
+    """ Hidden directories (e.g. a desktop trash, whose content is deleted at any time) and hidden files (e.g. the
+        temporary file of a copy in progress) are not inputs, recursively or not.
+    """
+
+    config = cr.Config()
+    for block in ['night/20261014_022345', '.Trash-1000/files/20261014/20261014_022416']:
+        (tmp_path/'in'/block).mkdir(parents=True)
+        (tmp_path/'in'/block/'CAWEB1_20261014_022345_960000.fits').write_bytes(b'')
+    (tmp_path/'flat'/'20261014_022345').mkdir(parents=True)
+    (tmp_path/'flat'/'20261014_022345'/'a.fits').write_bytes(b'')
+    (tmp_path/'flat'/'.20261014_022416').mkdir(parents=True)
+    (tmp_path/'flat'/'.20261014_022416'/'a.fits').write_bytes(b'')
+
+    walked = [os.path.relpath(root, str(tmp_path/'in'))
+              for root, _, _ in mon.walkInput(str(tmp_path/'in'), str(tmp_path/'out'), config)]
+    assert not any(part.startswith('.') for root in walked for part in root.split(os.sep) if part != '.')
+
+    found = mon.scanInputs(str(tmp_path/'in'), str(tmp_path/'out'), config, 'fitsdirs', True)
+    assert [os.path.basename(p) for p, _, _ in found] == ['20261014_022345']
+
+    found = mon.scanInputs(str(tmp_path/'flat'), str(tmp_path/'out'), config, 'fitsdirs', False)
+    assert [os.path.basename(p) for p, _, _ in found] == ['20261014_022345']
+
+
+def test_processFileWorker_vanished_input(monkeypatch, tmp_path):
+    """ An input which disappears while it is processed (the processing fails, also with an error before
+        processFile handles its errors) ends the worker with VANISHED_EXIT_CODE, so it is not retried; a failure
+        of an input which is still there is a failure.
+    """
+
+    path = tmp_path/'block'
+    path.mkdir()
+
+    def _vanish(*args, **kwargs):
+        os.rmdir(str(path))
+        raise FileNotFoundError(str(path))
+
+    monkeypatch.setattr(mon, 'processFile', _vanish)
+    with pytest.raises(SystemExit) as exc_info:
+        mon.processFileWorker(str(path), 'dummy.config', None, 'out', 128)
+    assert exc_info.value.code == mon.VANISHED_EXIT_CODE
+
+    path.mkdir()
+    monkeypatch.setattr(mon, 'processFile', lambda *args, **kwargs: False)
+    with pytest.raises(SystemExit) as exc_info:
+        mon.processFileWorker(str(path), 'dummy.config', None, 'out', 128)
+    assert exc_info.value.code == 1
+
+
 def test_input_file_is_staged_locally(tmp_path, monkeypatch):
 
     input_dir = tmp_path/'nfs'
