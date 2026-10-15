@@ -86,6 +86,10 @@ SKIP_EXIT_CODE = 3
 #   the file is processed again
 CHANGED_EXIT_CODE = 4
 
+# Exit code of a worker whose input disappeared while it was processed (e.g. it was deleted or moved away), so it
+#   is not processed again
+VANISHED_EXIT_CODE = 5
+
 # Default time limit (seconds) for processing one file, after which the worker is stopped and the file retried
 WORKER_TIMEOUT = 3600
 
@@ -213,6 +217,20 @@ def resultsDirPath(output_dir, beginning_datetime, file_base):
                         "{:04d}{:02d}{:02d}".format(dt.year, dt.month, dt.day), file_base)
 
 
+def isHidden(name):
+    """ Whether a file or directory name is hidden (starts with a dot), e.g. a trash directory or the temporary
+        file of a copy in progress, which are never inputs.
+
+    Arguments:
+        name: [str] Name of the file or directory.
+
+    Return:
+        [bool] True if the name is hidden.
+    """
+
+    return name.startswith('.')
+
+
 def walkInput(top_dir, output_dir, config):
     """ Walk the directory tree like os.walk, without descending into the night, archive and log directories
         of the monitor, which are in the input directory if it is also the output directory (the default).
@@ -241,7 +259,9 @@ def walkInput(top_dir, output_dir, config):
             dirs[:] = []
             continue
 
-        dirs[:] = [d for d in dirs if os.path.realpath(os.path.join(root, d)) not in output_dirs]
+        # Hidden directories (e.g. .Trash-1000 of a desktop, whose content is deleted at any time) are not inputs
+        dirs[:] = [d for d in dirs if (not isHidden(d))
+                   and (os.path.realpath(os.path.join(root, d)) not in output_dirs)]
         yield root, dirs, files
 
 
@@ -429,9 +449,10 @@ def scanInputs(input_dir, output_dir, config, file_type, recursive):
     if recursive:
         paths = []
         for root, dirs, files in walkInput(input_dir, output_dir, config):
-            paths += [os.path.join(root, name) for name in (dirs if file_type == 'fitsdirs' else files)]
+            paths += [os.path.join(root, name) for name in (dirs if file_type == 'fitsdirs' else files)
+                      if not isHidden(name)]
     else:
-        paths = [os.path.join(input_dir, name) for name in os.listdir(input_dir)]
+        paths = [os.path.join(input_dir, name) for name in os.listdir(input_dir) if not isHidden(name)]
 
     # Keep the inputs, with the time and the size of their file or directory
     inputs = []
@@ -1399,6 +1420,35 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
             shutil.rmtree(os.path.dirname(processing_path), ignore_errors=True)
 
 
+def inputVanished(file_path):
+    """ Whether an input was removed: the path is not found while its directory can still be read. Any other error
+        (e.g. a network share which is unavailable for a while, a permission or I/O error) is not a removal, as the
+        input can come back.
+
+    Arguments:
+        file_path: [str] Path of the input file or directory.
+
+    Return:
+        [bool] True if the input was removed.
+    """
+
+    try:
+        os.stat(file_path)
+        return False
+
+    # Not found: removed, if the directory it was in can still be read
+    except FileNotFoundError:
+        try:
+            os.listdir(os.path.dirname(os.path.abspath(file_path)))
+            return True
+        except OSError:
+            return False
+
+    # Another error of the lookup, e.g. an unavailable network share
+    except OSError:
+        return False
+
+
 def processFileWorker(*args, **kwargs):
     """ Worker process target which runs processFile and turns its result into the process exit code, so
         the monitor can tell failed files apart and retry them. Takes the same arguments as processFile.
@@ -1407,6 +1457,7 @@ def processFileWorker(*args, **kwargs):
         0 - processing succeeded
         SKIP_EXIT_CODE - the file begins before the start time, or its night is past the cutoff
         CHANGED_EXIT_CODE - the file changed while it was processed, it has to be processed again
+        VANISHED_EXIT_CODE - the file existed when the worker started and disappeared while it was processed
         1 - processing failed
     """
 
@@ -1414,6 +1465,10 @@ def processFileWorker(*args, **kwargs):
     #   gone
     signal.signal(signal.SIGTERM, signal.SIG_DFL)
     exitWithMonitor()
+
+    # Whether the input exists now, to tell a failure from an input which disappeared while it was processed
+    file_path = args[0] if args else kwargs.get('file_path')
+    existed = (file_path is not None) and os.path.exists(file_path)
 
     try:
         success = processFile(*args, **kwargs)
@@ -1427,6 +1482,19 @@ def processFileWorker(*args, **kwargs):
         # which would otherwise end the process with exit code 0
         print("ERROR: Processing exited early with code {}".format(e.code))
         success = False
+
+    except Exception:
+
+        # An error before processFile handles its own errors (e.g. reading the time of a file which is being
+        #   deleted) is a failure too, with its traceback
+        traceback.print_exc()
+        success = False
+
+    # A failed input which existed at the start and is gone now (e.g. deleted or moved away while it was read)
+    #   is not processed again
+    if (not success) and existed and inputVanished(file_path):
+        print("WARNING: {} disappeared while it was processed".format(file_path))
+        sys.exit(VANISHED_EXIT_CODE)
 
     sys.exit(0 if success else 1)
 
@@ -1913,7 +1981,8 @@ def recordFinished(status, unique_id, proc, file_path, file_type):
     """
 
     # The outcome from the exit code of the worker (see processFileWorker)
-    outcome = {0: 'ok', SKIP_EXIT_CODE: 'skipped', CHANGED_EXIT_CODE: 'changed'}.get(proc.exitcode, 'failed')
+    outcome = {0: 'ok', SKIP_EXIT_CODE: 'skipped', CHANGED_EXIT_CODE: 'changed',
+               VANISHED_EXIT_CODE: 'skipped'}.get(proc.exitcode, 'failed')
 
     # Record it with how long it ran (on the monotonic clock) and its input
     status.fileFinished(unique_id, outcome, time.monotonic() - proc.start_time,
@@ -2128,6 +2197,11 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                     elif proc.exitcode == CHANGED_EXIT_CODE:
                         log.warning("{} was still being written while it was processed, processing it "
                                     "again".format(uid))
+
+                    # The input disappeared while it was processed (deleted or moved away), it is not retried
+                    elif proc.exitcode == VANISHED_EXIT_CODE:
+                        log.warning("{} disappeared while it was processed, skipped".format(uid))
+                        processed_files.add(uid)
                     elif recordFailure(output_dir, failed_files, uid, proc.exitcode, fail_wait_time,
                                        killed=killedFromOutside(proc)):
                         processed_files.add(uid)
@@ -2148,9 +2222,11 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                                 candidate_paths.append(os.path.join(root, d))
                         else:
                             for f in files:
-                                candidate_paths.append(os.path.join(root, f))
+                                if not isHidden(f):
+                                    candidate_paths.append(os.path.join(root, f))
                 else:
-                    candidate_paths = [os.path.join(input_dir, f) for f in os.listdir(input_dir)]
+                    candidate_paths = [os.path.join(input_dir, f) for f in os.listdir(input_dir)
+                                       if not isHidden(f)]
                 logReadable(input_dir, True)
                 input_readable = True
             except OSError:
@@ -2704,6 +2780,11 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
                         log.warning("[{}] {} was still being written while it was processed, processing it "
                                     "again".format(cam_id, uid))
 
+                    # The input disappeared while it was processed (deleted or moved away), it is not retried
+                    elif proc.exitcode == VANISHED_EXIT_CODE:
+                        log.warning("[{}] {} disappeared while it was processed, skipped".format(cam_id, uid))
+                        processed_files[cam_id].add(uid)
+
                     # Process failed, it is retried once after fail_wait_time and then given up
                     elif recordFailure(cam_output_dirs[cam_id], failed_files[cam_id], uid, proc.exitcode,
                                        fail_wait_time, log_prefix="[{}] ".format(cam_id),
@@ -2734,10 +2815,11 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
                                     candidate_paths.append(os.path.join(root, d))
                             else:
                                 for f in files:
-                                    candidate_paths.append(os.path.join(root, f))
+                                    if not isHidden(f):
+                                        candidate_paths.append(os.path.join(root, f))
                     else:
                         candidate_paths = [os.path.join(cam['input_dir'], f)
-                                           for f in os.listdir(cam['input_dir'])]
+                                           for f in os.listdir(cam['input_dir']) if not isHidden(f)]
                     logReadable(cam['input_dir'], True, log_prefix="[{}] ".format(cam_id))
                     input_readable[cam_id] = True
 
