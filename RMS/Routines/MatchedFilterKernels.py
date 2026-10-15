@@ -387,6 +387,7 @@ class VelocityStacker(object):
         # The shifts of every frame for every velocity (at the middles of the frames), and the samples which the
         #   stacks sum, are the same for all runs, so they are computed once
         self.shifts = velocityShifts(self.velocities, n_frames)
+        self.streak = streak
         self.samples, self.counts, self.weights = velocitySamples(self.velocities, n_frames, streak=streak,
                                                                   smooth_sigma=smooth_sigma)
 
@@ -399,6 +400,20 @@ class VelocityStacker(object):
         if self.use_gpu:
             self.d_samples = cuda.to_device(self.samples)
             self.d_counts = cuda.to_device(self.counts)
+            self.d_weights = cuda.to_device(self.weights)
+
+
+    def setSmoothing(self, smooth_sigma):
+        """ Set the sigma of the Gaussian smoothing of the frames, which the weights of the streak samples depend on
+            (see velocitySamples). The samples don't change, only their weights.
+
+        Arguments:
+            smooth_sigma: [float] Sigma of the smoothing (px).
+        """
+
+        _, _, self.weights = velocitySamples(self.velocities, self.n_frames, streak=self.streak,
+                                             smooth_sigma=smooth_sigma)
+        if self.use_gpu:
             self.d_weights = cuda.to_device(self.weights)
 
 

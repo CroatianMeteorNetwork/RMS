@@ -1983,6 +1983,17 @@ def test_streak_search_collects_the_streak():
     assert abs(np.std(noise_streak)/np.std(noise_plain) - 1) < 0.1
 
 
+def test_streak_weights_follow_the_smoothing():
+    """ The weights of the streak samples can be set again for another smoothing (e.g. after the PSF was
+        measured), and are then the same as for a stacker made with that smoothing.
+    """
+
+    vel = velocityGrid(6.0, 8, 2)
+    stacker = VelocityStacker(vel, 8, streak=True, smooth_sigma=0.5)
+    stacker.setSmoothing(0.8)
+    assert np.array_equal(stacker.weights, VelocityStacker(vel, 8, streak=True, smooth_sigma=0.8).weights)
+
+
 @pytest.mark.skipif(not CUDA_AVAILABLE, reason="CUDA is not available")
 def test_gpu_streak_stacks_agree_with_the_cpu():
     """ With the streak samples, the stacks of the GPU (single and runs) agree with the CPU. The velocity of the

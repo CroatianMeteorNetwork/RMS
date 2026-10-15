@@ -1504,6 +1504,11 @@ class MatchedFilterDetector(object):
                     psf_measured = True
                     log.info('Matched filter: PSF sigma {:.2f} px (block {:d})'.format(self.psf_sigma, k))
 
+                    # The weights of the streak samples depend on the smoothing of the search, which now follows
+                    #   the measured PSF
+                    for _, tier_bin, st in stackers:
+                        st.setSmoothing(self.searchSigma()/tier_bin)
+
             # The mean of the block (for the photometry of the stars), the static mask, and the frames normalized to
             #   unit noise (in place, the raw frames are not needed any more)
             t1 = time()
