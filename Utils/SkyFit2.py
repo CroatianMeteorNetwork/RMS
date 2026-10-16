@@ -2855,8 +2855,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.image_navigation_slider.setMinimum(1)
         self.image_navigation_slider.setMaximum(1)
         self.image_navigation_slider.setValue(1)
-        self.image_navigation_slider.setMinimumWidth(220)
-        self.image_navigation_slider.setMaximumWidth(330)
+        # Fixed width, the same in SkyFit and manual reduction, so nothing next to it moves
+        self.image_navigation_slider.setFixedWidth(330)
         self.image_navigation_slider.setToolTip("Drag or click to navigate through images (frames in manual "
                                                 "reduction)")
         # Shrink the handle so it fits within the status bar height without being clipped. A background is
