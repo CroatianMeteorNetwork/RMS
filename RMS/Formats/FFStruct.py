@@ -38,6 +38,9 @@ class FFStruct:
         # False if dark and flat weren't applied, True otherwise (False be default)
         self.calibrated = False
 
+        # 1.0 means no scaling, e.g. 0.6666 for 1080p -> 720p conversion
+        self.rescaling_factor = 1.0
+
 
     def __repr__(self):
 

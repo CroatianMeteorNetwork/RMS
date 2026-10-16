@@ -271,6 +271,7 @@ class InputTypeFRFF(InputType):
         self.ff_list = []  
         self.current_ff_index = 0
         self.ff = None
+        self.rescaling_factor = 1.0
 
         # Add the single FF file to the list
         if self.single_ff:
@@ -389,6 +390,9 @@ class InputTypeFRFF(InputType):
                 
                 # Load the FF file from disk
                 ff = readFF(self.dir_path, file_name)
+                self.nrows = ff.nrows
+                self.ncols = ff.ncols
+                self.rescaling_factor = ff.rescaling_factor
 
                 # Put the FF into separate cache
                 self.cache[file_name] = ff
@@ -396,8 +400,19 @@ class InputTypeFRFF(InputType):
             else:
                 # Load the FR files from disk
                 ff = readFR(self.dir_path, file_name)
-                ff.nrows = self.nrows
-                ff.ncols = self.ncols
+                # try find a corresponding FF file in the folder, and if it exists, load it and use its size for the FR file
+                for ff_file_name in self.ff_list:
+                    if ff_file_name[:2] == 'FF' and filenameToDatetime(file_name) == filenameToDatetime(ff_file_name):
+                        fits = readFF(self.dir_path, ff_file_name)
+                        ff.nrows = fits.nrows
+                        ff.ncols = fits.ncols
+                        self.nrows = ff.nrows
+                        self.ncols = ff.ncols
+                        self.rescaling_factor = fits.rescaling_factor
+                        break
+                if ff.nrows is None or ff.ncols is None:
+                    ff.nrows = self.nrows
+                    ff.ncols = self.ncols
                 self.cache[file_name] = ff
 
                 self.line_number[self.current_ff_index] = ff.lines
@@ -692,15 +707,28 @@ class InputTypeFRFF(InputType):
 
             # Load the FF file from disk
             ff_frame = readFF(self.dir_path, file_name)
-
+            self.nrows = ff_frame.nrows
+            self.ncols = ff_frame.ncols
+            self.rescaling_factor = ff.rescaling_factor
             # Put the FF into separate cache
             self.cache[file_name] = ff_frame
 
         # Read the FR file from disk
         else:
             ff_frame = readFR(self.dir_path, file_name)
-            ff_frame.nrows = self.nrows
-            ff_frame.ncols = self.ncols
+            # try find a corresponding FF file in the folder, and if it exists, load it and use its size for the FR file
+            for ff_file_name in self.ff_list:
+                if ff_file_name[:2] == 'FF' and filenameToDatetime(file_name) == filenameToDatetime(ff_file_name):
+                    fits = readFF(self.dir_path, ff_file_name)
+                    ff_frame.nrows = fits.nrows
+                    ff_frame.ncols = fits.ncols
+                    self.nrows = ff_frame.nrows
+                    self.ncols = ff_frame.ncols
+                    self.rescaling_factor = fits.rescaling_factor
+                    break
+            if ff_frame.nrows is None or ff_frame.ncols is None:
+                ff_frame.nrows = self.nrows
+                ff_frame.ncols = self.ncols
             self.cache[file_name] = ff_frame
 
             # If there is a corresponding FF file in the folder, reconstruct the frame from it
@@ -2606,8 +2634,6 @@ def detectInputTypeFolder(input_dir, config, beginning_time=None, fps=None, skip
         else:
             # Init the image handle for FF files in a directory
             img_handle = InputTypeFRFF(input_dir, config, use_fr_files=use_fr_files)
-            img_handle.ncols = config.width
-            img_handle.nrows = config.height
 
     elif any([any(file.lower().endswith(x) for x in img_types) for file in os.listdir(input_dir)]) and \
             config.width != 4912 and config.width != 7360:
