@@ -29,9 +29,25 @@ def extractStarsFrameInterface(img_handle, config,
     """
 
     # Extract the stars on the image handle
-    star_list = extractStarsImgHandle(img_handle, config=config, 
+    star_list = extractStarsImgHandle(img_handle, config=config,
                                       flat_struct=flat_struct, dark=dark, mask=mask)
-    
+
+    # Remove detections at blacklisted hot pixel positions. Only the persistent blacklist is
+    # applied - short video runs cannot support the full-night recurrence analysis the FF
+    # pipeline uses to update it
+    if getattr(config, 'hot_pixels_filter', True):
+
+        from RMS import HotPixels
+
+        hp_xy = HotPixels.loadHotPixelCoords(img_handle.dir_path, config)
+
+        if len(hp_xy):
+            star_list, n_removed = HotPixels.filterStarList(star_list, hp_xy,
+                getattr(config, 'hot_pixels_radius', 2.0))
+
+            if n_removed:
+                print("Removed {:d} detections at blacklisted hot pixel positions".format(n_removed))
+
     if save_calstars:
 
         # Construct the name of the CALSTARS file by using the camera code and the time of the first frame
