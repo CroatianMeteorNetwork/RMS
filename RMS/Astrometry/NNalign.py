@@ -10,13 +10,12 @@ from __future__ import print_function, division, absolute_import
 import os
 import sys
 import copy
-import datetime
 import argparse
 
 import numpy as np
 
 from RMS.Astrometry import ApplyAstrometry
-from RMS.Astrometry.Conversions import date2JD
+from RMS.Astrometry.Conversions import date2JD, jd2YearsFromJ2000
 from RMS.Math import angularSeparationDeg
 import RMS.ConfigReader as cr
 from RMS.Formats import CALSTARS
@@ -32,6 +31,18 @@ from RMS.Astrometry.CyFunctions import subsetCatalog
 
 
 log = getLogger('rmslogger')
+
+
+# Bounds of the catalog limiting magnitude inferred from the photometric calibration (mag). The floor
+#   guards against a handful of bright detections producing a useless shallow catalog, the cap against
+#   a mis-calibrated zero point pulling in an unmatchable deep catalog.
+INFERRED_LM_MIN = 4.0
+INFERRED_LM_MAX = 12.0
+
+# Percentile of the estimated catalog magnitudes of the detected stars taken as the LM estimate, and the
+#   margin added to it so the catalog covers all detections (mag)
+INFERRED_LM_PERCENTILE = 95
+INFERRED_LM_MARGIN = 1.0
 
 
 def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update=False, show_plot=False,
@@ -68,25 +79,31 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
     # Create a copy of the config not to mess with the original config parameters
     config = copy.deepcopy(config)
 
-    year, month, day, hour, minute, second, millisecond = calstars_time
-    ts = datetime.datetime(year, month, day, hour, minute, second, int(round(millisecond * 1000)))
-    J2000 = datetime.datetime(2000, 1, 1, 12, 0, 0)
-
-    # Compute the number of years from J2000
-    years_from_J2000 = (ts - J2000).total_seconds() / (365.25 * 24 * 3600)
-
-    # Compute Julian date
+    # Compute the Julian date (the tuple is not turned into a datetime directly, so a millisecond value that
+    #   rounds up to a full second cannot overflow the datetime microsecond field)
     jd = date2JD(*calstars_time)
+
+    # Compute the number of years from J2000 for the proper motion correction
+    years_from_J2000 = jd2YearsFromJ2000(jd)
 
     # Extract coordinates and optionally infer catalog LM from intensities
     calstars_coords = np.array(calstars_coords)
+
+    # Bail out if there are no stars or the input is not a 2D table of star entries
+    if (calstars_coords.ndim != 2) or (len(calstars_coords) == 0):
+        log.warning("alignPlatepar: No usable star data (shape {}), returning original platepar".format(
+            calstars_coords.shape))
+        return platepar, config.catalog_mag_limit
+
     if calstars_coords.shape[1] >= 3:
         # Full CALSTARS format: (y, x, intensity, ...)
         det_x = calstars_coords[:, 1]
         det_y = calstars_coords[:, 0]
         det_intens = calstars_coords[:, 2]
 
-        # Infer catalog LM from detected star magnitudes if photometry is calibrated
+        # Infer catalog LM from detected star magnitudes if photometry is calibrated. A fresh Platepar has
+        #   mag_lev = 1.0 and mag_lev_stddev = 0.0; the photometric fit sets both, so a non-default zero
+        #   point together with a positive stddev is taken as "photometry has been fitted".
         photometry_calibrated = (platepar.mag_lev != 1.0) and (platepar.mag_lev_stddev > 0)
 
         if photometry_calibrated:
@@ -95,9 +112,10 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
                 inst_mags = -2.5 * np.log10(valid_intens)
                 est_cat_mags = inst_mags + platepar.mag_lev
 
-                # Use 95th percentile + margin to ensure catalog covers all detections
-                inferred_lim_mag = min(np.percentile(est_cat_mags, 95) + 1.0, 12.0)
-                inferred_lim_mag = max(inferred_lim_mag, 4.0)  # Floor at 4.0
+                # Take a high percentile plus a margin so the catalog covers all detections, clamped to
+                #   the plausible LM range
+                inferred_lim_mag = np.percentile(est_cat_mags, INFERRED_LM_PERCENTILE) + INFERRED_LM_MARGIN
+                inferred_lim_mag = min(max(inferred_lim_mag, INFERRED_LM_MIN), INFERRED_LM_MAX)
 
                 log.info("alignPlatepar: Inferred LM={:.1f} from {} detected stars (mag_lev={:.1f})".format(
                     inferred_lim_mag, len(valid_intens), platepar.mag_lev))
@@ -260,10 +278,12 @@ if __name__ == "__main__":
         log.error('Cannot find the platepar file in the night directory: {}'.format(config.platepar_name))
         sys.exit()
 
-    # Find the CALSTARS file in the given folder
+    # Find the CALSTARS file in the given folder (do not reuse the loop variable, otherwise it is left
+    #   pointing at the last listed file when nothing matches)
     calstars_file = None
-    for calstars_file in file_list:
-        if ('CALSTARS' in calstars_file) and ('.txt' in calstars_file):
+    for file_name in file_list:
+        if ('CALSTARS' in file_name) and ('.txt' in file_name):
+            calstars_file = file_name
             break
 
     if calstars_file is None:

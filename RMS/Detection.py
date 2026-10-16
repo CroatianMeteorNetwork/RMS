@@ -1230,7 +1230,10 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 # Random sample the point, sampling is weighted by pixel intensity.
                 # Use a fixed-seed local generator so reprocessing the same data is
                 # reproducible (the global RNG is unseeded; this matches the seeded-RNG
-                # convention used elsewhere in RMS, e.g. ApplyRecalibrate).
+                # convention used elsewhere in RMS, e.g. ApplyRecalibrate). The generator is
+                # deliberately re-created per line: every line then draws from the same state,
+                # so a line's subsample does not depend on how many lines preceded it.
+                # Constructing a Generator costs microseconds, so this is not a hot spot.
                 rng = np.random.default_rng(0)
                 indices = rng.choice(len(zs), config.max_points_det, replace=False, p=weights)
                 ys = ys[indices]

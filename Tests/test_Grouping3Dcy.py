@@ -31,6 +31,9 @@ def _thresholdCount(max_value, average, stddev, k1, j1):
         (255, 250, 10, 1.0, 0.0, 1),
         # Reject a pixel below the threshold: avg_std = 10, max_value = 5.
         (5, 10, 1, 0.6, 0.0, 0),
+        # A negative j1 gives a negative threshold, which must clamp to 0 (accept) instead of wrapping to a
+        # huge unsigned value that then clamps to 255 (reject).
+        (5, 10, 1, 0.6, -20.0, 1),
     ],
 )
 def testThresholdAndSubsampleThresholdConversion(max_value, average, stddev, k1, j1, expected):
