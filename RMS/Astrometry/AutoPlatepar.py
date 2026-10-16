@@ -362,7 +362,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
 
     Keyword arguments (filtering parameters):
         photometric_sigma: [float] Sigma threshold for photometric outlier removal (default: 2.5)
-        fwhm_mult: [float] Multiplier of FWHM for blend detection radius (default: 2.0)
+        fwhm_mult: [float] Multiplier of FWHM for blend detection radius (default: 2.8)
 
         wide_fov_search: [bool] If True, use a wide FOV search range (2° to 200°) instead of
                          the config-based range. Used as fallback when the tight search fails.
@@ -624,7 +624,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
             sky_obj = CatalogStar(cat_ra, cat_dec, cat_mag)
 
             # Find closest detected star to get FWHM, SNR, saturation
-            fwhm, snr, saturated = 2.5, 1.0, False
+            fwhm, snr, saturated = 1.8, 1.0, False
             if len(x_data) > 0:
                 distances = np.sqrt((x_data - img_x)**2 + (y_data - img_y)**2)
                 closest_idx = np.argmin(distances)
