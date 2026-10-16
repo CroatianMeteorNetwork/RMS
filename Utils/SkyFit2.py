@@ -9265,24 +9265,28 @@ class PlateTool(QtWidgets.QMainWindow):
         if not self.hasData():
             return
 
-        # In manual reduction the slider moves through the frames. DFN and single images only allow moving
-        #   next to the picks, so they get no slider. The frame number is already on the floating info
-        #   panel (updateLeftLabels), so the label next to the slider is not needed here.
+        # In manual reduction the slider moves through the frames. DFN, single images and inputs with a single
+        #   frame have nothing to scroll through (the frame can only be changed next to the picks), so the
+        #   slider is kept in place but locked. The frame number is already on the floating info panel
+        #   (updateLeftLabels), so the label next to the slider is not needed here.
         if self.mode == 'manualreduction':
 
-            show = not ((self.img_handle.input_type == 'dfn')
+            navigable = (not ((self.img_handle.input_type == 'dfn')
                 or ((self.img_handle.input_type == 'images') and self.img_handle.single_image_mode))
+                and (self.img_handle.total_frames > 1))
 
-            self.image_navigation_slider.setVisible(show)
+            self.image_navigation_slider.show()
             self.image_navigation_label.hide()
+            self.image_navigation_slider.setEnabled(navigable)
 
-            if show:
-                last_frame = self.img_handle.total_frames - 1
-
-                self.image_navigation_slider.blockSignals(True)
-                self.image_navigation_slider.setRange(0, last_frame)
+            self.image_navigation_slider.blockSignals(True)
+            if navigable:
+                self.image_navigation_slider.setRange(0, self.img_handle.total_frames - 1)
                 self.image_navigation_slider.setValue(self.img.getFrame())
-                self.image_navigation_slider.blockSignals(False)
+            else:
+                self.image_navigation_slider.setRange(0, 0)
+                self.image_navigation_slider.setValue(0)
+            self.image_navigation_slider.blockSignals(False)
 
             return
 
@@ -9292,7 +9296,8 @@ class PlateTool(QtWidgets.QMainWindow):
             self.image_navigation_label.hide()
             return
 
-        # Show slider for multi-image inputs
+        # Show slider for multi-image inputs (it may have been locked in manual reduction)
+        self.image_navigation_slider.setEnabled(True)
         self.image_navigation_slider.show()
         self.image_navigation_label.show()
 
