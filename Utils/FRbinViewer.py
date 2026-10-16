@@ -734,7 +734,7 @@ if __name__ == "__main__":
     
 
     # Get the list of FR bin files (fireball detections) in the given directory
-    fr_list = [fr for fr in os.listdir(dir_path) if fr[0:2]=="FR" and fr.endswith('bin')]
+    fr_list = [fr for fr in os.listdir(dir_path) if FRbin.validFRName(fr)]
     fr_list = sorted(fr_list)
 
     if not fr_list:
