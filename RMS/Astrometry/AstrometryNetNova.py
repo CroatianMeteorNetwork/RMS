@@ -282,7 +282,7 @@ class Client(object):
 
 
 def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None, fov_w_range=None,
-    api_key=None, x_center=None, y_center=None, api_url=None):
+    api_key=None, x_center=None, y_center=None, api_url=None, position_hint=None):
     """ Find an astrometric solution of X, Y image coordinates of stars detected on an image using the
         nova.astrometry.net service or a compatible API.
 
@@ -299,6 +299,7 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
         y_center: [float] Y coordinate of the image center. If not given, the image center will be used.
         api_url: [str] Custom API URL. None by default, in which case nova.astrometry.net will be used.
             Can be set to use alternative servers like 'https://astro.contrailcast.com/api/'.
+        position_hint: [tuple] Optional (ra_deg, dec_deg, radius_deg) search-position hint.
 
     Return:
         (ra, dec, orientation, scale, fov_w, fov_h, star_data): [tuple of floats] All in degrees,
@@ -389,6 +390,13 @@ def novaAstrometryNetSolve(ff_file_path=None, img=None, x_data=None, y_data=None
         kwargs['scale_lower'] = scale_lower
         kwargs['scale_upper'] = scale_upper
         kwargs['scale_units'] = 'degwidth'  # FOV range is in degrees
+
+    # Restrict the remote all-sky search when an approximate field position is known
+    if position_hint is not None:
+        ra_hint, dec_hint, radius_hint = position_hint
+        kwargs['center_ra'] = float(ra_hint)
+        kwargs['center_dec'] = float(dec_hint)
+        kwargs['radius'] = float(radius_hint)
 
 
     # Upload image or the list of stars

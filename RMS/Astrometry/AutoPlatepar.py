@@ -330,7 +330,8 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
                     fwhm_mult=DEFAULT_BLEND_FWHM_MULT,
                     wide_fov_search=False,
                     final_catalog_stars=None,
-                    verbose=True):
+                    verbose=True,
+                    position_hint=None):
     """
     Automatically create a platepar from CALSTARS data in a directory.
 
@@ -366,7 +367,11 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
 
         wide_fov_search: [bool] If True, use a wide FOV search range (2° to 200°) instead of
                          the config-based range. Used as fallback when the tight search fails.
+        final_catalog_stars: [ndarray] Optional catalog used for the final astrometric fit.
         verbose: [bool] Print progress information
+        position_hint: [tuple] Optional (ra_deg, dec_deg, radius_deg) forwarded to astrometry.net
+                       as a search-position hint. Lets star-starved / narrow-FOV cameras solve
+                       with fewer stars. None = blind all-sky search (default).
 
     Returns:
         platepar: [Platepar] Fitted platepar object, or None if fitting failed
@@ -533,6 +538,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
         lon=platepar.lon,
         jd=jd,
         input_intensities=input_intensities,
+        position_hint=position_hint,
         verbose=verbose
     )
 
@@ -550,6 +556,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
                 photometric_sigma=photometric_sigma,
                 fwhm_mult=fwhm_mult,
                 wide_fov_search=True,
+                position_hint=position_hint,
                 verbose=verbose
             )
 
