@@ -160,7 +160,7 @@ if __name__ == "__main__":
     t1 = time.time()
 
     # Run the compression
-    compressed, field_intensities = comp.compress(frames)
+    compressed, ave16, field_intensities = comp.compress(frames)
 
     print('Time for compression', time.time() - t1)
 
