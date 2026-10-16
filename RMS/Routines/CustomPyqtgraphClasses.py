@@ -4005,6 +4005,11 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
     sigLoadTLEPressed = QtCore.pyqtSignal()
     sigClearTLEPressed = QtCore.pyqtSignal()
     sigRedrawSatTracksPressed = QtCore.pyqtSignal()
+    sigWMPLSolutionsToggled = QtCore.pyqtSignal()
+    sigWMPLLegendToggled = QtCore.pyqtSignal()
+    sigWMPLSolutionToggled = QtCore.pyqtSignal(int)  # Emits the index of the solution
+    sigLoadWMPLPressed = QtCore.pyqtSignal()
+    sigRemoveWMPLPressed = QtCore.pyqtSignal(int)  # Emits the index of the selected solution
     sigCatalogChanged = QtCore.pyqtSignal(str)  # Emits the selected catalog filename
 
     def __init__(self, gui):
@@ -4174,6 +4179,33 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
         vbox.addWidget(QHSeparationLine())
 
+        self.wmpl_solutions_chk = QtWidgets.QCheckBox('Show WMPL Solutions')
+        self.wmpl_solutions_chk.released.connect(self.sigWMPLSolutionsToggled.emit)
+        vbox.addWidget(self.wmpl_solutions_chk)
+
+        self.wmpl_legend_chk = QtWidgets.QCheckBox('Show Legend')
+        self.wmpl_legend_chk.released.connect(self.sigWMPLLegendToggled.emit)
+        self.updateShowWMPLSolutions()  # Initialize after both checkboxes are created
+        vbox.addWidget(self.wmpl_legend_chk)
+
+        # Loaded solutions, the checked ones are shown
+        self.wmpl_list = QtWidgets.QListWidget()
+        self.wmpl_list.itemChanged.connect(
+            lambda item: self.sigWMPLSolutionToggled.emit(self.wmpl_list.row(item)))
+        vbox.addWidget(self.wmpl_list)
+        self.updateWMPLSolutionList()  # Sync only after the list is in the layout, as it sets its visibility
+
+        self.load_wmpl_btn = QtWidgets.QPushButton("Load WMPL Report")
+        self.load_wmpl_btn.released.connect(self.sigLoadWMPLPressed.emit)
+        vbox.addWidget(self.load_wmpl_btn)
+
+        self.remove_wmpl_btn = QtWidgets.QPushButton("Remove Selected Solution")
+        self.remove_wmpl_btn.released.connect(
+            lambda: self.sigRemoveWMPLPressed.emit(self.wmpl_list.currentRow()))
+        vbox.addWidget(self.remove_wmpl_btn)
+
+        vbox.addWidget(QHSeparationLine())
+
 
         vbox.addWidget(QtWidgets.QLabel('Grid:'))
         hbox = QtWidgets.QHBoxLayout()
@@ -4312,6 +4344,32 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
     def updateTLELabel(self, text):
         self.tle_label.setText("TLE: " + text)
+
+    def updateShowWMPLSolutions(self):
+        self.wmpl_solutions_chk.setChecked(self.gui.show_wmpl_solutions)
+        self.wmpl_legend_chk.setChecked(self.gui.show_wmpl_legend)
+        # The legend can only be shown together with the solutions
+        self.wmpl_legend_chk.setEnabled(self.gui.show_wmpl_solutions)
+
+    def updateWMPLSolutionList(self):
+        # Rebuild the list without emitting the signals of the checkboxes
+        self.wmpl_list.blockSignals(True)
+        self.wmpl_list.clear()
+
+        for solution in self.gui.wmpl_solutions:
+            item = QtWidgets.QListWidgetItem(solution['symbol'][1] + ' ' + solution['name'])
+            item.setToolTip(solution['path'])
+            item.setFlags(item.flags() | QtCore.Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(QtCore.Qt.CheckState.Checked if solution['visible'] \
+                else QtCore.Qt.CheckState.Unchecked)
+            self.wmpl_list.addItem(item)
+
+        self.wmpl_list.blockSignals(False)
+
+        # The list is only as tall as its items, so it takes no space when no solutions are loaded
+        self.wmpl_list.setFixedHeight(self.wmpl_list.sizeHintForRow(0)*self.wmpl_list.count() \
+            + 2*self.wmpl_list.frameWidth())
+        self.wmpl_list.setVisible(self.wmpl_list.count() > 0)
 
     def updateImageGamma(self):
         self.img_gamma.setValue(self.gui.img.gamma)
