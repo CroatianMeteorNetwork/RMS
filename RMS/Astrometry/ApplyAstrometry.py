@@ -59,8 +59,18 @@ import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import (cyraDecToXY, cyTrueRaDec2ApparentAltAz,
                                         cyXYToRADec,
+                                        cyraDec2AltAz,
                                         eqRefractionApparentToTrue,
-                                        equatorialCoordPrecession)
+                                        pyRefractionApparentToTrue,
+                                        pyRefractionTrueToApparent,
+                                        equatorialCoordPrecession,
+                                        cyXYToAltAz,
+                                        cyXYHttoENU_wgs84,
+                                        cyGeoToENU,
+                                        cyENUToXY_iter,
+                                        cyGeoToXY_wgs84_iter,
+                                        cyENHtToXY_iter,
+                                        cyENHt0ToENHt1)
 
 # Handle Python 2/3 compatibility
 if sys.version_info.major == 3:
@@ -555,45 +565,129 @@ def getFOVSelectionRadius(platepar):
 
 
 
-def rotationWrtHorizon(platepar):
-    """ Given the platepar, compute the rotation of the FOV with respect to the horizon.
+def rotationWrtHorizon(platepar, jd_obs=None, dx=5):
+    """ Angle of the image +x axis w.r.t. the horizon (east) at the FOV centre, in degrees.
+
+    This is the local tangent-plane position angle. The previous implementation returned
+    atan2(dAlt, dAz) with no cos(Alt) on the azimuth step, which the RA/Dec path only ever used as
+    a rotation anchor, but which the alt/az gnomonic kernels (cyXYToAltAz, cyGeoToXY_wgs84_iter,
+    cyENUToXY_iter, cyENHtToXY_iter) need to be a true tangent-plane angle.
+
+    Taken from the test-coordinate-transforms branch:
+      - central differences at dx and dx/2 with Richardson extrapolation, instead of a single
+        one-sided 10 px step
+      - the azimuth step is scaled by cos(Alt) so the angle is measured in the tangent plane
+      - a pole-safe branch for zenith-pointing platepars, where the finite difference degenerates
 
     Arguments:
-        platepar: [Platepar object] Input platepar.
+        platepar: [Platepar structure] Astrometry parameters.
+
+    Keyword arguments:
+        jd_obs: [float] Julian date to evaluate at. None (default) uses platepar.JD.
+        dx: [float] Half-baseline in pixels for the finite difference. 5 by default.
+
     Return:
-        rot_angle: [float] Rotation w.r.t. horizon (degrees).
+        rot_deg: [float] Rotation of the sensor +x axis from the horizon, east-positive, wrapped
+            to (-180, 180] degrees.
     """
 
-    # Image coordinates of the center
-    img_mid_w = platepar.X_res/2
-    img_mid_h = platepar.Y_res/2
+    jd = platepar.JD if jd_obs is None else jd_obs
+    x0, y0 = imageCenter(platepar, center_of_distortion=True)
 
-    # Image coordinate slightly right of the center (horizontal)
-    img_up_w = img_mid_w + 10
-    img_up_h = img_mid_h
+    # Pole-safe branch (zenith-pointing platepars, e.g. an all-sky canvas): the finite difference
+    # below measures (cos(alt)*dAz, dAlt) at the CENTRE, which is degenerate as alt -> 90. Instead,
+    # solve for the rotation that makes the geo path agree with the rotation-correct celestial
+    # path: project one probe direction through raDecToXYPP (reference) and through geoToXYPP with
+    # rot=0 (recursion-guarded). rot enters cyGeoToXY as a rigid rotation, so one image-angle
+    # difference determines it. Self-verified with a second projection and cached on the platepar.
+    # Real cameras (alt < 89) are untouched.
+    _, _alt_centre_chk = _centreAltAz(platepar, jd)
+    if np.degrees(_alt_centre_chk) > 89.0:
+        _cached = getattr(platepar, '_pole_safe_rot', None)
+        if _cached is not None:
+            return _cached
+        if getattr(platepar, '_rot_probe_active', False):
+            return 0.0
+        from RMS.Astrometry.CyFunctions import cyApparentAltAz2TrueRADec
+        try:
+            platepar._rot_probe_active = True
+            x0c, y0c = imageCenter(platepar, center_of_distortion=True)
 
-    # Compute apparent alt/az in the epoch of date from X,Y
-    jd_arr, ra_arr, dec_arr, _ = xyToRaDecPP(2*[jd2Date(platepar.JD)], [img_mid_w, img_up_w], \
-        [img_mid_h, img_up_h], [1, 1], platepar, extinction_correction=False, precompute_pointing_corr=True)
-    azim_mid, alt_mid = cyTrueRaDec2ApparentAltAz(np.radians(ra_arr[0]), np.radians(dec_arr[0]), jd_arr[0], \
-        np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction)
-    azim_up, alt_up = cyTrueRaDec2ApparentAltAz(np.radians(ra_arr[1]), np.radians(dec_arr[1]), jd_arr[1], \
-        np.radians(platepar.lat), np.radians(platepar.lon), platepar.refraction)
+            # Probe: due-north sky direction 45 deg below zenith
+            _elev_p = np.degrees(_alt_centre_chk) - 45.0
+            ra_p, dec_p = cyApparentAltAz2TrueRADec(
+                np.radians(0.0), np.radians(_elev_p), jd,
+                np.radians(platepar.lat), np.radians(platepar.lon),
+                platepar.refraction)
+            xr, yr = raDecToXYPP(np.array([np.degrees(ra_p)]),
+                                 np.array([np.degrees(dec_p)]), jd, platepar)
 
-    # Compute the azimuth difference, wrapping across the 0/360 deg boundary. Without this, a FOV centre
-    # pointing near due north (azimuth ~ 0/360 deg) puts the two sample points on opposite sides of the
-    # wrap, producing a spurious ~360 deg difference that pins the rotation near +/-180 deg and makes it
-    # insensitive to the true camera roll.
-    d_azim = (azim_up - azim_mid + np.pi)%(2*np.pi) - np.pi
+            # Geo point in the same direction. A spherical-earth approximation is fine here:
+            # only the ANGLE difference matters and both paths share it.
+            _h = 11000.0
+            _rng = (_h - getattr(platepar, 'elev', 0.0))/np.tan(np.radians(_elev_p))
+            _lat_t = platepar.lat + np.degrees(_rng/6371000.0)
+            xg, yg = geoToXYPP(np.array([_lat_t]), np.array([platepar.lon]),
+                               np.array([_h]), platepar)
 
-    # Compute the rotation wrt horizon (deg)
-    rot_angle = np.degrees(np.arctan2(alt_up - alt_mid, d_azim))
+            _phi_ref = np.arctan2(float(yr[0]) - y0c, float(xr[0]) - x0c)
+            _phi_got = np.arctan2(float(yg[0]) - y0c, float(xg[0]) - x0c)
 
-    # Wrap output to <-180, 180] range
-    if rot_angle > 180:
-        rot_angle -= 360
+            for _cand in (np.degrees(_phi_got - _phi_ref),
+                          np.degrees(_phi_ref - _phi_got)):
+                platepar._pole_safe_rot = ((_cand + 180)%360) - 180
+                platepar._rot_probe_active = False
+                xv, yv = geoToXYPP(np.array([_lat_t]), np.array([platepar.lon]),
+                                   np.array([_h]), platepar)
+                if np.hypot(float(xv[0]) - float(xr[0]),
+                            float(yv[0]) - float(yr[0])) < 5.0:
+                    return platepar._pole_safe_rot
+                platepar._rot_probe_active = True
 
-    return rot_angle
+            # Neither candidate verified - fall through to the finite difference (degenerate but
+            # defined) rather than silently returning garbage
+            platepar._pole_safe_rot = None
+
+        finally:
+            platepar._rot_probe_active = False
+
+    def _altaz_at(x, y):
+        """ Precession-aware XY -> RA/Dec -> Alt/Az at jd. """
+
+        _, RA, DEC, _ = xyToRaDecPP(np.array([jd, jd]), np.array([x, x]), np.array([y, y]),
+                                    np.ones(2), platepar, extinction_correction=False,
+                                    jd_time=True)
+        az, alt = cyTrueRaDec2ApparentAltAz(np.radians(RA[0]), np.radians(DEC[0]),
+                                            jd, np.radians(platepar.lat),
+                                            np.radians(platepar.lon), platepar.refraction)
+
+        return az, alt
+
+    def _east_up(h):
+        """ Central difference of the east/up direction per pixel, at half-baseline h. """
+
+        A1, H1 = _altaz_at(x0 - h, y0)
+        A2, H2 = _altaz_at(x0 + h, y0)
+
+        # Wrap the azimuth difference across the 0/360 deg boundary
+        dA = (A2 - A1 + np.pi)%(2*np.pi) - np.pi
+        dH = H2 - H1
+        h0 = 0.5*(H1 + H2)
+
+        # Scale the azimuth step by cos(alt) so the angle is in the local tangent plane
+        return (np.cos(h0)*dA)/(2*h), dH/(2*h)
+
+    ex1, up1 = _east_up(dx)
+    ex2, up2 = _east_up(dx/2.0)
+
+    # Richardson extrapolation (error ~ k*h^2): D* ~= D(h/2) + (D(h/2) - D(h))/3
+    east = ex2 + (ex2 - ex1)/3.0
+    up = up2 + (up2 - up1)/3.0
+
+    rot_deg = np.degrees(np.arctan2(up, east))
+
+    # Wrap to (-180, 180]
+    return ((rot_deg + 180)%360) - 180
 
 
 
@@ -820,8 +914,6 @@ def rotationWrtHorizonToPosAngle(platepar, rot_angle):
     return res.x[0]%360
 
 
-
-
 def rotationWrtStandard(platepar):
     """ Given the platepar, compute the rotation from the celestial meridian passing through the centre of
         the FOV.
@@ -860,8 +952,6 @@ def rotationWrtStandard(platepar):
     rot_angle = rot_angle%360
 
     return rot_angle
-
-
 
 
 def rotationWrtStandardToPosAngle(platepar, rot_angle):
@@ -1010,8 +1100,6 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
 
 
 
-
-
 def raDecToXYPP(RA_data, dec_data, jd, platepar):
     """ Converts RA, Dec to image coordinates, but the platepar is given instead of individual parameters.
     Arguments:
@@ -1032,8 +1120,6 @@ def raDecToXYPP(RA_data, dec_data, jd, platepar):
         force_distortion_centre=platepar.force_distortion_centre, asymmetry_corr=platepar.asymmetry_corr)
 
     return X_data, Y_data
-
-
 
 
 def applyPlateparToCentroids(ff_name, fps, meteor_meas, platepar, add_calstatus=False, exp_mag_corr=0.0):
@@ -1605,6 +1691,410 @@ def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file,
     writeFTPdetectinfo(meteor_list, dir_path, ftp_detectinfo_file, dir_path, cam_code, fps, 
         calibration=calib_str, celestial_coords_given=True)
 
+
+
+
+
+# ============================================================================
+# ENU / geodetic coordinate transforms and XY->Alt/Az, ported from the
+# test-coordinate-transforms branch for the GMN contrail pipeline (Janus).
+# ============================================================================
+
+
+def imageCenter(platepar, center_of_distortion=False):
+    """
+    Returns image x, y of the FOV center, or the center of distortion
+
+    Arguments:
+        platepar: [Platepar structure] Astrometry parameters.
+    
+    Keyword arguments:
+        center_of_distortion: [bool] If True, return the image x,y of the center of distortion
+
+    Return: (x, y)
+    """
+
+    if center_of_distortion:
+        if platepar.distortion_type.startswith("radial"):
+            x0_norm = platepar.x_poly_fwd[0]
+            y0_norm = platepar.x_poly_fwd[1]
+        else:
+            x0_norm = platepar.x_poly_fwd[0]
+            y0_norm = platepar.y_poly_fwd[0]
+    
+    else:
+        x0_norm = 0
+        y0_norm = 0
+    
+    x = (1 + x0_norm) * platepar.X_res / 2
+    y = (1 + y0_norm) * platepar.Y_res / 2
+
+    return (x, y)
+
+
+def _centreAltAz(platepar, jd):
+    """ Alt/az of the platepar centre at jd (radians).
+
+    Uses cyraDec2AltAz rather than cyTrueRaDec2ApparentAltAz: the latter precesses J2000 -> date,
+    but RA_d/dec_d are already epoch-of-date in RMS (see pointingCorrection), so precessing them
+    again shifts the centre. This is the same call the ENU wrappers make.
+    """
+
+    az_c, alt_c = cyraDec2AltAz(
+        np.radians(platepar.RA_d), np.radians(platepar.dec_d), jd,
+        np.radians(platepar.lat), np.radians(platepar.lon))
+
+    return az_c, alt_c
+
+
+def xyToAltAzPP(X_data, Y_data, platepar, measurement=False):
+    """ Converts image XY to Alt, Az, but it takes a platepar instead of individual parameters. 
+
+    Arguments:
+        X_data: [ndarray] 1D numpy array containing the image X component.
+        Y_data: [ndarray] 1D numpy array containing the image Y component.
+        platepar: [Platepar structure] Astrometry parameters.
+
+    Keyword arguments:
+        measurement: [bool] Indicates if the given images values are image measurements. Used for correcting
+            celestial coordinates for refraction if the refraction was not taken into account during
+            plate fitting.
+
+    Return:
+        (Alt_data, Az_data): [tuple of ndarrays]
+            Alt_data: [ndarray] Altitude of each point (deg).
+            Az_data: [ndarray] Azimuth of each point (deg).
+    """
+
+    # Compute reference Alt/Az to apparent coordinates, epoch of date
+    az_centre, alt_centre = cyraDec2AltAz(
+        np.radians(platepar.RA_d),
+        np.radians(platepar.dec_d),
+        platepar.JD,
+        np.radians(platepar.lat),
+        np.radians(platepar.lon)
+    )
+    az_centre, alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
+
+
+    rot = rotationWrtHorizon(platepar)
+
+    # Convert x,y to Alt/Az using a fast cython function
+    Alt_data, Az_data = cyXYToAltAz(np.atleast_1d(np.array(X_data, dtype=np.float64)).ravel(), \
+        np.atleast_1d(np.array(Y_data, dtype=np.float64)).ravel(), float(platepar.X_res), \
+        float(platepar.Y_res), float(alt_centre), float(az_centre), \
+        float(rot), float(platepar.F_scale), platepar.x_poly_fwd, platepar.y_poly_fwd, \
+        unicode(platepar.distortion_type), refraction=platepar.refraction, \
+        equal_aspect=platepar.equal_aspect, force_distortion_centre=platepar.force_distortion_centre, \
+        asymmetry_corr=platepar.asymmetry_corr)
+
+    # Correct the coordinates for refraction if it wasn't taken into account during the astrometry calibration
+    #   procedure
+    if (not platepar.refraction) and measurement and platepar.measurement_apparent_to_true_refraction:
+        for i, entry in enumerate(zip(Az_data, Alt_data)):
+            az, alt = entry
+            alt = pyRefractionApparentToTrue(np.radians(alt))
+
+            Az_data[i] = az
+            Alt_data[i] = np.degrees(alt)
+            
+    return (Alt_data, Az_data)
+
+
+def xyHtToENUPP(X_data, Y_data, ht_wgs84_m, platepar, min_el_deg=0.0):
+    """ Converts image XY to East-North-Up coordinates at a given WGS-84 height.
+    
+    Arguments:
+        X_data: [ndarray] 1D numpy array containing the image X component.
+        Y_data: [ndarray] 1D numpy array containing the image Y component.
+        ht_wgs84_m: [float or ndarray] Target WGS-84 ellipsoid height(s) in meters.
+        platepar: [Platepar structure] Astrometry parameters.
+    
+    Keyword arguments:
+        min_el_deg: [float] Minimum elevation in degrees. Points below this will return NaN. Default: 0.0.
+    
+    Return:
+        (E, N, U, Eu, Nu, Uu, az, el): [tuple of ndarrays]
+            E, N, U: [ndarrays] East, North, Up coordinates of intersection point (meters).
+            Eu, Nu, Uu: [ndarrays] East, North, Up unit vector components of the ray direction.
+            az, el: [ndarrays] Azimuth and elevation of the ray (radians).
+    """
+    
+    # Compute reference Alt/Az to apparent coordinates, epoch of date
+    az_centre, alt_centre = cyraDec2AltAz(
+        np.radians(platepar.RA_d),
+        np.radians(platepar.dec_d),
+        platepar.JD,
+        np.radians(platepar.lat),
+        np.radians(platepar.lon)
+    )
+    az_centre, alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
+    
+    rot = rotationWrtHorizon(platepar)
+        
+    E, N, U = cyXYHttoENU_wgs84(
+        np.atleast_1d(np.array(X_data, dtype=np.float64)).ravel(),
+        np.atleast_1d(np.array(Y_data, dtype=np.float64)).ravel(), 
+        float(platepar.X_res), float(platepar.Y_res), 
+        float(alt_centre), float(az_centre),
+        float(rot), float(platepar.F_scale), 
+        platepar.x_poly_fwd, platepar.y_poly_fwd, 
+        unicode(platepar.distortion_type), 
+        float(platepar.lat), float(platepar.lon), float(platepar.height_wgs84), 
+        np.array(ht_wgs84_m, dtype=np.float64).ravel() if not np.isscalar(ht_wgs84_m) \
+            else np.full(np.size(X_data), float(ht_wgs84_m), dtype=np.float64),
+        refraction=platepar.refraction, 
+        equal_aspect=platepar.equal_aspect, 
+        force_distortion_centre=platepar.force_distortion_centre, 
+        asymmetry_corr=platepar.asymmetry_corr, 
+        min_el_deg=min_el_deg
+    )
+    
+    # Calculate unit vectors from ENU coordinates
+    magnitude = np.sqrt(E**2 + N**2 + U**2)
+    Eu = E / magnitude
+    Nu = N / magnitude
+    Uu = U / magnitude
+    
+    # Calculate azimuth and elevation from ENU
+    az = np.arctan2(E, N)
+    el = np.arcsin(Uu)
+    
+    return E, N, U, Eu, Nu, Uu, az, el
+
+
+def geoToENUPP(lat_geo_deg, lon_geo_deg, h_geo_m, platepar):
+    """ Convert geodetic coordinates to East-North-Up (ENU) coordinates.
+
+    This is a direct conversion from geodetic (lat, lon, height) to ENU coordinates
+    relative to the station position. Unlike geoToXYPP, this does not go through
+    the camera projection and works for any point, not just those in the field of view.
+
+    Arguments:
+        lat_geo_deg: [float or ndarray] Target geodetic latitude(s) in degrees.
+        lon_geo_deg: [float or ndarray] Target geodetic longitude(s) in degrees.
+        h_geo_m: [float or ndarray] Target WGS-84 ellipsoid height(s) in meters.
+        platepar: [Platepar structure] Platepar object containing station coordinates.
+
+    Return:
+        (E, N, U): [tuple of ndarrays] East, North, Up coordinates in meters relative to station.
+    """
+
+    # Convert scalars to arrays if needed
+    lat_arr = np.atleast_1d(np.array(lat_geo_deg, dtype=np.float64))
+    lon_arr = np.atleast_1d(np.array(lon_geo_deg, dtype=np.float64))
+    h_arr = np.atleast_1d(np.array(h_geo_m, dtype=np.float64))
+
+    # Call the Cython function
+    E, N, U = cyGeoToENU(
+        lat_arr, lon_arr, h_arr,
+        float(platepar.lat), float(platepar.lon), float(platepar.height_wgs84)
+    )
+
+    # Return scalars if input was scalar
+    if np.isscalar(lat_geo_deg) and np.isscalar(lon_geo_deg) and np.isscalar(h_geo_m):
+        return E[0], N[0], U[0]
+
+    return E, N, U
+
+
+def geoToXYPP(lat_data, lon_data, h_data, platepar, min_el_deg=0.0):
+    """ Converts WGS-84 geodetic coordinates to image coordinates.
+    
+    Arguments:
+        lat_data: [ndarray] Array of geodetic latitudes (degrees).
+        lon_data: [ndarray] Array of geodetic longitudes (degrees).
+        h_data: [ndarray] Array of WGS-84 ellipsoid heights (meters).
+        platepar: [Platepar structure] Astrometry parameters.
+    
+    Keyword arguments:
+        min_el_deg: [float] Minimum elevation angle in degrees. Points below this are returned as NaN.
+    
+    Return:
+        (x, y): [tuple of ndarrays] Image X and Y coordinates.
+    """
+    
+    # Compute reference Alt/Az to apparent coordinates, epoch of date
+    az_centre, alt_centre = cyraDec2AltAz(
+        np.radians(platepar.RA_d),
+        np.radians(platepar.dec_d),
+        platepar.JD,
+        np.radians(platepar.lat),
+        np.radians(platepar.lon)
+    )
+    az_centre, alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
+    
+    rot = rotationWrtHorizon(platepar)
+        
+    X_data, Y_data = cyGeoToXY_wgs84_iter(
+        np.array(lat_data, dtype=np.float64), np.array(lon_data, dtype=np.float64),
+        np.array(h_data, dtype=np.float64),
+        float(platepar.X_res), float(platepar.Y_res),
+        float(alt_centre), float(az_centre),
+        float(rot), float(platepar.F_scale),
+        platepar.x_poly_fwd, platepar.y_poly_fwd,
+        unicode(platepar.distortion_type),
+        float(platepar.lat), float(platepar.lon), float(platepar.height_wgs84),
+        refraction=platepar.refraction,
+        equal_aspect=platepar.equal_aspect,
+        force_distortion_centre=platepar.force_distortion_centre,
+        asymmetry_corr=platepar.asymmetry_corr,
+        min_el_deg=min_el_deg
+    )
+    
+    return X_data, Y_data
+
+
+def enuToXYPP(E_data, N_data, U_data, platepar, min_el_deg=0.0):
+    """ Converts East-North-Up coordinates to image XY coordinates.
+    
+    Arguments:
+        E_data: [ndarray] Array of East coordinates in meters.
+        N_data: [ndarray] Array of North coordinates in meters.
+        U_data: [ndarray] Array of Up coordinates in meters.
+        platepar: [Platepar structure] Astrometry parameters.
+    
+    Keyword arguments:
+        min_el_deg: [float] Minimum elevation in degrees. Points below this will return NaN. Default: 0.0.
+    
+    Return:
+        (x, y): [tuple of ndarrays] Image X and Y coordinates.
+    """
+    
+    # Compute reference Alt/Az to apparent coordinates, epoch of date
+    az_centre, alt_centre = cyraDec2AltAz(
+        np.radians(platepar.RA_d),
+        np.radians(platepar.dec_d),
+        platepar.JD,
+        np.radians(platepar.lat),
+        np.radians(platepar.lon)
+    )
+    az_centre, alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
+    
+    rot = rotationWrtHorizon(platepar)
+    
+    x, y = cyENUToXY_iter(
+        np.atleast_1d(np.array(E_data, dtype=np.float64)).ravel(),
+        np.atleast_1d(np.array(N_data, dtype=np.float64)).ravel(),
+        np.atleast_1d(np.array(U_data, dtype=np.float64)).ravel(),
+        float(platepar.X_res), float(platepar.Y_res),
+        float(alt_centre), float(az_centre),
+        float(rot), float(platepar.F_scale),
+        platepar.x_poly_fwd, platepar.y_poly_fwd,
+        platepar.distortion_type,
+        platepar.refraction, platepar.equal_aspect,
+        platepar.force_distortion_centre, platepar.asymmetry_corr,
+        min_el_deg
+    )
+    
+    return x, y
+
+
+def enHtToXYPP(E_data, N_data, Ht_data, platepar, min_el_deg=0.0):
+    """ Converts East-North coordinates at specified heights to image XY coordinates using iterative solver.
+    
+    This function takes E, N coordinates and target WGS-84 ellipsoidal heights, 
+    solves for the Up (U) component that places the point at the specified height,
+    then converts to image coordinates.
+    
+    Arguments:
+        E_data: [ndarray] Array of East coordinates in meters (from station).
+        N_data: [ndarray] Array of North coordinates in meters (from station).
+        Ht_data: [ndarray] Array of target WGS-84 ellipsoidal heights in meters.
+        platepar: [Platepar structure] Astrometry parameters.
+    
+    Keyword arguments:
+        min_el_deg: [float] Minimum elevation in degrees. Points below this will return NaN. Default: 0.0.
+    
+    Return:
+        (x, y): [tuple of ndarrays] Image X and Y coordinates.
+    """
+    
+    # Import the Cython function
+    
+    # Compute reference Alt/Az to apparent coordinates, epoch of date
+    az_centre, alt_centre = cyraDec2AltAz(
+        np.radians(platepar.RA_d),
+        np.radians(platepar.dec_d),
+        platepar.JD,
+        np.radians(platepar.lat),
+        np.radians(platepar.lon)
+    )
+    az_centre, alt_centre = np.degrees(az_centre), np.degrees(alt_centre)
+    
+    rot = rotationWrtHorizon(platepar)
+    
+    # Ensure inputs are numpy arrays
+    E_array = np.array(E_data, dtype=np.float64).ravel()
+    N_array = np.array(N_data, dtype=np.float64).ravel()
+    Ht_array = np.array(Ht_data, dtype=np.float64).ravel()
+    
+    # Check that arrays have the same length
+    if len(E_array) != len(N_array) or len(E_array) != len(Ht_array):
+        raise ValueError(f"E, N, and Ht arrays must have the same length. Got E:{len(E_array)}, N:{len(N_array)}, Ht:{len(Ht_array)}")
+    
+    # Call the Cython function
+    x, y = cyENHtToXY_iter(
+        E_array, N_array, Ht_array,
+        float(platepar.X_res), float(platepar.Y_res),
+        float(alt_centre), float(az_centre),
+        float(rot), float(platepar.F_scale),
+        platepar.x_poly_fwd, platepar.y_poly_fwd,
+        platepar.distortion_type,
+        float(platepar.lat), float(platepar.lon), float(platepar.height_wgs84),
+        refraction=platepar.refraction,
+        equal_aspect=platepar.equal_aspect,
+        force_distortion_centre=platepar.force_distortion_centre,
+        asymmetry_corr=platepar.asymmetry_corr,
+        min_el_deg=min_el_deg
+    )
+    
+    return x, y
+
+
+def ENHt0ToENHt1(E0_data, N0_data, Ht0_data, Ht1_data, platepar):
+    """ Convert ENHt coordinates at one height to ENHt at a different height,
+        maintaining the same line of sight from the station.
+
+    Arguments:
+        E0_data: [ndarray or float] ENU east coordinate(s) at height Ht0 (meters).
+        N0_data: [ndarray or float] ENU north coordinate(s) at height Ht0 (meters).
+        Ht0_data: [ndarray or float] WGS-84 ellipsoidal height(s) of input points (meters).
+        Ht1_data: [ndarray or float] WGS-84 ellipsoidal height(s) of output points (meters).
+        platepar: [Platepar object] Platepar object with station coordinates.
+
+    Returns:
+        tuple: (E1, N1, U1) ENU coordinates at height Ht1 that lie on the same line of sight,
+               where U1 is the Up component in the ENU system.
+    """
+
+    # Ensure inputs are numpy arrays
+    E0_array = np.array(E0_data, dtype=np.float64).ravel()
+    N0_array = np.array(N0_data, dtype=np.float64).ravel()
+    Ht0_array = np.array(Ht0_data, dtype=np.float64).ravel()
+    Ht1_array = np.array(Ht1_data, dtype=np.float64).ravel()
+
+    # Broadcast length-1 heights over the points, as the docstring promises. A scalar height with
+    # array E0/N0 is the normal way to ask for a whole frame at one height.
+    if len(Ht0_array) == 1 and len(E0_array) != 1:
+        Ht0_array = np.full(len(E0_array), Ht0_array[0], dtype=np.float64)
+
+    if len(Ht1_array) == 1 and len(E0_array) != 1:
+        Ht1_array = np.full(len(E0_array), Ht1_array[0], dtype=np.float64)
+
+    # Check that arrays have the same length
+    if len(E0_array) != len(N0_array) or len(E0_array) != len(Ht0_array) or len(E0_array) != len(Ht1_array):
+        raise ValueError("E0, N0, Ht0, and Ht1 must have the same length (heights may also be scalar). "
+                         "Got E0:{}, N0:{}, Ht0:{}, Ht1:{}".format(len(E0_array), len(N0_array),
+                                                                   len(Ht0_array), len(Ht1_array)))
+
+    # Call the Cython function
+    E1, N1, U1 = cyENHt0ToENHt1(
+        E0_array, N0_array, Ht0_array, Ht1_array,
+        float(platepar.lat), float(platepar.lon), float(platepar.height_wgs84)
+    )
+
+    return E1, N1, U1
 
 
 if __name__ == "__main__":
