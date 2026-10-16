@@ -1,3 +1,4 @@
+import argparse
 import struct
 import json
 import hashlib
@@ -232,30 +233,35 @@ class DVRIPCam(object):
 
 
 if __name__ == '__main__':
-    if len(sys.argv) < 3:
-        print("This script allows you to set your Camera's IP address.")
-        print('')
-        print('To use the script, your camera must be attached to your home network')
-        print('and acessible via its default IP address. If you are not sure what')
-        print('what that is, you may be able to find out from your home router. Most routers')
-        print("have a page that displys connected clients. Look for one named 'HostName',")
-        print('and make a note of its address. Alternatively you can use free tools like ')
-        print('Advanced IP-Scanner to scan your network for the same name. ')
-        print('')
-        print('You will also need to know the address you want your camera to have.')
-        print('Normally this will be 192.168.42.10')
-        print('')
-        print('Once you have this information and the camera is on your network')
-        print('call this module again with two arguments, the CURRENT and DESIRED address, eg:')
-        print('')
-        print('   python -m Utils.SetCameraAddress 192.168.1.100 192.168.42.10')
-        print('')
-        print('replacing the two addresses as needed')
-        print('')
-        exit(0)
 
-    ipaddr = sys.argv[1]
-    newaddr = sys.argv[2]
+    arg_parser = argparse.ArgumentParser(
+        description="Set your camera's IP address.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""To use the script, your camera must be attached to your home network
+and accessible via its default IP address. If you are not sure what
+that is, you may be able to find out from your home router. Most routers
+have a page that displays connected clients. Look for one named 'HostName',
+and make a note of its address. Alternatively you can use free tools like
+Advanced IP-Scanner to scan your network for the same name.
+
+You will also need to know the address you want your camera to have.
+Normally this will be 192.168.42.10
+
+Example:
+
+   python -m Utils.SetCameraAddress 192.168.1.100 192.168.42.10
+""")
+
+    arg_parser.add_argument('current_address', metavar='CURRENT_IP', type=str,
+        help='Current IP address of the camera.')
+
+    arg_parser.add_argument('new_address', metavar='NEW_IP', type=str,
+        help='Desired new IP address of the camera, e.g. 192.168.42.10.')
+
+    cml_args = arg_parser.parse_args()
+
+    ipaddr = cml_args.current_address
+    newaddr = cml_args.new_address
 
     if not checkValidIPAddr(ipaddr) or not checkValidIPAddr(newaddr):
         print('')
