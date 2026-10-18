@@ -1134,7 +1134,11 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
 
         # Distortion coeffs
         k1 = x_poly_rev[5 - index_offset]
-        k2 = x_poly_rev[6 - index_offset]
+
+        # radial3-odd has no k2: its polynomial ends at k1, and reading past it is out of bounds
+        k2 = 0.0
+        if x_poly_rev.shape[0] > (6 - index_offset):
+            k2 = x_poly_rev[6 - index_offset]
 
         if x_poly_rev.shape[0] > (7 - index_offset):
             k3 = x_poly_rev[7 - index_offset]
@@ -1493,7 +1497,11 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
 
         # Distortion coeffs
         k1 = x_poly_fwd[5 - index_offset]
-        k2 = x_poly_fwd[6 - index_offset]
+
+        # radial3-odd has no k2: its polynomial ends at k1, and reading past it is out of bounds
+        k2 = 0.0
+        if x_poly_fwd.shape[0] > (6 - index_offset):
+            k2 = x_poly_fwd[6 - index_offset]
 
         if x_poly_fwd.shape[0] > (7 - index_offset):
             k3 = x_poly_fwd[7 - index_offset]
