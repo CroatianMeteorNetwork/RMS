@@ -60,7 +60,7 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import (cyraDecToXY, cyTrueRaDec2ApparentAltAz,
                                         cyXYToRADec,
                                         eqRefractionApparentToTrue,
-                                        equatorialCoordPrecession)
+                                        trueOfDateFromJ2000)
 
 # Handle Python 2/3 compatibility
 if sys.version_info.major == 3:
@@ -147,8 +147,8 @@ def extinctionCorrectionTrueToApparent(catalog_mags, ra_data, dec_data, jd, plat
     elevation_data = []
     for ra, dec in zip(ra_data, dec_data):
 
-        # Precess to epoch of date
-        ra, dec = equatorialCoordPrecession(J2000_JD.days, jd, np.radians(ra), np.radians(dec))
+        # Precession and nutation: J2000 -> true equator and equinox of date, the frame of the sidereal time
+        ra, dec = trueOfDateFromJ2000(jd, np.radians(ra), np.radians(dec))
 
         # Compute elevation
         _, elev = raDec2AltAz(np.degrees(ra), np.degrees(dec), jd, platepar.lat, platepar.lon)
@@ -195,8 +195,8 @@ def extinctionCorrectionApparentToTrue(mags, x_data, y_data, jd, platepar):
     elevation_data = []
     for ra, dec in zip(ra_data, dec_data):
 
-        # Precess to epoch of date
-        ra, dec = equatorialCoordPrecession(J2000_JD.days, jd, np.radians(ra), np.radians(dec))
+        # Precession and nutation: J2000 -> true equator and equinox of date, the frame of the sidereal time
+        ra, dec = trueOfDateFromJ2000(jd, np.radians(ra), np.radians(dec))
 
         # Compute elevation
         _, elev = raDec2AltAz(np.degrees(ra), np.degrees(dec), jd, platepar.lat, platepar.lon)
@@ -1108,9 +1108,8 @@ def applyPlateparToCentroids(ff_name, fps, meteor_meas, platepar, add_calstatus=
         ra_tmp = RA_data[i]
         dec_tmp = dec_data[i]
 
-        # Precess RA/Dec to epoch of date
-        ra_tmp, dec_tmp = equatorialCoordPrecession(J2000_JD.days, jd, np.radians(ra_tmp), \
-            np.radians(dec_tmp))
+        # Precession and nutation: J2000 -> true equator and equinox of date, the frame of the sidereal time
+        ra_tmp, dec_tmp = trueOfDateFromJ2000(jd, np.radians(ra_tmp), np.radians(dec_tmp))
 
         # Alt/Az are apparent (in the epoch of date, corresponding to geographical azimuths)
         az_tmp, alt_tmp = raDec2AltAz(np.degrees(ra_tmp), np.degrees(dec_tmp), jd, platepar.lat, platepar.lon)
@@ -1214,9 +1213,8 @@ def applyPlateparToRaDecCentroids(ff_name, fps, meteor_meas, platepar, add_calst
         ra_tmp = RA_data[i]
         dec_tmp = dec_data[i]
 
-        # Precess RA/Dec to epoch of date
-        ra_tmp, dec_tmp = equatorialCoordPrecession(J2000_JD.days, jd, np.radians(ra_tmp), \
-            np.radians(dec_tmp))
+        # Precession and nutation: J2000 -> true equator and equinox of date, the frame of the sidereal time
+        ra_tmp, dec_tmp = trueOfDateFromJ2000(jd, np.radians(ra_tmp), np.radians(dec_tmp))
 
         # Alt/Az are apparent (in the epoch of date, corresponding to geographical azimuths)
         az_tmp, alt_tmp = raDec2AltAz(np.degrees(ra_tmp), np.degrees(dec_tmp), jd, platepar.lat, platepar.lon)

@@ -717,8 +717,8 @@ cpdef (double, double) eqRefractionApparentToTrue(double ra, double dec, double 
 
     cdef double azim, alt
 
-    # Precess RA/Dec from J2000 to the epoch of date
-    ra, dec = equatorialCoordPrecession(J2000_DAYS, jd, ra, dec)
+    # Precession and nutation: J2000 -> true equator and equinox of date, the frame of the sidereal time
+    ra, dec = trueOfDateFromJ2000(jd, ra, dec)
 
     # Convert coordinates to alt/az
     azim, alt = cyraDec2AltAz(ra, dec, jd, lat, lon)
@@ -729,8 +729,8 @@ cpdef (double, double) eqRefractionApparentToTrue(double ra, double dec, double 
     # Convert back to equatorial
     ra, dec = cyaltAz2RADec(azim, alt, jd, lat, lon)
 
-    # Precess RA/Dec from the epoch of date to J2000
-    ra, dec = equatorialCoordPrecession(jd, J2000_DAYS, ra, dec)
+    # Nutation and precession: true equator and equinox of date -> J2000
+    ra, dec = j2000FromTrueOfDate(jd, ra, dec)
 
 
     return (ra, dec)
@@ -803,8 +803,8 @@ cpdef (double, double) eqRefractionTrueToApparent(double ra, double dec, double 
 
     cdef double azim, alt
 
-    # Precess RA/Dec from J2000 to the epoch of date
-    ra, dec = equatorialCoordPrecession(J2000_DAYS, jd, ra, dec)
+    # Precession and nutation: J2000 -> true equator and equinox of date, the frame of the sidereal time
+    ra, dec = trueOfDateFromJ2000(jd, ra, dec)
 
     # Convert coordinates to alt/az
     azim, alt = cyraDec2AltAz(ra, dec, jd, lat, lon)
@@ -815,8 +815,8 @@ cpdef (double, double) eqRefractionTrueToApparent(double ra, double dec, double 
     # Convert back to equatorial
     ra, dec = cyaltAz2RADec(azim, alt, jd, lat, lon)
 
-    # Precess RA/Dec from the epoch of date to J2000
-    ra, dec = equatorialCoordPrecession(jd, J2000_DAYS, ra, dec)
+    # Nutation and precession: true equator and equinox of date -> J2000
+    ra, dec = j2000FromTrueOfDate(jd, ra, dec)
 
 
     return (ra, dec)
