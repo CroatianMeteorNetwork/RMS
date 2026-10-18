@@ -217,7 +217,8 @@ def subsetCatalog(np.ndarray[FLOAT_TYPE_t, ndim=2] catalog_list, double ra_c, do
 
 @cython.cdivision(True)
 cdef double cyjd2LST(double jd, double lon):
-    """ Convert Julian date to apparent Local Sidereal Time. The times is apparent, not mean!
+    """ Convert Julian date to mean Local Sidereal Time. The time is mean, not apparent: there is no
+        nutation term, the equation of the equinoxes, which is up to about 1 s of time (15 arcsec).
 
     Source: J. Meeus: Astronomical Algorithms
 
@@ -226,7 +227,7 @@ cdef double cyjd2LST(double jd, double lon):
         lon: [float] Longitude of the observer in degrees.
     
     Return:
-        lst [float] Apparent Local Sidereal Time (deg).
+        lst [float] Mean Local Sidereal Time (deg).
     """
 
     cdef double gst
@@ -238,7 +239,7 @@ cdef double cyjd2LST(double jd, double lon):
     gst = (gst + 360)%360
 
 
-    # Compute the apparent Local Sidereal Time (LST)
+    # Compute the mean Local Sidereal Time (LST)
     return (gst + lon + 360)%360
 
 
