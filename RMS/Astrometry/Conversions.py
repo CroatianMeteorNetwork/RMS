@@ -48,10 +48,27 @@ import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
 from RMS.Astrometry.CyFunctions import cyaltAz2RADec, cyraDec2AltAz, cyApparentAltAz2TrueRADec, \
     cyApparentAltAz2TrueRADec_vect, cyTrueRaDec2ApparentAltAz, cyTrueRaDec2ApparentAltAz_vect, cyjd2GST
+from RMS.Astrometry.CyFunctions import cyaltAz2RADec_vect as cyaltAz2RADecArrays, \
+    cyraDec2AltAz_vect as cyraDec2AltAzArrays
+
+
+def broadcastVect(cy_vect):
+    """ Vectorize a CyFunctions array conversion taking (two coordinates, jd, lat, lon), broadcasting the
+        arguments against each other as np.vectorize does. The Cython loop evaluates the sidereal time once
+        per time instead of once per point.
+    """
+
+    def vect(a, b, jd, lat, lon):
+        args = np.broadcast_arrays(*[np.asarray(v, dtype=np.float64) for v in (a, b, jd, lat, lon)])
+        out_a, out_b = cy_vect(*[np.ascontiguousarray(v).ravel() for v in args])
+        return out_a.reshape(args[0].shape), out_b.reshape(args[0].shape)
+
+    return vect
+
 
 # Vectorize some functions
-cyaltAz2RADec_vect = np.vectorize(cyaltAz2RADec, excluded=["jd", "lat", "lon"])
-cyraDec2AltAz_vect = np.vectorize(cyraDec2AltAz, excluded=["jd", "lat", "lon"])
+cyaltAz2RADec_vect = broadcastVect(cyaltAz2RADecArrays)
+cyraDec2AltAz_vect = broadcastVect(cyraDec2AltAzArrays)
 
 ### CONSTANTS ###
 
@@ -275,7 +292,11 @@ def JD2GST(jd):
     if np.ndim(jd) == 0:
         return cyjd2GST(float(jd))
 
-    return np.array([cyjd2GST(float(j)) for j in np.asarray(jd).ravel()]).reshape(np.shape(jd))
+    # Evaluated once per distinct time
+    jd_unique, inverse = np.unique(np.asarray(jd), return_inverse=True)
+    gst_unique = np.array([cyjd2GST(float(j)) for j in jd_unique], dtype=np.float64)
+
+    return gst_unique[inverse].reshape(np.shape(jd))
 
 
 def JD2LST(julian_date, lon):
@@ -1101,8 +1122,8 @@ def trueRaDec2ApparentAltAz(ra, dec, jd, lat, lon, refraction=True):
     elif isinstance(ra, np.ndarray):
 
         # Convert JD to appropriate format
-        if isinstance(jd, float):
-            jd = np.zeros_like(ra) + jd
+        if np.ndim(jd) == 0:
+            jd = np.zeros_like(ra) + float(jd)
 
         # Compute it for numpy arrays
         azim, elev = cyTrueRaDec2ApparentAltAz_vect(ra, dec, jd, lat, lon, refraction)

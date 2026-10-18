@@ -42,8 +42,9 @@ from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
 from RMS.Astrometry.Conversions import (J2000_JD, 
                                         date2JD, 
                                         jd2Date, 
-                                        raDec2AltAz, 
-                                        AEGeoidH2LatLonAlt, 
+                                        raDec2AltAz,
+                                        trueRaDec2ApparentAltAz,
+                                        AEGeoidH2LatLonAlt,
                                         geo2Cartesian,
                                         vector2RaDec
                                         )
@@ -143,20 +144,12 @@ def extinctionCorrectionTrueToApparent(catalog_mags, ra_data, dec_data, jd, plat
 
     ### Compute star elevations above the horizon (epoch of date, true) ###
 
-    # Compute elevation above the horizon
-    elevation_data = []
-    for ra, dec in zip(ra_data, dec_data):
+    # Compute elevation above the horizon (precession and nutation to the true equator and equinox of date,
+    #   the frame of the sidereal time, evaluated once for all stars)
+    _, elevation_data = trueRaDec2ApparentAltAz(np.array(ra_data, dtype=np.float64), \
+        np.array(dec_data, dtype=np.float64), jd, platepar.lat, platepar.lon, refraction=False)
 
-        # Precession and nutation: J2000 -> true equator and equinox of date, the frame of the sidereal time
-        ra, dec = trueOfDateFromJ2000(jd, np.radians(ra), np.radians(dec))
-
-        # Compute elevation
-        _, elev = raDec2AltAz(np.degrees(ra), np.degrees(dec), jd, platepar.lat, platepar.lon)
-
-        if elev < 0:
-            elev = 0
-
-        elevation_data.append(elev)
+    elevation_data[elevation_data < 0] = 0
 
     ### ###
 
@@ -191,20 +184,12 @@ def extinctionCorrectionApparentToTrue(mags, x_data, y_data, jd, platepar):
     _, ra_data, dec_data, _ = xyToRaDecPP(len(x_data)*[jd2Date(jd)], x_data, y_data, len(x_data)*[1], \
         platepar, extinction_correction=False, precompute_pointing_corr=True)
 
-    # Compute elevation above the horizon
-    elevation_data = []
-    for ra, dec in zip(ra_data, dec_data):
+    # Compute elevation above the horizon (precession and nutation to the true equator and equinox of date,
+    #   the frame of the sidereal time, evaluated once for all points)
+    _, elevation_data = trueRaDec2ApparentAltAz(np.array(ra_data, dtype=np.float64), \
+        np.array(dec_data, dtype=np.float64), jd, platepar.lat, platepar.lon, refraction=False)
 
-        # Precession and nutation: J2000 -> true equator and equinox of date, the frame of the sidereal time
-        ra, dec = trueOfDateFromJ2000(jd, np.radians(ra), np.radians(dec))
-
-        # Compute elevation
-        _, elev = raDec2AltAz(np.degrees(ra), np.degrees(dec), jd, platepar.lat, platepar.lon)
-
-        if elev < 0:
-            elev = 0
-            
-        elevation_data.append(elev)
+    elevation_data[elevation_data < 0] = 0
 
     ### ###
 

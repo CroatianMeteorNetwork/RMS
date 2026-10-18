@@ -156,12 +156,15 @@ def subsetCatalog(np.ndarray[FLOAT_TYPE_t, ndim=2] catalog_list, double ra_c, do
     # Define variables
     cdef int i, k
     cdef double dec_min, dec_max
-    cdef double ra, dec, mag, elev
+    cdef double ra, dec, mag, elev, lst
     cdef np.ndarray[FLOAT_TYPE_t, ndim=2] filtered_list = np.zeros(shape=(catalog_list.shape[0], \
         catalog_list.shape[1]), dtype=FLOAT_TYPE)
 
     cdef np.ndarray[INT_TYPE_t, ndim=1] filtered_indices = np.zeros(shape=(catalog_list.shape[0]), \
         dtype=INT_TYPE)
+
+    # Local sidereal time, the same for all stars
+    lst = radians(cyjd2LST(jd, lon))
 
     # Calculate minimum and maximum declination
     dec_min = dec_c - radius
@@ -191,7 +194,7 @@ def subsetCatalog(np.ndarray[FLOAT_TYPE_t, ndim=2] catalog_list, double ra_c, do
         if (angularSeparation(ra, dec, ra_c, dec_c) <= radius) and (mag <= mag_limit):
 
             # Compute the local star elevation
-            _, elev = cyraDec2AltAz(radians(ra), radians(dec), jd, radians(lat), radians(lon))
+            _, elev = raDec2AltAzLST(radians(ra), radians(dec), lst, radians(lat))
 
 
             # Only take stars above -5 degrees, if the filtering is on
@@ -545,13 +548,12 @@ cdef (double, double, double) frameRotateVector(FrameRotation f, double x, doubl
 
 
 
-cdef (double, double) frameRotateRaDec(double start_epoch, double final_epoch, double ra, double dec):
+cdef (double, double) frameRotateRaDec(FrameRotation f, double ra, double dec):
     """ frameRotateVector for a direction given as right ascension and declination (radians). """
 
     cdef double x, y, z
 
-    x, y, z = frameRotateVector(frameRotation(start_epoch, final_epoch), cos(dec)*cos(ra), \
-        cos(dec)*sin(ra), sin(dec))
+    x, y, z = frameRotateVector(f, cos(dec)*cos(ra), cos(dec)*sin(ra), sin(dec))
 
     return (atan2(y, x) + 2*pi)%(2*pi), atan2(z, sqrt(x*x + y*y))
 
@@ -573,7 +575,7 @@ cpdef (double, double) trueOfDateFromJ2000(double jd, double ra, double dec):
 
     """
 
-    return frameRotateRaDec(J2000_DAYS, jd, ra, dec)
+    return frameRotateRaDec(frameRotation(J2000_DAYS, jd), ra, dec)
 
 
 
@@ -591,7 +593,39 @@ cpdef (double, double) j2000FromTrueOfDate(double jd, double ra, double dec):
 
     """
 
-    return frameRotateRaDec(jd, J2000_DAYS, ra, dec)
+    return frameRotateRaDec(frameRotation(jd, J2000_DAYS), ra, dec)
+
+
+
+cdef struct DateFrame:
+    # Everything in a J2000 <-> alt/az conversion that depends only on the time and the longitude. The
+    #   kernels evaluate it once per Julian date instead of once per point (see dateFrame).
+    FrameRotation to_date
+    FrameRotation to_j2000
+    double lst
+
+
+
+cdef DateFrame dateFrame(double jd, double lon):
+    """ Frame rotations and sidereal time for the given time and place.
+
+    Arguments:
+        jd: [float] Julian date.
+        lon: [float] Longitude of the observer in radians.
+
+    Return:
+        [DateFrame] J2000 -> true of date and true of date -> J2000 rotations, and the local apparent
+            sidereal time (radians).
+
+    """
+
+    cdef DateFrame d
+
+    d.to_date = frameRotation(J2000_DAYS, jd)
+    d.to_j2000 = frameRotation(jd, J2000_DAYS)
+    d.lst = radians(cyjd2LST(jd, degrees(lon)))
+
+    return d
 
 
 
@@ -697,6 +731,48 @@ cpdef double pyRefractionApparentToTrue(double elev):
 
 
 
+cdef (double, double) eqRefraction(DateFrame d, double ra, double dec, double lat, bint true_to_apparent):
+    """ Refract J2000 equatorial coordinates at their altitude. The body of eqRefractionApparentToTrue and
+        eqRefractionTrueToApparent, with the frame rotations and the sidereal time taken from a DateFrame so
+        that the kernels compute them once per Julian date.
+
+    Arguments:
+        d: [DateFrame] From dateFrame() for the time and the observer's longitude.
+        ra: [float] J2000 right ascension in radians.
+        dec: [float] J2000 declination in radians.
+        lat: [float] Latitude in radians.
+        true_to_apparent: [bool] True: true -> apparent, False: apparent -> true.
+
+    Return:
+        (ra, dec): [tuple of floats] Refracted J2000 right ascension and declination in radians.
+
+    """
+
+    cdef double azim, alt
+
+    # Precession and nutation: J2000 -> true equator and equinox of date, the frame of the sidereal time
+    ra, dec = frameRotateRaDec(d.to_date, ra, dec)
+
+    # Convert coordinates to alt/az
+    azim, alt = raDec2AltAzLST(ra, dec, d.lst, lat)
+
+    # Correct the elevation
+    if true_to_apparent:
+        alt = refractionTrueToApparent(alt)
+    else:
+        alt = refractionApparentToTrue(alt)
+
+    # Convert back to equatorial
+    ra, dec = altAz2RADecLST(azim, alt, d.lst, lat)
+
+    # Nutation and precession: true equator and equinox of date -> J2000
+    ra, dec = frameRotateRaDec(d.to_j2000, ra, dec)
+
+
+    return (ra, dec)
+
+
+
 cpdef (double, double) eqRefractionApparentToTrue(double ra, double dec, double jd, double lat, double lon):
     """ Correct the equatorial coordinates for refraction. The correction is done from apparent to true
         coordinates.
@@ -715,25 +791,7 @@ cpdef (double, double) eqRefractionApparentToTrue(double ra, double dec, double 
 
     """
 
-    cdef double azim, alt
-
-    # Precession and nutation: J2000 -> true equator and equinox of date, the frame of the sidereal time
-    ra, dec = trueOfDateFromJ2000(jd, ra, dec)
-
-    # Convert coordinates to alt/az
-    azim, alt = cyraDec2AltAz(ra, dec, jd, lat, lon)
-
-    # Correct the elevation
-    alt = refractionApparentToTrue(alt)
-
-    # Convert back to equatorial
-    ra, dec = cyaltAz2RADec(azim, alt, jd, lat, lon)
-
-    # Nutation and precession: true equator and equinox of date -> J2000
-    ra, dec = j2000FromTrueOfDate(jd, ra, dec)
-
-
-    return (ra, dec)
+    return eqRefraction(dateFrame(jd, lon), ra, dec, lat, False)
 
 
 
@@ -801,29 +859,10 @@ cpdef (double, double) eqRefractionTrueToApparent(double ra, double dec, double 
 
     """
 
-    cdef double azim, alt
-
-    # Precession and nutation: J2000 -> true equator and equinox of date, the frame of the sidereal time
-    ra, dec = trueOfDateFromJ2000(jd, ra, dec)
-
-    # Convert coordinates to alt/az
-    azim, alt = cyraDec2AltAz(ra, dec, jd, lat, lon)
-
-    # Correct the elevation
-    alt = refractionTrueToApparent(alt)
-
-    # Convert back to equatorial
-    ra, dec = cyaltAz2RADec(azim, alt, jd, lat, lon)
-
-    # Nutation and precession: true equator and equinox of date -> J2000
-    ra, dec = j2000FromTrueOfDate(jd, ra, dec)
-
-
-    return (ra, dec)
+    return eqRefraction(dateFrame(jd, lon), ra, dec, lat, True)
 
 
 
-@cython.cdivision(True)
 cpdef (double, double) cyraDec2AltAz(double ra, double dec, double jd, double lat, double lon):
     """ Convert right ascension and declination to azimuth (+East of due North) and altitude. Same epoch is
         assumed, no correction for refraction is done.
@@ -842,10 +881,47 @@ cpdef (double, double) cyraDec2AltAz(double ra, double dec, double jd, double la
 
         """
 
-    cdef double lst, ha, azim, sin_elev, elev
-
     # Calculate Local Sidereal Time
-    lst = radians(cyjd2LST(jd, degrees(lon)))
+    return raDec2AltAzLST(ra, dec, radians(cyjd2LST(jd, degrees(lon))), lat)
+
+
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+def cyraDec2AltAz_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_arr, np.ndarray[FLOAT_TYPE_t, ndim=1] dec_arr, \
+    np.ndarray[FLOAT_TYPE_t, ndim=1] jd_arr, np.ndarray[FLOAT_TYPE_t, ndim=1] lat_arr, \
+    np.ndarray[FLOAT_TYPE_t, ndim=1] lon_arr):
+    """ cyraDec2AltAz for arrays of the same length (radians). The sidereal time is evaluated only when the
+        time or the longitude changes.
+
+    Return:
+        (azim_arr, elev_arr): [tuple of ndarrays] Azimuth (+east of due north) and elevation in radians.
+    """
+
+    cdef int i
+    cdef double lst, azim, elev
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] azim_arr = np.zeros_like(ra_arr)
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] elev_arr = np.zeros_like(ra_arr)
+
+    for i in range(ra_arr.shape[0]):
+
+        if (i == 0) or (jd_arr[i] != jd_arr[i - 1]) or (lon_arr[i] != lon_arr[i - 1]):
+            lst = radians(cyjd2LST(jd_arr[i], degrees(lon_arr[i])))
+
+        azim, elev = raDec2AltAzLST(ra_arr[i], dec_arr[i], lst, lat_arr[i])
+
+        azim_arr[i] = azim
+        elev_arr[i] = elev
+
+    return azim_arr, elev_arr
+
+
+
+@cython.cdivision(True)
+cdef (double, double) raDec2AltAzLST(double ra, double dec, double lst, double lat):
+    """ cyraDec2AltAz with the local sidereal time (radians) given instead of the time and longitude. """
+
+    cdef double ha, azim, sin_elev, elev
 
     # Calculate the hour angle
     ha = lst - ra
@@ -890,14 +966,26 @@ cpdef (double, double) cyTrueRaDec2ApparentAltAz(double ra, double dec, double j
 
         """
 
+    return trueRaDec2ApparentAltAzOfDate(frameRotation(J2000_DAYS, jd), radians(cyjd2LST(jd, degrees(lon))), \
+        ra, dec, lat, refraction)
+
+
+
+cdef (double, double) trueRaDec2ApparentAltAzOfDate(FrameRotation to_date, double lst, double ra, double dec, \
+    double lat, bint refraction):
+    """ cyTrueRaDec2ApparentAltAz with the J2000 -> true of date rotation (frameRotation) and the local
+        sidereal time (radians) given instead of the time and longitude, so that they are evaluated once
+        for all points of the same time.
+    """
+
     cdef double azim, elev
 
 
     # Precession and nutation: catalog J2000 -> true equator and equinox of date
-    ra, dec = trueOfDateFromJ2000(jd, ra, dec)
+    ra, dec = frameRotateRaDec(to_date, ra, dec)
 
     # Convert to alt/az
-    azim, elev = cyraDec2AltAz(ra, dec, jd, lat, lon)
+    azim, elev = raDec2AltAzLST(ra, dec, lst, lat)
 
     # Correct elevation for refraction
     if refraction:
@@ -930,7 +1018,8 @@ def cyTrueRaDec2ApparentAltAz_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_arr, \
         """
 
     cdef int i
-    cdef double azim, elev
+    cdef double azim, elev, lst
+    cdef FrameRotation to_date
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] azim_arr = np.zeros_like(ra_arr)
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] elev_arr = np.zeros_like(ra_arr)
 
@@ -938,9 +1027,13 @@ def cyTrueRaDec2ApparentAltAz_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_arr, \
     # Convert all entries
     for i in range(len(ra_arr)):
 
+        # The frame rotation and the sidereal time depend only on the time, evaluated when it changes
+        if (i == 0) or (jd_arr[i] != jd_arr[i - 1]):
+            to_date = frameRotation(J2000_DAYS, jd_arr[i])
+            lst = radians(cyjd2LST(jd_arr[i], degrees(lon)))
+
         # Compute alt/az
-        azim, elev = cyTrueRaDec2ApparentAltAz(ra_arr[i], dec_arr[i], jd_arr[i], lat, lon, \
-            refraction=refraction)
+        azim, elev = trueRaDec2ApparentAltAzOfDate(to_date, lst, ra_arr[i], dec_arr[i], lat, refraction)
 
         # Assign alt/az to array
         azim_arr[i] = azim
@@ -952,10 +1045,9 @@ def cyTrueRaDec2ApparentAltAz_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_arr, \
 
 
 
-@cython.cdivision(True)
 cpdef (double, double) cyaltAz2RADec(double azim, double elev, double jd, double lat, double lon):
-    """ Convert azimuth and altitude in a given time and position on Earth to right ascension and 
-        declination. 
+    """ Convert azimuth and altitude in a given time and position on Earth to right ascension and
+        declination.
 
     Arguments:
         azim: [float] Azimuth (+east of due north) in radians.
@@ -970,12 +1062,48 @@ cpdef (double, double) cyaltAz2RADec(double azim, double elev, double jd, double
             dec: [float] Declination (radians).
     """
 
-
-    cdef double lst, ha, ra, dec
-
     # Calculate Local Sidereal Time
-    lst = radians(cyjd2LST(jd, degrees(lon)))
-    
+    return altAz2RADecLST(azim, elev, radians(cyjd2LST(jd, degrees(lon))), lat)
+
+
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+def cyaltAz2RADec_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] azim_arr, np.ndarray[FLOAT_TYPE_t, ndim=1] elev_arr, \
+    np.ndarray[FLOAT_TYPE_t, ndim=1] jd_arr, np.ndarray[FLOAT_TYPE_t, ndim=1] lat_arr, \
+    np.ndarray[FLOAT_TYPE_t, ndim=1] lon_arr):
+    """ cyaltAz2RADec for arrays of the same length (radians). The sidereal time is evaluated only when the
+        time or the longitude changes.
+
+    Return:
+        (ra_arr, dec_arr): [tuple of ndarrays] Right ascension and declination in radians.
+    """
+
+    cdef int i
+    cdef double lst, ra, dec
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] ra_arr = np.zeros_like(azim_arr)
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] dec_arr = np.zeros_like(azim_arr)
+
+    for i in range(azim_arr.shape[0]):
+
+        if (i == 0) or (jd_arr[i] != jd_arr[i - 1]) or (lon_arr[i] != lon_arr[i - 1]):
+            lst = radians(cyjd2LST(jd_arr[i], degrees(lon_arr[i])))
+
+        ra, dec = altAz2RADecLST(azim_arr[i], elev_arr[i], lst, lat_arr[i])
+
+        ra_arr[i] = ra
+        dec_arr[i] = dec
+
+    return ra_arr, dec_arr
+
+
+
+@cython.cdivision(True)
+cdef (double, double) altAz2RADecLST(double azim, double elev, double lst, double lat):
+    """ cyaltAz2RADec with the local sidereal time (radians) given instead of the time and longitude. """
+
+    cdef double ha, ra, dec
+
     # Calculate hour angle
     ha = atan2(-sin(azim), tan(elev)*cos(lat) - cos(azim)*sin(lat))
     
@@ -1010,6 +1138,17 @@ cpdef (double, double) cyApparentAltAz2TrueRADec(double azim, double elev, doubl
             dec: [float] Declination (radians, J2000).
     """
 
+    return apparentAltAz2TrueRADecOfDate(frameRotation(jd, J2000_DAYS), radians(cyjd2LST(jd, degrees(lon))), \
+        azim, elev, lat, refraction)
+
+
+
+cdef (double, double) apparentAltAz2TrueRADecOfDate(FrameRotation to_j2000, double lst, double azim, \
+    double elev, double lat, bint refraction):
+    """ cyApparentAltAz2TrueRADec with the true of date -> J2000 rotation (frameRotation) and the local
+        sidereal time (radians) given instead of the time and longitude, so that they are evaluated once
+        for all points of the same time.
+    """
 
     cdef double ra, dec
 
@@ -1019,10 +1158,10 @@ cpdef (double, double) cyApparentAltAz2TrueRADec(double azim, double elev, doubl
         elev = refractionApparentToTrue(elev)
 
     # Convert to RA/Dec (true, epoch of date)
-    ra, dec = cyaltAz2RADec(azim, elev, jd, lat, lon)
+    ra, dec = altAz2RADecLST(azim, elev, lst, lat)
 
     # Nutation and precession: true equator and equinox of date -> catalog J2000
-    ra, dec = j2000FromTrueOfDate(jd, ra, dec)
+    ra, dec = frameRotateRaDec(to_j2000, ra, dec)
 
 
     return (ra, dec)
@@ -1049,16 +1188,20 @@ def cyApparentAltAz2TrueRADec_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] azim_arr, np
     """
 
     cdef int i
-    cdef double ra, dec
+    cdef double ra, dec, lst
+    cdef FrameRotation to_j2000
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] ra_arr = np.zeros_like(azim_arr)
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] dec_arr = np.zeros_like(azim_arr)
 
 
+    # The frame rotation and the sidereal time are the same for all points
+    to_j2000 = frameRotation(jd, J2000_DAYS)
+    lst = radians(cyjd2LST(jd, degrees(lon)))
+
     for i in range(len(azim_arr)):
 
         # Compute RA/Dec
-        ra, dec = cyApparentAltAz2TrueRADec(azim_arr[i], elev_arr[i], jd, lat, lon, \
-            refraction=refraction)
+        ra, dec = apparentAltAz2TrueRADecOfDate(to_j2000, lst, azim_arr[i], elev_arr[i], lat, refraction)
 
         ra_arr[i] = ra
         dec_arr[i] = dec
@@ -1182,6 +1325,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
     cdef double radius, sin_ang, cos_ang, theta, x, y, r, dx, dy, x_img, y_img, r_corr, r_scale
     cdef double x0, y0, xy, a1, a2, k1, k2, k3, k4, k5
     cdef int index_offset
+    cdef DateFrame date_frame
 
     # Init output arrays
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] x_array = np.zeros_like(ra_data)
@@ -1190,10 +1334,14 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
 
     # Correct the pointing for precession (output in radians)
     ra_centre, dec_centre, pos_angle_ref = pointingCorrection(
-            jd, radians(lat), radians(lon), 
-            radians(h0), jd_ref, radians(ra_ref), radians(dec_ref), radians(pos_angle_ref), 
+            jd, radians(lat), radians(lon),
+            radians(h0), jd_ref, radians(ra_ref), radians(dec_ref), radians(pos_angle_ref),
             refraction=refraction
             )
+
+    # Frame rotations and sidereal time for the refraction, the same for all stars
+    if refraction:
+        date_frame = dateFrame(jd, radians(lon))
 
     # # Compute the current RA of the FOV centre by adding the difference in between the current and the 
     # #   reference hour angle
@@ -1296,7 +1444,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
 
         # Apply refraction
         if refraction:
-            ra, dec = eqRefractionTrueToApparent(ra, dec, jd, radians(lat), radians(lon))
+            ra, dec = eqRefraction(date_frame, ra, dec, radians(lat), True)
 
 
         # Compute the distance from the FOV centre to the sky coordinate
@@ -1565,6 +1713,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
     cdef int index_offset
     cdef double radius, theta, sin_t, cos_t
     cdef double ra_ref_now_corr, ra, dec, dec_ref_corr, pos_angle_ref_now_corr
+    cdef DateFrame date_frame
 
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data = np.zeros_like(jd_data)
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] dec_data = np.zeros_like(jd_data)
@@ -1657,6 +1806,23 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         jd = jd_data[i]
         x_img = x_data[i]
         y_img = y_data[i]
+
+
+        # What depends only on the time is evaluated when it changes, i.e. once per frame
+        if (i == 0) or (jd != jd_data[i - 1]):
+
+            if not precompute_pointing_corr:
+
+                # Correct the pointing for precession (output in radians)
+                ra_ref_now_corr, dec_ref_corr, pos_angle_ref_now_corr = pointingCorrection(
+                    jd, radians(lat), radians(lon),
+                    radians(h0), jd_ref, radians(ra_ref), radians(dec_ref), radians(pos_angle_ref),
+                    refraction=refraction
+                    )
+
+            # Frame rotations and sidereal time for the refraction
+            if refraction:
+                date_frame = dateFrame(jd, radians(lon))
 
 
         ### APPLY DISTORTION CORRECTION ###
@@ -1795,16 +1961,6 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
 
         ### Convert gnomonic X, Y to RA, Dec ###
 
-        if not precompute_pointing_corr:
-
-            # Correct the pointing for precession (output in radians)
-            ra_ref_now_corr, dec_ref_corr, pos_angle_ref_now_corr = pointingCorrection(
-                jd, radians(lat), radians(lon), 
-                radians(h0), jd_ref, radians(ra_ref), radians(dec_ref), radians(pos_angle_ref), 
-                refraction=refraction
-                )
-
-
         # Radius from FOV centre to sky coordinate
         radius = radians(sqrt(x_corr**2 + y_corr**2))
 
@@ -1825,7 +1981,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
 
         # Apply refraction correction
         if refraction:
-            ra, dec = eqRefractionApparentToTrue(ra, dec, jd, radians(lat), radians(lon))
+            ra, dec = eqRefraction(date_frame, ra, dec, radians(lat), False)
 
 
 
