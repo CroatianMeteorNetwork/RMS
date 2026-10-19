@@ -2123,3 +2123,28 @@ def test_cpu_search_streams_the_runs(config, monkeypatch):
     obj = linearObject(1.5, 25, 30, 0.3, 0.12, 40, 470)
     _, detections = runDetector(_SynthHandle([obj]), config)
     assert len(detections) == 1
+
+
+def test_faint_ends_of_a_track_are_cut():
+    """ A track whose leading part is much fainter than the rest (a piece of track over empty sky joined to the
+        object's track) loses that part; a track which is faint all along, or briefly faint in its middle, is kept
+        as it is. """
+
+    rng = np.random.default_rng(3)
+    n = 60
+    cent = np.zeros((n, 7))
+    cent[:, 0] = np.arange(n)
+
+    # 25 rows at SNR ~1 (empty sky), then the object at SNR ~25
+    cent[:, 5] = np.r_[rng.normal(1.0, 0.8, 25), rng.normal(25.0, 4.0, n - 25)]
+    kept = mfd.trimFaintEnds(cent)
+    assert 22 <= kept[0, 0] <= 28 and kept[-1, 0] == n - 1
+
+    # Faint all along (near the limit): kept
+    cent[:, 5] = rng.normal(1.5, 0.8, n)
+    assert len(mfd.trimFaintEnds(cent)) == n
+
+    # A short dip in the middle (e.g. behind a star) is not an end
+    cent[:, 5] = np.full(n, 20.0)
+    cent[30:36, 5] = 0.5
+    assert len(mfd.trimFaintEnds(cent)) == n

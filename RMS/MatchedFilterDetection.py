@@ -103,6 +103,11 @@ FITS_EXTENSIONS = ('.fits',)
 # Tracks slower than this (px per frame) are measured again on a background estimated without them
 SLOW_SPEED = 0.1
 
+# The ends of a track whose running median SNR (over FAINT_END_WINDOW rows) is below FAINT_END_FRACTION of the upper
+#   quartile of the SNR of the track are cut (see trimFaintEnds)
+FAINT_END_FRACTION = 0.1
+FAINT_END_WINDOW = 9
+
 # Very bright objects spill their charge along their row and column before the pixels reach the saturation
 #   level: in a frame where the sum within SPILL_RADIUS (px) of the object is more than SPILL_RATIO times the sum
 #   within the normal aperture, the measurement counts as saturated and the wider sum is its intensity. Only
@@ -2356,9 +2361,23 @@ class MatchedFilterDetector(object):
         detections = joinContinuousDetections(detections, max_gap, 15*fwhm, 2*fwhm, self.height, self.width,
                                               bin_factor=self.det_bin)
 
+        # A joined track can end in a piece much fainter than the rest of it (a piece built from the sums of other
+        #   velocities through a bright object joins the object's track): its faint ends are cut (a track left too
+        #   short to be a detection is dropped), before the duplicates are removed, as the rest of such a track is
+        #   often a second detection of the object
+        trimmed = []
+        for det in detections:
+            cent = trimFaintEnds(det[2])
+            if cent is None:
+                continue
+            if len(cent) == len(det[2]):
+                trimmed.append(det)
+            elif cent[-1, 0] - cent[0, 0] >= self.opts.min_frames:
+                trimmed.append([*self.polarLine(cent), cent])
+
         # The duplicates: detections of the same object close to a longer one, also further along the motion when
         #   the light between them is connected (the same bright object measured twice)
-        return removeDuplicateDetections(detections, fwhm*self.det_bin, 3*fwhm*self.det_bin,
+        return removeDuplicateDetections(trimmed, fwhm*self.det_bin, 3*fwhm*self.det_bin,
                                          connected=connected if connected is not None else self.connectedLight,
                                          max_connected_along=DUPLICATE_ALONG*fwhm*self.det_bin)
 
@@ -2471,6 +2490,13 @@ class MatchedFilterDetector(object):
                     self.cloud_detections_removed += 1
                     self.cloud_removed_frames.append(int(round(first)))
                     continue
+
+            # The ends of a track where it is much fainter than along the rest of it are not of the object (e.g. a
+            #   piece of track built from the sums of other velocities through a bright object, which continues
+            #   the object over empty sky), and what is left has to last as long as a detection
+            cent = trimFaintEnds(cent)
+            if (cent is None) or (cent[-1, 0] - cent[0, 0] < self.opts.min_frames):
+                continue
 
             # Unbinned coordinates, and the intensity of the unbinned image (averaged bins hold the mean of the
             #   pixels, summed bins already their sum)
@@ -3551,6 +3577,43 @@ def weightedMedian(values, weights):
     order = np.argsort(values)
     cumulative = np.cumsum(weights[order])
     return float(values[order][np.searchsorted(cumulative, 0.5*cumulative[-1])])
+
+
+def trimFaintEnds(cent, fraction=FAINT_END_FRACTION, window=FAINT_END_WINDOW):
+    """ Cut the ends of a track where it is much fainter than along the rest of it: the leading and the trailing
+        rows whose running median SNR (over window rows) is below fraction of the upper quartile of the SNR of the
+        track (the level of its bright part, also when a faint piece is half of it). A track which is faint all
+        along (e.g. near the limit) is kept as it is, as only the ends fainter than the track itself are cut.
+
+    Arguments:
+        cent: [ndarray] Rows of a track, one per frame, [frame, x, y, intensity, background, snr, ...], sorted by
+            frame.
+
+    Keyword arguments:
+        fraction: [float] Fraction of the upper quartile of the SNR of the track. FAINT_END_FRACTION by default.
+        window: [int] Number of rows of the running median. FAINT_END_WINDOW by default.
+
+    Return:
+        [ndarray] The rows which are kept, None if none is.
+    """
+
+    if len(cent) < 2*window:
+        return cent
+
+    # The running median of the SNR of the rows, and the level below which an end of the track is cut
+    snr = np.asarray(cent[:, 5], dtype=np.float64)
+    # (the windows shrink at the ends of the track, so that a single row there doesn't decide)
+    half = window//2
+    running = np.array([np.median(snr[max(i - half, 0):i + half + 1]) for i in range(len(snr))])
+    level = fraction*np.percentile(snr, 75)
+    bright = running >= level
+    if not bright.any():
+        return None
+
+    # The rows from the first to the last bright one
+    idx = np.nonzero(bright)[0]
+
+    return cent[idx[0]:idx[-1] + 1]
 
 
 def smoothTrack(cent, frames, segment=512):
