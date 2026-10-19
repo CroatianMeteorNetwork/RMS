@@ -487,6 +487,27 @@ def chunkImageName(config, img_handle, first_frame):
     return FFpng.pairNames(constructFFName(config.stationID, begin_time, frame=first_frame, ext=None))[0]
 
 
+def savedChunkImages(config, img_handle):
+    """ The image pairs which ChunkImageSaver saves for an input: one for every whole chunk of frames, and one
+        for the frames after them if they make at least half a chunk (see ChunkImageSaver.saveTrailing).
+
+    Arguments:
+        config: [Config] Configuration.
+        img_handle: [FrameInterface instance] Image handle.
+
+    Return:
+        [list] (time of the first frame of the chunk, FF name of its pair), sorted by time.
+    """
+
+    chunk_frames = img_handle.chunk_frames
+    firsts = [k*chunk_frames for k in range(img_handle.total_fr_chunks)]
+    if img_handle.total_frames - img_handle.total_fr_chunks*chunk_frames >= chunk_frames//2:
+        firsts.append(img_handle.total_fr_chunks*chunk_frames)
+
+    return [(img_handle.currentFrameTime(frame_no=f, dt_obj=True), chunkImageName(config, img_handle, f))
+            for f in firsts]
+
+
 class ChunkImageSaver(object):
     """ Saves the max pixel and average pixel images of every star extraction chunk as an FF-equivalent image
         pair, corrected with the dark and the flat, and keeps the list of saved chunks. Used as the chunk
@@ -1093,9 +1114,7 @@ def continuousInput(file_path, input_dir, img_handle, config, chunk_frames, outp
 
     # The image pairs of the chunks of the previous file (when they are saved), for the detections moved to it
     if config.monitor_save_images and (prev.input_type != 'ff'):
-        pending['previous_chunk_images'] = [
-            [unixTime(prev.currentFrameTime(frame_no=k*chunk_frames, dt_obj=True)),
-             chunkImageName(config, prev, k*chunk_frames)] for k in range(max(1, prev.total_frames//chunk_frames))]
+        pending['previous_chunk_images'] = [[unixTime(t), name] for t, name in savedChunkImages(config, prev)]
     writePending(output_dir, cur_uid, pending)
     proc_log.info("Continuous detection: the last {:d} frames of {} are searched in front".format(chain.n_context,
                                                                                                prev_path))

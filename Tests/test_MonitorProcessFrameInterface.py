@@ -1638,3 +1638,23 @@ def test_star_catalog_preloaded_only_when_the_workers_use_it(tmp_path, monkeypat
 
     mpfi.preloadStarCatalog(str(tmp_path/'.config'), platepar_path)
     assert len(calls) == expected
+
+
+def test_saved_chunk_images_include_the_trailing_frames(config_path):
+    """ The image pairs of an input are its whole chunks, and the frames after them if they make at least half a
+        chunk, named as the chunk image saver names them. """
+
+    config = cr.parse(config_path)
+
+    class _Handle(object):
+        chunk_frames = 128
+        def __init__(self, n):
+            self.total_frames = n
+            self.total_fr_chunks = n//128
+        def currentFrameTime(self, frame_no=None, dt_obj=False):
+            return datetime.datetime(2026, 10, 18, 1, 15, 28) + datetime.timedelta(seconds=frame_no/10.0)
+
+    assert [n for _, n in mon.savedChunkImages(config, _Handle(330))] == \
+        [mon.chunkImageName(config, _Handle(330), f) for f in (0, 128, 256)]
+    assert len(mon.savedChunkImages(config, _Handle(300))) == 2
+
