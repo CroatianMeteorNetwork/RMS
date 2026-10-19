@@ -751,7 +751,7 @@ def test_persistence_kept_past_a_segment_too_short_to_search(monkeypatch):
         psf_sigma = 0.7
         tracks_measured = 0
 
-        def joinDetections(self, detections, connected=None):
+        def joinDetections(self, detections, connected=None, cut=None):
             """ No joining: the detections as they are. """
             return detections
 

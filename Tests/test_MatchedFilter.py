@@ -1040,6 +1040,52 @@ def test_extent_line_fast_object_not_a_line():
     assert mfd.extentLine(stack, PSF_SIGMA, n, motion=(0.1*math.cos(angle), 0.1*math.sin(angle)))[0] < 0.5
 
 
+def test_track_left_without_motion_after_the_faint_ends_are_cut_is_dropped(config):
+    """ A joined track which moves enough only thanks to its faint head (a piece over empty sky joined to an
+        object which barely moves) is not a detection once the head is cut. """
+
+    det = MatchedFilterDetector(_SynthHandle([], total_frames=256), config)
+    det.psf_sigma = PSF_SIGMA
+
+    # A faint piece of 80 frames, then the bright object for 30 frames, moving less than a detection has to
+    v = 0.4*det.minDisplacement()/30
+    def piece(f0, n, snr):
+        """ Rows of n frames from frame f0 on the line of the track, at the given SNR. """
+        cent = np.zeros((n, 7))
+        cent[:, 0] = f0 + np.arange(n)
+        cent[:, 1] = 40.0 + v*cent[:, 0]
+        cent[:, 2] = 60.0
+        cent[:, 5] = snr
+        return cent
+    head, obj = piece(0, 80, 1.0), piece(80, 30, 30.0)
+    assert len(det.joinDetections([[0.0, 0.0, obj]], connected=lambda *args: None)) == 1
+
+    assert det.joinDetections([[0.0, 0.0, head], [0.0, 0.0, obj]], connected=lambda *args: None) == []
+
+
+def test_measured_track_is_not_cut_again_when_not_joined(config):
+    """ The faint ends of a track are cut once: a track already cut (when it was measured) is not cut again by the
+        joining of the tracks (the level of the cut follows the track, so a second cut could shorten it further),
+        while a track made since (e.g. by the stitching of segments) is cut. """
+
+    det = MatchedFilterDetector(_SynthHandle([], total_frames=128), config)
+    det.psf_sigma = PSF_SIGMA
+
+    # A faint head of 25 rows, then the object for 40 rows
+    n = 65
+    cent = np.zeros((n, 7))
+    cent[:, 0] = np.arange(n)
+    cent[:, 1] = 20.0 + 2.0*np.arange(n)
+    cent[:, 2] = 60.0
+    cent[:, 5] = np.r_[np.full(25, 1.0), np.full(n - 25, 30.0)]
+
+    joined = det.joinDetections([[0.0, 0.0, cent]], connected=lambda *args: None, cut={id(cent)})
+    assert (len(joined) == 1) and (joined[0][2] is cent)
+
+    joined = det.joinDetections([[0.0, 0.0, cent]], connected=lambda *args: None, cut=set())
+    assert (len(joined) == 1) and (joined[0][2][0, 0] >= 20)
+
+
 def test_linear_structure_flags_per_track(config):
     """ The flag of a track rejected on a linear structure belongs to that track, also when another track has the
         same first and last frame. """
@@ -1121,6 +1167,41 @@ def test_duplicate_along_the_motion_removed_when_the_light_is_connected():
     kept = removeDuplicateDetections(dets, 1.4, 4.2, connected=lit, max_connected_along=14.0)
     assert (len(kept) == 1) and (kept[0][2] is first)
     assert len(removeDuplicateDetections(dets, 1.4, 4.2, connected=lit, max_connected_along=5.0)) == 2
+
+
+def test_duplicate_which_runs_into_the_object_removed():
+    """ A shorter detection which begins away from an object and runs into it (a piece of the sums of other
+        velocities through a bright object) is a duplicate once it is on the object in a third of its frames,
+        while two objects which cross are not. """
+
+    from RMS.Detection import removeDuplicateDetections
+    from RMS.MatchedFilterDetection import DUPLICATE_COINCIDENT
+
+    # The object, and a detection which joins it from 12 px across over 18 frames, then follows it for 11 frames
+    #   (as in a recording of a bright object)
+    frames = np.arange(100, 241, 1.0)
+    obj = np.c_[frames, 900 + 0.6*(frames - 100), 10 + 2.1*(frames - 100)]
+    ghost = obj[48:77].copy()
+    off = np.clip(1 - np.arange(29)/18.0, 0, None)
+    ghost[:, 1] -= 12*off
+    dets = [[0, 0, obj], [0, 0, ghost]]
+
+    # The medians are too far apart for the usual limits
+    assert len(removeDuplicateDetections(dets, 2.2, 6.6)) == 2
+    kept = removeDuplicateDetections(dets, 2.2, 6.6, min_coincident=DUPLICATE_COINCIDENT)
+    assert (len(kept) == 1) and (kept[0][2] is obj)
+
+    # A shallow crossing: a shorter object which passes across it, close to it in a third of its frames in the
+    #   middle, is not a duplicate
+    shallow = obj[60:81].copy()
+    shallow[:, 1] += np.linspace(-6.0, 6.0, len(shallow))
+    assert len(removeDuplicateDetections([[0, 0, obj], [0, 0, shallow]], 2.2, 6.6,
+                                         min_coincident=DUPLICATE_COINCIDENT)) == 2
+
+    # An object crossing it at another direction is close to it only in a few frames
+    cross = np.c_[frames[30:70], 920 - 1.0*(frames[30:70] - 130), 73 + 2.1*(frames[30:70] - 130)]
+    assert len(removeDuplicateDetections([[0, 0, obj], [0, 0, cross]], 2.2, 6.6,
+                                         min_coincident=DUPLICATE_COINCIDENT)) == 2
 
 
 def test_connected_light_along_a_trail(config):
@@ -2125,6 +2206,63 @@ def test_cpu_search_streams_the_runs(config, monkeypatch):
     assert len(detections) == 1
 
 
+def test_faint_ends_of_a_track_are_cut():
+    """ A track whose leading part is much fainter than the rest (a piece of track over empty sky joined to the
+        object's track) loses that part; a track which is faint all along, or briefly faint in its middle, is kept
+        as it is. """
+
+    rng = np.random.default_rng(3)
+    n = 60
+    cent = np.zeros((n, 7))
+    cent[:, 0] = np.arange(n)
+
+    # 25 rows at SNR ~1 (empty sky), then the object at SNR ~25
+    cent[:, 5] = np.r_[rng.normal(1.0, 0.8, 25), rng.normal(25.0, 4.0, n - 25)]
+    kept = mfd.trimFaintEnds(cent)
+    assert 22 <= kept[0, 0] <= 28 and kept[-1, 0] == n - 1
+
+    # Faint all along (near the limit): kept
+    cent[:, 5] = rng.normal(1.5, 0.8, n)
+    assert len(mfd.trimFaintEnds(cent)) == n
+
+    # A short dip in the middle (e.g. behind a star) is not an end
+    cent[:, 5] = np.full(n, 20.0)
+    cent[30:36, 5] = 0.5
+    assert len(mfd.trimFaintEnds(cent)) == n
+
+    # Flashing (e.g. tumbling): bright every third frame and faint between, all along or after a steady part. It
+    #   is kept at least from its first to its last flash
+    cent[:, 5] = np.where(np.arange(n)%3 == 0, 100.0, 1.0)
+    kept = mfd.trimFaintEnds(cent)
+    assert (kept[0, 0] == 0) and (kept[-1, 0] >= 57)
+    cent[:30, 5] = 50.0
+    kept = mfd.trimFaintEnds(cent)
+    assert (kept[0, 0] == 0) and (kept[-1, 0] >= 57)
+
+    # A faint head which is most of the track (a long piece over empty sky joined to the object)
+    long = np.zeros((120, 7))
+    long[:, 0] = np.arange(120)
+    long[:, 5] = np.r_[rng.normal(1.0, 0.5, 100), rng.normal(25.0, 4.0, 20)]
+    assert mfd.trimFaintEnds(long)[0, 0] >= 95
+
+    # The bright part exactly a tenth of the track
+    tenth = np.zeros((210, 7))
+    tenth[:, 0] = np.arange(210)
+    tenth[:, 5] = np.r_[np.full(189, 1.0), np.full(21, 25.0)]
+    assert mfd.trimFaintEnds(tenth)[0, 0] >= 185
+
+    # Flashes every fifth frame, at both ends too, the shortest track a detection can be
+    short = np.zeros((21, 7))
+    short[:, 0] = np.arange(21)
+    short[:, 5] = np.where(np.arange(21)%5 == 0, 100.0, 1.0)
+    assert len(mfd.trimFaintEnds(short)) == 21
+
+    # A single bright noise row at the end of a faint head doesn't keep the head
+    cent[:, 5] = np.r_[rng.normal(1.0, 0.5, 25), rng.normal(25.0, 4.0, n - 25)]
+    cent[0, 5] = 30.0
+    assert mfd.trimFaintEnds(cent)[0, 0] >= 20
+
+
 ### Gaps in the recording ###
 
 class _GapHandle(_SynthHandle):
@@ -2288,7 +2426,7 @@ def test_detections_cut_and_joined_only_within_the_parts_between_gaps(config):
     # Two pieces of one straight track, one on each side of the gap, stay two detections; without the gap they
     #   are joined
     class _Joiner(object):
-        def joinDetections(self, detections, connected=None):
+        def joinDetections(self, detections, connected=None, cut=None):
             # Joins everything it is given into one detection, as the joining of continuous pieces would
             if len(detections) < 2:
                 return detections

@@ -3024,7 +3024,7 @@ def joinContinuousDetections(meteor_detections, max_gap_frames, max_gap_spatial,
 
 
 def removeDuplicateDetections(meteor_detections, max_dist, max_along_dist, x_col=1, connected=None,
-    max_connected_dist=None, max_connected_along=None):
+    max_connected_dist=None, max_connected_along=None, min_coincident=None):
     """ Remove the detections which follow the same object as a longer detection. At least half of their
         frames are shared with it, and in the shared frames the centroids are closer than max_dist across the
         direction of motion and closer than max_along_dist along it (median). The centroids of an extended
@@ -3049,6 +3049,11 @@ def removeDuplicateDetections(meteor_detections, max_dist, max_along_dist, x_col
             the same object measured twice (e.g. on the wing or the trail of a bright object), which is a duplicate
             if the image is above the threshold all the way between them (px). None by default, in which case
             only max_along_dist is used.
+        min_coincident: [float] Fraction of the frames of a detection in which its centroids are closer than
+            max_dist to those of a longer detection, without a break from the beginning or to the end of their
+            shared frames, at which it is a duplicate whatever the medians are (a second detection of an object can
+            begin away from it and run into it, while two objects which cross are this close only in a few frames
+            in the middle). None by default (only the medians are used).
 
     Return:
         [list] Detections without duplicates, in the original order.
@@ -3083,6 +3088,19 @@ def removeDuplicateDetections(meteor_detections, max_dist, max_along_dist, x_col
 
             diff_x = cent[idx, x_col] - cent_kept[idx_kept, x_col]
             diff_y = cent[idx, x_col + 1] - cent_kept[idx_kept, x_col + 1]
+
+            # The same object in many of the frames, from where it runs into the longer detection to its end (or from
+            #   its beginning to where it runs off): the close frames are at one end of the shared frames (two
+            #   objects which cross are close in the middle of them)
+            if min_coincident is not None:
+
+                # The close frames from the beginning and to the end of the shared frames, without a break
+                close = np.hypot(diff_x, diff_y) < max_dist
+                lead = len(close) if close.all() else int(np.argmin(close))
+                trail = len(close) if close.all() else int(np.argmin(close[::-1]))
+                if max(lead, trail) >= min_coincident*len(cent):
+                    duplicate = True
+                    break
 
             # Direction of motion of the longer detection
             direction = np.zeros(2)
