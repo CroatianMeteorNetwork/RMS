@@ -657,9 +657,12 @@ def test_failed_directory_sync_after_publishing_warns(tmp_path, monkeypatch):
 
 
 
-def test_block_frame_times_are_the_middle_of_the_exposure(tmp_path):
-    """ The frame times of a block file are those of the middle of the exposures (where a moving object is measured),
-        from the start of the integration and the exposure of every frame. """
+@pytest.mark.parametrize('block_time, offset', [(None, 0.0475), ('start', 0.0), ('middle', 0.0475),
+                                                ('end', 0.095)])
+def test_block_frame_times_at_the_configured_point_of_the_exposure(tmp_path, block_time, offset):
+    """ The frame times of a block file are those of the point of the exposures given by frame_block_time, by
+        default the middle (where a moving object is measured), from the start of the integration and the exposure
+        of every frame. """
 
     import RMS.ConfigReader as cr
     from RMS.Formats.FrameInterface import detectInputTypeFile
@@ -667,6 +670,8 @@ def test_block_frame_times_are_the_middle_of_the_exposure(tmp_path):
     config = cr.parse(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.config'))
     config.width, config.height = 16, 10
     config.detection_binning_factor = 1
+    if block_time is not None:
+        config.frame_block_time = block_time
 
     # 4 frames at 10 fps, started every 0.1 s, exposed 95 ms
     path = str(tmp_path/'TEST01_20261018_011528_000000.fblk')
@@ -679,8 +684,26 @@ def test_block_frame_times_are_the_middle_of_the_exposure(tmp_path):
     for i in range(4):
         t = handle.currentFrameTime(frame_no=i, dt_obj=True)
         unix = (t - datetime.datetime(1970, 1, 1)).total_seconds() if t.tzinfo is None else t.timestamp()
-        assert unix == pytest.approx(t0/1e9 + i*0.1 + 0.0475, abs=2e-6)
+        assert unix == pytest.approx(t0/1e9 + i*0.1 + offset, abs=2e-6)
     assert handle.fps == pytest.approx(10.0, rel=1e-6)
+
+
+
+@pytest.mark.parametrize('value, parsed', [('start', 'start'), (' End ', 'end'), ('middle', 'middle'),
+                                           ('centre', 'middle')])
+def test_frame_block_time_option(tmp_path, value, parsed):
+    """ frame_block_time is read from the Capture section; a value other than start, middle or end is the middle. """
+
+    import RMS.ConfigReader as cr
+
+    src = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.config')
+    with open(src) as f:
+        text = f.read()
+    assert 'frame_block_time: middle' in text
+    path = tmp_path/'.config'
+    path.write_text(text.replace('frame_block_time: middle', 'frame_block_time: ' + value))
+
+    assert cr.parse(str(path)).frame_block_time == parsed
 
 
 
