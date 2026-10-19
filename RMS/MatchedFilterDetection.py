@@ -103,10 +103,11 @@ FITS_EXTENSIONS = ('.fits',)
 # Tracks slower than this (px per frame) are measured again on a background estimated without them
 SLOW_SPEED = 0.1
 
-# The ends of a track whose running median SNR (over FAINT_END_WINDOW rows) is below FAINT_END_FRACTION of the upper
-#   quartile of the SNR of the track are cut (see trimFaintEnds)
+# The ends of a track where at most FAINT_END_BRIGHT_ROWS of the rows (in windows of FAINT_END_WINDOW rows) reach
+#   FAINT_END_FRACTION of the upper quartile of the SNR of the track are cut (see trimFaintEnds)
 FAINT_END_FRACTION = 0.1
 FAINT_END_WINDOW = 9
+FAINT_END_BRIGHT_ROWS = 0.2
 
 # Very bright objects spill their charge along their row and column before the pixels reach the saturation
 #   level: in a frame where the sum within SPILL_RADIUS (px) of the object is more than SPILL_RATIO times the sum
@@ -2372,8 +2373,6 @@ class MatchedFilterDetector(object):
         trimmed = []
         for det in detections:
             cent = trimFaintEnds(det[2])
-            if cent is None:
-                continue
             if len(cent) == len(det[2]):
                 trimmed.append(det)
             elif isValidDetection(cent, self):
@@ -2501,7 +2500,7 @@ class MatchedFilterDetector(object):
             #   piece of track built from the sums of other velocities through a bright object, which continues
             #   the object over empty sky), and what is left has to last and move as long as a detection
             cent = trimFaintEnds(cent)
-            if (cent is None) or (cent[-1, 0] - cent[0, 0] < self.opts.min_frames) \
+            if (cent[-1, 0] - cent[0, 0] < self.opts.min_frames) \
                     or (np.hypot(*(cent[-1, 1:3] - cent[0, 1:3])) < self.minDisplacement()):
                 continue
 
@@ -3588,9 +3587,10 @@ def weightedMedian(values, weights):
 
 def trimFaintEnds(cent, fraction=FAINT_END_FRACTION, window=FAINT_END_WINDOW):
     """ Cut the ends of a track where it is much fainter than along the rest of it: the leading and the trailing
-        rows whose running median SNR (over window rows) is below fraction of the upper quartile of the SNR of the
-        track (the level of its bright part, also when a faint piece is half of it). A track which is faint all
-        along (e.g. near the limit) is kept as it is, as only the ends fainter than the track itself are cut.
+        rows in whose window (of window rows) at most FAINT_END_BRIGHT_ROWS of the rows reach fraction of the upper
+        quartile of the SNR of the track (the level of its bright part, also when a faint piece is half of it). A
+        track which is faint all along (e.g. near the limit) is kept as it is, as only the ends fainter than the
+        track itself are cut, and so is a track which is bright only in rare flashes.
 
     Arguments:
         cent: [ndarray] Rows of a track, one per frame, [frame, x, y, intensity, background, snr, ...], sorted by
@@ -3598,24 +3598,28 @@ def trimFaintEnds(cent, fraction=FAINT_END_FRACTION, window=FAINT_END_WINDOW):
 
     Keyword arguments:
         fraction: [float] Fraction of the upper quartile of the SNR of the track. FAINT_END_FRACTION by default.
-        window: [int] Number of rows of the running median. FAINT_END_WINDOW by default.
+        window: [int] Number of rows of the window around a row. FAINT_END_WINDOW by default.
 
     Return:
-        [ndarray] The rows which are kept, None if none is.
+        [ndarray] The rows which are kept.
     """
 
     if len(cent) < 2*window:
         return cent
 
-    # The running median of the SNR of the rows (over windows which shrink at the ends of the track, so a single
-    #   row there doesn't decide), and the level below which an end of the track is cut
+    # A row is in a bright part of the track if more than FAINT_END_BRIGHT_ROWS of the rows of the window around
+    #   it reach the level: a track faint between flashes (e.g. a tumbling object) is bright where it flashes, while
+    #   a single noise row is not (the windows shrink at the ends of the track)
     snr = np.asarray(cent[:, 5], dtype=np.float64)
     half = window//2
-    running = np.array([np.median(snr[max(i - half, 0):i + half + 1]) for i in range(len(snr))])
     level = fraction*np.percentile(snr, 75)
-    bright = running >= level
+    above = snr >= level
+    bright = np.array([np.mean(above[max(i - half, 0):i + half + 1]) > FAINT_END_BRIGHT_ROWS
+                       for i in range(len(snr))])
+
+    # Without a bright part (e.g. rare flashes), nothing is an end of the track fainter than the rest of it
     if not bright.any():
-        return None
+        return cent
 
     # The rows from the first to the last bright one
     idx = np.nonzero(bright)[0]

@@ -2196,3 +2196,17 @@ def test_faint_ends_of_a_track_are_cut():
     cent[:, 5] = np.full(n, 20.0)
     cent[30:36, 5] = 0.5
     assert len(mfd.trimFaintEnds(cent)) == n
+
+    # Flashing (e.g. tumbling): bright every third frame and faint between, all along or after a steady part. It
+    #   is kept at least from its first to its last flash
+    cent[:, 5] = np.where(np.arange(n)%3 == 0, 100.0, 1.0)
+    kept = mfd.trimFaintEnds(cent)
+    assert (kept[0, 0] == 0) and (kept[-1, 0] >= 57)
+    cent[:30, 5] = 50.0
+    kept = mfd.trimFaintEnds(cent)
+    assert (kept[0, 0] == 0) and (kept[-1, 0] >= 57)
+
+    # A single bright noise row at the end of a faint head doesn't keep the head
+    cent[:, 5] = np.r_[rng.normal(1.0, 0.5, 25), rng.normal(25.0, 4.0, n - 25)]
+    cent[0, 5] = 30.0
+    assert mfd.trimFaintEnds(cent)[0, 0] >= 20
