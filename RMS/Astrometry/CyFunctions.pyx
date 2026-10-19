@@ -1451,10 +1451,14 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
         radius = radians(angularSeparation(degrees(ra), degrees(dec), degrees(ra_centre), \
             degrees(dec_centre)))
 
-        # Compute theta - the direction angle between the FOV centre, sky coordinate, and the image vertical
-        sin_ang = cos(dec)*sin(ra - ra_centre)/sin(radius)
-        cos_ang = (sin(dec) - sin(dec_centre)*cos(radius))/(cos(dec_centre)*sin(radius))
-        theta   = -atan2(sin_ang, cos_ang) + pos_angle_ref - pi/2.0
+        # Compute theta - the direction angle between the FOV centre, sky coordinate, and the image vertical.
+        #   It is undefined (0/0) for the FOV centre itself, which projects to x = y = 0 at any angle.
+        if radius == 0:
+            theta = 0
+        else:
+            sin_ang = cos(dec)*sin(ra - ra_centre)/sin(radius)
+            cos_ang = (sin(dec) - sin(dec_centre)*cos(radius))/(cos(dec_centre)*sin(radius))
+            theta   = -atan2(sin_ang, cos_ang) + pos_angle_ref - pi/2.0
 
         # Calculate the standard coordinates
         x = degrees(radius)*cos(theta)*pix_scale

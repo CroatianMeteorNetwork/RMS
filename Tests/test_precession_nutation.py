@@ -13,7 +13,8 @@ from RMS.Astrometry.CyFunctions import (equatorialCoordAndRotPrecession, equator
     cyaltAz2RADec, pyRefractionTrueToApparent, pyRefractionApparentToTrue, eqRefractionTrueToApparent,
     eqRefractionApparentToTrue)
 from RMS.Astrometry.Conversions import date2JD, jd2Date, JD2HourAngle, JD2LST
-from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, applyPlateparToCentroids, applyPlateparToRaDecCentroids
+from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, applyPlateparToCentroids, \
+    applyPlateparToRaDecCentroids
 from RMS.Formats.Platepar import Platepar
 from RMS.Misc import getRmsRootDir
 
@@ -322,6 +323,27 @@ class TestPrecessionNutation(unittest.TestCase):
                 r_true, d_true = erfaJ2000(jd, lat, lon, az, pyRefractionApparentToTrue(alt_app))
                 self.assertLess(separationArcsec(*eqRefractionApparentToTrue(r_app, d_app, jd, lat, lon), r_true,
                     d_true), 0.05)
+
+
+    def testReferenceDirectionProjects(self):
+        """ The reference direction projects to the same pixel as a direction next to it. Stars and the
+            reference pointing are refracted in the same frame, so it lands exactly on the FOV centre, where
+            the direction angle in raDecToXYPP is 0/0. """
+
+        pp = Platepar()
+        pp.read(TEMPLATE)
+        pp.lat, pp.lon = 45.0, 15.0
+
+        for refraction in (True, False):
+            pp.refraction = refraction
+            pp.alt_centre, pp.az_centre = 45.0, 200.0
+            pp.updateRefRADec(skip_rot_update=True)
+
+            ra, dec = j2000FromTrueOfDate(pp.JD, np.radians(pp.RA_d), np.radians(pp.dec_d))
+            x, y = raDecToXYPP(np.degrees([ra, ra + 1e-11]), np.degrees([dec, dec]), pp.JD, pp)
+
+            self.assertTrue(np.all(np.isfinite(x)) and np.all(np.isfinite(y)), "refraction={}".format(refraction))
+            self.assertLess(np.hypot(x[0] - x[1], y[0] - y[1]), 1e-6)
 
 
 # ---- A distortion-free synthetic camera, fixed in alt/az, checked at off-centre pixels ----------------------------
