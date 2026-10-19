@@ -53,7 +53,7 @@ MAX_COMMON_DISTANCE = 3.0
 
 
 
-def previousInput(file_path):
+def previousInput(file_path, root=None):
     """ The input recorded just before an input of a recording, by the names (which begin with the time): the
         previous file with the same extension in the same directory or in the previous directory of the parent
         directory, or the previous directory for a directory of frames.
@@ -61,12 +61,23 @@ def previousInput(file_path):
     Arguments:
         file_path: [str] Input file, or a directory of frames.
 
+    Keyword arguments:
+        root: [str] The monitored input directory, outside which no input is looked for (e.g. the input of another
+            camera next to it). None by default (no limit).
+
     Return:
         [str] The previous input, None if there is none.
     """
 
     file_path = os.path.abspath(file_path)
     parent, name = os.path.split(file_path)
+    root = os.path.abspath(root) if root is not None else None
+
+    def inside(path):
+        return (root is None) or (path == root) or path.startswith(root + os.sep)
+
+    if not inside(parent):
+        return None
 
     def visible(entries):
         return [e for e in entries if not e.startswith('.')]
@@ -85,6 +96,8 @@ def previousInput(file_path):
         return os.path.join(parent, same[-1])
 
     grand, parent_name = os.path.split(parent)
+    if (parent == root) or (not inside(grand)):
+        return None
     dirs = sorted(e for e in visible(os.listdir(grand)) if os.path.isdir(os.path.join(grand, e)) and e < parent_name)
     if dirs:
         files = sorted(e for e in visible(os.listdir(os.path.join(grand, dirs[-1]))) if e.lower().endswith(ext))
@@ -342,7 +355,7 @@ def _recalibrateJoined(results_dir, result, recalibrate):
 
 
 
-def processPendingJoins(output_dir, config, recalibrate=None, now=None):
+def processPendingJoins(output_dir, config, recalibrate=None, now=None, done_after=None):
     """ Do the pending joins whose files are both processed, in the order of their boundaries, the join of a file
         only after the join of the file before it. Called by the monitor in its loop.
 
@@ -353,10 +366,19 @@ def processPendingJoins(output_dir, config, recalibrate=None, now=None):
     Keyword arguments:
         recalibrate: [function] recalibrate(results_dir), see joinResults. None by default.
         now: [float] Current time (unix s), for the waiting limit. None by default (the clock).
+        done_after: [float] Only the done flags written at or after this time (unix s) mark processed files, e.g.
+            the start of a monitor which processes all files again (--force), so the old results of a file not
+            yet processed again are not joined. None by default (any done flag).
 
     Return:
         [int] Number of joins done.
     """
+
+    def isDone(results_dir):
+        flag = os.path.join(results_dir, 'done.flag')
+        if not os.path.isfile(flag):
+            return False
+        return (done_after is None) or (os.path.getmtime(flag) >= done_after)
 
     pending_dir = os.path.join(output_dir, PENDING_DIR)
     if not os.path.isdir(pending_dir):
@@ -375,8 +397,8 @@ def processPendingJoins(output_dir, config, recalibrate=None, now=None):
 
     done = 0
     for path, p in pendings:
-        cur_done = os.path.isfile(os.path.join(p['results_dir'], 'done.flag'))
-        prev_done = os.path.isfile(os.path.join(p['previous_results_dir'], 'done.flag'))
+        cur_done = isDone(p['results_dir'])
+        prev_done = isDone(p['previous_results_dir'])
 
         # One of the files never got results (skipped, failed, or its processing was stopped): nothing to join,
         #   and the joins after it are not held back

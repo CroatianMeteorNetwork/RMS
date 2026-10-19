@@ -1041,7 +1041,7 @@ def continuousInput(file_path, input_dir, img_handle, config, chunk_frames, outp
     proc_log = log if proc_log is None else proc_log
 
     # The previous file of the recording, opened like this one
-    prev_path = previousInput(file_path)
+    prev_path = previousInput(file_path, root=input_dir)
     if prev_path is None:
         proc_log.info("Continuous detection: no previous file")
         return None, None
@@ -2216,6 +2216,10 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
     # Track files that have been processed or are being processed
     processed_files = set()
 
+    # With --force, the results of the files processed before this start are old: the joins of the continuous
+    #   detection wait for the new ones
+    joins_done_after = time.time() if force else None
+
     # Failed files, also from previous runs. Files which failed too often are not processed again
     failed_files, given_up = loadFailedFiles(output_dir, retry_failed=(retry_failed or force))
     if given_up:
@@ -2341,7 +2345,8 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
             # The joins of the continuous detection whose files are both processed
             if reporter.config.monitor_continuous:
                 if processPendingJoins(output_dir, reporter.config,
-                                       recalibrate=lambda d: recalibrateJoined(d, reporter.config)):
+                                       recalibrate=lambda d: recalibrateJoined(d, reporter.config),
+                                       done_after=joins_done_after):
                     reporter.resultsChanged()
 
             # 1. Get ALL paths and their metadata first
@@ -2777,6 +2782,10 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
         # Initialize state tracking dictionaries. Since files from different cameras might have the same name,
         # we track these metrics per camera using nested dictionaries or sets.
         processed_files = {cam['id']: set() for cam in cameras}
+
+        # With --force, the results of the files processed before this start are old: the joins of the continuous
+        #   detection wait for the new ones
+        joins_done_after = time.time() if force else None
         cam_output_dirs = {cam['id']: cam['output_dir'] for cam in cameras}
 
         # Failed files of every camera, also from previous runs. Files which failed too often are not
@@ -2935,7 +2944,8 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
                 cam_config = reporters[cam['id']].config
                 if cam_config.monitor_continuous:
                     if processPendingJoins(cam['output_dir'], cam_config,
-                                           recalibrate=lambda d, c=cam_config: recalibrateJoined(d, c)):
+                                           recalibrate=lambda d, c=cam_config: recalibrateJoined(d, c),
+                                           done_after=joins_done_after):
                         reporters[cam['id']].resultsChanged()
 
             # 2. Collect all new, stable files ready to be processed for each camera

@@ -97,6 +97,12 @@ def test_previous_input_of_files_and_directories(tmp_path):
     assert cont.previousInput(str(tmp_path/'20261018_011458'/'A_011458.fblk')) is None
     assert cont.previousInput(str(tmp_path/'20261018_011528')) == str(tmp_path/'20261018_011458')
 
+    # Not outside the monitored directory (e.g. the input of another camera next to it)
+    assert cont.previousInput(str(tmp_path/'20261018_011528'/'A_011528.fblk'),
+                              root=str(tmp_path/'20261018_011528')) is None
+    assert cont.previousInput(str(tmp_path/'20261018_011528'/'A_011528.fblk'), root=str(tmp_path)) == \
+        str(tmp_path/'20261018_011458'/'A_011458.fblk')
+
 
 @pytest.fixture
 def config():
@@ -275,3 +281,25 @@ def test_join_of_a_file_never_processed_expires(tmp_path, config):
     assert cont.processPendingJoins(out, config, now=time.time() + cont.PENDING_MAX_WAIT + 1) == 1
     assert not os.listdir(os.path.join(out, cont.PENDING_DIR))
     assert len(cont.readDetections(c)) == 1 and len(cont.readDetections(d)) == 0
+
+
+
+def test_joins_wait_for_results_newer_than_a_forced_start(tmp_path, config):
+    """ With all files processed again (--force), a done flag from before the start is old: the join waits until
+        both files have new results. """
+
+    out = str(tmp_path/'out')
+    os.makedirs(out)
+    b1 = (T0 + datetime.timedelta(seconds=30)).replace(tzinfo=datetime.timezone.utc).timestamp()
+    a = _results(tmp_path, 'a', [_det(20.0, 29.9)], config)
+    b = _results(tmp_path, 'b', [_det(17.2, 40.0)], config)
+    cont.writePending(out, 'b', {'results_dir': b, 'previous_results_dir': a, 'boundary_unix': b1, 'context_s': 12.8})
+
+    # The earlier file's done flag is from before the start
+    start = time.time() - 50
+    os.utime(os.path.join(a, 'done.flag'), (start - 100, start - 100))
+    assert cont.processPendingJoins(out, config, done_after=start) == 0
+
+    # Processed again: joined
+    open(os.path.join(a, 'done.flag'), 'w').close()
+    assert cont.processPendingJoins(out, config, done_after=start) == 1
