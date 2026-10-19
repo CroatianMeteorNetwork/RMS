@@ -70,6 +70,11 @@ def test_chained_input_puts_the_last_frames_of_the_previous_input_in_front():
     assert contiguous(prev, cur)
     assert not contiguous(prev, _Handle(3.5, 20))
 
+    # Nor with frames of another size
+    other = _Handle(3.0, 20)
+    other.nrows = 8
+    assert not contiguous(prev, other)
+
 
 def test_previous_input_of_files_and_directories(tmp_path):
     """ The previous input is the previous file of the directory, else the last one of the previous directory, or
@@ -172,6 +177,40 @@ def test_pending_joins_in_order_after_the_files_are_processed(tmp_path, config):
     assert cont.processPendingJoins(out, config) == 1
     assert cont.processPendingJoins(out, config) == 0
 
+    dets = cont.readDetections(a)
+    assert len(dets) == 1 and not cont.readDetections(b) and not cont.readDetections(c)
+    assert dets[0]['times'][-1] - dets[0]['times'][0] == pytest.approx(52.8, abs=1e-3)
+
+
+
+def test_failed_join_is_tried_again(tmp_path, config):
+    """ A join which fails in the recalibration stays pending, holds back the join after it, and is finished (only
+        the recalibrations left) when it is tried again. """
+
+    out = str(tmp_path/'out')
+    os.makedirs(out)
+    b1 = (T0 + datetime.timedelta(seconds=30)).replace(tzinfo=datetime.timezone.utc).timestamp()
+    b2 = (T0 + datetime.timedelta(seconds=60)).replace(tzinfo=datetime.timezone.utc).timestamp()
+    a = _results(tmp_path, 'a', [_det(20.0, 29.9)], config)
+    b = _results(tmp_path, 'b', [_det(17.2, 59.9)], config)
+    c = _results(tmp_path, 'c', [_det(47.2, 70.0)], config)
+    cont.writePending(out, 'b', {'results_dir': b, 'previous_results_dir': a, 'boundary_unix': b1, 'context_s': 12.8})
+    cont.writePending(out, 'c', {'results_dir': c, 'previous_results_dir': b, 'boundary_unix': b2, 'context_s': 12.8})
+
+    # The first recalibration fails
+    calls = []
+    def recalibrate(d):
+        calls.append(d)
+        if len(calls) == 1:
+            raise RuntimeError('recalibration failed')
+
+    assert cont.processPendingJoins(out, config, recalibrate=recalibrate) == 0
+    assert sorted(os.listdir(os.path.join(out, cont.PENDING_DIR))) == ['b.json', 'c.json']
+
+    # Tried again: the recalibrations are finished, then the join after it is done
+    assert cont.processPendingJoins(out, config, recalibrate=recalibrate) == 2
+    assert not os.listdir(os.path.join(out, cont.PENDING_DIR))
+    assert sorted(set(calls)) == sorted({a, b, c})
     dets = cont.readDetections(a)
     assert len(dets) == 1 and not cont.readDetections(b) and not cont.readDetections(c)
     assert dets[0]['times'][-1] - dets[0]['times'][0] == pytest.approx(52.8, abs=1e-3)

@@ -42,6 +42,10 @@ JOIN_RECORD = 'continuous.json'
 #   or failed); the detections of the later file are kept as they are
 PENDING_MAX_WAIT = 3600.0
 
+# A join which fails is tried again when the monitor next handles the pending joins, up to this many times, after
+#   which it is dropped (the detections stay as they are)
+MAX_JOIN_ATTEMPTS = 3
+
 # Two detections are the same object if they share at least this many frames of the borrowed frames, at a median
 #   distance of at most this many pixels
 MIN_COMMON_FRAMES = 3
@@ -103,7 +107,8 @@ def writePending(output_dir, unique_id, pending):
 
     pending_dir = os.path.join(output_dir, PENDING_DIR)
     os.makedirs(pending_dir, exist_ok=True)
-    pending = dict(pending, unique_id=unique_id, created_unix=time.time())
+    pending = dict(pending, unique_id=unique_id)
+    pending.setdefault('created_unix', time.time())
 
     # Written to a temporary file and renamed, so the monitor never reads a partly written join
     path = os.path.join(pending_dir, unique_id + '.json')
@@ -238,6 +243,14 @@ def joinResults(previous_dir, results_dir, boundary, context_s, config, recalibr
         [dict] The record of the join: the number of joined and moved detections, and where they went.
     """
 
+    # A join tried before which failed after writing the detections only has recalibrations left
+    own_record = os.path.join(results_dir, JOIN_RECORD)
+    if os.path.isfile(own_record):
+        with open(own_record) as f:
+            result = json.load(f)
+        if result.get('to_recalibrate') and (result.get('previous_results_dir') == previous_dir):
+            return _recalibrateJoined(results_dir, result, recalibrate)
+
     # The detections of the earlier side: those of the previous file and those it gave to the files before it
     #   (a detection joined over several files is kept where it begins)
     homes = [previous_dir]
@@ -288,20 +301,42 @@ def joinResults(previous_dir, results_dir, boundary, context_s, config, recalibr
         changed.update([home, results_dir])
         record.append({'home': home, 't_first': float(det['times'][0]), 't_last': float(det['times'][-1])})
 
-    # The changed results are written and recalibrated
+    # The changed results are written, and the record of the join with the results still to be recalibrated
     for home, dets in earlier.items():
         if home in changed:
             writeDetections(home, dets, config)
     if results_dir in changed:
         writeDetections(results_dir, keep_later, config)
-    if recalibrate is not None:
-        for d in sorted(changed):
-            recalibrate(d)
 
     result = {'joined': joined, 'moved': record, 'boundary_unix': boundary, 'previous_results_dir': previous_dir,
-              'n_joined': joined, 'n_moved': moved}
-    with open(os.path.join(results_dir, JOIN_RECORD), 'w') as f:
+              'n_joined': joined, 'n_moved': moved,
+              'to_recalibrate': sorted(changed) if recalibrate is not None else []}
+    _writeRecord(results_dir, result)
+
+    return _recalibrateJoined(results_dir, result, recalibrate)
+
+
+
+def _writeRecord(results_dir, result):
+    """ Write the record of a join (JOIN_RECORD) in the results directory of the later file. """
+
+    path = os.path.join(results_dir, JOIN_RECORD)
+    with open(path + '.tmp', 'w') as f:
         json.dump(result, f, indent=1)
+    os.replace(path + '.tmp', path)
+
+
+
+def _recalibrateJoined(results_dir, result, recalibrate):
+    """ Recalibrate the results changed by a join, one by one, keeping in its record those still to be done (so a
+        join which failed in the recalibration is finished when it is tried again).
+    """
+
+    while result.get('to_recalibrate'):
+        if recalibrate is not None:
+            recalibrate(result['to_recalibrate'][0])
+        result['to_recalibrate'] = result['to_recalibrate'][1:]
+        _writeRecord(results_dir, result)
 
     return result
 
@@ -359,8 +394,17 @@ def processPendingJoins(output_dir, config, recalibrate=None, now=None):
             log.info('Continuous detection: {} joined to {}: {:d} detections joined, {:d} moved'.format(
                 os.path.basename(p['results_dir']), os.path.basename(p['previous_results_dir']),
                 result['n_joined'], result['n_moved']))
+
+        # A failed join stays pending (and holds back the joins after it) to be tried again, up to a limit
         except Exception as e:
-            log.warning('Continuous detection: the join of {} failed: {}'.format(p['results_dir'], repr(e)))
+            attempts = p.get('attempts', 0) + 1
+            if attempts < MAX_JOIN_ATTEMPTS:
+                log.warning('Continuous detection: the join of {} failed (attempt {:d}), tried again later: {}'.format(
+                    p['results_dir'], attempts, repr(e)))
+                writePending(output_dir, p['unique_id'], dict(p, attempts=attempts))
+                continue
+            log.warning('Continuous detection: the join of {} failed {:d} times, dropped: {}'.format(
+                p['results_dir'], attempts, repr(e)))
         os.remove(path)
         waiting_dirs.discard(p['results_dir'])
         done += 1
