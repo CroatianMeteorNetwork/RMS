@@ -3618,9 +3618,10 @@ def weightedMedian(values, weights):
 def trimFaintEnds(cent, fraction=FAINT_END_FRACTION, window=FAINT_END_WINDOW):
     """ Cut the ends of a track where it is much fainter than along the rest of it: the leading and the trailing
         rows in whose window (of window rows) at most FAINT_END_BRIGHT_ROWS of the rows reach fraction of the
-        FAINT_END_PERCENTILE percentile of the SNR of the unsaturated rows of the track (the level of its bright
-        part, also when a faint piece is most of the track), and at most FAINT_END_MAX_SNR (an end at the level of
-        the noise). Saturated rows are always bright (their SNR is not a measure of their brightness). A track
+        FAINT_END_PERCENTILE percentile of the SNR of the track (the level of its bright part, also when a faint
+        piece is most of the track; saturated rows count as the brightest), and at most FAINT_END_MAX_SNR (an end at
+        the level of the noise). Saturated rows are always bright (their SNR is not a measure of their
+        brightness). A track
         which is faint all along (e.g. near the limit) is kept as it is, as only the ends fainter than the track
         itself are cut, and so is a track which is bright only in rare flashes.
 
@@ -3648,17 +3649,12 @@ def trimFaintEnds(cent, fraction=FAINT_END_FRACTION, window=FAINT_END_WINDOW):
     saturated = (np.asarray(cent[:, 6], dtype=np.float64) > 0) if cent.shape[1] > 6 else np.zeros(len(snr), bool)
     half = window//2
 
-    # The level from a row of the unsaturated rows (not interpolated between rows), so a bright part which is just a
-    #   tenth of the track sets it, but never above the level of the noise. A track with saturated rows has a bright
-    #   part whatever its unsaturated rows are (they may be only a continuation over empty sky), so its level is
-    #   that of the noise
-    unsat = np.sort(snr[~saturated])
-    if len(unsat) == 0:
-        return cent
-    if saturated.any():
-        level = FAINT_END_MAX_SNR
-    else:
-        level = min(fraction*unsat[int(math.ceil(FAINT_END_PERCENTILE/100.0*(len(unsat) - 1)))], FAINT_END_MAX_SNR)
+    # The level from a row of the track (not interpolated between rows), so a bright part which is just a tenth of
+    #   the track sets it, but never above the level of the noise. The saturated rows count as brighter than any
+    #   other (their SNR is not a measure of their brightness): a track saturated in a tenth of its rows has a
+    #   bright part whatever its other rows are (they may be only a continuation over empty sky)
+    ref = np.sort(np.where(saturated, np.inf, snr))
+    level = min(fraction*ref[int(math.ceil(FAINT_END_PERCENTILE/100.0*(len(ref) - 1)))], FAINT_END_MAX_SNR)
     above = (snr >= level) | saturated
     starts = np.clip(np.arange(len(snr)) - half, 0, len(snr) - window)
     bright = np.array([np.mean(above[k:k + window]) > FAINT_END_BRIGHT_ROWS for k in starts])
