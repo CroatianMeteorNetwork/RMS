@@ -33,7 +33,7 @@ from RMS.Astrometry.ApplyAstrometry import (
     xyToRaDecPP,
 )
 from RMS.Astrometry.CyFunctions import subsetCatalog
-from RMS.Astrometry.Conversions import date2JD, jd2Date
+from RMS.Astrometry.Conversions import date2JD, jd2Date, trueOfDateRaDec2ApparentAltAz
 from RMS.Astrometry.NNalign import alignPlatepar
 from RMS.Formats import CALSTARS, FFfile, FTPdetectinfo, Platepar, StarCatalog
 from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile, validDefaultFTPdetectinfo
@@ -622,9 +622,18 @@ def recalibratePlateparsForFF(
         # Store the platepar if the fit succeeded
         if result is not None:
 
-            # Recompute the apparent alt/az of the FOV centre and the rotation wrt horizon, with the same
-            # epoch and refraction conventions SkyFit uses
-            working_platepar.updateRefAltAz()
+            # Recompute alt/az of the FOV centre
+            working_platepar.az_centre, working_platepar.alt_centre = trueOfDateRaDec2ApparentAltAz(
+                working_platepar.RA_d,
+                working_platepar.dec_d,
+                working_platepar.JD,
+                working_platepar.lat,
+                working_platepar.lon,
+                refraction=working_platepar.refraction,
+            )
+
+            # Recompute the rotation wrt horizon
+            working_platepar.rotation_from_horiz = rotationWrtHorizon(working_platepar)
 
             # Mark the platepar to indicate that it was automatically recalibrated on an individual FF file
             working_platepar.auto_recalibrated = True

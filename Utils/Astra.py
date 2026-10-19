@@ -18,7 +18,7 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
 from RMS import ConfigReader
 from RMS.Astrometry.ApplyAstrometry import computeFOVSize, xyToRaDecPP, rotationWrtHorizon
-from RMS.Astrometry.Conversions import trueRaDec2ApparentAltAz, raDec2AltAz
+from RMS.Astrometry.Conversions import trueRaDec2ApparentAltAz, trueOfDateRaDec2ApparentAltAz
 from RMS.Formats.Platepar import Platepar
 from RMS.Formats.FrameInterface import detectInputTypeFolder, detectInputTypeFile
 from RMS.Routines.Image import signalToNoise
@@ -2715,9 +2715,8 @@ class ASTRA:
         ecsv_file_name = dt_ref.strftime(isodate_format_file) + '_ASTRA_' + self.config.stationID + ".ecsv"
 
         # Compute alt/az pointing
-        # RA_d/dec_d are epoch-of-date (see Platepar.computeRefAltAz), so convert without precession
-        azim, elev = raDec2AltAz(self.platepar.RA_d, self.platepar.dec_d, self.platepar.JD,
-            self.platepar.lat, self.platepar.lon)
+        azim, elev = trueOfDateRaDec2ApparentAltAz(self.platepar.RA_d, self.platepar.dec_d, self.platepar.JD,
+            self.platepar.lat, self.platepar.lon, refraction=False)
 
         # Compute FOV size
         fov_horiz, fov_vert = computeFOVSize(self.platepar)

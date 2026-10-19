@@ -14,7 +14,7 @@ from RMS.Astrometry.ApplyAstrometry import computeFOVSize, xyToRaDecPP, raDecToX
     photometryFitRobust, correctVignetting, photomLine, rotationWrtHorizon, \
     extinctionCorrectionTrueToApparent, getFOVSelectionRadius, limitingMagnitude
 from RMS.Astrometry.CheckFit import matchStarsResiduals
-from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
+from RMS.Astrometry.Conversions import date2JD, jd2Date, trueRaDec2ApparentAltAz
 from RMS.Formats.CALSTARS import readCALSTARS
 from RMS.Formats.FFfile import validFFName, getMiddleTimeFF
 from RMS.Formats.FFfile import read as readFF
@@ -448,8 +448,9 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
     # Mark FOV centre
     plt.scatter(platepar.X_res/2, platepar.Y_res/2, marker='+', s=20, c='r', zorder=4)
 
-    # Compute FOV centre alt/az
-    azim_centre, alt_centre = raDec2AltAz(RA_c, dec_c, max_jd, platepar.lat, platepar.lon)
+    # Compute FOV centre alt/az (RA_c/dec_c are J2000)
+    azim_centre, alt_centre = trueRaDec2ApparentAltAz(RA_c, dec_c, max_jd, platepar.lat, platepar.lon,
+        refraction=False)
 
     # Compute FOV size
     fov_h, fov_v = computeFOVSize(platepar)

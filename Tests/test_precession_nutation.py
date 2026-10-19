@@ -9,9 +9,12 @@ import unittest
 import numpy as np
 
 from RMS.Astrometry.CyFunctions import (equatorialCoordAndRotPrecession, equatorialCoordPrecession,
-    trueOfDateFromJ2000, j2000FromTrueOfDate, cyTrueRaDec2ApparentAltAz, pointingCorrection)
-from RMS.Astrometry.Conversions import date2JD, JD2HourAngle
-from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
+    trueOfDateFromJ2000, j2000FromTrueOfDate, cyTrueRaDec2ApparentAltAz, pointingCorrection, cyjd2GST,
+    cyaltAz2RADec, pyRefractionTrueToApparent, pyRefractionApparentToTrue, eqRefractionTrueToApparent,
+    eqRefractionApparentToTrue)
+from RMS.Astrometry.Conversions import date2JD, jd2Date, JD2HourAngle, JD2LST
+from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, applyPlateparToCentroids, \
+    applyPlateparToRaDecCentroids
 from RMS.Formats.Platepar import Platepar
 from RMS.Misc import getRmsRootDir
 
@@ -22,6 +25,10 @@ except ImportError:
 
 
 J2000 = 2451545.0
+
+# TT - UT1 in days. RMS uses UTC as UT1 throughout (DUT1 is at most 0.9 s, a rigid rotation about the pole
+#   that the star fit absorbs), and the reference model below makes the same assumption, so the two are
+#   compared on equal terms. 69.2 s is the 2021-2029 value to within 0.1 s.
 TT_MINUS_UT = 69.2/86400.0
 DATES = [date2JD(2021, 3, 1, 3, 0, 0), date2JD(2024, 9, 5, 3, 0, 0), date2JD(2026, 1, 15, 3, 0, 0),
     date2JD(2027, 7, 1, 3, 0, 0), date2JD(2029, 6, 1, 3, 0, 0)]
@@ -45,6 +52,31 @@ def separationArcsec(ra1, dec1, ra2, dec2):
 def randomDirections(n, seed=0):
     rng = np.random.default_rng(seed)
     return [(rng.uniform(0, 2*np.pi), np.arcsin(rng.uniform(-0.98, 0.98))) for _ in range(n)]
+
+
+def erfaAltAz(jd, lat, lon, ra, dec):
+    """ J2000 -> az/alt (radians), refraction off: erfa's true of date and apparent sidereal time. """
+
+    v = erfa.pnm06a(jd + TT_MINUS_UT, 0.0).dot(unitVector(ra, dec))
+    ha = erfa.gst06a(jd, 0.0, jd + TT_MINUS_UT, 0.0) + lon - np.arctan2(v[1], v[0])
+    d = np.arcsin(v[2])
+    alt = np.arcsin(np.sin(lat)*np.sin(d) + np.cos(lat)*np.cos(d)*np.cos(ha))
+    az = np.arctan2(-np.sin(ha)*np.cos(d), np.sin(d)*np.cos(lat) - np.cos(d)*np.sin(lat)*np.cos(ha))
+
+    return az%(2*np.pi), alt
+
+
+def erfaJ2000(jd, lat, lon, az, alt):
+    """ Inverse of erfaAltAz. """
+
+    d = np.arcsin(np.sin(lat)*np.sin(alt) + np.cos(lat)*np.cos(alt)*np.cos(az))
+    ha = np.arctan2(-np.sin(az)*np.cos(alt), np.cos(lat)*np.sin(alt) - np.sin(lat)*np.cos(alt)*np.cos(az))
+    r = erfa.gst06a(jd, 0.0, jd + TT_MINUS_UT, 0.0) + lon - ha
+
+    return raDec(erfa.pnm06a(jd + TT_MINUS_UT, 0.0).T.dot(unitVector(r, d)))
+
+
+TEMPLATE = os.path.join(getRmsRootDir(), 'share', 'platepar_templates', 'template_generic_720p_4mm.cal')
 
 
 class TestPrecessionNutation(unittest.TestCase):
@@ -144,9 +176,179 @@ class TestPrecessionNutation(unittest.TestCase):
         self.assertLess(max(errs), 2.0)
         self.assertLess(max(errs) - min(errs), 0.5)
 
+    @unittest.skipIf(erfa is None, "pyerfa not installed")
+    def testSiderealTimeAgainstErfa(self):
+        """ The kernel's sidereal time is the apparent one (mean plus the equation of the equinoxes), and the
+            two Python routines that platepars and the ground path use are the same function. The equation of
+            the equinoxes is up to 15.8 arcsec; the 4-term nutation series leaves under 0.5 arcsec. """
+
+        for jd in np.arange(date2JD(2018, 1, 1, 0, 0, 0), date2JD(2036, 1, 1, 0, 0, 0), 3.7):
+            gast = np.degrees(erfa.gst06a(jd, 0.0, jd + TT_MINUS_UT, 0.0))%360
+            self.assertLess(abs((cyjd2GST(jd) - gast + 180)%360 - 180)*3600, 0.5)
+
+        jd = DATES[2]
+        self.assertEqual(JD2HourAngle(jd), cyjd2GST(jd))
+        self.assertEqual(JD2LST(jd, 0.0)[1], cyjd2GST(jd))
+        self.assertAlmostEqual(JD2LST(jd, 15.0)[0], (cyjd2GST(jd) + 15.0)%360, places=9)
+
+
+    @unittest.skipIf(erfa is None, "pyerfa not installed")
+    def testAltAzAgainstErfa(self):
+        """ J2000 -> apparent alt/az, refraction off, against erfa (GCRS -> true of date -> Earth rotation by
+            the apparent sidereal time -> topocentric). True-of-date right ascensions taken against the mean
+            sidereal time were off by up to 15 arcsec. """
+
+        lat, lon = np.radians(31.69), np.radians(-110.9)
+
+        def rot3(t, v):
+            c, s = np.cos(t), np.sin(t); return np.array([c*v[0] - s*v[1], s*v[0] + c*v[1], v[2]])
+
+        for jd in DATES:
+            gast = erfa.gst06a(jd, 0.0, jd + TT_MINUS_UT, 0.0)
+            for ra, dec in randomDirections(100, 4):
+                v = erfa.pnm06a(jd + TT_MINUS_UT, 0.0).dot(unitVector(ra, dec))
+                ha = gast + lon - np.arctan2(v[1], v[0])
+                d = np.arcsin(v[2])
+                alt = np.arcsin(np.sin(lat)*np.sin(d) + np.cos(lat)*np.cos(d)*np.cos(ha))
+                if alt < np.radians(5):
+                    continue
+                az = np.arctan2(-np.sin(ha)*np.cos(d),
+                    np.sin(d)*np.cos(lat) - np.cos(d)*np.sin(lat)*np.cos(ha))
+                az_k, alt_k = cyTrueRaDec2ApparentAltAz(ra, dec, jd, lat, lon, False)
+                v1 = np.array([np.cos(alt)*np.sin(az), np.cos(alt)*np.cos(az), np.sin(alt)])
+                v2 = np.array([np.cos(alt_k)*np.sin(az_k), np.cos(alt_k)*np.cos(az_k), np.sin(alt_k)])
+                self.assertLess(np.degrees(np.arctan2(np.linalg.norm(np.cross(v1, v2)), np.dot(v1, v2)))*3600, 0.3)
+
+
+    def testReferenceRefractionInItsOwnFrame(self):
+        """ pointingCorrection refracts the reference pointing, a true-of-date direction, at its own altitude.
+            Going through the J2000 refraction routine precesses it a second time and evaluates the refraction
+            about 22 arcmin off in altitude: 8 arcsec at 10 deg elevation in 2026. """
+
+        lat, lon = np.radians(31.69), np.radians(-110.9)
+        jd = DATES[2]
+        h0 = np.radians(JD2HourAngle(jd))
+
+        for alt0 in (10.0, 20.0, 45.0):
+            for az0 in range(0, 360, 45):
+                ra_t, dec_t = cyaltAz2RADec(np.radians(az0), np.radians(alt0), jd, lat, lon)
+                r_k, d_k, _ = pointingCorrection(jd, lat, lon, h0, jd, ra_t, dec_t, 0.0, True)
+
+                alt_app = pyRefractionTrueToApparent(np.radians(alt0))
+                r_a, d_a = cyaltAz2RADec(np.radians(az0), alt_app, jd, lat, lon)
+                r_ref, d_ref, _ = equatorialCoordAndRotPrecession(jd, J2000, r_a, d_a, 0.0)
+
+                self.assertLess(separationArcsec(r_k, d_k, r_ref, d_ref), 0.001)
+
+
+    def testHourAngleIsRecomputedWhenAPlateparIsLoaded(self):
+        """ Ho is a function of the reference time only. A JSON platepar written with another definition of
+            the sidereal time must not carry its stored Ho into the kernel. """
+
+        import tempfile
+
+        pp = Platepar()
+        pp.read(TEMPLATE)
+        pp.JD = DATES[2]
+        pp.Ho = 123.456
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'platepar_cmn2010.cal')
+            pp.write(path)
+            pp2 = Platepar()
+            pp2.read(path)
+
+        self.assertEqual(pp2.Ho, JD2HourAngle(pp2.JD))
+        self.assertNotEqual(pp2.Ho, 123.456)
+
+
+    @unittest.skipIf(erfa is None, "pyerfa not installed")
+    def testCentroidAltAzAgainstErfa(self):
+        """ The az/alt that applyPlateparToCentroids writes to FTPdetectinfo, and applyPlateparToRaDecCentroids,
+            against erfa. Precessing only (mean equator and equinox of date) and then taking the apparent
+            sidereal time was off by up to 17 arcsec. """
+
+        lat, lon = np.radians(31.69), np.radians(-110.9)
+        fps = 25.0
+
+        pp = Platepar()
+        pp.read(TEMPLATE)
+        pp.lat, pp.lon = np.degrees(lat), np.degrees(lon)
+
+        for jd in DATES:
+
+            # Point the camera at the zenith so that the whole field is well above the horizon
+            pp.JD, pp.Ho = jd, JD2HourAngle(jd)
+            ra_z, dec_z = cyaltAz2RADec(0.0, np.pi/2, jd, lat, lon)
+            pp.RA_d, pp.dec_d = np.degrees(ra_z), np.degrees(dec_z)
+
+            Y, M, D, h, m, s, _ = jd2Date(jd)
+            ff_name = "FF_XX0001_{:04d}{:02d}{:02d}_{:02d}{:02d}{:02d}_000_0000000.fits".format(Y, M, D, h, m, s)
+
+            # [calib_status, frame, x, y, ra, dec, azim, elev, inten, mag, background, snr, saturated]
+            meas = [[1, 10*i, x, y, 0, 0, 0, 0, 1000, 0, 10, 10, 0] for i, (x, y)
+                in enumerate(zip(np.linspace(100, pp.X_res - 100, 8), np.linspace(100, pp.Y_res - 100, 8)))]
+            picks = applyPlateparToCentroids(ff_name, fps, meas, pp)
+
+            # The same directions given as RA/Dec
+            meas = [[1, p[0], 0, 0, p[3], p[4], 0, 0, 1000, 0, 10, 10, 0] for p in picks]
+            picks_radec = applyPlateparToRaDecCentroids(ff_name, fps, meas, pp)
+
+            for p in np.r_[picks, picks_radec]:
+                az, alt = erfaAltAz(jd + p[0]/fps/86400.0, lat, lon, np.radians(p[3]), np.radians(p[4]))
+                self.assertLess(separationArcsec(az, alt, np.radians(p[5]), np.radians(p[6])), 0.3)
+
+
+    @unittest.skipIf(erfa is None, "pyerfa not installed")
+    def testStarRefractionAtItsAltitude(self):
+        """ eqRefractionTrueToApparent and eqRefractionApparentToTrue refract a J2000 direction at its altitude
+            in the frame of the sidereal time. Precessing only evaluated the refraction up to 17 arcsec off in
+            altitude: 0.7 arcsec of error at 3 deg elevation. """
+
+        lat, lon = np.radians(31.69), np.radians(-110.9)
+
+        for jd in DATES:
+            for ra, dec in randomDirections(400, 6):
+
+                az, alt = erfaAltAz(jd, lat, lon, ra, dec)
+                if not (np.radians(3.0) < alt < np.radians(20.0)):
+                    continue
+
+                # True -> apparent, then the apparent direction back to true
+                alt_app = pyRefractionTrueToApparent(alt)
+                r_app, d_app = erfaJ2000(jd, lat, lon, az, alt_app)
+                self.assertLess(separationArcsec(*eqRefractionTrueToApparent(ra, dec, jd, lat, lon), r_app, d_app),
+                    0.05)
+
+                r_true, d_true = erfaJ2000(jd, lat, lon, az, pyRefractionApparentToTrue(alt_app))
+                self.assertLess(separationArcsec(*eqRefractionApparentToTrue(r_app, d_app, jd, lat, lon), r_true,
+                    d_true), 0.05)
+
+
+    def testReferenceDirectionProjects(self):
+        """ The reference direction projects to the same pixel as a direction next to it. Stars and the
+            reference pointing are refracted in the same frame, so it lands exactly on the FOV centre, where
+            the direction angle in raDecToXYPP is 0/0. """
+
+        pp = Platepar()
+        pp.read(TEMPLATE)
+        pp.lat, pp.lon = 45.0, 15.0
+
+        for refraction in (True, False):
+            pp.refraction = refraction
+            pp.alt_centre, pp.az_centre = 45.0, 200.0
+            pp.updateRefRADec(skip_rot_update=True)
+
+            ra, dec = j2000FromTrueOfDate(pp.JD, np.radians(pp.RA_d), np.radians(pp.dec_d))
+            x, y = raDecToXYPP(np.degrees([ra, ra + 1e-11]), np.degrees([dec, dec]), pp.JD, pp)
+
+            self.assertTrue(np.all(np.isfinite(x)) and np.all(np.isfinite(y)), "refraction={}".format(refraction))
+            # Within ~1e-9 rad of the centre the direction angle is poorly conditioned, at the micropixel level
+            self.assertLess(np.hypot(x[0] - x[1], y[0] - y[1]), 1e-4)
+
+
 # ---- A distortion-free synthetic camera, fixed in alt/az, checked at off-centre pixels ----------------------------
 
-TEMPLATE = os.path.join(getRmsRootDir(), 'share', 'platepar_templates', 'template_generic_720p_4mm.cal')
 SITE = (32.2, -110.9, 700.0)       # lat, lon (deg), elevation (m)
 X_RES, Y_RES, FOV_DEG = 1280, 720, 82.0
 
