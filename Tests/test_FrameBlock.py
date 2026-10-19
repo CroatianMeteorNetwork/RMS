@@ -4,6 +4,7 @@
 from __future__ import print_function, division, absolute_import
 
 import os
+import datetime
 import time
 
 import numpy as np
@@ -126,8 +127,9 @@ def test_convert_fits_directory(tmp_path):
 
 
 def test_rms_reads_a_block_like_its_fits_frames(tmp_path):
-    """ Through the frame interface of RMS, a block file gives the same frames and frame times as the FITS frames it
-        was converted from. """
+    """ Through the frame interface of RMS, a block file gives the same frames as the FITS frames it was converted
+        from, and their times at the middle of the exposure: the FITS frames (DATE-OBS) and the block keep the start
+        of the integration. """
 
     from astropy.io import fits
 
@@ -151,7 +153,8 @@ def test_rms_reads_a_block_like_its_fits_frames(tmp_path):
 
     block = fb.convertFitsDirectory(str(fits_dir), str(tmp_path/'out'), station_id='TEST01')[0]
 
-    # Every frame and its time are the same through both inputs, and the frame rate comes from the frame times
+    # Every frame is the same through both inputs, half the exposure later in the block, and the frame rate comes
+    #   from the frame times
     fits_handle = detectInputTypeFolder(str(fits_dir), config, detection=True)
     block_handle = detectInputTypeFile(block, config, detection=True)
     assert block_handle.total_frames == fits_handle.total_frames == 6
@@ -160,7 +163,7 @@ def test_rms_reads_a_block_like_its_fits_frames(tmp_path):
         block_handle.setFrame(i)
         assert np.array_equal(block_handle.loadFrame(), fits_handle.loadFrame())
         assert abs((block_handle.currentFrameTime(dt_obj=True)
-                    - fits_handle.currentFrameTime(dt_obj=True)).total_seconds()) < 1e-6
+                    - fits_handle.currentFrameTime(dt_obj=True)).total_seconds() - 0.065/2) < 1e-6
     assert block_handle.fps == pytest.approx(15.0, rel=1e-3)
 
 
@@ -651,3 +654,30 @@ def test_failed_directory_sync_after_publishing_warns(tmp_path, monkeypatch):
     with pytest.warns(RuntimeWarning):
         w.close(fsync=True)
     assert fb.FrameBlockReader(path).n_frames == 1
+
+
+
+def test_block_frame_times_are_the_middle_of_the_exposure(tmp_path):
+    """ The frame times of a block file are those of the middle of the exposures (where a moving object is measured),
+        from the start of the integration and the exposure of every frame. """
+
+    import RMS.ConfigReader as cr
+    from RMS.Formats.FrameInterface import detectInputTypeFile
+
+    config = cr.parse(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.config'))
+    config.width, config.height = 16, 10
+    config.detection_binning_factor = 1
+
+    # 4 frames at 10 fps, started every 0.1 s, exposed 95 ms
+    path = str(tmp_path/'TEST01_20261018_011528_000000.fblk')
+    t0 = 1792199728000000000
+    with fb.FrameBlockWriter(path, 16, 10, 4) as writer:
+        for i in range(4):
+            writer.write(np.full((10, 16), 100*i, np.uint16), t0 + i*100000000, exposure_us=95000)
+
+    handle = detectInputTypeFile(path, config, detection=True)
+    for i in range(4):
+        t = handle.currentFrameTime(frame_no=i, dt_obj=True)
+        unix = (t - datetime.datetime(1970, 1, 1)).total_seconds() if t.tzinfo is None else t.timestamp()
+        assert unix == pytest.approx(t0/1e9 + i*0.1 + 0.0475, abs=2e-6)
+    assert handle.fps == pytest.approx(10.0, rel=1e-6)
