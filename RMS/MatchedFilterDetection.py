@@ -3625,7 +3625,9 @@ def trimFaintEnds(cent, fraction=FAINT_END_FRACTION, window=FAINT_END_WINDOW):
     #   it), so a single row there doesn't count more than elsewhere
     snr = np.asarray(cent[:, 5], dtype=np.float64)
     half = window//2
-    level = fraction*np.percentile(snr, FAINT_END_PERCENTILE)
+    # The level from a row of the track (not interpolated between rows), so a bright part which is just a tenth of
+    #   the track sets it
+    level = fraction*np.sort(snr)[int(math.ceil(FAINT_END_PERCENTILE/100.0*(len(snr) - 1)))]
     above = snr >= level
     starts = np.clip(np.arange(len(snr)) - half, 0, len(snr) - window)
     bright = np.array([np.mean(above[k:k + window]) > FAINT_END_BRIGHT_ROWS for k in starts])

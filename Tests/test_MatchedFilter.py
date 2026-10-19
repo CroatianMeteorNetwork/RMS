@@ -2244,6 +2244,12 @@ def test_faint_ends_of_a_track_are_cut():
     long[:, 5] = np.r_[rng.normal(1.0, 0.5, 100), rng.normal(25.0, 4.0, 20)]
     assert mfd.trimFaintEnds(long)[0, 0] >= 95
 
+    # The bright part exactly a tenth of the track
+    tenth = np.zeros((210, 7))
+    tenth[:, 0] = np.arange(210)
+    tenth[:, 5] = np.r_[np.full(189, 1.0), np.full(21, 25.0)]
+    assert mfd.trimFaintEnds(tenth)[0, 0] >= 185
+
     # Flashes every fifth frame, at both ends too, the shortest track a detection can be
     short = np.zeros((21, 7))
     short[:, 0] = np.arange(21)
