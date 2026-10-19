@@ -37,7 +37,6 @@ import math
 from datetime import datetime, timedelta, MINYEAR
 
 import numpy as np
-import scipy.optimize
 
 from RMS.Math import vectMag, vectNorm
 from RMS.Misc import UTCFromTimestamp
@@ -47,11 +46,29 @@ from RMS.GeoidHeightEGM96 import mslToWGS84Height, wgs84toMSLHeight
 import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
 from RMS.Astrometry.CyFunctions import cyaltAz2RADec, cyraDec2AltAz, cyApparentAltAz2TrueRADec, \
-    cyApparentAltAz2TrueRADec_vect, cyTrueRaDec2ApparentAltAz, cyTrueRaDec2ApparentAltAz_vect
+    cyApparentAltAz2TrueRADec_vect, cyTrueRaDec2ApparentAltAz, cyTrueRaDec2ApparentAltAz_vect, cyjd2GST, \
+    trueOfDateFromJ2000, j2000FromTrueOfDate, pyRefractionTrueToApparent, pyRefractionApparentToTrue
+from RMS.Astrometry.CyFunctions import cyaltAz2RADec_vect as cyaltAz2RADecArrays, \
+    cyraDec2AltAz_vect as cyraDec2AltAzArrays
+
+
+def broadcastVect(cy_vect):
+    """ Vectorize a CyFunctions array conversion taking (two coordinates, jd, lat, lon), broadcasting the
+        arguments against each other as np.vectorize does. The Cython loop evaluates the sidereal time once
+        per time instead of once per point.
+    """
+
+    def vect(a, b, jd, lat, lon):
+        args = np.broadcast_arrays(*[np.asarray(v, dtype=np.float64) for v in (a, b, jd, lat, lon)])
+        out_a, out_b = cy_vect(*[np.ascontiguousarray(v).ravel() for v in args])
+        return out_a.reshape(args[0].shape), out_b.reshape(args[0].shape)
+
+    return vect
+
 
 # Vectorize some functions
-cyaltAz2RADec_vect = np.vectorize(cyaltAz2RADec, excluded=["jd", "lat", "lon"])
-cyraDec2AltAz_vect = np.vectorize(cyraDec2AltAz, excluded=["jd", "lat", "lon"])
+cyaltAz2RADec_vect = broadcastVect(cyaltAz2RADecArrays)
+cyraDec2AltAz_vect = broadcastVect(cyraDec2AltAzArrays)
 
 ### CONSTANTS ###
 
@@ -258,8 +275,32 @@ def jd2UnixTime(jd, UT_corr=0):
     return date2UnixTime(*jd2Date(jd, UT_corr=UT_corr))
 
 
+def JD2GST(jd):
+    """ Apparent Greenwich sidereal time, the same definition as the astrometric kernels use (mean sidereal
+        time plus the equation of the equinoxes). All sidereal times in RMS come from here or from the
+        kernel's cyjd2GST, which this calls, so hour angles of true-of-date right ascensions are consistent
+        everywhere.
+
+    Arguments:
+        jd: [float or ndarray] Julian date.
+
+    Return:
+        gst: [float or ndarray] Apparent Greenwich sidereal time (deg), in [0, 360).
+
+    """
+
+    if np.ndim(jd) == 0:
+        return cyjd2GST(float(jd))
+
+    # Evaluated once per distinct time
+    jd_unique, inverse = np.unique(np.asarray(jd), return_inverse=True)
+    gst_unique = np.array([cyjd2GST(float(j)) for j in jd_unique], dtype=np.float64)
+
+    return gst_unique[inverse].reshape(np.shape(jd))
+
+
 def JD2LST(julian_date, lon):
-    """ Convert Julian date to Local Sidereal Time and Greenwich Sidereal Time.
+    """ Convert Julian date to apparent Local Sidereal Time and Greenwich Sidereal Time.
 
     Arguments;
         julian_date: [float] decimal julian date, epoch J2000.0
@@ -270,11 +311,8 @@ def JD2LST(julian_date, lon):
             (degrees)
     """
 
-    t = (julian_date - J2000_JD.days)/36525.0
-
-    # Greenwich Sidereal Time
-    GST = 280.46061837 + 360.98564736629*(julian_date - 2451545) + 0.000387933*t**2 - ((t**3)/38710000)
-    GST = (GST + 360)%360
+    # Greenwich Sidereal Time (apparent)
+    GST = JD2GST(julian_date)
 
     # Local Sidereal Time
     LST = (GST + lon + 360)%360
@@ -283,21 +321,23 @@ def JD2LST(julian_date, lon):
 
 
 def JD2HourAngle(jd):
-    """ Convert the given Julian date to hour angle.
+    """ Reference hour angle of a platepar: the apparent Greenwich sidereal time at its reference time. The
+        kernel adds cyjd2LST(jd) - Ho to RA_d to follow the sky, so this has to be the same sidereal time
+        that the kernel uses.
+
     Arguments:
         jd: [float] Julian date.
+
     Return:
         hour_angle: [float] Hour angle (deg), normalized to [0, 360).
+
     """
 
-    T = (jd - 2451545)/36525.0
-    hour_angle = 280.46061837 + 360.98564736629*(jd - 2451545.0) + 0.000387933*T**2 \
-                 - (T**3)/38710000.0
-
-    return hour_angle % 360
+    return JD2GST(jd)
 
 
 ############################
+
 
 
 ### Spatial coordinates transformations ###
@@ -328,22 +368,22 @@ def latLonAlt2ECEF(lat, lon, h):
     """ Convert geographical coordinates to Earth centered - Earth fixed coordinates.
 
     Arguments:
-        lat: [float] latitude in radians (+north)
-        lon: [float] longitude in radians (+east)
-        h: [float] elevation in meters (WGS84)
+        lat: [float or ndarray] latitude in radians (+north)
+        lon: [float or ndarray] longitude in radians (+east)
+        h: [float or ndarray] elevation in meters (WGS84)
 
     Return:
-        (x, y, z): [tuple of floats] ECEF coordinates
+        (x, y, z): [tuple of floats or ndarrays] ECEF coordinates
 
     """
 
     # Get distance from Earth centre to the position given by geographical coordinates, in WGS84
-    N = EARTH.EQUATORIAL_RADIUS/math.sqrt(1.0 - (EARTH.E**2)*math.sin(lat)**2)
+    N = EARTH.EQUATORIAL_RADIUS/np.sqrt(1.0 - (EARTH.E**2)*np.sin(lat)**2)
 
     # Calculate ECEF coordinates
-    ecef_x = (N + h)*math.cos(lat)*math.cos(lon)
-    ecef_y = (N + h)*math.cos(lat)*math.sin(lon)
-    ecef_z = ((1 - EARTH.E**2)*N + h)*math.sin(lat)
+    ecef_x = (N + h)*np.cos(lat)*np.cos(lon)
+    ecef_y = (N + h)*np.cos(lat)*np.sin(lon)
+    ecef_z = ((1 - EARTH.E**2)*N + h)*np.sin(lat)
 
     return ecef_x, ecef_y, ecef_z
 
@@ -394,14 +434,19 @@ def ecef2LatLonAlt(x, y, z):
         elevation).
 
     Arguments:
-        x: [float] ECEF x coordinate
-        y: [float] ECEF y coordinate
-        z: [float] ECEF z coordinate
+        x: [float or ndarray] ECEF x coordinate
+        y: [float or ndarray] ECEF y coordinate
+        z: [float or ndarray] ECEF z coordinate
 
     Return:
-        (lat, lon, alt): [tuple of floats] latitude and longitude in radians, WGS84 elevation in meters
+        (lat, lon, alt): [tuple of floats or ndarrays] latitude and longitude in radians, WGS84 elevation
+            in meters
 
     """
+
+    scalar_input = (np.ndim(x) == 0) and (np.ndim(y) == 0) and (np.ndim(z) == 0)
+    x, y, z = np.asarray(x, dtype=np.float64), np.asarray(y, dtype=np.float64), \
+        np.asarray(z, dtype=np.float64)
 
     # Calculate the polar eccentricity
     ep = np.sqrt((EARTH.EQUATORIAL_RADIUS**2 - EARTH.POLAR_RADIUS**2)/(EARTH.POLAR_RADIUS**2))
@@ -418,19 +463,18 @@ def ecef2LatLonAlt(x, y, z):
         p - (EARTH.E**2)*EARTH.EQUATORIAL_RADIUS*np.cos(theta)**3)
 
     # Get distance from Earth centre to the position given by geographical coordinates, in WGS84
-    N = EARTH.EQUATORIAL_RADIUS/math.sqrt(1.0 - (EARTH.E**2)*math.sin(lat)**2)
+    N = EARTH.EQUATORIAL_RADIUS/np.sqrt(1.0 - (EARTH.E**2)*np.sin(lat)**2)
 
-    
-    # Calculate the height in meters
 
-    # Correct for numerical instability in altitude near exact poles (and make sure cos(lat) is not 0!)
-    if((np.abs(x) < 1000) and (np.abs(y) < 1000)):
-        alt = np.abs(z) - EARTH.POLAR_RADIUS
+    # Calculate the height in meters. Near the exact poles cos(lat) vanishes, so the height is taken
+    #   from the polar axis there instead.
+    near_pole = (np.abs(x) < 1000) & (np.abs(y) < 1000)
 
-    else:
-        # Calculate altitude anywhere else
-        alt = p/np.cos(lat) - N
+    with np.errstate(divide='ignore', invalid='ignore'):
+        alt = np.where(near_pole, np.abs(z) - EARTH.POLAR_RADIUS, p/np.cos(lat) - N)
 
+    if scalar_input:
+        return float(lat), float(lon), float(alt)
 
     return lat, lon, alt
 
@@ -460,9 +504,10 @@ def ECEF2AltAz(s_vect, p_vect):
     dz = pz - sz
 
     # Compute the elevation
-    alt = np.degrees(
-        np.pi/2 - np.arccos((sx*dx + sy*dy + sz*dz)/np.sqrt((sx**2 + sy**2 + sz**2)*(dx**2 + dy**2 + dz**2)))
-        )
+    # The normalized dot product can round just outside [-1, 1] when P is directly overhead or
+    #   directly below S, which would make arccos return NaN, so clamp it
+    cos_zenith = (sx*dx + sy*dy + sz*dz)/np.sqrt((sx**2 + sy**2 + sz**2)*(dx**2 + dy**2 + dz**2))
+    alt = np.degrees(np.pi/2 - np.arccos(np.clip(cos_zenith, -1.0, 1.0)))
 
     # Compute the azimuth
     
@@ -637,37 +682,24 @@ def AEH2Range(azim, elev, h, lat, lon, alt, accurate=False):
         that has the specified height above the ground.
 
     Arguments:
-        azim: [float] Azimuth (+E of due N) in degrees.
-        elev: [float] Elevation in degrees.
-        h: [float] Height of the point on the line of sight (meters).
+        azim: [float or ndarray] Azimuth (+E of due N) in degrees.
+        elev: [float or ndarray] Elevation in degrees.
+        h: [float or ndarray] Height of the point on the line of sight (meters).
         lat: [float] Latitude of observer in degrees.
         lon: [float] Longitude of observer in degrees.
         alt: [float] Altitude of observer in meters.
 
     Keyword arguments:
-        accurate: [bool] Minimize the range for very accurate solution. False by default, in which case
-            the accuracy is +/- 10 m using an analytical approach.
+        accurate: [bool] Solve for the range on the WGS84 ellipsoid (see rangeToHeightWGS84) instead of
+            using the analytical approximation, which is accurate to about +/- 10 m for a target above
+            the observer. False by default. The approximation also picks the wrong intersection for a
+            target below the observer, so this has to be set for a target that the camera looks down at.
 
     Return:
-        r: [float] Range to point in meters.
+        r: [float or ndarray] Range to point in meters. With accurate=True, NaN if the line of sight
+            never reaches the given height.
 
     """
-
-
-    def _heightCostFunction(params, azim, elev, h, lat, lon, alt):
-
-        # Get the guessed range
-        r = params
-
-        # Compute the ECEF coordinates with the given range
-        x, y, z = AER2ECEF(azim, elev, r, lat, lon, alt)
-
-        # Compute the height
-        _, _, h_computed = ecef2LatLonAlt(x, y, z)
-
-        # Return residual between the heights
-        return (h_computed - h)**2
-
 
 
     ### Law of sines solution ###
@@ -690,28 +722,116 @@ def AEH2Range(azim, elev, h, lat, lon, alt, accurate=False):
     ### ###
 
 
-    # Compute an accurate numerical solution if needed
+    # Solve on the ellipsoid if the approximation is not good enough, or if the target is below the
+    #   observer, where the law of sines above returns the far intersection instead of the near one
     if accurate:
 
-        # First guess of range if the elevation is higher than 10 degrees
-        if elev < np.radians(10):
+        r = rangeToHeightWGS84(azim, elev, h, lat, lon, alt)
 
-            # Flat-Earth assumption
-            r0 = r
-
-        else:
-            # Otherwise, use a distance of 1000 km
-            r0 = 1e6
-
-        # Numerically find the range which corresponds to the given height above the ground
-        res = scipy.optimize.minimize(_heightCostFunction, r0, \
-            args=(azim, elev, h, lat, lon, alt))
-
-        # Minimized range
-        r = res.x[0]
+        # Scalar in, scalar out
+        if (np.ndim(azim) == 0) and (np.ndim(elev) == 0) and (np.ndim(h) == 0):
+            return float(r[0])
 
 
-    # Return the minimized solution
+    return r
+
+
+
+def rangeToHeightWGS84(azim, elev, h, lat, lon, alt, max_iter=20, height_tol=1.0e-3):
+    """ Range along a line of sight at which it reaches a given WGS84 height, solved on the ellipsoid.
+        Vectorized over the line of sight and the height; the observer is fixed.
+
+        The start is the intersection with the sphere osculating the ellipsoid at the observer's
+        location, in the azimuth of the line of sight, which is exact to first order and correctly
+        classifies grazing rays: a geocentric sphere would not, since the geocentric vertical is up to
+        0.19 deg off the geodetic one that the elevation is measured from. For a target below the
+        observer the near crossing is taken, for one above the far one. Newton's method on the
+        ellipsoid then refines it, using the component of the line of sight along the local vertical
+        as the derivative.
+
+    Arguments:
+        azim: [float or ndarray] Azimuth (+E of due N) in degrees.
+        elev: [float or ndarray] Elevation in degrees.
+        h: [float or ndarray] Height of the point on the line of sight (meters, WGS84).
+        lat: [float] Latitude of observer in degrees.
+        lon: [float] Longitude of observer in degrees.
+        alt: [float] Altitude of observer in meters (WGS84).
+
+    Keyword arguments:
+        max_iter: [int] Maximum number of Newton steps. 20 by default, two or three are typical.
+        height_tol: [float] Largest accepted miss of the requested height (meters). 1 mm by default.
+
+    Return:
+        r: [ndarray] Range to the point in meters, NaN where the line of sight never reaches the
+            height, or where the solution did not converge to within height_tol.
+
+    """
+
+    azim, elev, h = np.broadcast_arrays(np.atleast_1d(azim).astype(np.float64), \
+        np.atleast_1d(elev).astype(np.float64), np.atleast_1d(h).astype(np.float64))
+
+    lat_rad, lon_rad = np.radians(lat), np.radians(lon)
+
+    # Observer position and the unit line of sight, both in ECEF
+    obs = np.array(latLonAlt2ECEF(lat_rad, lon_rad, alt), dtype=np.float64)
+    los = np.stack(AER2ECEF(azim, elev, 1.0, lat, lon, alt), axis=-1) - obs
+
+    # Radius of curvature of the ellipsoid at the observer in the azimuth of the line of sight (Euler's
+    #   formula from the meridional and prime vertical radii)
+    sin2_lat = np.sin(lat_rad)**2
+    radius_n = EARTH.EQUATORIAL_RADIUS/np.sqrt(1.0 - (EARTH.E**2)*sin2_lat)
+    radius_m = EARTH.EQUATORIAL_RADIUS*(1.0 - EARTH.E**2)/(1.0 - (EARTH.E**2)*sin2_lat)**1.5
+    azim_rad = np.radians(azim)
+    radius = 1.0/(np.cos(azim_rad)**2/radius_m + np.sin(azim_rad)**2/radius_n)
+
+    # Distances of the observer and of the target from the centre of the osculating sphere
+    rs = radius + alt
+    rm = radius + h
+
+    # The ray meets the sphere of radius rm where r**2 + 2*b*r + rs**2 - rm**2 = 0, with b the component
+    #   of the observer's position along the line of sight, rs*sin(elev). For a target above the
+    #   observer only one root is in front of the camera; for one below there are two and the near one
+    #   is wanted. A negative discriminant means the ray never gets down to that height.
+    b = rs*np.sin(np.radians(elev))
+    disc = b*b + rm*rm - rs*rs
+
+    reachable = disc >= 0
+    sqrt_disc = np.sqrt(np.where(reachable, disc, 0.0))
+    r = np.where(rm >= rs, -b + sqrt_disc, -b - sqrt_disc)
+    r = np.where(reachable & (r > 0), r, np.nan)
+
+    # Refine on the WGS84 ellipsoid. The height along the line of sight grows with the range at the
+    #   rate of the component of the line of sight along the local vertical, which is the derivative
+    #   Newton's method needs. A grazing ray has a vanishing derivative, so it is left where it is and
+    #   caught by the height check below.
+    active = np.isfinite(r)
+
+    for _ in range(max_iter):
+
+        if not np.any(active):
+            break
+
+        idx = np.flatnonzero(active)
+        point = obs + r[idx, None]*los[idx]
+        lat_p, lon_p, h_p = ecef2LatLonAlt(point[:, 0], point[:, 1], point[:, 2])
+        up = np.stack([np.cos(lat_p)*np.cos(lon_p), np.cos(lat_p)*np.sin(lon_p), np.sin(lat_p)], \
+            axis=-1)
+        slope = np.sum(los[idx]*up, axis=1)
+
+        steep = np.abs(slope) > 1.0e-9
+        dr = np.where(steep, (h[idx] - h_p)/np.where(steep, slope, 1.0), 0.0)
+        r[idx] += dr
+
+        active[idx[np.abs(dr) < 1.0e-6]] = False
+
+    # Only accept a range in front of the camera that actually lands on the requested height
+    with np.errstate(invalid='ignore'):
+        point = obs + r[:, None]*los
+        _, _, h_p = ecef2LatLonAlt(point[:, 0], point[:, 1], point[:, 2])
+        good = np.isfinite(r) & (r > 0) & (np.abs(h_p - h) < height_tol)
+
+    r[~good] = np.nan
+
     return r
 
 
@@ -774,56 +894,40 @@ def AEH2LatLonAlt(azim, elev, h, lat, lon, alt):
 
 def AEGeoidH2LatLonAlt(azim, elev, h, lat, lon, alt):
     """ Given an azimuth and altitude, and Height above Geoid compute lat, lon, and lat to a point.
+        Vectorized over the line of sight and the height; the observer is fixed.
 
     Arguments:
-        azim: [float] Azimuth (+E of due N) in degrees.
-        elev: [float] Elevation in degrees.
-        h: [float] Height of the point above the geoid (meters).
+        azim: [float or ndarray] Azimuth (+E of due N) in degrees.
+        elev: [float or ndarray] Elevation in degrees.
+        h: [float or ndarray] Height of the point above the geoid (meters).
         lat: [float] Latitude of observer in degrees.
         lon: [float] Longitude of observer in degrees.
         alt: [float] Altitude of observer in meters.
 
     Return:
-        (lat, lon): [tuple of floats] latitude and longitude in degrees
+        (lat, lon): [tuple of floats or ndarrays] latitude and longitude in degrees. NaN where the line
+            of sight never reaches the given height.
 
     """
 
-    # Convert azimuth and elevation to radians
-    azim = np.radians(azim)
-    elev = np.radians(elev)
-    lat = np.radians(lat)
-    lon = np.radians(lon)
+    scalar_input = (np.ndim(azim) == 0) and (np.ndim(elev) == 0) and (np.ndim(h) == 0)
+    azim, elev, h = np.broadcast_arrays(np.atleast_1d(azim).astype(np.float64), \
+        np.atleast_1d(elev).astype(np.float64), np.atleast_1d(h).astype(np.float64))
 
-    # Convert observer's geodetic coordinates to ECEF
-    obs_x, obs_y, obs_z = latLonAlt2ECEF(lat, lon, alt)
+    # Range at which the line of sight is at the given height above the ellipsoid. Solved on the
+    #   ellipsoid rather than taken as (h - alt)/sin(elev): that flat-Earth range ignores the Earth
+    #   curving away under the ray, which puts a target at 100 km and 5 deg elevation at 200 km instead,
+    #   and it cannot be inverted by geoHt2XY(), which places the target at exactly h.
+    r = rangeToHeightWGS84(azim, elev, h, lat, lon, alt)
 
-    # Calculate line-of-sight unit vector in ENU coordinates
-    los_vector_enu = np.array([
-        np.cos(elev)*np.sin(azim),  # East component
-        np.cos(elev)*np.cos(azim),  # North component
-        np.sin(elev)                # Up component
-    ])
+    # Convert the target's ECEF coordinates to geodetic coordinates (NaN ranges stay NaN)
+    with np.errstate(invalid='ignore'):
+        target_lat, target_lon, _ = ecef2LatLonAlt(*AER2ECEF(azim, elev, r, lat, lon, alt))
 
-    # Transform ENU to ECEF coordinates
-    R_enu2ecef = np.array([
-        [-np.sin(lon),  -np.sin(lat)*np.cos(lon),  np.cos(lat)*np.cos(lon)],
-        [np.cos(lon), -np.sin(lat)*np.sin(lon),  np.cos(lat)*np.sin(lon)],
-        [0, np.cos(lat), np.sin(lat)]
-    ])
-
-    los_vector = np.dot(R_enu2ecef, los_vector_enu)
-
-    # Compute the range to the point
-    r = (h - alt)/np.sin(elev)
-    
-    # Find the target ECEF coordinates using the optimized range
-    target_x = obs_x + r*los_vector[0]
-    target_y = obs_y + r*los_vector[1]
-    target_z = obs_z + r*los_vector[2]
-      
-    # Convert target ECEF coordinates to geodetic coordinates
-    target_lat, target_lon, h2 = ecef2LatLonAlt(target_x, target_y, target_z)
     target_lat, target_lon = np.degrees(target_lat), np.degrees(target_lon)
+
+    if scalar_input:
+        return float(target_lat[0]), float(target_lon[0])
 
     return target_lat, target_lon
 
@@ -1085,8 +1189,8 @@ def trueRaDec2ApparentAltAz(ra, dec, jd, lat, lon, refraction=True, refraction_s
     elif isinstance(ra, np.ndarray):
 
         # Convert JD to appropriate format
-        if isinstance(jd, float):
-            jd = np.zeros_like(ra) + jd
+        if np.ndim(jd) == 0:
+            jd = np.zeros_like(ra) + float(jd)
 
         # Compute it for numpy arrays
         azim, elev = cyTrueRaDec2ApparentAltAz_vect(ra, dec, jd, lat, lon, refraction, refraction_scale)
@@ -1095,6 +1199,137 @@ def trueRaDec2ApparentAltAz(ra, dec, jd, lat, lon, refraction=True, refraction_s
         raise TypeError("ra must be a number or np.ndarray, given: {}".format(type(ra)))
 
     return np.degrees(azim), np.degrees(elev)
+
+
+def _perPoint(func, *args):
+    """ Helper: apply a scalar (ra, dec)-style function to scalars or to arrays of the first two arguments,
+        returning floats for scalars and arrays otherwise. """
+
+    a, b = args[0], args[1]
+    rest = args[2:]
+
+    if np.ndim(a) == 0 and np.ndim(b) == 0:
+        return func(float(a), float(b), *rest)
+
+    a, b = np.broadcast_arrays(np.atleast_1d(a).astype(np.float64), np.atleast_1d(b).astype(np.float64))
+    out = np.array([func(float(x), float(y), *rest) for x, y in zip(a.ravel(), b.ravel())])
+
+    return out[:, 0].reshape(a.shape), out[:, 1].reshape(a.shape)
+
+
+def trueOfDateRaDec2ApparentAltAz(ra, dec, jd, lat, lon, refraction=True, refraction_scale=1.0):
+    """ Convert a true-of-date right ascension and declination, such as the platepar reference pointing
+        RA_d/dec_d, to apparent azimuth and altitude. No precession or nutation is applied, only the hour
+        angle against the apparent sidereal time and, optionally, the refraction.
+
+        This is the conversion that matches the astrometric kernel: pointingCorrection takes RA_d/dec_d to
+        be true-of-date and precesses them to J2000 before comparing with the catalog, so the fit defines
+        them in that frame. Feeding them to trueRaDec2ApparentAltAz, which expects J2000, precesses them a
+        second time and lands 8-19 arcmin from the real pointing in 2026.
+
+    Arguments:
+        ra: [float or ndarray] Right ascension in degrees (true of date).
+        dec: [float or ndarray] Declination in degrees (true of date).
+        jd: [float] Julian date.
+        lat: [float] Latitude in degrees.
+        lon: [float] Longitude in degrees.
+
+    Keyword arguments:
+        refraction: [bool] Apply refraction correction. True by default.
+        refraction_scale: [float] Scale of the refraction for the observer's height, from
+            refractionScale(). 1.0 by default (sea level).
+
+    Return:
+        (azim, elev): [tuple of floats or ndarrays] Azimuth (+east of due north) and apparent altitude in
+            degrees.
+
+    """
+
+    def one(ra_i, dec_i):
+
+        azim, elev = cyraDec2AltAz(np.radians(ra_i), np.radians(dec_i), jd, np.radians(lat), np.radians(lon))
+
+        if refraction:
+            elev = pyRefractionTrueToApparent(elev, refraction_scale)
+
+        return np.degrees(azim), np.degrees(elev)
+
+    return _perPoint(one, ra, dec)
+
+
+def apparentAltAz2TrueOfDateRaDec(azim, elev, jd, lat, lon, refraction=True, refraction_scale=1.0):
+    """ Inverse of trueOfDateRaDec2ApparentAltAz: apparent azimuth and altitude to a true-of-date right
+        ascension and declination, the frame of the platepar reference pointing RA_d/dec_d.
+
+    Arguments:
+        azim: [float or ndarray] Azimuth (+east of due north) in degrees.
+        elev: [float or ndarray] Apparent altitude in degrees.
+        jd: [float] Julian date.
+        lat: [float] Latitude in degrees.
+        lon: [float] Longitude in degrees.
+
+    Keyword arguments:
+        refraction: [bool] Remove the refraction first. True by default.
+        refraction_scale: [float] Scale of the refraction for the observer's height, from
+            refractionScale(). 1.0 by default (sea level).
+
+    Return:
+        (ra, dec): [tuple of floats or ndarrays] Right ascension and declination in degrees (true of date).
+
+    """
+
+    def one(azim_i, elev_i):
+
+        elev_i = np.radians(elev_i)
+
+        if refraction:
+            elev_i = pyRefractionApparentToTrue(elev_i, refraction_scale)
+
+        ra, dec = cyaltAz2RADec(np.radians(azim_i), elev_i, jd, np.radians(lat), np.radians(lon))
+
+        return np.degrees(ra), np.degrees(dec)
+
+    return _perPoint(one, azim, elev)
+
+
+def trueOfDateRaDec2J2000(ra, dec, jd):
+    """ True equator and equinox of date -> J2000, in degrees (see j2000FromTrueOfDate).
+
+    Arguments:
+        ra: [float or ndarray] Right ascension in degrees (true of date).
+        dec: [float or ndarray] Declination in degrees (true of date).
+        jd: [float] Julian date of the epoch of date.
+
+    Return:
+        (ra, dec): [tuple of floats or ndarrays] Right ascension and declination in degrees (J2000).
+
+    """
+
+    def one(ra_i, dec_i):
+        ra_j, dec_j = j2000FromTrueOfDate(jd, np.radians(ra_i), np.radians(dec_i))
+        return np.degrees(ra_j), np.degrees(dec_j)
+
+    return _perPoint(one, ra, dec)
+
+
+def j2000RaDec2TrueOfDate(ra, dec, jd):
+    """ J2000 -> true equator and equinox of date, in degrees (see trueOfDateFromJ2000).
+
+    Arguments:
+        ra: [float or ndarray] Right ascension in degrees (J2000).
+        dec: [float or ndarray] Declination in degrees (J2000).
+        jd: [float] Julian date of the epoch of date.
+
+    Return:
+        (ra, dec): [tuple of floats or ndarrays] Right ascension and declination in degrees (true of date).
+
+    """
+
+    def one(ra_i, dec_i):
+        ra_t, dec_t = trueOfDateFromJ2000(jd, np.radians(ra_i), np.radians(dec_i))
+        return np.degrees(ra_t), np.degrees(dec_t)
+
+    return _perPoint(one, ra, dec)
 
 
 def geocentricToApparentRadiantAndVelocity(ra_g, dec_g, vg, lat, lon, elev, jd, include_rotation=True):
