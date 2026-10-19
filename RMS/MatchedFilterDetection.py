@@ -2507,9 +2507,10 @@ class MatchedFilterDetector(object):
 
             # The ends of a track where it is much fainter than along the rest of it are not of the object (e.g. a
             #   piece of track built from the sums of other velocities through a bright object, which continues
-            #   the object over empty sky), and what is left has to last and move as long as a detection
+            #   the object over empty sky), and what is left has to be a detection: enough rows, lasting and
+            #   moving long enough
             cent = trimFaintEnds(cent)
-            if (cent[-1, 0] - cent[0, 0] < self.opts.min_frames) \
+            if (len(cent) < max(2, self.opts.min_centroids)) or (cent[-1, 0] - cent[0, 0] < self.opts.min_frames) \
                     or (np.hypot(*(cent[-1, 1:3] - cent[0, 1:3])) < self.minDisplacement()):
                 continue
 
