@@ -4,6 +4,7 @@ from __future__ import print_function, division, absolute_import
 
 import os
 import json
+import time
 import datetime
 
 import numpy as np
@@ -247,3 +248,30 @@ def test_sky_quality_of_a_chained_input_from_its_own_chunks(config, monkeypatch)
     assert mf.skyQuality(chain, config, star_list, object(), update=False) is not None
     assert seen['first_frame'] == 6
     assert seen['first_frames'] == [6, 10, 14, 18, 22]
+
+
+
+def test_join_of_a_file_never_processed_expires(tmp_path, config):
+    """ A file whose processing never ends (no done flag) holds back the joins after it only until the pending
+        joins expire, then the later files are joined. """
+
+    out = str(tmp_path/'out')
+    os.makedirs(out)
+    bound = lambda s: (T0 + datetime.timedelta(seconds=s)).replace(tzinfo=datetime.timezone.utc).timestamp()
+    a = _results(tmp_path, 'a', [_det(20.0, 29.9)], config)
+    b = _results(tmp_path, 'b', [_det(40.0, 45.0)], config)
+    c = _results(tmp_path, 'c', [_det(70.0, 89.9)], config)
+    d = _results(tmp_path, 'd', [_det(80.0, 100.0)], config)
+    os.remove(os.path.join(b, 'done.flag'))
+    for name, cur, prev, t in (('b', b, a, 30), ('c', c, b, 60), ('d', d, c, 90)):
+        cont.writePending(out, name, {'results_dir': cur, 'previous_results_dir': prev, 'boundary_unix': bound(t),
+                                      'context_s': 12.8})
+
+    # Held back while the file may still be processed
+    assert cont.processPendingJoins(out, config) == 0
+    assert len(os.listdir(os.path.join(out, cont.PENDING_DIR))) == 3
+
+    # Expired: the joins with the unprocessed file are dropped, the one after them is done
+    assert cont.processPendingJoins(out, config, now=time.time() + cont.PENDING_MAX_WAIT + 1) == 1
+    assert not os.listdir(os.path.join(out, cont.PENDING_DIR))
+    assert len(cont.readDetections(c)) == 1 and len(cont.readDetections(d)) == 0

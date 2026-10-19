@@ -38,8 +38,8 @@ log = getLogger("logger")
 PENDING_DIR = '.continuous'
 JOIN_RECORD = 'continuous.json'
 
-# A pending join whose earlier file has no results after this long (s) is dropped (e.g. the earlier file was skipped
-#   or failed); the detections of the later file are kept as they are
+# A pending join one of whose files has no results this long (s) after the processing of the later file began is
+#   dropped (e.g. a file was skipped, failed or its processing was stopped); the detections are kept as they are
 PENDING_MAX_WAIT = 3600.0
 
 # A join which fails is tried again when the monitor next handles the pending joins, up to this many times, after
@@ -378,11 +378,14 @@ def processPendingJoins(output_dir, config, recalibrate=None, now=None):
         cur_done = os.path.isfile(os.path.join(p['results_dir'], 'done.flag'))
         prev_done = os.path.isfile(os.path.join(p['previous_results_dir'], 'done.flag'))
 
-        # The earlier file never got results (skipped, failed): nothing to join with
-        if cur_done and (not prev_done) and (now - p['created_unix'] > PENDING_MAX_WAIT):
-            log.warning('Continuous detection: {} has no results, {} is not joined to it'.format(
-                p['previous_results_dir'], p['results_dir']))
+        # One of the files never got results (skipped, failed, or its processing was stopped): nothing to join,
+        #   and the joins after it are not held back
+        if ((not cur_done) or (not prev_done)) and (now - p['created_unix'] > PENDING_MAX_WAIT):
+            missing = p['results_dir'] if not cur_done else p['previous_results_dir']
+            log.warning('Continuous detection: {} has no results, {} is not joined to {}'.format(
+                missing, p['results_dir'], p['previous_results_dir']))
             os.remove(path)
+            waiting_dirs.discard(p['results_dir'])
             continue
 
         # Both files processed, and the earlier file joined to the one before it
