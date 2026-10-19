@@ -4314,6 +4314,7 @@ def timeGaps(img_handle, frame_range=None, factor=TIME_GAP_FACTOR):
     if (not hasattr(img_handle, 'hasAccurateTime')) or (not img_handle.hasAccurateTime()):
         return []
 
+    # Too few frames to tell the usual interval from a gap
     first, end = frame_range if (frame_range is not None) else (0, img_handle.total_frames)
     if end - first < 3:
         return []
@@ -4343,9 +4344,9 @@ def timeGaps(img_handle, frame_range=None, factor=TIME_GAP_FACTOR):
                     + traceback.format_exc())
         return []
 
-    # The gaps against the median interval, which the gaps hardly change
-    # The usual interval is the median of the positive steps: an input whose time stamps repeat (e.g. one stamp for
-    #   every pair of frames) has steps of zero, which are no gaps and would make the median zero
+    # The gaps against the usual interval, the median of the positive steps (which the gaps hardly change): an input
+    #   whose time stamps repeat (e.g. one stamp for every pair of frames) has steps of zero, which are no gaps and
+    #   would make the median zero
     steps = np.diff(times)
     positive = steps[steps > 0]
     if len(positive) == 0:
@@ -4371,6 +4372,7 @@ class GapPieces(object):
                 it.
         """
 
+        # The parts and the gaps, and the main detector
         self.detectors = detectors
         self.ranges = ranges
         self.gaps = gaps
@@ -4413,6 +4415,7 @@ class GapPieces(object):
         """ The light between two points in a frame (see MatchedFilterDetector.connectedLight), from the
             detector of the part which the frame belongs to, None outside of the parts which were searched. """
 
+        # The part whose searched blocks hold the frame
         for det in self.detectors:
             starts = getattr(det, 'block_starts', [])
             if starts and (starts[0] <= frame < det.block_ends[-1]):
@@ -5057,6 +5060,7 @@ def splitAtGaps(detections, gaps):
         [list] The detections, those across a gap cut into their pieces.
     """
 
+    # Without gaps there is nothing to cut
     if not gaps:
         return detections
 
@@ -5068,6 +5072,8 @@ def splitAtGaps(detections, gaps):
         if part[0] == part[-1]:
             out.append([rho, theta, cent])
             continue
+
+        # Otherwise one piece per part
         for k in np.unique(part):
             out.append([rho, theta, cent[part == k]])
 
@@ -5090,6 +5096,7 @@ def joinWithinGaps(detector, detections, gaps, connected=None):
         [list] The joined detections.
     """
 
+    # Without gaps, all detections are joined together
     if not gaps:
         return detector.joinDetections(detections, connected=connected)
 

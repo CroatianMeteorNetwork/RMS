@@ -251,6 +251,11 @@ class Config:
         # when in GStreamer Standalone mode
         self.camera_latency = 0.05
 
+        # The point of the exposure of every frame at which the frames of frame block (.fblk) files are timed:
+        #   'start', 'middle' or 'end'. The blocks record the time of the start of the integration; the position
+        #   of a moving object measured on a frame is its position at the middle of the exposure
+        self.frame_block_time = 'middle'
+
 
         self.report_dropped_frames = False
 
@@ -1579,6 +1584,17 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "camera_latency"):
         config.camera_latency = parser.getfloat(section, "camera_latency")
+
+    if parser.has_option(section, "frame_block_time"):
+        block_time = parser.get(section, "frame_block_time").strip().lower()
+
+        block_time_list = ['start', 'middle', 'end']
+        if block_time not in block_time_list:
+            log.warning('The frame block time {:s} is not one of {}. Defaulting to middle...'.format(
+                block_time, block_time_list))
+            block_time = 'middle'
+
+        config.frame_block_time = block_time
 
     if parser.has_option(section, "ff_format"):
         config.ff_format = parser.get(section, "ff_format")
