@@ -1190,6 +1190,13 @@ def test_duplicate_which_runs_into_the_object_removed():
     kept = removeDuplicateDetections(dets, 2.2, 6.6, min_coincident=DUPLICATE_COINCIDENT)
     assert (len(kept) == 1) and (kept[0][2] is obj)
 
+    # A shallow crossing: a shorter object which passes across it, close to it in a third of its frames in the
+    #   middle, is not a duplicate
+    shallow = obj[60:81].copy()
+    shallow[:, 1] += np.linspace(-6.0, 6.0, len(shallow))
+    assert len(removeDuplicateDetections([[0, 0, obj], [0, 0, shallow]], 2.2, 6.6,
+                                         min_coincident=DUPLICATE_COINCIDENT)) == 2
+
     # An object crossing it at another direction is close to it only in a few frames
     cross = np.c_[frames[30:70], 920 - 1.0*(frames[30:70] - 130), 73 + 2.1*(frames[30:70] - 130)]
     assert len(removeDuplicateDetections([[0, 0, obj], [0, 0, cross]], 2.2, 6.6,
@@ -2236,6 +2243,12 @@ def test_faint_ends_of_a_track_are_cut():
     long[:, 0] = np.arange(120)
     long[:, 5] = np.r_[rng.normal(1.0, 0.5, 100), rng.normal(25.0, 4.0, 20)]
     assert mfd.trimFaintEnds(long)[0, 0] >= 95
+
+    # Flashes every fifth frame, at both ends too, the shortest track a detection can be
+    short = np.zeros((21, 7))
+    short[:, 0] = np.arange(21)
+    short[:, 5] = np.where(np.arange(21)%5 == 0, 100.0, 1.0)
+    assert len(mfd.trimFaintEnds(short)) == 21
 
     # A single bright noise row at the end of a faint head doesn't keep the head
     cent[:, 5] = np.r_[rng.normal(1.0, 0.5, 25), rng.normal(25.0, 4.0, n - 25)]

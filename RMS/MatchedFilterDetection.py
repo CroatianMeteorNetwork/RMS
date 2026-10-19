@@ -3621,13 +3621,14 @@ def trimFaintEnds(cent, fraction=FAINT_END_FRACTION, window=FAINT_END_WINDOW):
 
     # A row is in a bright part of the track if more than FAINT_END_BRIGHT_ROWS of the rows of the window around
     #   it reach the level: a track faint between flashes (e.g. a tumbling object) is bright where it flashes, while
-    #   a single noise row is not (the windows shrink at the ends of the track)
+    #   a single noise row is not. The windows keep their length at the ends of the track (they are moved inside
+    #   it), so a single row there doesn't count more than elsewhere
     snr = np.asarray(cent[:, 5], dtype=np.float64)
     half = window//2
     level = fraction*np.percentile(snr, FAINT_END_PERCENTILE)
     above = snr >= level
-    bright = np.array([np.mean(above[max(i - half, 0):i + half + 1]) > FAINT_END_BRIGHT_ROWS
-                       for i in range(len(snr))])
+    starts = np.clip(np.arange(len(snr)) - half, 0, len(snr) - window)
+    bright = np.array([np.mean(above[k:k + window]) > FAINT_END_BRIGHT_ROWS for k in starts])
 
     # Without a bright part (e.g. rare flashes), nothing is an end of the track fainter than the rest of it
     if not bright.any():
