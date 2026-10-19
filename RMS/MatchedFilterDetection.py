@@ -103,6 +103,10 @@ FITS_EXTENSIONS = ('.fits',)
 # Tracks slower than this (px per frame) are measured again on a background estimated without them
 SLOW_SPEED = 0.1
 
+# A step between the times of neighbouring frames longer than this many median steps is a gap in the recording,
+#   where frames are missing (e.g. while the clock of the camera is synchronised)
+TIME_GAP_FACTOR = 1.5
+
 # Very bright objects spill their charge along their row and column before the pixels reach the saturation
 #   level: in a frame where the sum within SPILL_RADIUS (px) of the object is more than SPILL_RATIO times the sum
 #   within the normal aperture, the measurement counts as saturated and the wider sum is its intensity. Only
@@ -2504,7 +2508,7 @@ class MatchedFilterDetector(object):
         return detections
 
 
-    def apertureCorrection(self, star_list):
+    def apertureCorrection(self, star_list, first_frames=None):
         """ Factor which puts the intensities of the detections on the scale of the intensities of the stars
             (CALSTARS), from which the magnitudes are calibrated. The stars are measured with the aperture of
             the detections (within 3 PSF sigmas) on the mean of the block of frames, minus the sky in an
@@ -2515,6 +2519,11 @@ class MatchedFilterDetector(object):
         Arguments:
             star_list: [list] Stars of the chunks, [ff_name, [(y, x, intensity, amplitude, fwhm, background, snr,
                 saturated pixels), ...]] in the unbinned image, as from extractStarsFrameInterface.
+
+        Keyword arguments:
+            first_frames: [list] The first frame of every chunk of the stars, -1 where it is not known (see
+                chunkFirstFrames). After a gap in the recording the frames are not where the time and the frame
+                rate put them. None by default (from the time of the chunk and the frame rate).
 
         Return:
             (factor, n_stars): [tuple] The factor (None if there are fewer than MIN_APERTURE_STARS stars) and the
@@ -2538,16 +2547,21 @@ class MatchedFilterDetector(object):
         m = self.opts.edge_margin + r + 1
 
         ratios = []
-        for entry in star_list:
+        for i, entry in enumerate(star_list):
             ff_name, stars = entry[0], entry[1]
 
-            # The time of the chunk of the stars from the beginning of the input, and the block of frames which
-            #   contains it (only the frames which were searched)
-            try:
-                dt = (filenameToDatetime(ff_name) - t_begin.replace(tzinfo=None)).total_seconds()
-            except Exception:
-                continue
-            frame = dt*self.img_handle.fps
+            # The first frame of the chunk of the stars (from its time from the beginning of the input if not
+            #   given), and the block of frames which contains it (only the frames which were searched)
+            if first_frames is not None:
+                frame = first_frames[i]
+                if frame < 0:
+                    continue
+            else:
+                try:
+                    dt = (filenameToDatetime(ff_name) - t_begin.replace(tzinfo=None)).total_seconds()
+                except Exception:
+                    continue
+                frame = dt*self.img_handle.fps
             if not (self.frame_first <= frame < self.frame_end):
                 continue
             k = int(np.clip(np.searchsorted(starts, frame, side='right') - 1, 0, len(starts) - 1))
@@ -4188,6 +4202,51 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
     if config.mf_threads > 0:
         numba.set_num_threads(min(config.mf_threads, numba.config.NUMBA_NUM_THREADS))
 
+    # The search follows the objects from frame to frame at a constant interval, so where frames are missing in
+    #   the recording (a gap in the times of the frames) the parts before and after the gap are searched
+    #   separately, as separate inputs would be
+    first, end = frame_range if (frame_range is not None) else (0, img_handle.total_frames)
+    gaps = timeGaps(img_handle, frame_range=(first, end))
+    if gaps:
+        detections, detector = detectAcrossGaps(img_handle, config, gaps, (first, end), mask=mask, dark=dark,
+                                                flat_struct=flat_struct, star_list=star_list, platepar=platepar,
+                                                reference_dir=reference_dir, input_name=input_name,
+                                                whole_input=(frame_range is None),
+                                                persistence_prior=persistence_prior, sky_range=sky_range,
+                                                persistence_until=persistence_until, max_tracks=max_tracks,
+                                                persistence_prior_frames=persistence_prior_frames,
+                                                track_deviation=track_deviation)
+
+        return (detections, detector) if return_detector else detections
+
+    # Otherwise the whole range is searched at once
+    detections, detector = detectRange(img_handle, config, mask=mask, dark=dark, flat_struct=flat_struct,
+                                       star_list=star_list, platepar=platepar, reference_dir=reference_dir,
+                                       input_name=input_name, frame_range=frame_range,
+                                       persistence_prior=persistence_prior, sky_range=sky_range,
+                                       persistence_until=persistence_until, max_tracks=max_tracks,
+                                       persistence_prior_frames=persistence_prior_frames,
+                                       track_deviation=track_deviation, update_sky=(frame_range is None))
+
+    return (detections, detector) if return_detector else detections
+
+
+
+def detectRange(img_handle, config, mask=None, dark=None, flat_struct=None, star_list=None, platepar=None,
+                reference_dir=None, input_name='', frame_range=None, persistence_prior=None, sky_range=None,
+                persistence_until=None, max_tracks=None, persistence_prior_frames=0, track_deviation=True,
+                update_sky=True, aperture=True):
+    """ Detect and measure the objects in a range of frames without gaps in the recording, with the calibration
+        already binned (see detectMatchedFilter, which describes the arguments).
+
+    Keyword arguments:
+        update_sky: [bool] Update the sky reference and the log of the conditions with the stars. True by default.
+        aperture: [bool] Put the intensities on the scale of the stars (see apertureCorrection). True by default.
+
+    Return:
+        (detections, detector): [tuple] Detections as [rho, theta, centroids], and the detector after its run.
+    """
+
     # Detect and measure the objects
     detector = MatchedFilterDetector(img_handle, config, mask=mask, dark=dark, flat_struct=flat_struct,
                                      frame_range=frame_range)
@@ -4200,7 +4259,7 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
         detector.opts.track_deviation_fwhm = 0.0
     detector.sky_map = skyQuality(img_handle, config, star_list, platepar, reference_dir=reference_dir,
                                   input_name=input_name, frame_range=(sky_range or frame_range),
-                                  update=(frame_range is None))
+                                  update=update_sky)
     detections = detector.run()
 
     # The measurements on clouded sky were removed in the run
@@ -4210,7 +4269,7 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
 
     # The intensities on the scale of the stars of the photometric calibration. A factor far from 1 means the
     #   stars were not measured properly (e.g. clouds), and the intensities are then left as they are
-    if star_list and detections:
+    if aperture and star_list and detections:
         factor, n_stars = detector.apertureCorrection(star_list)
         if (factor is not None) and (0.5 <= factor <= 2.0):
             for det in detections:
@@ -4222,7 +4281,285 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
             log.warning('Matched filter: no aperture correction of the intensities ({:d} stars, factor {})'.format(
                 n_stars, factor))
 
-    return (detections, detector) if return_detector else detections
+    return detections, detector
+
+
+
+def timeGaps(img_handle, frame_range=None, factor=TIME_GAP_FACTOR):
+    """ The gaps in the recording of an input: where the time between two neighbouring frames is longer than
+        factor times the usual interval, frames are missing (e.g. while the clock of the camera is synchronised).
+        Only an input with the time of every frame shows them; the times are those the input already holds after
+        its frames were read (the star extraction reads them all), so nothing is read again.
+
+    Arguments:
+        img_handle: [FrameInterface] Frame-based input.
+
+    Keyword arguments:
+        frame_range: [tuple] (first frame, end frame) of the frames. None by default (the whole input).
+        factor: [float] Interval, in median intervals of the frames, above which there is a gap.
+            TIME_GAP_FACTOR by default.
+
+    Return:
+        [list] The first frame after every gap, in order, empty without gaps.
+    """
+
+    # The inputs without the time of every frame have their frames at a constant interval
+    if (not hasattr(img_handle, 'hasAccurateTime')) or (not img_handle.hasAccurateTime()):
+        return []
+
+    # Too few frames to tell the usual interval from a gap
+    first, end = frame_range if (frame_range is not None) else (0, img_handle.total_frames)
+    if end - first < 3:
+        return []
+
+    try:
+
+        # The times of the frames (s), from the table of the frame times of the input if it has one
+        table = getattr(img_handle, 'frame_unix_times', None)
+        if (table is not None) and (len(table) >= end):
+            times = np.asarray(table[first:end], dtype=np.float64)
+
+        # Otherwise from the time of every frame, relative to the first one
+        else:
+            t0 = None
+            times = []
+            for i in range(first, end):
+                t = img_handle.currentFrameTime(frame_no=i, dt_obj=True)
+                if t.tzinfo is not None:
+                    t = t.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+                if t0 is None:
+                    t0 = t
+                times.append((t - t0).total_seconds())
+            times = np.array(times)
+
+    except Exception:
+        log.warning('Matched filter: the times of the frames could not be read, no gaps are looked for:\n'
+                    + traceback.format_exc())
+        return []
+
+    # The gaps against the usual interval, the median of the positive steps (which the gaps hardly change): an input
+    #   whose time stamps repeat (e.g. one stamp for every pair of frames) has steps of zero, which are no gaps and
+    #   would make the median zero
+    steps = np.diff(times)
+    positive = steps[steps > 0]
+    if len(positive) == 0:
+        return []
+    step = np.median(positive)
+
+    return [first + int(i) + 1 for i in np.nonzero(steps > factor*step)[0]]
+
+
+
+class GapPieces(object):
+    def __init__(self, detectors, ranges, gaps, gap_seconds):
+        """ The matched filter of an input (or of a segment of it) whose recording has gaps: the parts between
+            the gaps are searched by their own detectors, and this stands for the detector of the whole range
+            (its summary, the light between points, the persistence counts carried on). Everything else is that
+            of the main detector: the first one with a measured PSF.
+
+        Arguments:
+            detectors: [list] The detector of every part, after its run.
+            ranges: [list] (first frame, end frame) of every part.
+            gaps: [list] The first frame after every gap.
+            gap_seconds: [list] The length of every gap (s), the time from the frame before it to the frame after
+                it.
+        """
+
+        # The parts and the gaps, and the main detector
+        self.detectors = detectors
+        self.ranges = ranges
+        self.gaps = gaps
+        self.gap_seconds = gap_seconds
+        self.primary = next((det for det in detectors if det.psf_sigma is not None), detectors[0])
+
+        # The counts and the time of the steps of the whole range, from all parts
+        self.timing = collections.defaultdict(float)
+        for det in detectors:
+            for key, value in det.timing.items():
+                self.timing[key] += value
+        self.cloud_rows_removed = sum(det.cloud_rows_removed for det in detectors)
+        self.cloud_removed_row_frames = [f for det in detectors for f in det.cloud_removed_row_frames]
+        self.cloud_detections_removed = sum(det.cloud_detections_removed for det in detectors)
+        self.cloud_removed_frames = [f for det in detectors for f in det.cloud_removed_frames]
+        self.tracks_dropped = sum(det.tracks_dropped for det in detectors)
+        self.tracks_measured = sum(det.tracks_measured for det in detectors)
+        self.significances = [sig for det in detectors for sig in det.significances]
+        self.deviation_rejected = sum(det.deviation_rejected for det in detectors)
+        self.photometry = {key: value for det in detectors for key, value in det.photometry.items()}
+
+        # The blocks of all parts (a part too short to be searched has none)
+        self.block_starts = [f for det in detectors for f in getattr(det, 'block_starts', [])]
+        self.block_ends = [f for det in detectors for f in getattr(det, 'block_ends', [])]
+
+        # Set after the parts are searched (see detectAcrossGaps)
+        self.aperture_correction = None
+        self.sky_map = self.primary.sky_map
+        self.persistence_carry, self.persistence_carry_frames = None, 0
+        self.persistence_full, self.persistence_full_frames = None, 0
+
+
+    def __getattr__(self, name):
+        """ Everything else is that of the main detector. """
+
+        return getattr(self.__dict__['primary'], name)
+
+
+    def connectedLight(self, frame, x1, y1, x2, y2):
+        """ The light between two points in a frame (see MatchedFilterDetector.connectedLight), from the
+            detector of the part which the frame belongs to, None outside of the parts which were searched. """
+
+        # The part whose searched blocks hold the frame
+        for det in self.detectors:
+            starts = getattr(det, 'block_starts', [])
+            if starts and (starts[0] <= frame < det.block_ends[-1]):
+                return det.connectedLight(frame, x1, y1, x2, y2)
+
+        return None
+
+
+    def summary(self):
+        """ Summary of the whole range (see MatchedFilterDetector.summary), from the summaries of its parts, with
+            the gaps. """
+
+        # The summary of the main detector, with the counts, the tracks and the time of all parts, and the gaps
+        summary = self.primary.summary()
+        tracks = [track for det in self.detectors for track in det.summary()['tracks']]
+        summary.update({
+            'aperture_correction': self.aperture_correction,
+            'clear_sky_fraction': (round(float(np.mean(self.sky_map.clear)), 3) if self.sky_map is not None
+                                   else None),
+            'cloud_frames_removed': int(self.cloud_rows_removed),
+            'cloud_detections_removed': int(self.cloud_detections_removed),
+            'cloud_removed_utc': self.primary.frameTimes(sorted(self.cloud_removed_frames)),
+            'tracks_dropped': int(self.tracks_dropped),
+            'gpu': any(bool(det.opts.use_gpu) for det in self.detectors),
+            'timing_s': {k: round(v, 2) for k, v in self.timing.items()},
+            'tracks': tracks,
+            'linear_structure_rejected': sum(int(track.get('linear_structure', False)) for track in tracks),
+            'deviation_rejected': int(self.deviation_rejected),
+            'time_gaps': [{'frame': int(f), 'gap_s': round(float(g), 3)}
+                          for f, g in zip(self.gaps, self.gap_seconds)],
+        })
+
+        return summary
+
+
+
+def detectAcrossGaps(img_handle, config, gaps, frame_range, mask=None, dark=None, flat_struct=None,
+                     star_list=None, platepar=None, reference_dir=None, input_name='', whole_input=True,
+                     persistence_prior=None, sky_range=None, persistence_until=None, max_tracks=None,
+                     persistence_prior_frames=0, track_deviation=True):
+    """ Detect and measure the objects in a range of frames with gaps in the recording: every part between the
+        gaps is searched as an input of its own (a track is not followed across a gap, as the object moved on while
+        no frames were recorded; an object seen on both sides is two detections, as in two files), with the
+        persistent pixels counted over all parts and the sky quality from the stars of the whole range. The
+        calibration is already binned (see detectMatchedFilter, which describes the other arguments).
+
+    Arguments:
+        img_handle: [FrameInterface] Frame-based input.
+        config: [Config] Configuration object.
+        gaps: [list] The first frame after every gap (see timeGaps).
+        frame_range: [tuple] (first frame, end frame) of the range which is searched.
+
+    Keyword arguments:
+        whole_input: [bool] The range is the whole input: the sky reference and the log of the conditions are
+            updated with it, and the persistent pixels are judged over it. False for a segment of an input (see
+            detectMatchedFilterSegments), which does both for the whole input. True by default.
+
+    Return:
+        (detections, detector): [tuple] Detections as [rho, theta, centroids], and the GapPieces of the range.
+    """
+
+    # The parts between the gaps
+    first, end = frame_range
+    bounds = [first] + list(gaps) + [end]
+    ranges = list(zip(bounds[:-1], bounds[1:]))
+
+    # The length of every gap, from the frame before it to the frame after it
+    gap_seconds = []
+    for g in gaps:
+        t1 = img_handle.currentFrameTime(frame_no=g - 1, dt_obj=True)
+        t2 = img_handle.currentFrameTime(frame_no=g, dt_obj=True)
+        gap_seconds.append((t2 - t1).total_seconds())
+    log.info('Matched filter: {:d} gaps in the recording ({:s} s), the {:d} parts between them are searched '
+             'separately'.format(len(gaps), ', '.join('{:.2f}'.format(g) for g in gap_seconds), len(ranges)))
+
+    # Every part is searched with the persistence counts of the parts before it, and the counts which reach the
+    #   first frame of the next segment of the input are carried to it (see MatchedFilterDetector.persistence_until)
+    prior, prior_frames = (persistence_prior or {}), persistence_prior_frames
+    carry = None
+    detectors, part_detections = [], []
+    for a, b in ranges:
+
+        # The counts up to the next segment, when it begins at or before this part
+        if (persistence_until is not None) and (carry is None) and (persistence_until <= a):
+            carry = (prior, prior_frames)
+        until = persistence_until if (persistence_until is not None) and (a < persistence_until < b) else None
+
+        detections, detector = detectRange(img_handle, config, mask=mask, dark=dark, flat_struct=flat_struct,
+                                           star_list=star_list, platepar=platepar, reference_dir=reference_dir,
+                                           input_name=input_name, frame_range=(a, b), persistence_prior=prior,
+                                           sky_range=(sky_range or frame_range), persistence_until=until,
+                                           max_tracks=max_tracks, persistence_prior_frames=prior_frames,
+                                           track_deviation=track_deviation, update_sky=False, aperture=False)
+        log.info('Matched filter: part {:d}-{:d}: {:d} detections'.format(a, b, len(detections)))
+
+        # The counts carried to the next segment from the part where it begins, and the counts so far to the
+        #   next part (a part too short to be searched has none)
+        if until is not None:
+            carry = ((detector.persistence_carry, detector.persistence_carry_frames)
+                     if detector.persistence_carry is not None else (prior, prior_frames))
+        if detector.persistence_full is not None:
+            prior, prior_frames = detector.persistence_full, detector.persistence_full_frames
+        detectors.append(detector)
+        part_detections.append(detections)
+
+    # The parts stand for one detector of the range, with the counts carried to the next segment (all of them
+    #   if it begins after the range) and the counts of the whole range
+    run = GapPieces(detectors, ranges, gaps, gap_seconds)
+    run.persistence_carry, run.persistence_carry_frames = carry if carry is not None else (prior, prior_frames)
+    run.persistence_full, run.persistence_full_frames = prior, prior_frames
+
+    # The detections of all parts, which don't overlap in time
+    detections = [det for dets in part_detections for det in dets]
+
+    # The intensities on the scale of the stars, by the factor of every part from the stars of its chunks (at the
+    #   frames of their times, see chunkFirstFrames). A part without such stars takes the median factor of the
+    #   others
+    if star_list and detections:
+        first_frames = chunkFirstFrames(star_list, img_handle) if hasattr(img_handle, 'chunk_frames') else None
+        factors = []
+        for detector, dets in zip(detectors, part_detections):
+            factor = None
+            if dets and getattr(detector, 'block_starts', None):
+                factor, _ = detector.apertureCorrection(star_list, first_frames=first_frames)
+            factors.append(factor if (factor is not None) and (0.5 <= factor <= 2.0) else None)
+        known = [f for f in factors if f is not None]
+        if known:
+            for factor, dets in zip(factors, part_detections):
+                for det in dets:
+                    det[2][:, 3] *= factor if (factor is not None) else np.median(known)
+            run.aperture_correction = round(float(np.median(known)), 4)
+            log.info('Matched filter: intensities scaled by {:s} to the scale of the stars'.format(
+                ', '.join('{:.3f}'.format(f) if f is not None else 'the median' for f in factors)))
+        else:
+            log.warning('Matched filter: no aperture correction of the intensities (no part has enough stars)')
+
+    # For the whole input, the detections mostly on pixels persistent over all parts are removed (each part only
+    #   removed the hits on pixels persistent in the parts so far), and the sky reference and the log of the
+    #   conditions are updated once
+    if whole_input:
+        n_before = len(detections)
+        detections = removePersistentDetections(detections, prior, config.mf_persistence, run.det_bin)
+        if len(detections) < n_before:
+            log.info('Matched filter: {:d} detections on persistent pixels of the whole input removed'.format(
+                n_before - len(detections)))
+        sky_map = skyQuality(img_handle, config, star_list, platepar, reference_dir=reference_dir,
+                             input_name=input_name)
+        if sky_map is not None:
+            run.sky_map = sky_map
+
+    return detections, run
 
 
 
@@ -4703,6 +5040,68 @@ class SegmentedRun(object):
 
 
 
+def splitAtGaps(detections, gaps):
+    """ Cut the detections at the gaps in the recording, so that no detection runs across one (see
+        detectAcrossGaps). The pieces which are no detections any more are removed later (see
+        removeInvalidDetections).
+
+    Arguments:
+        detections: [list] Detections as [rho, theta, centroids], centroids rows [frame, x, y, ...].
+        gaps: [list] The first frame after every gap.
+
+    Return:
+        [list] The detections, those across a gap cut into their pieces.
+    """
+
+    # Without gaps there is nothing to cut
+    if not gaps:
+        return detections
+
+    out = []
+    for rho, theta, cent in detections:
+
+        # The part between the gaps which every row belongs to; a detection within one part is kept as it is
+        part = np.searchsorted(gaps, cent[:, 0], side='right')
+        if part[0] == part[-1]:
+            out.append([rho, theta, cent])
+            continue
+
+        # Otherwise one piece per part
+        for k in np.unique(part):
+            out.append([rho, theta, cent[part == k]])
+
+    return out
+
+
+def joinWithinGaps(detector, detections, gaps, connected=None):
+    """ Join the pieces of tracks and remove the duplicates (see MatchedFilterDetector.joinDetections) within every
+        part of the recording between its gaps, as a track is not followed across a gap.
+
+    Arguments:
+        detector: [MatchedFilterDetector] The detector whose limits are used.
+        detections: [list] Detections as [rho, theta, centroids], none across a gap (see splitAtGaps).
+        gaps: [list] The first frame after every gap.
+
+    Keyword arguments:
+        connected: [function] The light between two points in a frame (see joinDetections). None by default.
+
+    Return:
+        [list] The joined detections.
+    """
+
+    # Without gaps, all detections are joined together
+    if not gaps:
+        return detector.joinDetections(detections, connected=connected)
+
+    # The detections of every part, by the part of their first row
+    parts = collections.defaultdict(list)
+    for det in detections:
+        parts[int(np.searchsorted(gaps, det[2][0, 0], side='right'))].append(det)
+
+    return [det for k in sorted(parts) for det in detector.joinDetections(parts[k], connected=connected)]
+
+
+
 def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, dark=None, flat_struct=None,
                                 platepar=None, reference_dir=None, input_name='', chunk_callback=None):
     """ Extract the stars and run the matched filter on an input which is read only once, in segments held in
@@ -4829,7 +5228,12 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
         tolerance = 3*2.355*searched[0].psf_sigma*searched[0].det_bin
         detections = stitchSegments(segment_detections, cuts, overlaps, searched[0], tolerance,
                                     searched=[det is not None for det in detectors])
-        detections = searched[0].joinDetections(detections, connected=connectedOver(detectors))
+
+        # A track is not followed across a gap in the recording (see detectAcrossGaps): the detections stitched over
+        #   a gap are cut there, and the pieces are joined only within the parts between the gaps
+        gaps = sorted(set(g for det in detectors if det is not None for g in getattr(det, 'gaps', [])))
+        detections = splitAtGaps(detections, gaps)
+        detections = joinWithinGaps(searched[0], detections, gaps, connected=connectedOver(detectors))
 
         # The pieces cut at the middle of an overlap and not joined again may be no detections any more
         detections = removeInvalidDetections(detections, searched[0])
