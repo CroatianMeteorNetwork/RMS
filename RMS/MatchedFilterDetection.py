@@ -3606,9 +3606,9 @@ def trimFaintEnds(cent, fraction=FAINT_END_FRACTION, window=FAINT_END_WINDOW):
     if len(cent) < 2*window:
         return cent
 
-    # The running median of the SNR of the rows, and the level below which an end of the track is cut
+    # The running median of the SNR of the rows (over windows which shrink at the ends of the track, so a single
+    #   row there doesn't decide), and the level below which an end of the track is cut
     snr = np.asarray(cent[:, 5], dtype=np.float64)
-    # (the windows shrink at the ends of the track, so that a single row there doesn't decide)
     half = window//2
     running = np.array([np.median(snr[max(i - half, 0):i + half + 1]) for i in range(len(snr))])
     level = fraction*np.percentile(snr, 75)
