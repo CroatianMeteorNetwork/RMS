@@ -1050,6 +1050,7 @@ def test_track_left_without_motion_after_the_faint_ends_are_cut_is_dropped(confi
     # A faint piece of 80 frames, then the bright object for 30 frames, moving less than a detection has to
     v = 0.4*det.minDisplacement()/30
     def piece(f0, n, snr):
+        """ Rows of n frames from frame f0 on the line of the track, at the given SNR. """
         cent = np.zeros((n, 7))
         cent[:, 0] = f0 + np.arange(n)
         cent[:, 1] = 40.0 + v*cent[:, 0]

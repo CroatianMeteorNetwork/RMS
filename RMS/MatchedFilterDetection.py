@@ -2381,6 +2381,8 @@ class MatchedFilterDetector(object):
             if (cut is not None) and (id(det[2]) in cut):
                 trimmed.append(det)
                 continue
+
+            # Cut, and kept if what is left is still a detection
             cent = trimFaintEnds(det[2])
             if len(cent) == len(det[2]):
                 trimmed.append(det)

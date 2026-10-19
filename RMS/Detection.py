@@ -3093,6 +3093,8 @@ def removeDuplicateDetections(meteor_detections, max_dist, max_along_dist, x_col
             #   its beginning to where it runs off): the close frames are at one end of the shared frames (two
             #   objects which cross are close in the middle of them)
             if min_coincident is not None:
+
+                # The close frames from the beginning and to the end of the shared frames, without a break
                 close = np.hypot(diff_x, diff_y) < max_dist
                 lead = len(close) if close.all() else int(np.argmin(close))
                 trail = len(close) if close.all() else int(np.argmin(close[::-1]))
