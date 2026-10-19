@@ -422,6 +422,27 @@ def test_dark_and_flat_applied_only_if_given(process_file, dark_given, flat_give
         assert seen['config'].dark_file == os.path.abspath('bias.png')
 
 
+@pytest.mark.parametrize('continuous', [False, True])
+def test_file_processed_again_has_no_done_flag_with_continuous_detection(process_file, tmp_path, continuous):
+    """ With continuous detection, a file processed again has no done flag and no join record of the earlier
+        processing until it is done; without it they are kept. """
+
+    run, config, seen = process_file
+    config.monitor_continuous = continuous
+
+    # Results of an earlier processing of the file
+    results_dir = mon.resultsDirPath(str(tmp_path/'out'), _ProcessHandle.beginning_datetime, 'dummy')
+    os.makedirs(results_dir)
+    for name in ('done.flag', 'continuous.json'):
+        open(os.path.join(results_dir, name), 'w').close()
+
+    # The monitor joins the results of continuous detection once they have a done flag: the old one is removed
+    #   while the file is processed again
+    run()
+    for name in ('done.flag', 'continuous.json'):
+        assert os.path.isfile(os.path.join(results_dir, name)) != continuous
+
+
 def test_given_dark_which_cannot_be_loaded_fails(process_file):
 
     run, config, seen = process_file
@@ -1619,3 +1640,24 @@ def test_star_catalog_preloaded_only_when_the_workers_use_it(tmp_path, monkeypat
 
     mpfi.preloadStarCatalog(str(tmp_path/'.config'), platepar_path)
     assert len(calls) == expected
+
+
+def test_saved_chunk_images_include_the_trailing_frames(config_path):
+    """ The image pairs of an input are its whole chunks, and the frames after them if they make at least half a
+        chunk, named as the chunk image saver names them. """
+
+    config = cr.parse(config_path)
+
+    class _Handle(object):
+        """ An input of n frames at 10 fps, in chunks of 128 frames. """
+        chunk_frames = 128
+        def __init__(self, n):
+            self.total_frames = n
+            self.total_fr_chunks = n//128
+        def currentFrameTime(self, frame_no=None, dt_obj=False):
+            return datetime.datetime(2026, 10, 18, 1, 15, 28) + datetime.timedelta(seconds=frame_no/10.0)
+
+    assert [n for _, n in mon.savedChunkImages(config, _Handle(330))] == \
+        [mon.chunkImageName(config, _Handle(330), f) for f in (0, 128, 256)]
+    assert len(mon.savedChunkImages(config, _Handle(300))) == 2
+
