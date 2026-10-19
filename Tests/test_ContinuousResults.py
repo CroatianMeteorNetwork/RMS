@@ -210,6 +210,7 @@ def test_failed_join_is_tried_again(tmp_path, config):
     # The first recalibration fails
     calls = []
     def recalibrate(d):
+        """ Records the recalibrations; the first one fails. """
         calls.append(d)
         if len(calls) == 1:
             raise RuntimeError('recalibration failed')
@@ -243,6 +244,7 @@ def test_sky_quality_of_a_chained_input_from_its_own_chunks(config, monkeypatch)
     # The arguments of the sky quality map
     seen = {}
     class _Map(object):
+        """ Records the arguments of the sky quality map. """
         def __init__(self, *args, **kwargs):
             seen.update(kwargs)
         def summary(self):

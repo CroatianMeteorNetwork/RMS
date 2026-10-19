@@ -424,6 +424,8 @@ def test_dark_and_flat_applied_only_if_given(process_file, dark_given, flat_give
 
 @pytest.mark.parametrize('continuous', [False, True])
 def test_file_processed_again_has_no_done_flag_with_continuous_detection(process_file, tmp_path, continuous):
+    """ With continuous detection, a file processed again has no done flag and no join record of the earlier
+        processing until it is done; without it they are kept. """
 
     run, config, seen = process_file
     config.monitor_continuous = continuous
@@ -1647,6 +1649,7 @@ def test_saved_chunk_images_include_the_trailing_frames(config_path):
     config = cr.parse(config_path)
 
     class _Handle(object):
+        """ An input of n frames at 10 fps, in chunks of 128 frames. """
         chunk_frames = 128
         def __init__(self, n):
             self.total_frames = n
