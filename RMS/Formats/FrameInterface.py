@@ -1646,7 +1646,8 @@ class InputTypeFrameBlock(InputType):
         #   integration (see RMS.Formats.FrameBlock), and the position of a moving object measured on a frame is
         #   its position at the middle of the exposure. The input begins at the first frame
         exposure_s = np.asarray(self.reader.table['exposure_us'], dtype=np.float64)/1e6
-        self.frame_unix_times = np.asarray(self.reader.times, dtype=np.float64) + exposure_s/2.0
+        self.frame_start_unix_times = np.asarray(self.reader.times, dtype=np.float64)
+        self.frame_unix_times = self.frame_start_unix_times + exposure_s/2.0
         self.beginning_datetime = unixTime2Date(*self._unixTimeParts(self.frame_unix_times[0]), dt_obj=True)
 
         # Start at the first frame of the first chunk
@@ -1666,8 +1667,9 @@ class InputTypeFrameBlock(InputType):
         self.frame_chunk_unix_times = []
         self.cache = {}
 
-        # The frame rate from the frame times, from the config if it can't be measured
-        self.fps = estimateFPS(list(self.frame_unix_times))
+        # The frame rate from the times of the starts of the frames (the middles move with the exposure if it
+        #   changes), from the config if it can't be measured
+        self.fps = estimateFPS(list(self.frame_start_unix_times))
         if self.fps is None:
             self.fps = self.config.fps
 

@@ -681,3 +681,26 @@ def test_block_frame_times_are_the_middle_of_the_exposure(tmp_path):
         unix = (t - datetime.datetime(1970, 1, 1)).total_seconds() if t.tzinfo is None else t.timestamp()
         assert unix == pytest.approx(t0/1e9 + i*0.1 + 0.0475, abs=2e-6)
     assert handle.fps == pytest.approx(10.0, rel=1e-6)
+
+
+
+def test_block_fps_from_the_starts_of_the_frames_with_changing_exposures(tmp_path):
+    """ The frame rate of a block comes from the starts of the frames: with exposures that change from frame to
+        frame the middles of the exposures are not evenly spaced, the starts are. """
+
+    import RMS.ConfigReader as cr
+    from RMS.Formats.FrameInterface import detectInputTypeFile
+
+    config = cr.parse(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.config'))
+    config.width, config.height = 16, 10
+    config.detection_binning_factor = 1
+
+    # Frames started every 0.1 s, exposed 0 and 80 ms in turn (middles 140/60 ms apart)
+    path = str(tmp_path/'TEST01_20261018_011528_000000.fblk')
+    t0 = 1792199728000000000
+    with fb.FrameBlockWriter(path, 16, 10, 20) as writer:
+        for i in range(20):
+            writer.write(np.zeros((10, 16), np.uint16), t0 + i*100000000, exposure_us=80000*(i%2))
+
+    handle = detectInputTypeFile(path, config, detection=True)
+    assert handle.fps == pytest.approx(10.0, rel=1e-6)
