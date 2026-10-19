@@ -2363,15 +2363,22 @@ class MatchedFilterDetector(object):
         #   in the unbinned image of the centroids
         fwhm = 2.355*self.psf_sigma
         max_gap = 4*max(self.opts.run_frames + [self.opts.slow_run_frames])
+        # The tracks before the joining (held, so the tracks which are not joined keep their identity)
+        before = list(detections)
+        unchanged = {id(det[2]) for det in before}
         detections = joinContinuousDetections(detections, max_gap, 15*fwhm, 2*fwhm, self.height, self.width,
                                               bin_factor=self.det_bin)
 
         # A joined track can end in a piece much fainter than the rest of it (a piece built from the sums of other
         #   velocities through a bright object joins the object's track): its faint ends are cut (a track left too
-        #   short or moving too little to be a detection is dropped), before the duplicates are removed, as the rest of such a track is
-        #   often a second detection of the object
+        #   short or moving too little to be a detection is dropped), before the duplicates are removed, as the rest
+        #   of such a track is often a second detection of the object. Only the joined tracks are cut here, the
+        #   others were cut when they were measured (the cut is not repeated, as its level follows the track)
         trimmed = []
         for det in detections:
+            if id(det[2]) in unchanged:
+                trimmed.append(det)
+                continue
             cent = trimFaintEnds(det[2])
             if len(cent) == len(det[2]):
                 trimmed.append(det)

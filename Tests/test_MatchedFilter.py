@@ -1041,23 +1041,46 @@ def test_extent_line_fast_object_not_a_line():
 
 
 def test_track_left_without_motion_after_the_faint_ends_are_cut_is_dropped(config):
-    """ A track which moves enough only thanks to its faint head (a piece over empty sky joined to a nearly
-        stationary object) is not a detection once the head is cut. """
+    """ A joined track which moves enough only thanks to its faint head (a piece over empty sky joined to an
+        object which barely moves) is not a detection once the head is cut. """
+
+    det = MatchedFilterDetector(_SynthHandle([], total_frames=256), config)
+    det.psf_sigma = PSF_SIGMA
+
+    # A faint piece of 80 frames, then the bright object for 30 frames, moving less than a detection has to
+    v = 0.4*det.minDisplacement()/30
+    def piece(f0, n, snr):
+        cent = np.zeros((n, 7))
+        cent[:, 0] = f0 + np.arange(n)
+        cent[:, 1] = 40.0 + v*cent[:, 0]
+        cent[:, 2] = 60.0
+        cent[:, 5] = snr
+        return cent
+    head, obj = piece(0, 80, 1.0), piece(80, 30, 30.0)
+    assert len(det.joinDetections([[0.0, 0.0, obj]], connected=lambda *args: None)) == 1
+
+    assert det.joinDetections([[0.0, 0.0, head], [0.0, 0.0, obj]], connected=lambda *args: None) == []
+
+
+def test_measured_track_is_not_cut_again_when_not_joined(config):
+    """ The faint ends of a track are cut once: a track which brightens steadily, cut when it was measured, is not
+        cut again by the joining of the tracks (the level of the cut follows the track, so a second cut would
+        shorten it further). """
 
     det = MatchedFilterDetector(_SynthHandle([], total_frames=128), config)
     det.psf_sigma = PSF_SIGMA
 
-    # A faint head moving 60 px, then the bright part which barely moves
     n = 40
-    cent = np.zeros((2*n, 7))
-    cent[:, 0] = np.arange(2*n)
-    cent[:n, 1] = 40.0 + 1.5*np.arange(n)
-    cent[n:, 1] = 100.0 + 0.01*np.arange(n)
+    cent = np.zeros((n, 7))
+    cent[:, 0] = np.arange(n)
+    cent[:, 1] = 20.0 + 2.0*np.arange(n)
     cent[:, 2] = 60.0
-    cent[:, 5] = np.r_[np.full(n, 1.0), np.full(n, 30.0)]
-    assert np.hypot(*(cent[n, 1:3] - cent[-1, 1:3])) < det.minDisplacement()
+    cent[:, 5] = np.geomspace(1.0, 1e4, n)
+    once = mfd.trimFaintEnds(cent)
+    assert len(mfd.trimFaintEnds(once)) < len(once)
 
-    assert det.joinDetections([[0.0, 0.0, cent]], connected=lambda *args: None) == []
+    joined = det.joinDetections([[0.0, 0.0, once]], connected=lambda *args: None)
+    assert (len(joined) == 1) and (len(joined[0][2]) == len(once))
 
 
 def test_linear_structure_flags_per_track(config):
