@@ -1642,8 +1642,14 @@ class InputTypeFrameBlock(InputType):
         self.total_frames = self.reader.n_frames
         if self.total_frames == 0:
             raise ValueError('{} has no complete frames'.format(file_path))
-        # Every frame has its own time; the input begins at the first one
-        self.frame_unix_times = self.reader.times
+        # Every frame has its own time, at the point of its exposure given by frame_block_time (the middle by
+        #   default): the block keeps the time of the start of the integration (see RMS.Formats.FrameBlock), and
+        #   the position of a moving object measured on a frame is its position at the middle of the exposure. The
+        #   input begins at the first frame
+        exposure_s = np.asarray(self.reader.table['exposure_us'], dtype=np.float64)/1e6
+        self.frame_start_unix_times = np.asarray(self.reader.times, dtype=np.float64)
+        exposure_fraction = {'start': 0.0, 'middle': 0.5, 'end': 1.0}[getattr(config, 'frame_block_time', 'middle')]
+        self.frame_unix_times = self.frame_start_unix_times + exposure_fraction*exposure_s
         self.beginning_datetime = unixTime2Date(*self._unixTimeParts(self.frame_unix_times[0]), dt_obj=True)
 
         # Start at the first frame of the first chunk
@@ -1663,8 +1669,9 @@ class InputTypeFrameBlock(InputType):
         self.frame_chunk_unix_times = []
         self.cache = {}
 
-        # The frame rate from the frame times, from the config if it can't be measured
-        self.fps = estimateFPS(list(self.frame_unix_times))
+        # The frame rate from the times of the starts of the frames (the middles move with the exposure if it
+        #   changes), from the config if it can't be measured
+        self.fps = estimateFPS(list(self.frame_start_unix_times))
         if self.fps is None:
             self.fps = self.config.fps
 
@@ -1786,7 +1793,9 @@ class InputTypeFrameBlock(InputType):
         return int(self.reader.table['counter'][self.current_frame])
 
     def currentFrameTime(self, frame_no=None, dt_obj=False):
-        """ The time of the start of the integration of a frame (the current one by default). """
+        """ The time of a frame (the current one by default), at the point of its exposure given by
+            frame_block_time (the middle by default).
+        """
 
         # The time of the frame from the frame table
         i = self.current_frame if frame_no is None else frame_no

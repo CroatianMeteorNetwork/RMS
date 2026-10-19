@@ -547,19 +547,43 @@ def test_saturated_reliable_stars_are_seen(monkeypatch, tmp_path):
 
 
 def test_short_input(tmp_path):
-    """ An input with fewer chunks than needed for the reference of its stars: without a reference of the camera the
-        sky quality is not known (not clouded everywhere), with one it is.
+    """ An input with fewer chunks than MIN_STAR_OBS (e.g. 30 s of frames): alone, its own stars give the references
+        (a single chunk doesn't, its sky quality is not known); with the reference of an earlier input, a cloud in the
+        short input is found.
     """
 
-    # Three chunks: fewer than MIN_STAR_OBS observations of every star
+    # A single chunk: no star has a reference
     with pytest.raises(CalibrationError):
-        _skyMap(n_chunks=3)
+        _skyMap(n_chunks=1)
+
+    # Three chunks: the stars seen in all of them have references, the clear sky is clear
+    assert _skyMap(n_chunks=3).clear.all()
 
     # With the reference of an earlier input, a cloud in the short input is found
     reference = SkyReference(str(tmp_path), 'XX0001')
     _skyMap(reference=reference).updateReference()
     later = BEGIN + datetime.timedelta(minutes=10)
     sky_map = _skyMap(n_chunks=3, begin=later, cloud=(150, 300, 80, (0, 1, 2), 0.5),
+                      reference=SkyReference(str(tmp_path), 'XX0001'))
+    assert not sky_map.isClear(np.array([150.0]), np.array([300.0]), np.array([CHUNK_FRAMES]))[0]
+    assert sky_map.isClear(np.array([450.0]), np.array([60.0]), np.array([CHUNK_FRAMES]))[0]
+
+
+def test_short_inputs_build_the_reference(tmp_path):
+    """ A camera with only short inputs (two chunks each) builds its reference from them, so that a cloud over the
+        same region during a whole later short input is found (which its own stars alone can't show). """
+
+    # Ten clear inputs of two chunks, 30 s apart, add their stars to the reference
+    for k in range(10):
+        begin = BEGIN + datetime.timedelta(seconds=30*k)
+        _skyMap(n_chunks=2, begin=begin, seed=k, reference=SkyReference(str(tmp_path), 'XX0001')).updateReference()
+    reference = SkyReference(str(tmp_path), 'XX0001')
+    assert len(reference.keys) > 400
+    assert np.median(np.isfinite(reference.values).sum(axis=1)) >= 5
+
+    # A later short input under a cloud in both its chunks
+    later = BEGIN + datetime.timedelta(minutes=10)
+    sky_map = _skyMap(n_chunks=2, begin=later, cloud=(150, 300, 80, (0, 1), 0.5), seed=50,
                       reference=SkyReference(str(tmp_path), 'XX0001'))
     assert not sky_map.isClear(np.array([150.0]), np.array([300.0]), np.array([CHUNK_FRAMES]))[0]
     assert sky_map.isClear(np.array([450.0]), np.array([60.0]), np.array([CHUNK_FRAMES]))[0]
