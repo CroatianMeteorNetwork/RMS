@@ -2267,6 +2267,12 @@ def test_faint_ends_of_a_track_are_cut():
     bright[30:50, 6] = 5
     assert len(mfd.trimFaintEnds(bright)) == 80
 
+    # A saturated object with a continuation over empty sky: the continuation is cut
+    bright[:, 5] = np.r_[np.full(50, 1.1e5), np.full(30, 1.0)]
+    bright[:, 6] = np.r_[np.full(50, 5), np.zeros(30)]
+    kept = mfd.trimFaintEnds(bright)
+    assert (kept[0, 0] == 0) and (kept[-1, 0] <= 52)
+
     # A single bright noise row at the end of a faint head doesn't keep the head
     cent[:, 5] = np.r_[rng.normal(1.0, 0.5, 25), rng.normal(25.0, 4.0, n - 25)]
     cent[0, 5] = 30.0

@@ -3649,11 +3649,16 @@ def trimFaintEnds(cent, fraction=FAINT_END_FRACTION, window=FAINT_END_WINDOW):
     half = window//2
 
     # The level from a row of the unsaturated rows (not interpolated between rows), so a bright part which is just a
-    #   tenth of the track sets it, but never above the level of the noise
+    #   tenth of the track sets it, but never above the level of the noise. A track with saturated rows has a bright
+    #   part whatever its unsaturated rows are (they may be only a continuation over empty sky), so its level is
+    #   that of the noise
     unsat = np.sort(snr[~saturated])
     if len(unsat) == 0:
         return cent
-    level = min(fraction*unsat[int(math.ceil(FAINT_END_PERCENTILE/100.0*(len(unsat) - 1)))], FAINT_END_MAX_SNR)
+    if saturated.any():
+        level = FAINT_END_MAX_SNR
+    else:
+        level = min(fraction*unsat[int(math.ceil(FAINT_END_PERCENTILE/100.0*(len(unsat) - 1)))], FAINT_END_MAX_SNR)
     above = (snr >= level) | saturated
     starts = np.clip(np.arange(len(snr)) - half, 0, len(snr) - window)
     bright = np.array([np.mean(above[k:k + window]) > FAINT_END_BRIGHT_ROWS for k in starts])
