@@ -25,6 +25,7 @@ class ChainedInput(object):
             current: [FrameInterface] The input.
         """
 
+        # The two inputs, and the borrowed frames: the last n_context frames of the previous input
         self.previous = previous
         self.current = current
         self.n_context = int(min(max(n_context, 0), previous.total_frames))
@@ -41,6 +42,8 @@ class ChainedInput(object):
         self.name_datetime = current.beginning_datetime
         self.beginning_datetime = previous.currentFrameTime(frame_no=self.context_first, dt_obj=True) \
             if self.n_context > 0 else current.beginning_datetime
+
+        # The directory and the properties of the images are those of the input, and the frames those of both
         self.dir_path = getattr(current, 'dir_path', None)
         self.byteswap = getattr(current, 'byteswap', False)
         self.ff = getattr(current, 'ff', None)
@@ -135,6 +138,7 @@ def contiguous(previous, current, factor=1.5):
         [bool] True if the inputs are contiguous (and both have the time of every frame).
     """
 
+    # Both inputs need the time of every frame
     for handle in (previous, current):
         if (not hasattr(handle, 'hasAccurateTime')) or (not handle.hasAccurateTime()):
             return False
@@ -145,6 +149,7 @@ def contiguous(previous, current, factor=1.5):
     if abs(previous.fps - current.fps) > 0.01*current.fps:
         return False
 
+    # The step from the last frame of the earlier input to the first frame of the later one
     t_last = previous.currentFrameTime(frame_no=previous.total_frames - 1, dt_obj=True)
     t_first = current.currentFrameTime(frame_no=0, dt_obj=True)
     step = (t_first.replace(tzinfo=None) - t_last.replace(tzinfo=None)).total_seconds()

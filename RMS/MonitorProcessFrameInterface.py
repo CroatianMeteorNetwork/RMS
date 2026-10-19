@@ -499,6 +499,7 @@ def savedChunkImages(config, img_handle):
         [list] (time of the first frame of the chunk, FF name of its pair), sorted by time.
     """
 
+    # The first frames of the whole chunks, and of the frames after them if they make at least half a chunk
     chunk_frames = img_handle.chunk_frames
     firsts = [k*chunk_frames for k in range(img_handle.total_fr_chunks)]
     if img_handle.total_frames - img_handle.total_fr_chunks*chunk_frames >= chunk_frames//2:
@@ -1082,6 +1083,9 @@ def continuousInput(file_path, input_dir, img_handle, config, chunk_frames, outp
     if prev_path is None:
         proc_log.info("Continuous detection: no previous file")
         return None, None
+
+    # Opened with a copy of the config, as opening an input can change it (e.g. the size and the frame rate of FITS
+    #   frames)
     try:
         prev = detectInputType(prev_path, copy.deepcopy(config), detection=True, preload_video=True,
                                chunk_frames=chunk_frames)
@@ -1095,10 +1099,12 @@ def continuousInput(file_path, input_dir, img_handle, config, chunk_frames, outp
             os.path.basename(file_path), os.path.basename(prev_path)))
         return None, None
 
+    # The last monitor_continuous_chunks chunks of the previous file in front of this one
     chain = ChainedInput(prev, config.monitor_continuous_chunks*chunk_frames, img_handle)
 
     # The results directories of both files (as the monitor names them), and the boundary between them
     def unixTime(dt):
+        """ Unix time of a datetime (UTC if it has no time zone). """
         return dt.replace(tzinfo=datetime.timezone.utc).timestamp() if dt.tzinfo is None else dt.timestamp()
 
     prev_uid = uniqueId(os.path.relpath(prev_path, input_dir))
@@ -1115,6 +1121,8 @@ def continuousInput(file_path, input_dir, img_handle, config, chunk_frames, outp
     # The image pairs of the chunks of the previous file (when they are saved), for the detections moved to it
     if config.monitor_save_images and (prev.input_type != 'ff'):
         pending['previous_chunk_images'] = [[unixTime(t), name] for t, name in savedChunkImages(config, prev)]
+
+    # Left for the monitor, which joins the results once both files are processed
     writePending(output_dir, cur_uid, pending)
     proc_log.info("Continuous detection: the last {:d} frames of {} are searched in front".format(chain.n_context,
                                                                                                prev_path))

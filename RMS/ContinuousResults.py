@@ -74,12 +74,15 @@ def previousInput(file_path, root=None):
     root = os.path.abspath(root) if root is not None else None
 
     def inside(path):
+        """ Whether a path is inside the monitored input directory (or there is no limit). """
         return (root is None) or (path == root) or path.startswith(root + os.sep)
 
+    # An input outside the monitored directory has no previous input
     if not inside(parent):
         return None
 
     def visible(entries):
+        """ The entries of a directory without the hidden ones. """
         return [e for e in entries if not e.startswith('.')]
 
     # A directory of frames: the previous sibling directory
@@ -95,6 +98,7 @@ def previousInput(file_path, root=None):
     if same:
         return os.path.join(parent, same[-1])
 
+    # The previous directory is looked for only inside the monitored directory
     grand, parent_name = os.path.split(parent)
     if (parent == root) or (not inside(grand)):
         return None
@@ -118,6 +122,7 @@ def writePending(output_dir, unique_id, pending):
             the later file), context_s (the length of the borrowed frames, s).
     """
 
+    # The join with the ID of the file and the time it was left (kept when it is written again)
     pending_dir = os.path.join(output_dir, PENDING_DIR)
     os.makedirs(pending_dir, exist_ok=True)
     pending = dict(pending, unique_id=unique_id)
@@ -134,6 +139,7 @@ def writePending(output_dir, unique_id, pending):
 def _ftpPath(results_dir):
     """ The FTPdetectinfo of the detections of a results directory, None if there is none. """
 
+    # The FTPdetectinfo files of the detections (not the backups, nor those of the separate passes)
     names = sorted(n for n in os.listdir(results_dir) if FTPdetectinfo.validDefaultFTPdetectinfo(n))
 
     return os.path.join(results_dir, names[0]) if names else None
@@ -158,6 +164,8 @@ def readDetections(results_dir):
     dets = []
     for entry in FTPdetectinfo.readFTPdetectinfo(os.path.dirname(path), os.path.basename(path)):
         ff_name, fps, rho, phi, meas = entry[0], entry[4], entry[9], entry[10], np.array(entry[-1], dtype=float)
+
+        # The time of every row from the time in the name and the frame, and the columns which are written back
         t_ref = filenameToDatetime(ff_name).replace(tzinfo=datetime.timezone.utc).timestamp()
         rows = meas[:, [1, 2, 3, 8, 10, 11, 12]]
         dets.append(dict(ff_name=ff_name, fps=fps, rho=rho, phi=phi, times=t_ref + meas[:, 1]/fps, rows=rows,
@@ -186,6 +194,7 @@ def writeDetections(results_dir, dets, config):
             else os.path.basename(os.path.normpath(results_dir))
         path = os.path.join(results_dir, 'FTPdetectinfo_' + prefix + '.txt')
 
+    # The detections in the order of their beginnings, numbered within every FF name
     results, counts = [], {}
     for det in sorted(dets, key=lambda d: d['times'][0]):
 
@@ -210,9 +219,12 @@ def _sameObject(a, b, t_lo, t_hi, fps):
         [bool]
     """
 
+    # The rows of the first detection in the time range
     ia = np.nonzero((a['times'] >= t_lo) & (a['times'] < t_hi))[0]
     if len(ia) == 0:
         return False
+
+    # The distance to the row of the second detection at the same time (within a third of a frame)
     tol = 0.3/fps
     dist = []
     for i in ia:
@@ -228,6 +240,7 @@ def _merge(earlier, later, boundary):
     """ One detection from two of the same object: the rows of the earlier one before the boundary and of the later
         one from the boundary on (also earlier rows of the later one, before the beginning of the earlier one). """
 
+    # The rows of each detection which are kept, in the order of their times
     keep_e = earlier['times'] < boundary
     keep_l = (later['times'] >= boundary) | (later['times'] < earlier['times'][0])
     times = np.r_[earlier['times'][keep_e], later['times'][keep_l]]
@@ -280,6 +293,7 @@ def joinResults(previous_dir, results_dir, boundary, context_s, config, recalibr
         earlier[home] = readDetections(home)
     later = readDetections(results_dir)
 
+    # Every detection of the later file which reaches into the borrowed frames is joined or moved
     joined, moved, record = 0, 0, []
     changed = set()
     keep_later = []
@@ -307,13 +321,16 @@ def joinResults(previous_dir, results_dir, boundary, context_s, config, recalibr
             joined += 1
         else:
             home = previous_dir
+
+            # Only in the borrowed frames: the previous file searched them itself
             if det['times'][-1] < boundary:
-                # Only in the borrowed frames: the previous file searched them itself
                 changed.add(results_dir)
                 continue
             earlier[home].append(dict(det, ff_name=_movedName(det['times'][0], config, previous_chunk_images),
                                       dir=home))
             moved += 1
+
+        # Both results change, and the record tells where the detection went
         changed.update([home, results_dir])
         record.append({'home': home, 't_first': float(det['times'][0]), 't_last': float(det['times'][-1])})
 
@@ -323,6 +340,7 @@ def joinResults(previous_dir, results_dir, boundary, context_s, config, recalibr
             writeDetections(home, dets, config)
     if results_dir in changed:
         writeDetections(results_dir, keep_later, config)
+
 
     result = {'joined': joined, 'moved': record, 'boundary_unix': boundary, 'previous_results_dir': previous_dir,
               'n_joined': joined, 'n_moved': moved, 'changed': sorted(changed),
@@ -337,11 +355,13 @@ def _movedName(t_first, config, chunk_images=None):
     """ The FF name of a detection moved to the previous file: the image pair of the chunk with its first frame,
         else the time of its first frame. """
 
+    # The last image pair which begins at or before the first frame (within 0.1 ms, the precision of the names)
     if chunk_images:
         names = [name for t, name in chunk_images if t <= t_first + 1e-4]
         if names:
             return names[-1]
 
+    # Without the image pairs, the name of the time of the first frame
     first_time = datetime.datetime.fromtimestamp(t_first, tz=datetime.timezone.utc).replace(tzinfo=None)
 
     return constructFFName(config.stationID, first_time)
@@ -351,6 +371,7 @@ def _movedName(t_first, config, chunk_images=None):
 def _writeRecord(results_dir, result):
     """ Write the record of a join (JOIN_RECORD) in the results directory of the later file. """
 
+    # Written to a temporary file and renamed, so the record is never partly written
     path = os.path.join(results_dir, JOIN_RECORD)
     with open(path + '.tmp', 'w') as f:
         json.dump(result, f, indent=1)
@@ -363,6 +384,7 @@ def _recalibrateJoined(results_dir, result, recalibrate):
         join which failed in the recalibration is finished when it is tried again).
     """
 
+    # Every recalibration done is taken off the record at once
     while result.get('to_recalibrate'):
         if recalibrate is not None:
             recalibrate(result['to_recalibrate'][0])
@@ -399,6 +421,7 @@ def processPendingJoins(output_dir, config, recalibrate=None, now=None, done_aft
     """
 
     def isDone(results_dir):
+        """ Whether a file is processed: its results have a done flag (written after done_after). """
         flag = os.path.join(results_dir, 'done.flag')
         if not os.path.isfile(flag):
             return False
@@ -409,6 +432,8 @@ def processPendingJoins(output_dir, config, recalibrate=None, now=None, done_aft
         return 0
     now = time.time() if now is None else now
 
+    # The pending joins in the order of their boundaries (one being written is read the next time), and the
+    #   results whose own join is still pending
     pendings = []
     for path in glob.glob(os.path.join(pending_dir, '*.json')):
         try:
@@ -421,6 +446,8 @@ def processPendingJoins(output_dir, config, recalibrate=None, now=None, done_aft
 
     done = 0
     for path, p in pendings:
+
+        # Whether both files are processed
         cur_done = isDone(p['results_dir'])
         prev_done = isDone(p['previous_results_dir'])
 
@@ -455,6 +482,8 @@ def processPendingJoins(output_dir, config, recalibrate=None, now=None, done_aft
                 continue
             log.warning('Continuous detection: the join of {} failed {:d} times, dropped: {}'.format(
                 p['results_dir'], attempts, repr(e)))
+
+        # Done (or given up): the joins after it can go on
         os.remove(path)
         waiting_dirs.discard(p['results_dir'])
         done += 1
