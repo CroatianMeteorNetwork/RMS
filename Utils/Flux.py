@@ -42,7 +42,8 @@ from RMS.Astrometry.ApplyAstrometry import (
     xyToRaDecPP,
 )
 from RMS.Astrometry.ApplyRecalibrate import applyRecalibrate, loadRecalibratedPlatepar, recalibrateSelectedFF
-from RMS.Astrometry.Conversions import J2000_JD, areaGeoPolygon, date2JD, datetime2JD, jd2Date, raDec2AltAz
+from RMS.Astrometry.Conversions import J2000_JD, areaGeoPolygon, date2JD, datetime2JD, jd2Date, raDec2AltAz, \
+    trueRaDec2ApparentAltAz
 from RMS.ExtractStars import extractStarsAndSave
 from RMS.Formats import FFfile, Platepar, StarCatalog
 from RMS.Formats.CALSTARS import readCALSTARS
@@ -3591,7 +3592,8 @@ def computeFluxCorrectionsOnBins(
         ### Compute the radiant elevation at the middle of the time bin ###
         ra, dec, v_init = shower.computeApparentRadiant(platepar.lat, platepar.lon, jd_mean, \
             meteor_fixed_ht=meteor_ht)
-        radiant_azim, radiant_elev = raDec2AltAz(ra, dec, jd_mean, platepar.lat, platepar.lon)
+        radiant_azim, radiant_elev = trueRaDec2ApparentAltAz(ra, dec, jd_mean, platepar.lat, platepar.lon, \
+            refraction=False)
 
         # Compute the mean meteor height
         if ref_height is None:
@@ -4554,7 +4556,8 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
             # meteors seen there must not be counted either)
             ra, dec, _ = shower.computeApparentRadiant(platepar.lat, platepar.lon, meteor.jdt_ref, \
                 meteor_fixed_ht=meteor_ht)
-            radiant_azim, radiant_elev = raDec2AltAz(ra, dec, meteor.jdt_ref, platepar.lat, platepar.lon)
+            radiant_azim, radiant_elev = trueRaDec2ApparentAltAz(ra, dec, meteor.jdt_ref, platepar.lat, \
+                platepar.lon, refraction=False)
 
             # Skip meteors don't belonging to the shower, outside the bin, and too close to the radiant
             if (
@@ -4710,8 +4713,9 @@ def computeFlux(config, dir_path, ftpdetectinfo_path, shower_code, dt_beg, dt_en
         ra, dec, v_init = shower.computeApparentRadiant(platepar.lat, platepar.lon, jd_night_mid, \
             meteor_fixed_ht=meteor_ht)
 
-        # Compute the radiant elevation
-        radiant_azim, radiant_elev = raDec2AltAz(ra, dec, jd_night_mid, platepar.lat, platepar.lon)
+        # Compute the radiant elevation (the radiant is J2000)
+        radiant_azim, radiant_elev = trueRaDec2ApparentAltAz(ra, dec, jd_night_mid, platepar.lat, platepar.lon, \
+            refraction=False)
 
         # Compute the average limiting magnitude to which all flux will be normalized
 

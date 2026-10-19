@@ -1366,8 +1366,9 @@ def geocentricToApparentRadiantAndVelocity(ra_g, dec_g, vg, lat, lon, elev, jd, 
 
     ### Uncorrect for zenith attraction ###
 
-    # Compute the radiant in the local coordinates
-    azim, elev = raDec2AltAz(ra_g, dec_g, jd, lat_geocentric, lon)
+    # Compute the radiant in the local coordinates (the radiant is J2000, so it is precessed to the epoch of
+    #   date first; no refraction, as for a direction of motion)
+    azim, elev = trueRaDec2ApparentAltAz(ra_g, dec_g, jd, lat_geocentric, lon, refraction=False)
 
     # Compute the zenith angle
     eta = np.radians(90.0 - elev)
@@ -1383,8 +1384,8 @@ def geocentricToApparentRadiantAndVelocity(ra_g, dec_g, vg, lat, lon, elev, jd, 
         delta_zc = 2*math.atan((v_init - vg)*math.tan(zc/2.0)/(v_init + vg))
         diff = zc + delta_zc - eta
 
-    # Compute the uncorrected geocentric radiant for zenith attraction
-    ra, dec = altAz2RADec(azim, 90.0 - np.degrees(zc), jd, lat_geocentric, lon)
+    # Compute the uncorrected geocentric radiant for zenith attraction (back to J2000)
+    ra, dec = apparentAltAz2TrueRADec(azim, 90.0 - np.degrees(zc), jd, lat_geocentric, lon, refraction=False)
 
     ### ###
 
@@ -1393,20 +1394,17 @@ def geocentricToApparentRadiantAndVelocity(ra_g, dec_g, vg, lat, lon, elev, jd, 
         # Calculate the velocity of the Earth rotation at the position of the reference trajectory point (m/s)
         v_e = 2*math.pi*vectMag(state_vector)*math.cos(np.radians(lat_geocentric))/86164.09053
 
-        # Calculate the equatorial coordinates of east from the reference position on the trajectory
+        # Calculate the equatorial coordinates (J2000) of east from the reference position on the trajectory
         azimuth_east = 90.0
-        altitude_east = 0
-        ra_east, dec_east = altAz2RADec(azimuth_east, altitude_east, jd, lat, lon)
+        altitude_east = 0.0
+        ra_east, dec_east = apparentAltAz2TrueRADec(azimuth_east, altitude_east, jd, lat, lon, refraction=False)
 
         # Compute the radiant vector in ECI coordinates of the apparent radiant
         v_ref_vect = v_init*np.array(raDec2Vector(ra, dec))
 
-        v_ref_nocorr = np.zeros(3)
-
-        # Calculate the derotated reference velocity vector/radiant
-        v_ref_nocorr[0] = v_ref_vect[0] + v_e*np.cos(np.radians(ra_east))
-        v_ref_nocorr[1] = v_ref_vect[1] + v_e*np.sin(np.radians(ra_east))
-        v_ref_nocorr[2] = v_ref_vect[2]
+        # Calculate the derotated reference velocity vector/radiant. East is on the equator of date, which in
+        #   J2000 axes is tilted by the precession, so its full direction is used
+        v_ref_nocorr = v_ref_vect + v_e*np.array(raDec2Vector(ra_east, dec_east))
 
         # Compute the radiant without Earth's rotation included
         ra_norot, dec_norot = vector2RaDec(vectNorm(v_ref_nocorr))

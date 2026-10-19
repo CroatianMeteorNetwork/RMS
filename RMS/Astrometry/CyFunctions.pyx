@@ -157,15 +157,18 @@ def subsetCatalog(np.ndarray[FLOAT_TYPE_t, ndim=2] catalog_list, double ra_c, do
     # Define variables
     cdef int i, k
     cdef double dec_min, dec_max
-    cdef double ra, dec, mag, elev, lst
+    cdef double ra, dec, mag, elev, ra_zenith, dec_zenith
     cdef np.ndarray[FLOAT_TYPE_t, ndim=2] filtered_list = np.zeros(shape=(catalog_list.shape[0], \
         catalog_list.shape[1]), dtype=FLOAT_TYPE)
 
     cdef np.ndarray[INT_TYPE_t, ndim=1] filtered_indices = np.zeros(shape=(catalog_list.shape[0]), \
         dtype=INT_TYPE)
 
-    # Local sidereal time, the same for all stars
-    lst = radians(cyjd2LST(jd, lon))
+    # Zenith in the catalog frame: the zenith of date (right ascension = local sidereal time, declination =
+    #   latitude) taken to J2000 once, so that the elevation of a catalog star is 90 deg minus its distance
+    #   from it
+    ra_zenith, dec_zenith = j2000FromTrueOfDate(jd, radians(cyjd2LST(jd, lon)), radians(lat))
+    ra_zenith, dec_zenith = degrees(ra_zenith), degrees(dec_zenith)
 
     # Calculate minimum and maximum declination
     dec_min = dec_c - radius
@@ -194,12 +197,12 @@ def subsetCatalog(np.ndarray[FLOAT_TYPE_t, ndim=2] catalog_list, double ra_c, do
         # Add star to the list if it is within a given radius and has a certain brightness
         if (angularSeparation(ra, dec, ra_c, dec_c) <= radius) and (mag <= mag_limit):
 
-            # Compute the local star elevation
-            _, elev = raDec2AltAzLST(radians(ra), radians(dec), lst, radians(lat))
+            # Compute the local star elevation (deg)
+            elev = 90 - angularSeparation(ra, dec, ra_zenith, dec_zenith)
 
 
             # Only take stars above -5 degrees, if the filtering is on
-            if not (remove_under_horizon and (degrees(elev) < -5)):
+            if not (remove_under_horizon and (elev < -5)):
             
                 filtered_list[k,0] = ra
                 filtered_list[k,1] = dec
