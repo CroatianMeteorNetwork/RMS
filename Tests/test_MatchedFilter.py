@@ -2257,6 +2257,16 @@ def test_faint_ends_of_a_track_are_cut():
     short[:, 5] = np.where(np.arange(21)%5 == 0, 100.0, 1.0)
     assert len(mfd.trimFaintEnds(short)) == 21
 
+    # An object which brightens by magnitudes keeps its fainter part (above the noise), and a saturated bright part
+    #   (whose SNR is not a measure of its brightness) doesn't make the rest of the track faint
+    bright = np.zeros((80, 7))
+    bright[:, 0] = np.arange(80)
+    bright[:, 5] = np.r_[np.full(40, 18.0), np.full(40, 1000.0)]
+    assert len(mfd.trimFaintEnds(bright)) == 80
+    bright[:, 5] = np.r_[np.full(30, 90.0), np.full(20, 1.1e5), np.full(30, 90.0)]
+    bright[30:50, 6] = 5
+    assert len(mfd.trimFaintEnds(bright)) == 80
+
     # A single bright noise row at the end of a faint head doesn't keep the head
     cent[:, 5] = np.r_[rng.normal(1.0, 0.5, 25), rng.normal(25.0, 4.0, n - 25)]
     cent[0, 5] = 30.0

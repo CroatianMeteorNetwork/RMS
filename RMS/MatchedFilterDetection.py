@@ -115,6 +115,10 @@ FAINT_END_FRACTION = 0.1
 FAINT_END_WINDOW = 9
 FAINT_END_BRIGHT_ROWS = 0.2
 
+# Only an end at the level of the noise is cut: a row at or above this SNR is the object, however much brighter the
+#   rest of the track is (e.g. an object which brightens by magnitudes, or one whose bright part is saturated)
+FAINT_END_MAX_SNR = 5.0
+
 # Very bright objects spill their charge along their row and column before the pixels reach the saturation
 #   level: in a frame where the sum within SPILL_RADIUS (px) of the object is more than SPILL_RATIO times the sum
 #   within the normal aperture, the measurement counts as saturated and the wider sum is its intensity. Only
@@ -3614,14 +3618,15 @@ def weightedMedian(values, weights):
 def trimFaintEnds(cent, fraction=FAINT_END_FRACTION, window=FAINT_END_WINDOW):
     """ Cut the ends of a track where it is much fainter than along the rest of it: the leading and the trailing
         rows in whose window (of window rows) at most FAINT_END_BRIGHT_ROWS of the rows reach fraction of the
-        FAINT_END_PERCENTILE percentile of the SNR of the track (the level of its bright part, also when a faint
-        piece is most of the track). A track which is faint all along (e.g. near the limit) is kept as it is, as
-        only the ends fainter than the track itself are cut, and so is a track which is bright only in rare
-        flashes.
+        FAINT_END_PERCENTILE percentile of the SNR of the unsaturated rows of the track (the level of its bright
+        part, also when a faint piece is most of the track), and at most FAINT_END_MAX_SNR (an end at the level of
+        the noise). Saturated rows are always bright (their SNR is not a measure of their brightness). A track
+        which is faint all along (e.g. near the limit) is kept as it is, as only the ends fainter than the track
+        itself are cut, and so is a track which is bright only in rare flashes.
 
     Arguments:
-        cent: [ndarray] Rows of a track, one per frame, [frame, x, y, intensity, background, snr, ...], sorted by
-            frame.
+        cent: [ndarray] Rows of a track, one per frame, [frame, x, y, intensity, background, snr, saturated, ...],
+            sorted by frame.
 
     Keyword arguments:
         fraction: [float] Fraction of the FAINT_END_PERCENTILE percentile of the SNR of the track.
@@ -3640,11 +3645,16 @@ def trimFaintEnds(cent, fraction=FAINT_END_FRACTION, window=FAINT_END_WINDOW):
     #   a single noise row is not. The windows keep their length at the ends of the track (they are moved inside
     #   it), so a single row there doesn't count more than elsewhere
     snr = np.asarray(cent[:, 5], dtype=np.float64)
+    saturated = (np.asarray(cent[:, 6], dtype=np.float64) > 0) if cent.shape[1] > 6 else np.zeros(len(snr), bool)
     half = window//2
-    # The level from a row of the track (not interpolated between rows), so a bright part which is just a tenth of
-    #   the track sets it
-    level = fraction*np.sort(snr)[int(math.ceil(FAINT_END_PERCENTILE/100.0*(len(snr) - 1)))]
-    above = snr >= level
+
+    # The level from a row of the unsaturated rows (not interpolated between rows), so a bright part which is just a
+    #   tenth of the track sets it, but never above the level of the noise
+    unsat = np.sort(snr[~saturated])
+    if len(unsat) == 0:
+        return cent
+    level = min(fraction*unsat[int(math.ceil(FAINT_END_PERCENTILE/100.0*(len(unsat) - 1)))], FAINT_END_MAX_SNR)
+    above = (snr >= level) | saturated
     starts = np.clip(np.arange(len(snr)) - half, 0, len(snr) - window)
     bright = np.array([np.mean(above[k:k + window]) > FAINT_END_BRIGHT_ROWS for k in starts])
 
