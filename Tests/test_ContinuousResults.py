@@ -75,6 +75,9 @@ def test_chained_input_puts_the_last_frames_of_the_previous_input_in_front():
     other.nrows = 8
     assert not contiguous(prev, other)
 
+    # Nor at another frame rate
+    assert not contiguous(prev, _Handle(3.0, 20, fps=20.0))
+
 
 def test_previous_input_of_files_and_directories(tmp_path):
     """ The previous input is the previous file of the directory, else the last one of the previous directory, or

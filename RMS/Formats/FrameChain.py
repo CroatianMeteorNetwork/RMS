@@ -116,7 +116,8 @@ class ChainedInput(object):
 
 def contiguous(previous, current, factor=1.5):
     """ Whether an input follows another one without missing frames: its first frame comes at most factor frame
-        intervals after the last frame of the other one, and the frames have the same size.
+        intervals after the last frame of the other one, at the same frame rate (within 1%) and with frames of the same
+        size.
 
     Arguments:
         previous: [FrameInterface] The earlier input.
@@ -133,8 +134,10 @@ def contiguous(previous, current, factor=1.5):
         if (not hasattr(handle, 'hasAccurateTime')) or (not handle.hasAccurateTime()):
             return False
 
-    # A recording which changed the frame size in between can't be searched as one
+    # A recording which changed the frame size or the frame rate in between can't be searched as one
     if (previous.nrows, previous.ncols) != (current.nrows, current.ncols):
+        return False
+    if abs(previous.fps - current.fps) > 0.01*current.fps:
         return False
 
     t_last = previous.currentFrameTime(frame_no=previous.total_frames - 1, dt_obj=True)
