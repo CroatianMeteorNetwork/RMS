@@ -1086,14 +1086,17 @@ def chunkFirstFrames(star_list, img_handle, frame_range=None):
         [list] The first frame of every chunk, -1 for a chunk whose time is not the time of a chunk of the input.
     """
 
-    # The chunks of the star extraction begin at the multiples of chunk_frames, and the times are relative to the
-    #   beginning of the input
+    # The times are relative to the beginning of the input
     chunk_frames = img_handle.chunk_frames
     begin = img_handle.beginning_datetime.replace(tzinfo=None)
 
-    # The times of the first frames of all chunks of the input, or of its part (s from the beginning)
+    # The times of the first frames of all chunks of the input, or of its part (s from the beginning). The chunks
+    #   begin at the multiples of chunk_frames, unless the input gives where they begin
     first, end = frame_range if (frame_range is not None) else (0, img_handle.total_frames)
-    firsts = np.arange(-(-first//chunk_frames)*chunk_frames, end, chunk_frames)
+    if hasattr(img_handle, 'chunk_first_frames'):
+        firsts = np.array([f for f in img_handle.chunk_first_frames if first <= f < end], dtype=int)
+    else:
+        firsts = np.arange(-(-first//chunk_frames)*chunk_frames, end, chunk_frames)
     times = np.array([(img_handle.currentFrameTime(frame_no=int(f), dt_obj=True).replace(tzinfo=None)
                        - begin).total_seconds() for f in firsts])
 

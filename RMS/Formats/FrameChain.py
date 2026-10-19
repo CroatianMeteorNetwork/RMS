@@ -45,8 +45,13 @@ class ChainedInput(object):
         self.byteswap = getattr(current, 'byteswap', False)
         self.ff = getattr(current, 'ff', None)
         self.total_frames = self.n_context + current.total_frames
-        self.total_fr_chunks = max(1, self.total_frames//self.chunk_frames)
         self.current_frame = 0
+
+        # The chunks of frames: those of the borrowed frames (from the first one), then those of the input, so the
+        #   chunks of the input (e.g. of its stars) are chunks of the chained input as well
+        self.chunk_first_frames = list(range(0, self.n_context, self.chunk_frames)) \
+            + [self.n_context + k*self.chunk_frames for k in range(max(1, current.total_frames//self.chunk_frames))]
+        self.total_fr_chunks = len(self.chunk_first_frames)
 
         # The times of the frames (unix s), from the frame tables of both inputs if they have them
         prev_times = getattr(previous, 'frame_unix_times', None)

@@ -217,3 +217,33 @@ def test_failed_join_is_tried_again(tmp_path, config):
     dets = cont.readDetections(a)
     assert len(dets) == 1 and not cont.readDetections(b) and not cont.readDetections(c)
     assert dets[0]['times'][-1] - dets[0]['times'][0] == pytest.approx(52.8, abs=1e-3)
+
+
+
+def test_sky_quality_of_a_chained_input_from_its_own_chunks(config, monkeypatch):
+    """ The sky quality of a chained input is that of the chunks of the input (its stars), at their frames in the
+        chained input also when the borrowed frames are not a whole number of chunks; the borrowed frames are not
+        missing chunks of the input. """
+
+    import RMS.MatchedFilterDetection as mf
+
+    prev, cur = _Handle(0.0, 6), _Handle(0.6, 20)
+    chain = ChainedInput(prev, 8, cur)
+    assert chain.n_context == 6
+    star_list = [[constructFFName(config.stationID, cur.currentFrameTime(frame_no=4*k, dt_obj=True)), []]
+                 for k in range(5)]
+
+    # The arguments of the sky quality map
+    seen = {}
+    class _Map(object):
+        def __init__(self, *args, **kwargs):
+            seen.update(kwargs)
+        def summary(self):
+            return np.ones(1)
+        n_matched, transparency, reliable_seen = np.ones(1), np.zeros(1), np.ones(1)
+
+    monkeypatch.setattr(mf, 'SkyQualityMap', _Map)
+    config.mf_cloud_filter = True
+    assert mf.skyQuality(chain, config, star_list, object(), update=False) is not None
+    assert seen['first_frame'] == 6
+    assert seen['first_frames'] == [6, 10, 14, 18, 22]
