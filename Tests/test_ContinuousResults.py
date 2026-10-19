@@ -303,3 +303,29 @@ def test_joins_wait_for_results_newer_than_a_forced_start(tmp_path, config):
     # Processed again: joined
     open(os.path.join(a, 'done.flag'), 'w').close()
     assert cont.processPendingJoins(out, config, done_after=start) == 1
+
+
+
+def test_moved_detection_named_after_the_chunk_image_and_results_marked_new(tmp_path, config):
+    """ A detection moved to the previous file takes the name of the image pair of the chunk with its first frame
+        (as the detections of the file do), and the changed results get new done flags (the night report takes
+        the results by the times of their done flags). """
+
+    boundary = (T0 + datetime.timedelta(seconds=30)).replace(tzinfo=datetime.timezone.utc).timestamp()
+    prev = _results(tmp_path, 'prev', [], config)
+    cur = _results(tmp_path, 'cur', [_det(25.0, 35.0, x0=900.0, y=500.0)], config)
+    old = time.time() - 100
+    for d in (prev, cur):
+        os.utime(os.path.join(d, 'done.flag'), (old, old))
+
+    # The images of the previous file: chunks beginning at 17.2 s and 22.4 s
+    unix = lambda s: (T0 + datetime.timedelta(seconds=s)).replace(tzinfo=datetime.timezone.utc).timestamp()
+    images = [[unix(17.2), 'FF_TEST01_20261018_011545_200_0000000.fits'],
+              [unix(22.4), 'FF_TEST01_20261018_011550_400_0000052.fits']]
+    cont.joinResults(prev, cur, boundary, 12.8, config, previous_chunk_images=images)
+
+    moved = cont.readDetections(prev)
+    assert len(moved) == 1 and moved[0]['ff_name'] == images[1][1]
+    assert moved[0]['times'][0] == pytest.approx(unix(25.0), abs=1e-3)
+    for d in (prev, cur):
+        assert os.path.getmtime(os.path.join(d, 'done.flag')) > old + 50

@@ -238,7 +238,8 @@ def _merge(earlier, later, boundary):
 
 
 
-def joinResults(previous_dir, results_dir, boundary, context_s, config, recalibrate=None):
+def joinResults(previous_dir, results_dir, boundary, context_s, config, recalibrate=None,
+                previous_chunk_images=None):
     """ Join the detections of a file with those of the previous file of the recording (see the module
         description).
 
@@ -251,6 +252,9 @@ def joinResults(previous_dir, results_dir, boundary, context_s, config, recalibr
 
     Keyword arguments:
         recalibrate: [function] recalibrate(results_dir) of the changed results. None by default (not recalibrated).
+        previous_chunk_images: [list] [time of the first frame (unix s), FF name] of the image pairs of the chunks
+            of the previous file, sorted by time: a detection moved to it is named after the image of its first
+            frame, as the detections of the file. None by default (named after the time of its first frame).
 
     Return:
         [dict] The record of the join: the number of joined and moved detections, and where they went.
@@ -307,9 +311,8 @@ def joinResults(previous_dir, results_dir, boundary, context_s, config, recalibr
                 # Only in the borrowed frames: the previous file searched them itself
                 changed.add(results_dir)
                 continue
-            first_time = datetime.datetime.fromtimestamp(det['times'][0], tz=datetime.timezone.utc)
-            earlier[home].append(dict(det, ff_name=constructFFName(config.stationID,
-                                                                   first_time.replace(tzinfo=None)), dir=home))
+            earlier[home].append(dict(det, ff_name=_movedName(det['times'][0], config, previous_chunk_images),
+                                      dir=home))
             moved += 1
         changed.update([home, results_dir])
         record.append({'home': home, 't_first': float(det['times'][0]), 't_last': float(det['times'][-1])})
@@ -322,11 +325,26 @@ def joinResults(previous_dir, results_dir, boundary, context_s, config, recalibr
         writeDetections(results_dir, keep_later, config)
 
     result = {'joined': joined, 'moved': record, 'boundary_unix': boundary, 'previous_results_dir': previous_dir,
-              'n_joined': joined, 'n_moved': moved,
+              'n_joined': joined, 'n_moved': moved, 'changed': sorted(changed),
               'to_recalibrate': sorted(changed) if recalibrate is not None else []}
     _writeRecord(results_dir, result)
 
     return _recalibrateJoined(results_dir, result, recalibrate)
+
+
+
+def _movedName(t_first, config, chunk_images=None):
+    """ The FF name of a detection moved to the previous file: the image pair of the chunk with its first frame,
+        else the time of its first frame. """
+
+    if chunk_images:
+        names = [name for t, name in chunk_images if t <= t_first + 1e-4]
+        if names:
+            return names[-1]
+
+    first_time = datetime.datetime.fromtimestamp(t_first, tz=datetime.timezone.utc).replace(tzinfo=None)
+
+    return constructFFName(config.stationID, first_time)
 
 
 
@@ -350,6 +368,12 @@ def _recalibrateJoined(results_dir, result, recalibrate):
             recalibrate(result['to_recalibrate'][0])
         result['to_recalibrate'] = result['to_recalibrate'][1:]
         _writeRecord(results_dir, result)
+
+    # The changed results are new results: the night report finds them by the time of their done flags
+    for d in result.get('changed', []):
+        flag = os.path.join(d, 'done.flag')
+        if os.path.isfile(flag):
+            os.utime(flag, None)
 
     return result
 
@@ -415,7 +439,8 @@ def processPendingJoins(output_dir, config, recalibrate=None, now=None, done_aft
             continue
         try:
             result = joinResults(p['previous_results_dir'], p['results_dir'], p['boundary_unix'], p['context_s'],
-                                 config, recalibrate=recalibrate)
+                                 config, recalibrate=recalibrate,
+                                 previous_chunk_images=p.get('previous_chunk_images'))
             log.info('Continuous detection: {} joined to {}: {:d} detections joined, {:d} moved'.format(
                 os.path.basename(p['results_dir']), os.path.basename(p['previous_results_dir']),
                 result['n_joined'], result['n_moved']))

@@ -469,6 +469,24 @@ def scanInputs(input_dir, output_dir, config, file_type, recursive):
     return inputs
 
 
+def chunkImageName(config, img_handle, first_frame):
+    """ The FF name of the image pair of a chunk of frames (see ChunkImageSaver), after the time of its first
+        frame.
+
+    Arguments:
+        config: [Config] Configuration.
+        img_handle: [FrameInterface instance] Image handle.
+        first_frame: [int] First frame of the chunk.
+
+    Return:
+        [str] FF name of the pair.
+    """
+
+    begin_time = img_handle.currentFrameTime(frame_no=first_frame, dt_obj=True)
+
+    return FFpng.pairNames(constructFFName(config.stationID, begin_time, frame=first_frame, ext=None))[0]
+
+
 class ChunkImageSaver(object):
     """ Saves the max pixel and average pixel images of every star extraction chunk as an FF-equivalent image
         pair, corrected with the dark and the flat, and keeps the list of saved chunks. Used as the chunk
@@ -512,10 +530,8 @@ class ChunkImageSaver(object):
             [str] FF name of the saved pair.
         """
 
+        ff_name = chunkImageName(self.config, img_handle, first_frame)
         begin_time = img_handle.currentFrameTime(frame_no=first_frame, dt_obj=True)
-
-        ff_name = FFpng.pairNames(constructFFName(self.config.stationID, begin_time, frame=first_frame,
-                                                  ext=None))[0]
 
         # Apply the dark and the flat, like for the star extraction (the cached chunk is not modified)
         maxpixel, avepixel = ff.maxpixel, ff.avepixel
@@ -1074,6 +1090,12 @@ def continuousInput(file_path, input_dir, img_handle, config, chunk_frames, outp
         'boundary_unix': boundary,
         'context_s': boundary - unixTime(chain.currentFrameTime(frame_no=0, dt_obj=True)),
     }
+
+    # The image pairs of the chunks of the previous file (when they are saved), for the detections moved to it
+    if config.monitor_save_images and (prev.input_type != 'ff'):
+        pending['previous_chunk_images'] = [
+            [unixTime(prev.currentFrameTime(frame_no=k*chunk_frames, dt_obj=True)),
+             chunkImageName(config, prev, k*chunk_frames)] for k in range(max(1, prev.total_frames//chunk_frames))]
     writePending(output_dir, cur_uid, pending)
     proc_log.info("Continuous detection: the last {:d} frames of {} are searched in front".format(chain.n_context,
                                                                                                prev_path))
