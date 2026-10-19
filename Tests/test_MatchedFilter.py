@@ -2243,3 +2243,57 @@ def test_segment_with_a_gap_carries_the_persistence(config):
     assert (detector.persistence_carry_frames, detector.persistence_full_frames) == (251, 512)
     assert detector.connectedLight(100, 10, 10, 20, 20) is not None
     assert detector.connectedLight(300, 10, 10, 20, 20) is not None
+
+
+class _StampedHandle(object):
+    """ An input with a table of frame times only (see timeGaps). """
+
+    def __init__(self, times):
+        self.frame_unix_times = np.asarray(times, dtype=np.float64)
+        self.total_frames = len(times)
+
+    def hasAccurateTime(self):
+        return True
+
+
+def test_time_gaps_with_repeated_time_stamps():
+    """ An input whose time stamps repeat for pairs of frames (steps of zero) still has its gaps found: the usual
+        interval is the median of the positive steps. """
+
+    # Pairs of frames share a stamp every 0.08 s (as many steps of zero as positive ones); 0.8 s are missing before
+    #   frame 200
+    times = np.repeat(np.arange(200)*0.08, 2)
+    times[200:] += 0.8
+    assert mfd.timeGaps(_StampedHandle(times)) == [200]
+
+    # Without a gap nothing is found, and an input whose stamps never change has no usual interval
+    assert mfd.timeGaps(_StampedHandle(np.repeat(np.arange(200)*0.08, 2))) == []
+    assert mfd.timeGaps(_StampedHandle(np.zeros(100))) == []
+
+
+def test_detections_cut_and_joined_only_within_the_parts_between_gaps(config):
+    """ Detections stitched over a gap are cut at it, and pieces on the two sides of a gap are not joined again,
+        however well one continues the other. """
+
+    def det(frames):
+        frames = np.asarray(frames, dtype=float)
+        cent = np.c_[frames, 100 + 2*frames, 200 + frames, np.full(len(frames), 500.0), np.zeros((len(frames), 3))]
+        return [0.0, 0.0, cent]
+
+    # A detection across the gap at frame 100 is cut into its two pieces
+    pieces = mfd.splitAtGaps([det(range(60, 140))], [100])
+    assert [(p[2][0, 0], p[2][-1, 0]) for p in pieces] == [(60, 99), (100, 139)]
+    assert mfd.splitAtGaps([det(range(60, 90))], [100])[0][2].shape[0] == 30
+
+    # Two pieces of one straight track, one on each side of the gap, stay two detections; without the gap they
+    #   are joined
+    class _Joiner(object):
+        def joinDetections(self, detections, connected=None):
+            # Joins everything it is given into one detection, as the joining of continuous pieces would
+            if len(detections) < 2:
+                return detections
+            return [[0.0, 0.0, np.concatenate([d[2] for d in detections])]]
+
+    two = [det(range(60, 99)), det(range(101, 140))]
+    assert len(mfd.joinWithinGaps(_Joiner(), two, [100])) == 2
+    assert len(mfd.joinWithinGaps(_Joiner(), two, [])) == 1

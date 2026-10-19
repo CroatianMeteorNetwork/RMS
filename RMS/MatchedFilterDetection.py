@@ -4337,10 +4337,13 @@ def timeGaps(img_handle, frame_range=None, factor=TIME_GAP_FACTOR):
         return []
 
     # The gaps against the median interval, which the gaps hardly change
+    # The usual interval is the median of the positive steps: an input whose time stamps repeat (e.g. one stamp for
+    #   every pair of frames) has steps of zero, which are no gaps and would make the median zero
     steps = np.diff(times)
-    step = np.median(steps)
-    if not (step > 0):
+    positive = steps[steps > 0]
+    if len(positive) == 0:
         return []
+    step = np.median(positive)
 
     return [first + int(i) + 1 for i in np.nonzero(steps > factor*step)[0]]
 
@@ -5034,6 +5037,64 @@ class SegmentedRun(object):
 
 
 
+def splitAtGaps(detections, gaps):
+    """ Cut the detections at the gaps in the recording, so that no detection runs across one (see
+        detectAcrossGaps). The pieces which are no detections any more are removed later (see
+        removeInvalidDetections).
+
+    Arguments:
+        detections: [list] Detections as [rho, theta, centroids], centroids rows [frame, x, y, ...].
+        gaps: [list] The first frame after every gap.
+
+    Return:
+        [list] The detections, those across a gap cut into their pieces.
+    """
+
+    if not gaps:
+        return detections
+
+    out = []
+    for rho, theta, cent in detections:
+
+        # The part between the gaps which every row belongs to; a detection within one part is kept as it is
+        part = np.searchsorted(gaps, cent[:, 0], side='right')
+        if part[0] == part[-1]:
+            out.append([rho, theta, cent])
+            continue
+        for k in np.unique(part):
+            out.append([rho, theta, cent[part == k]])
+
+    return out
+
+
+def joinWithinGaps(detector, detections, gaps, connected=None):
+    """ Join the pieces of tracks and remove the duplicates (see MatchedFilterDetector.joinDetections) within every
+        part of the recording between its gaps, as a track is not followed across a gap.
+
+    Arguments:
+        detector: [MatchedFilterDetector] The detector whose limits are used.
+        detections: [list] Detections as [rho, theta, centroids], none across a gap (see splitAtGaps).
+        gaps: [list] The first frame after every gap.
+
+    Keyword arguments:
+        connected: [function] The light between two points in a frame (see joinDetections). None by default.
+
+    Return:
+        [list] The joined detections.
+    """
+
+    if not gaps:
+        return detector.joinDetections(detections, connected=connected)
+
+    # The detections of every part, by the part of their first row
+    parts = collections.defaultdict(list)
+    for det in detections:
+        parts[int(np.searchsorted(gaps, det[2][0, 0], side='right'))].append(det)
+
+    return [det for k in sorted(parts) for det in detector.joinDetections(parts[k], connected=connected)]
+
+
+
 def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, dark=None, flat_struct=None,
                                 platepar=None, reference_dir=None, input_name='', chunk_callback=None):
     """ Extract the stars and run the matched filter on an input which is read only once, in segments held in
@@ -5160,7 +5221,12 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
         tolerance = 3*2.355*searched[0].psf_sigma*searched[0].det_bin
         detections = stitchSegments(segment_detections, cuts, overlaps, searched[0], tolerance,
                                     searched=[det is not None for det in detectors])
-        detections = searched[0].joinDetections(detections, connected=connectedOver(detectors))
+
+        # A track is not followed across a gap in the recording (see detectAcrossGaps): the detections stitched over
+        #   a gap are cut there, and the pieces are joined only within the parts between the gaps
+        gaps = sorted(set(g for det in detectors if det is not None for g in getattr(det, 'gaps', [])))
+        detections = splitAtGaps(detections, gaps)
+        detections = joinWithinGaps(searched[0], detections, gaps, connected=connectedOver(detectors))
 
         # The pieces cut at the middle of an overlap and not joined again may be no detections any more
         detections = removeInvalidDetections(detections, searched[0])
