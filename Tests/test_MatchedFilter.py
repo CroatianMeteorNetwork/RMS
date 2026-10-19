@@ -1123,6 +1123,34 @@ def test_duplicate_along_the_motion_removed_when_the_light_is_connected():
     assert len(removeDuplicateDetections(dets, 1.4, 4.2, connected=lit, max_connected_along=5.0)) == 2
 
 
+def test_duplicate_which_runs_into_the_object_removed():
+    """ A shorter detection which begins away from an object and runs into it (a piece of the sums of other
+        velocities through a bright object) is a duplicate once it is on the object in a third of its frames,
+        while two objects which cross are not. """
+
+    from RMS.Detection import removeDuplicateDetections
+    from RMS.MatchedFilterDetection import DUPLICATE_COINCIDENT
+
+    # The object, and a detection which joins it from 12 px across over 18 frames, then follows it for 11 frames
+    #   (as in a recording of a bright object)
+    frames = np.arange(100, 241, 1.0)
+    obj = np.c_[frames, 900 + 0.6*(frames - 100), 10 + 2.1*(frames - 100)]
+    ghost = obj[48:77].copy()
+    off = np.clip(1 - np.arange(29)/18.0, 0, None)
+    ghost[:, 1] -= 12*off
+    dets = [[0, 0, obj], [0, 0, ghost]]
+
+    # The medians are too far apart for the usual limits
+    assert len(removeDuplicateDetections(dets, 2.2, 6.6)) == 2
+    kept = removeDuplicateDetections(dets, 2.2, 6.6, min_coincident=DUPLICATE_COINCIDENT)
+    assert (len(kept) == 1) and (kept[0][2] is obj)
+
+    # An object crossing it at another direction is close to it only in a few frames
+    cross = np.c_[frames[30:70], 920 - 1.0*(frames[30:70] - 130), 73 + 2.1*(frames[30:70] - 130)]
+    assert len(removeDuplicateDetections([[0, 0, obj], [0, 0, cross]], 2.2, 6.6,
+                                         min_coincident=DUPLICATE_COINCIDENT)) == 2
+
+
 def test_connected_light_along_a_trail(config):
     """ The fraction of a segment which is lit (well above the background) in a frame: along the trail of a very
         bright object from its position it is lit, towards the empty sky it is not. """

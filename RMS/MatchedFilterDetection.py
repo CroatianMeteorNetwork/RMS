@@ -145,6 +145,10 @@ SHADOW_OVERLAP = 0.8
 DUPLICATE_ALONG = 10.0
 CONNECTED_LEVEL = 5.0
 
+# A detection whose centroids are within a PSF FWHM of those of a longer one in at least this fraction of its frames
+#   is the same object (see removeDuplicateDetections)
+DUPLICATE_COINCIDENT = 1/3
+
 # Smallest F statistic of the curvature of a short track (see curvatureSignificant): about a 5 sigma improvement
 #   of the fit by the quadratic. The tracks of faint objects have no measurable curvature over a short time, and
 #   a quadratic would fit their noise
@@ -2376,10 +2380,12 @@ class MatchedFilterDetector(object):
                 trimmed.append([*self.polarLine(cent), cent])
 
         # The duplicates: detections of the same object close to a longer one, also further along the motion when
-        #   the light between them is connected (the same bright object measured twice)
+        #   the light between them is connected (the same bright object measured twice), or on it in a part of
+        #   their frames (a piece of the sums of other velocities through the object which runs into it)
         return removeDuplicateDetections(trimmed, fwhm*self.det_bin, 3*fwhm*self.det_bin,
                                          connected=connected if connected is not None else self.connectedLight,
-                                         max_connected_along=DUPLICATE_ALONG*fwhm*self.det_bin)
+                                         max_connected_along=DUPLICATE_ALONG*fwhm*self.det_bin,
+                                         min_coincident=DUPLICATE_COINCIDENT)
 
 
     def run(self):
