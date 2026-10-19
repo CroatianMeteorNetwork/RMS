@@ -1040,6 +1040,26 @@ def test_extent_line_fast_object_not_a_line():
     assert mfd.extentLine(stack, PSF_SIGMA, n, motion=(0.1*math.cos(angle), 0.1*math.sin(angle)))[0] < 0.5
 
 
+def test_track_left_without_motion_after_the_faint_ends_are_cut_is_dropped(config):
+    """ A track which moves enough only thanks to its faint head (a piece over empty sky joined to a nearly
+        stationary object) is not a detection once the head is cut. """
+
+    det = MatchedFilterDetector(_SynthHandle([], total_frames=128), config)
+    det.psf_sigma = PSF_SIGMA
+
+    # A faint head moving 60 px, then the bright part which barely moves
+    n = 40
+    cent = np.zeros((2*n, 7))
+    cent[:, 0] = np.arange(2*n)
+    cent[:n, 1] = 40.0 + 1.5*np.arange(n)
+    cent[n:, 1] = 100.0 + 0.01*np.arange(n)
+    cent[:, 2] = 60.0
+    cent[:, 5] = np.r_[np.full(n, 1.0), np.full(n, 30.0)]
+    assert np.hypot(*(cent[n, 1:3] - cent[-1, 1:3])) < det.minDisplacement()
+
+    assert det.joinDetections([[0.0, 0.0, cent]], connected=lambda *args: None) == []
+
+
 def test_linear_structure_flags_per_track(config):
     """ The flag of a track rejected on a linear structure belongs to that track, also when another track has the
         same first and last frame. """

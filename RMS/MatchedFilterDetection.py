@@ -2367,7 +2367,7 @@ class MatchedFilterDetector(object):
 
         # A joined track can end in a piece much fainter than the rest of it (a piece built from the sums of other
         #   velocities through a bright object joins the object's track): its faint ends are cut (a track left too
-        #   short to be a detection is dropped), before the duplicates are removed, as the rest of such a track is
+        #   short or moving too little to be a detection is dropped), before the duplicates are removed, as the rest of such a track is
         #   often a second detection of the object
         trimmed = []
         for det in detections:
@@ -2376,7 +2376,7 @@ class MatchedFilterDetector(object):
                 continue
             if len(cent) == len(det[2]):
                 trimmed.append(det)
-            elif cent[-1, 0] - cent[0, 0] >= self.opts.min_frames:
+            elif isValidDetection(cent, self):
                 trimmed.append([*self.polarLine(cent), cent])
 
         # The duplicates: detections of the same object close to a longer one, also further along the motion when
@@ -2499,9 +2499,10 @@ class MatchedFilterDetector(object):
 
             # The ends of a track where it is much fainter than along the rest of it are not of the object (e.g. a
             #   piece of track built from the sums of other velocities through a bright object, which continues
-            #   the object over empty sky), and what is left has to last as long as a detection
+            #   the object over empty sky), and what is left has to last and move as long as a detection
             cent = trimFaintEnds(cent)
-            if (cent is None) or (cent[-1, 0] - cent[0, 0] < self.opts.min_frames):
+            if (cent is None) or (cent[-1, 0] - cent[0, 0] < self.opts.min_frames) \
+                    or (np.hypot(*(cent[-1, 1:3] - cent[0, 1:3])) < self.minDisplacement()):
                 continue
 
             # Unbinned coordinates, and the intensity of the unbinned image (averaged bins hold the mean of the
