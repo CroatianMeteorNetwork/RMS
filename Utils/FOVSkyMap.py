@@ -7,7 +7,7 @@ from matplotlib.ticker import StrMethodFormatter
 from RMS.Routines.FOVArea import fovArea
 from RMS.Routines.FOVSkyArea import fovSkyArea
 
-from RMS.Astrometry.Conversions import latLonAlt2ECEF, ECEF2AltAz, raDec2AltAz, datetime2JD, jd2Date
+from RMS.Astrometry.Conversions import latLonAlt2ECEF, ECEF2AltAz, trueRaDec2ApparentAltAz, datetime2JD, jd2Date
 import ephem
 import os
 
@@ -172,7 +172,8 @@ def plotRaDec(ax, configs, show_radec, radec_list, radec_name_list, station_code
                 # Compute az and el of object
                 jd = datetime2JD(time_to_evaluate)
                 ra_degrees, dec_degrees = radec[0], radec[1]
-                az, el = raDec2AltAz(ra_degrees, dec_degrees, jd, c.latitude, c.longitude)
+                az, el = trueRaDec2ApparentAltAz(ra_degrees, dec_degrees, jd, c.latitude, c.longitude,
+                    refraction=False)
 
                 # Is the sun below the dusk threshold?
                 if sun.alt < ASTRONOMICAL_DUSK:
