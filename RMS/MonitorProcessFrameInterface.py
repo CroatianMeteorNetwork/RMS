@@ -58,6 +58,7 @@ from RMS.DeleteOldObservations import availableSpace
 from RMS.DetectionTools import binImageCalibration, findMaskPath, loadImageCalibration
 from RMS.Astrometry.ApplyRecalibrate import applyRecalibrate
 from RMS.Logger import LoggingManager, getLogger
+from RMS.ContinuousResults import processPendingJoins
 from RMS.Misc import RmsDateTime
 
 
@@ -1013,8 +1014,93 @@ def _plateparFailed(results_path, result_name):
 
 
 
+def continuousInput(file_path, input_dir, img_handle, config, chunk_frames, output_dir, proc_log=None):
+    """ The input of the matched filter with continuous detection: the file preceded by the last chunks of frames of
+        the previous file of the recording, if that file follows it without missing frames, and the pending join of
+        their results left for the monitor (see RMS.ContinuousResults).
+
+    Arguments:
+        file_path: [str] The input file.
+        input_dir: [str] The input directory of the monitor (the IDs of the files are relative to it).
+        img_handle: [FrameInterface] The opened input file.
+        config: [Config] Configuration.
+        chunk_frames: [int] Number of frames of a chunk.
+        output_dir: [str] Output directory of the camera.
+
+    Keyword arguments:
+        proc_log: [Logger] Logger, the module logger if None.
+
+    Return:
+        (chain, pending): [tuple] The chained input (RMS.Formats.FrameChain.ChainedInput) and the pending join, or
+            (None, None) without a contiguous previous file.
+    """
+
+    from RMS.ContinuousResults import previousInput, writePending
+    from RMS.Formats.FrameChain import ChainedInput, contiguous
+
+    proc_log = log if proc_log is None else proc_log
+
+    # The previous file of the recording, opened like this one
+    prev_path = previousInput(file_path)
+    if prev_path is None:
+        proc_log.info("Continuous detection: no previous file")
+        return None, None
+    try:
+        prev = detectInputType(prev_path, copy.deepcopy(config), detection=True, preload_video=True,
+                               chunk_frames=chunk_frames)
+    except Exception as e:
+        proc_log.warning("Continuous detection: the previous file {} can't be read: {}".format(prev_path, repr(e)))
+        return None, None
+
+    # Only a previous file which this one follows without missing frames is put in front
+    if (prev is None) or (not contiguous(prev, img_handle)):
+        proc_log.info("Continuous detection: {} doesn't follow {} without missing frames".format(
+            os.path.basename(file_path), os.path.basename(prev_path)))
+        return None, None
+
+    chain = ChainedInput(prev, config.monitor_continuous_chunks*chunk_frames, img_handle)
+
+    # The results directories of both files (as the monitor names them), and the boundary between them
+    def unixTime(dt):
+        return dt.replace(tzinfo=datetime.timezone.utc).timestamp() if dt.tzinfo is None else dt.timestamp()
+
+    prev_uid = uniqueId(os.path.relpath(prev_path, input_dir))
+    cur_uid = uniqueId(os.path.relpath(file_path, input_dir))
+    boundary = unixTime(chain.currentFrameTime(frame_no=chain.n_context, dt_obj=True))
+    pending = {
+        'results_dir': resultsDirPath(output_dir, img_handle.beginning_datetime, cur_uid),
+        'previous_results_dir': resultsDirPath(output_dir, prev.beginning_datetime, prev_uid),
+        'previous_input': os.path.abspath(prev_path),
+        'boundary_unix': boundary,
+        'context_s': boundary - unixTime(chain.currentFrameTime(frame_no=0, dt_obj=True)),
+    }
+    writePending(output_dir, cur_uid, pending)
+    proc_log.info("Continuous detection: the last {:d} frames of {} are searched in front".format(chain.n_context,
+                                                                                               prev_path))
+
+    return chain, pending
+
+
+def recalibrateJoined(results_dir, config, proc_log=None):
+    """ Recalibrate results changed by a join of the continuous detection, with new ECSV files of their detections.
+
+    Arguments:
+        results_dir: [str] Results directory.
+        config: [Config] Configuration.
+
+    Keyword arguments:
+        proc_log: [Logger] Logger, the module logger if None.
+    """
+
+    # The ECSV files of the detections before the join are written again by the recalibration
+    for path in glob.glob(os.path.join(results_dir, '*.ecsv')):
+        os.remove(path)
+    if os.path.isfile(os.path.join(results_dir, config.platepar_name)):
+        recalibrateResults(results_dir, config, proc_log=proc_log)
+
+
 def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
-                flat_path=None, dark_path=None, unique_id=None, start_time=None, mask_path=None):
+                flat_path=None, dark_path=None, unique_id=None, start_time=None, mask_path=None, input_dir=None):
     """ Process a single file through the detection and recalibration pipeline.
 
     Arguments:
@@ -1034,6 +1120,9 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
             (monitor_night_cutoff_hours) are skipped the same way, and marked as done.
         mask_path: [str] Path to the mask. None by default, in which case the mask named in the config next
             to the file or next to the config file is used, if there is one.
+        input_dir: [str] The input directory of the monitor, which the IDs of the files are relative to. With
+            monitor_continuous, the previous file of the recording is found and its results named with it. None by
+            default (no continuous detection).
 
     Return:
         [bool] True if processing succeeded, False otherwise.
@@ -1214,6 +1303,11 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
         # The frames are read from the file, or from memory when it is read in segments (see below)
         frame_source = img_handle
 
+        # The input of the matched filter with the frames of the previous file in front (continuous detection), and
+        #   the join of the results it leaves for the monitor
+        mf_handle = img_handle
+        continuous_pending = None
+
         if mf_only:
 
             # The matched filter is imported here, in the worker, and not at the top of the module: importing its
@@ -1251,13 +1345,32 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
                 #   number of stars is the largest number in a chunk of frames
                 max_stars = max([len(entry[1]) for entry in star_list] + [0])
                 mf_t0 = time.time()
+
+                # With continuous detection, the last chunks of the previous file of the recording are searched in
+                #   front of the file, so the search continues across the boundary (see RMS.ContinuousResults)
+                mf_handle = img_handle
+                if config.monitor_continuous and (input_dir is not None):
+                    chain, continuous_pending = continuousInput(file_path, input_dir, img_handle, config,
+                                                                chunk_frames, output_dir, proc_log)
+                    if chain is not None:
+                        mf_handle = chain
+
                 if max_stars >= config.ff_min_stars:
-                    meteor_list, mf_detector = detectMatchedFilter(img_handle, config, mask=mask, dark=dark,
+                    meteor_list, mf_detector = detectMatchedFilter(mf_handle, config, mask=mask, dark=dark,
                                                                    flat_struct=flat_struct, star_list=star_list,
                                                                    return_detector=True,
                                                                    platepar=readPlatepar(results_platepar_path),
                                                                    reference_dir=output_dir,
                                                                    input_name=os.path.abspath(file_path))
+
+                    # The detections only in the borrowed frames are those of the previous file, which searched them
+                    #   itself
+                    if mf_handle is not img_handle:
+                        n_all = len(meteor_list)
+                        meteor_list = [det for det in meteor_list
+                                       if np.max(np.asarray(det[2])[:, 0]) >= mf_handle.n_context]
+                        proc_log.info("Continuous detection: {:d} detections, {:d} only in the frames of the "
+                                      "previous file dropped".format(n_all, n_all - len(meteor_list)))
                 else:
                     proc_log.info("Not enough stars for the matched filter: {:d} < {:d}".format(max_stars,
                                                                                               config.ff_min_stars))
@@ -1287,10 +1400,15 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
 
         # Save results (CALSTARS + FTPdetectinfo) to the results directory. Meteors are assigned to the saved
         #   chunk images
+        # With continuous detection, the frames of the detections are those of the chained input (the chunk images
+        #   are moved to their frames there)
+        chunk_images = image_saver.chunk_images if image_saver is not None else None
+        if (mf_handle is not img_handle) and (chunk_images is not None):
+            chunk_images = [(c[0] + mf_handle.n_context,) + tuple(c[1:]) for c in chunk_images]
         saveResultsFrameInterface(
-            star_list, meteor_list, img_handle, config,
+            star_list, meteor_list, mf_handle, config,
             chunk_frames=chunk_frames, output_dir=results_dir,
-            chunk_images=(image_saver.chunk_images if image_saver is not None else None)
+            chunk_images=chunk_images
         )
 
         proc_log.info("Detection results saved to: {}".format(results_dir))
@@ -2212,6 +2330,12 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                 del active_workers[uid]
                 worker_paths.pop(uid, None)
 
+            # The joins of the continuous detection whose files are both processed
+            if reporter.config.monitor_continuous:
+                if processPendingJoins(output_dir, reporter.config,
+                                       recalibrate=lambda d: recalibrateJoined(d, reporter.config)):
+                    reporter.resultsChanged()
+
             # 1. Get ALL paths and their metadata first
             candidate_paths = []
             try:
@@ -2319,7 +2443,7 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                 proc = startWorker(file_path,
                     (file_path, config_path, platepar_path, output_dir, chunk_frames),
                     {'flat_path': flat_path, 'dark_path': dark_path, 'unique_id': unique_id,
-                     'start_time': start_time, 'mask_path': mask_path})
+                     'start_time': start_time, 'mask_path': mask_path, 'input_dir': input_dir})
                 if proc is None:
                     break
 
@@ -2798,6 +2922,14 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
                 del active_workers[key]
                 worker_paths.pop(key, None)
 
+            # The joins of the continuous detection of every camera whose files are both processed
+            for cam in cameras:
+                cam_config = reporters[cam['id']].config
+                if cam_config.monitor_continuous:
+                    if processPendingJoins(cam['output_dir'], cam_config,
+                                           recalibrate=lambda d, c=cam_config: recalibrateJoined(d, c)):
+                        reporters[cam['id']].resultsChanged()
+
             # 2. Collect all new, stable files ready to be processed for each camera
             stable_per_cam = {}
             for cam in cameras:
@@ -2968,7 +3100,7 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
                      chosen_cam['output_dir'], chunk_frames),
                     {'flat_path': chosen_cam['flat_path'], 'dark_path': chosen_cam['dark_path'],
                      'unique_id': unique_id, 'start_time': chosen_cam['start_time'],
-                     'mask_path': chosen_cam['mask_path']})
+                     'mask_path': chosen_cam['mask_path'], 'input_dir': chosen_cam['input_dir']})
                 if proc is None:
                     break
 
