@@ -1063,24 +1063,26 @@ def test_track_left_without_motion_after_the_faint_ends_are_cut_is_dropped(confi
 
 
 def test_measured_track_is_not_cut_again_when_not_joined(config):
-    """ The faint ends of a track are cut once: a track which brightens steadily, cut when it was measured, is not
-        cut again by the joining of the tracks (the level of the cut follows the track, so a second cut would
-        shorten it further). """
+    """ The faint ends of a track are cut once: a track already cut (when it was measured) is not cut again by the
+        joining of the tracks (the level of the cut follows the track, so a second cut could shorten it further),
+        while a track made since (e.g. by the stitching of segments) is cut. """
 
     det = MatchedFilterDetector(_SynthHandle([], total_frames=128), config)
     det.psf_sigma = PSF_SIGMA
 
-    n = 40
+    # A faint head of 25 rows, then the object for 40 rows
+    n = 65
     cent = np.zeros((n, 7))
     cent[:, 0] = np.arange(n)
     cent[:, 1] = 20.0 + 2.0*np.arange(n)
     cent[:, 2] = 60.0
-    cent[:, 5] = np.geomspace(1.0, 1e4, n)
-    once = mfd.trimFaintEnds(cent)
-    assert len(mfd.trimFaintEnds(once)) < len(once)
+    cent[:, 5] = np.r_[np.full(25, 1.0), np.full(n - 25, 30.0)]
 
-    joined = det.joinDetections([[0.0, 0.0, once]], connected=lambda *args: None)
-    assert (len(joined) == 1) and (len(joined[0][2]) == len(once))
+    joined = det.joinDetections([[0.0, 0.0, cent]], connected=lambda *args: None, cut={id(cent)})
+    assert (len(joined) == 1) and (joined[0][2] is cent)
+
+    joined = det.joinDetections([[0.0, 0.0, cent]], connected=lambda *args: None, cut=set())
+    assert (len(joined) == 1) and (joined[0][2][0, 0] >= 20)
 
 
 def test_linear_structure_flags_per_track(config):
@@ -2228,6 +2230,12 @@ def test_faint_ends_of_a_track_are_cut():
     cent[:30, 5] = 50.0
     kept = mfd.trimFaintEnds(cent)
     assert (kept[0, 0] == 0) and (kept[-1, 0] >= 57)
+
+    # A faint head which is most of the track (a long piece over empty sky joined to the object)
+    long = np.zeros((120, 7))
+    long[:, 0] = np.arange(120)
+    long[:, 5] = np.r_[rng.normal(1.0, 0.5, 100), rng.normal(25.0, 4.0, 20)]
+    assert mfd.trimFaintEnds(long)[0, 0] >= 95
 
     # A single bright noise row at the end of a faint head doesn't keep the head
     cent[:, 5] = np.r_[rng.normal(1.0, 0.5, 25), rng.normal(25.0, 4.0, n - 25)]

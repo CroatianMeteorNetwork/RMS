@@ -104,7 +104,9 @@ FITS_EXTENSIONS = ('.fits',)
 SLOW_SPEED = 0.1
 
 # The ends of a track where at most FAINT_END_BRIGHT_ROWS of the rows (in windows of FAINT_END_WINDOW rows) reach
-#   FAINT_END_FRACTION of the upper quartile of the SNR of the track are cut (see trimFaintEnds)
+#   FAINT_END_FRACTION of the FAINT_END_PERCENTILE percentile of the SNR of the track (the level of its bright part,
+#   also when that is only a tenth of the track) are cut (see trimFaintEnds)
+FAINT_END_PERCENTILE = 90
 FAINT_END_FRACTION = 0.1
 FAINT_END_WINDOW = 9
 FAINT_END_BRIGHT_ROWS = 0.2
@@ -2342,7 +2344,7 @@ class MatchedFilterDetector(object):
         return float(np.mean(z[pts[:, 1], pts[:, 0]] > CONNECTED_LEVEL))
 
 
-    def joinDetections(self, detections, connected=None):
+    def joinDetections(self, detections, connected=None, cut=None):
         """ Join the pieces of tracks (a faint object can be lost for a while, e.g. behind stars) and remove the
             duplicates. An object can be lost for many seconds while moving only a few PSF widths, so pieces
             are joined across any gap in which the object moved less than 15 PSF widths, if the second piece
@@ -2354,6 +2356,9 @@ class MatchedFilterDetector(object):
         Keyword arguments:
             connected: [function] The light between two points in a frame (see connectedLight), e.g. over the
                 segments of an input (see connectedOver). None by default (connectedLight of this detector).
+            cut: [set] Identities (id) of the centroid arrays of the detections whose faint ends were already cut
+                (see trimFaintEnds), e.g. as they were measured; the arrays have to be held by the caller. None by
+                default (the faint ends of all detections are cut here).
 
         Return:
             [list] The joined detections.
@@ -2363,20 +2368,17 @@ class MatchedFilterDetector(object):
         #   in the unbinned image of the centroids
         fwhm = 2.355*self.psf_sigma
         max_gap = 4*max(self.opts.run_frames + [self.opts.slow_run_frames])
-        # The tracks before the joining (held, so the tracks which are not joined keep their identity)
-        before = list(detections)
-        unchanged = {id(det[2]) for det in before}
         detections = joinContinuousDetections(detections, max_gap, 15*fwhm, 2*fwhm, self.height, self.width,
                                               bin_factor=self.det_bin)
 
         # A joined track can end in a piece much fainter than the rest of it (a piece built from the sums of other
         #   velocities through a bright object joins the object's track): its faint ends are cut (a track left too
         #   short or moving too little to be a detection is dropped), before the duplicates are removed, as the rest
-        #   of such a track is often a second detection of the object. Only the joined tracks are cut here, the
-        #   others were cut when they were measured (the cut is not repeated, as its level follows the track)
+        #   of such a track is often a second detection of the object. The tracks already cut (e.g. when they were
+        #   measured, and not joined since) are not cut again, as the level of the cut follows the track
         trimmed = []
         for det in detections:
-            if id(det[2]) in unchanged:
+            if (cut is not None) and (id(det[2]) in cut):
                 trimmed.append(det)
                 continue
             cent = trimFaintEnds(det[2])
@@ -2520,8 +2522,8 @@ class MatchedFilterDetector(object):
 
             detections.append([*self.polarLine(cent), cent])
 
-        # Join the pieces of tracks and remove the duplicates
-        detections = self.joinDetections(detections)
+        # Join the pieces of tracks and remove the duplicates (their faint ends were cut above)
+        detections = self.joinDetections(detections, cut={id(det[2]) for det in detections})
 
         # The whole tracks which wander sideways from one smooth path are no objects (e.g. pieces of diffuse
         #   light)
@@ -3594,17 +3596,19 @@ def weightedMedian(values, weights):
 
 def trimFaintEnds(cent, fraction=FAINT_END_FRACTION, window=FAINT_END_WINDOW):
     """ Cut the ends of a track where it is much fainter than along the rest of it: the leading and the trailing
-        rows in whose window (of window rows) at most FAINT_END_BRIGHT_ROWS of the rows reach fraction of the upper
-        quartile of the SNR of the track (the level of its bright part, also when a faint piece is half of it). A
-        track which is faint all along (e.g. near the limit) is kept as it is, as only the ends fainter than the
-        track itself are cut, and so is a track which is bright only in rare flashes.
+        rows in whose window (of window rows) at most FAINT_END_BRIGHT_ROWS of the rows reach fraction of the
+        FAINT_END_PERCENTILE percentile of the SNR of the track (the level of its bright part, also when a faint
+        piece is most of the track). A track which is faint all along (e.g. near the limit) is kept as it is, as
+        only the ends fainter than the track itself are cut, and so is a track which is bright only in rare
+        flashes.
 
     Arguments:
         cent: [ndarray] Rows of a track, one per frame, [frame, x, y, intensity, background, snr, ...], sorted by
             frame.
 
     Keyword arguments:
-        fraction: [float] Fraction of the upper quartile of the SNR of the track. FAINT_END_FRACTION by default.
+        fraction: [float] Fraction of the FAINT_END_PERCENTILE percentile of the SNR of the track.
+            FAINT_END_FRACTION by default.
         window: [int] Number of rows of the window around a row. FAINT_END_WINDOW by default.
 
     Return:
@@ -3619,7 +3623,7 @@ def trimFaintEnds(cent, fraction=FAINT_END_FRACTION, window=FAINT_END_WINDOW):
     #   a single noise row is not (the windows shrink at the ends of the track)
     snr = np.asarray(cent[:, 5], dtype=np.float64)
     half = window//2
-    level = fraction*np.percentile(snr, 75)
+    level = fraction*np.percentile(snr, FAINT_END_PERCENTILE)
     above = snr >= level
     bright = np.array([np.mean(above[max(i - half, 0):i + half + 1]) > FAINT_END_BRIGHT_ROWS
                        for i in range(len(snr))])
@@ -4910,7 +4914,8 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
         tolerance = 3*2.355*searched[0].psf_sigma*searched[0].det_bin
         detections = stitchSegments(segment_detections, cuts, overlaps, searched[0], tolerance,
                                     searched=[det is not None for det in detectors])
-        detections = searched[0].joinDetections(detections, connected=connectedOver(detectors))
+        detections = searched[0].joinDetections(detections, connected=connectedOver(detectors),
+                                                cut={id(det[2]) for dets in segment_detections for det in dets})
 
         # The pieces cut at the middle of an overlap and not joined again may be no detections any more
         detections = removeInvalidDetections(detections, searched[0])
