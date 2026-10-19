@@ -158,8 +158,9 @@ def saveResultsFrameInterface(star_list, meteor_list, img_handle, config, chunk_
     if output_dir is None:
         output_dir = img_handle.dir_path
 
-    # Construct the name of the CALSTARS file by using the camera code and the time of the first frame
-    timestamp = img_handle.beginning_datetime.strftime("%Y%m%d_%H%M%S_%f")
+    # Construct the name of the CALSTARS file by using the camera code and the time of the first frame (of the input
+    #   itself for an input with frames of another one in front, see RMS.Formats.FrameChain)
+    timestamp = getattr(img_handle, 'name_datetime', img_handle.beginning_datetime).strftime("%Y%m%d_%H%M%S_%f")
     prefix = "{:s}_{:s}".format(config.stationID, timestamp)
 
     suffix = ''

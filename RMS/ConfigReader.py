@@ -883,6 +883,14 @@ class Config:
         #   network. Empty disables it
         self.monitor_staging_dir = ''
 
+        # Continuous detection over the consecutive files of a recording: a file which follows the previous file
+        #   without missing frames is searched with the last chunks of frames of the previous file in front of it,
+        #   and the detections of an object which crosses the boundary are joined into one, kept in the results of
+        #   the file where it begins (see RMS.ContinuousResults). Only with the matched filter replacing the normal
+        #   detection, without mf_buffer_memory
+        self.monitor_continuous = False
+        self.monitor_continuous_chunks = 1
+
         # Keep the live status of the monitor in a JSON file in the output directory (monitor_status.json), for
         #   external monitoring, rewritten every given number of seconds and after every processed file
         self.monitor_status = True
@@ -2512,6 +2520,12 @@ def parseMonitorProcessing(config, parser):
 
     if parser.has_option(section, "monitor_observation_summary"):
         config.monitor_observation_summary = parser.getboolean(section, "monitor_observation_summary")
+
+    if parser.has_option(section, "monitor_continuous"):
+        config.monitor_continuous = parser.getboolean(section, "monitor_continuous")
+
+    if parser.has_option(section, "monitor_continuous_chunks"):
+        config.monitor_continuous_chunks = max(parser.getint(section, "monitor_continuous_chunks"), 1)
 
     if parser.has_option(section, "monitor_staging_dir"):
         staging_dir = parser.get(section, "monitor_staging_dir").strip()

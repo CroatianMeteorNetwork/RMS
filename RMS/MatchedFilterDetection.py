@@ -4194,11 +4194,18 @@ def skyQuality(img_handle, config, star_list, platepar, reference_dir=None, inpu
         #   (by the frame times of the input)
         reference = SkyReference(reference_dir, config.stationID) if reference_dir else None
         first_frame, end_frame = frame_range if (frame_range is not None) else (0, img_handle.total_frames)
+
+        # The frames borrowed from the previous input (continuous detection, see RMS.Formats.FrameChain) are not
+        #   part of this input: the sky quality is that of its own chunks (the nearest one for the borrowed frames),
+        #   so the chunks of the previous input are neither clouded for lack of stars nor added to the reference
+        #   and the log again
+        first_frame = max(first_frame, getattr(img_handle, 'n_context', 0))
         sky_map = SkyQualityMap(star_list, platepar, config, img_handle.beginning_datetime.replace(tzinfo=None),
                                 img_handle.fps, getattr(img_handle, 'chunk_frames', None),
                                 max_offset=config.mf_cloud_max_offset, total_frames=end_frame,
                                 min_matched=config.mf_cloud_min_matched,
-                                first_frames=(chunkFirstFrames(star_list, img_handle, frame_range=frame_range)
+                                first_frames=(chunkFirstFrames(star_list, img_handle,
+                                                               frame_range=(first_frame, end_frame))
                                               if hasattr(img_handle, 'chunk_frames') else None),
                                 reference=reference, input_name=input_name, first_frame=first_frame)
 
