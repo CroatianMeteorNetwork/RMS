@@ -14,7 +14,7 @@ from RMS.Misc import getRmsRootDir
 from RMS.Formats.Platepar import Platepar
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, targetRaDecToPlateRaDec
 from RMS.Astrometry.Conversions import date2JD, JD2HourAngle
-from RMS.Astrometry.CyFunctions import (refractionScale, refractionTargetFraction,
+from RMS.Astrometry.CyFunctions import (refractionScale, refractionTargetFraction, removeAberration,
     pyRefractionApparentToTrue, pyRefractionTrueToApparent, equatorialCoordPrecession)
 
 
@@ -214,6 +214,10 @@ def test_star_fit_at_altitude_leaves_no_bias():
         dec = np.arcsin(eq[:, 2])
         out = np.array([equatorialCoordPrecession(jd, 2451545.0, r_, d_) for r_, d_ in zip(ra, dec)])
 
+        # Everything here goes through the star path, which removes the annual aberration, so the truth is
+        #   the catalog direction: the seen direction with the aberration taken out
+        out = np.array([removeAberration(r_, d_, jd) for r_, d_ in out])
+
         return np.degrees(out[:, 0]), np.degrees(out[:, 1])
 
     def unit(ra, dec):
@@ -298,7 +302,10 @@ def _syntheticCamera(lat, lon, elev_station, az0, alt0, x_res, y_res, f_scale, j
     side = np.cross(pointing, up)
     gmst = np.radians(JD2HourAngle(jd))
 
-    def trueJ2000(x, y, refr_scale):
+    def trueJ2000(x, y, refr_scale, catalog=True):
+        """ catalog=True gives the catalog direction of a star seen at the pixel (the aberration taken
+            out, as the star path does); catalog=False the geometric direction of a target fixed to the
+            Earth, which is not aberrated. """
 
         dx, dy = x - x_res/2, y - y_res/2
         rho = np.radians(np.hypot(dx, dy)/f_scale)
@@ -318,6 +325,9 @@ def _syntheticCamera(lat, lon, elev_station, az0, alt0, x_res, y_res, f_scale, j
         ra = np.arctan2(eq[:, 1], eq[:, 0])%(2*np.pi)
         dec = np.arcsin(eq[:, 2])
         out = np.array([equatorialCoordPrecession(jd, 2451545.0, r_, d_) for r_, d_ in zip(ra, dec)])
+
+        if catalog:
+            out = np.array([removeAberration(r_, d_, jd) for r_, d_ in out])
 
         return np.degrees(out[:, 0]), np.degrees(out[:, 1])
 
@@ -357,13 +367,13 @@ def test_ground_references_are_fitted_without_refraction(references):
     ra_s, dec_s = trueJ2000(sx, sy, scale)
     rng = np.random.default_rng(11)
     gx, gy = rng.uniform(20, x_res - 20, 40), rng.uniform(20, y_res - 20, 40)
-    ra_g, dec_g = trueJ2000(gx, gy, 0.0)
+    ra_g, dec_g = trueJ2000(gx, gy, 0.0, catalog=False)
 
     # Check points spread over the frame, and the truth for both kinds of measurement
     cx, cy = np.meshgrid(np.linspace(30, x_res - 30, 7), np.linspace(30, y_res - 30, 5))
     cx, cy = cx.ravel(), cy.ravel()
-    ra_ground_true, dec_ground_true = trueJ2000(cx, cy, 0.0)
-    ra_sky_true, dec_sky_true = trueJ2000(cx, cy, scale)
+    ra_ground_true, dec_ground_true = trueJ2000(cx, cy, 0.0, catalog=False)
+    ra_sky_true, dec_sky_true = trueJ2000(cx, cy, scale, catalog=False)   # measured as a meteor
 
     # Start from an ordinary refraction-on plate fitted on the stars, so that the distortion is already
     #   the one of this camera and the comparison below only sees the effect of the ground references
@@ -447,7 +457,7 @@ def test_plate_coordinates_are_a_no_op_without_refraction():
 
     ra = np.array([120.0, 121.0, 122.0])
     dec = np.array([20.0, 21.0, 22.0])
-    ra_plate, dec_plate = targetRaDecToPlateRaDec(ra, dec, 2460000.5, pp)
+    ra_plate, dec_plate = targetRaDecToPlateRaDec(ra, dec, 2460000.5, pp, aberration=False)
 
     assert np.array_equal(ra_plate, ra)
     assert np.array_equal(dec_plate, dec)
@@ -464,7 +474,8 @@ def test_a_full_refraction_fraction_is_a_no_op():
 
     ra = np.array([120.0, 150.0, 200.0])
     dec = np.array([5.0, 20.0, 60.0])
-    ra_plate, dec_plate = targetRaDecToPlateRaDec(ra, dec, 2460000.5, pp, refraction_fraction=1.0)
+    ra_plate, dec_plate = targetRaDecToPlateRaDec(ra, dec, 2460000.5, pp, refraction_fraction=1.0,
+        aberration=False)
 
     assert _separation(ra_plate, dec_plate, ra, dec).max() < 1e-6
 
@@ -509,14 +520,14 @@ def test_ground_projection_uses_the_apparent_pointing():
     cx, cy = cx.ravel(), cy.ravel()
 
     # The light of a target on the ground is not refracted, so its true direction is the line of sight
-    ra_ground, dec_ground = trueJ2000(cx, cy, 0.0)
+    ra_ground, dec_ground = trueJ2000(cx, cy, 0.0, catalog=False)
 
     # The direction the ground path of xyHt2Geo() recovers from those pixels
     pp_ground = copy.deepcopy(pp)
     pp_ground.updateRefAltAz()
     pp_ground.switchToGroundPicks()
     _, ra_m, dec_m, _ = xyToRaDecPP(len(cx)*[jd], cx, cy, np.ones(len(cx)), pp_ground, \
-        extinction_correction=False, measurement=False, jd_time=True)
+        extinction_correction=False, measurement=False, jd_time=True, aberration=False)
 
     assert _separation(ra_m, dec_m, ra_ground, dec_ground).max() < 1.0
 
@@ -524,6 +535,6 @@ def test_ground_projection_uses_the_apparent_pointing():
     pp_flag_only = copy.deepcopy(pp)
     pp_flag_only.refraction = False
     _, ra_b, dec_b, _ = xyToRaDecPP(len(cx)*[jd], cx, cy, np.ones(len(cx)), pp_flag_only, \
-        extinction_correction=False, measurement=False, jd_time=True)
+        extinction_correction=False, measurement=False, jd_time=True, aberration=False)
 
     assert _separation(ra_b, dec_b, ra_ground, dec_ground).max() > 100.0
