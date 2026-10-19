@@ -2123,3 +2123,123 @@ def test_cpu_search_streams_the_runs(config, monkeypatch):
     obj = linearObject(1.5, 25, 30, 0.3, 0.12, 40, 470)
     _, detections = runDetector(_SynthHandle([obj]), config)
     assert len(detections) == 1
+
+
+### Gaps in the recording ###
+
+class _GapHandle(_SynthHandle):
+    """ Synthetic frames with the time of every frame, with frames missing after the frame gap_frame: the time
+        jumps there by gap_missing frame intervals more. The objects move with the time, so after the gap they
+        are where the time puts them, not where the frame number would.
+    """
+
+    def __init__(self, objects, gap_frame, gap_missing, table=False, **kwargs):
+
+        self.gap_frame = gap_frame
+        self.gap_missing = gap_missing
+
+        # The positions of the objects are functions of the time in frame intervals (the time axis)
+        timed = []
+        for obj in objects:
+            timed.append(dict(obj, pos=self._timed(obj['pos'])))
+        _SynthHandle.__init__(self, timed, **kwargs)
+
+        # The time table of the frames (as of frame block files), if asked for
+        if table:
+            self.frame_unix_times = np.array([self.frameTime(f) for f in range(self.total_frames)]) + 1.8e9
+
+    def frameTime(self, f):
+        """ The time of a frame in frame intervals from the first one. """
+
+        return f + (self.gap_missing if f > self.gap_frame else 0)
+
+    def _timed(self, pos):
+        """ The position function of the time, as a function of the frame (between frames by the nearest one's
+            time, so the motion during a frame is the usual one). """
+
+        def timedPos(f):
+            base = int(math.floor(f + 0.5))
+            return pos(self.frameTime(base) + (f - base))
+
+        return timedPos
+
+    def currentFrameTime(self, frame_no=None, dt_obj=False):
+        """ The time of a frame, with the gap. """
+
+        if frame_no is None:
+            frame_no = self.current_frame
+
+        return BEG_TIME + datetime.timedelta(seconds=self.frameTime(frame_no)/self.fps)
+
+    def hasAccurateTime(self):
+        return True
+
+
+def test_time_gaps_found_from_the_frame_times():
+    """ The gaps in the recording are where the time between two frames is much longer than usual, from the time
+        of every frame or from the time table of the input; none without the time of every frame. """
+
+    handle = _GapHandle([], 250, 30, total_frames=400)
+    assert mfd.timeGaps(handle) == [251]
+    assert mfd.timeGaps(handle, frame_range=(260, 400)) == []
+    assert mfd.timeGaps(_GapHandle([], 250, 30, total_frames=400, table=True)) == [251]
+
+    # Without the time of every frame the frames are at a constant interval
+    assert mfd.timeGaps(_SynthHandle([], total_frames=400)) == []
+
+
+def test_object_measured_at_its_times_across_a_gap(config):
+    """ An object moving through a gap in the recording (30 frame intervals missing) is measured where it is on
+        both sides of the gap: the track is not followed across the gap as if no time had passed (which put
+        phantom points on empty sky after it), and the object is not found twice. """
+
+    obj = linearObject(3.0, 15, 30, 0.25, 0.1, 40, 500)
+    handle = _GapHandle([obj], 250, 30, total_frames=512)
+    detections, detector = mfd.detectMatchedFilter(handle, config, return_detector=True)
+
+    # The parts on both sides of the gap, without overlap
+    assert len(detections) == 2
+    cents = sorted((det[2] for det in detections), key=lambda c: c[0, 0])
+    assert cents[0][-1, 0] <= 250 < 251 <= cents[1][0, 0]
+
+    # Every measurement is near the true position at the time of its frame
+    for cent in cents:
+        err = truthError(cent, handle.objects[0])
+        assert np.sqrt(np.mean(err**2)) < 0.6
+        assert err.max() < 2.0
+
+    # The summary has the gap
+    summary = detector.summary()
+    assert summary['time_gaps'] == [{'frame': 251, 'gap_s': round(31/config.fps, 3)}]
+    assert len(summary['tracks']) >= 2
+
+
+def test_input_without_gaps_unchanged(config):
+    """ An input with the time of every frame but without gaps is searched as before, in one piece. """
+
+    obj = linearObject(3.0, 15, 30, 0.25, 0.1, 40, 500)
+    handle = _GapHandle([obj], 10000, 0, total_frames=512)
+    detections, detector = mfd.detectMatchedFilter(handle, config, return_detector=True)
+    _, plain = runDetector(_GapHandle([obj], 10000, 0, total_frames=512), config)
+
+    assert isinstance(detector, MatchedFilterDetector)
+    assert len(detections) == len(plain) == 1
+    assert np.array_equal(detections[0][2], plain[0][2])
+
+
+def test_segment_with_a_gap_carries_the_persistence(config):
+    """ A segment of an input with a gap: its parts are searched separately, the persistence counts reach the
+        next segment (counted up to its first frame, here at the end of the block of the first part which holds
+        it), and the light between points is taken from the part which the frame belongs to. """
+
+    obj = linearObject(3.0, 15, 30, 0.25, 0.1, 40, 500)
+    handle = _GapHandle([obj], 250, 30, total_frames=512)
+    detections, detector = mfd.detectMatchedFilter(handle, config, return_detector=True, frame_range=(0, 512),
+                                                   persistence_until=200, track_deviation=False)
+
+    assert isinstance(detector, mfd.GapPieces)
+    assert [tuple(r) for r in detector.ranges] == [(0, 251), (251, 512)]
+    assert detector.persistence_carry is not None
+    assert (detector.persistence_carry_frames, detector.persistence_full_frames) == (251, 512)
+    assert detector.connectedLight(100, 10, 10, 20, 20) is not None
+    assert detector.connectedLight(300, 10, 10, 20, 20) is not None
