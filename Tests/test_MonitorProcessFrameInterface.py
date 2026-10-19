@@ -422,6 +422,25 @@ def test_dark_and_flat_applied_only_if_given(process_file, dark_given, flat_give
         assert seen['config'].dark_file == os.path.abspath('bias.png')
 
 
+@pytest.mark.parametrize('continuous', [False, True])
+def test_file_processed_again_has_no_done_flag_with_continuous_detection(process_file, tmp_path, continuous):
+
+    run, config, seen = process_file
+    config.monitor_continuous = continuous
+
+    # Results of an earlier processing of the file
+    results_dir = mon.resultsDirPath(str(tmp_path/'out'), _ProcessHandle.beginning_datetime, 'dummy')
+    os.makedirs(results_dir)
+    for name in ('done.flag', 'continuous.json'):
+        open(os.path.join(results_dir, name), 'w').close()
+
+    # The monitor joins the results of continuous detection once they have a done flag: the old one is removed
+    #   while the file is processed again
+    run()
+    for name in ('done.flag', 'continuous.json'):
+        assert os.path.isfile(os.path.join(results_dir, name)) != continuous
+
+
 def test_given_dark_which_cannot_be_loaded_fails(process_file):
 
     run, config, seen = process_file

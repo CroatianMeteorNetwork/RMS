@@ -58,7 +58,7 @@ from RMS.DeleteOldObservations import availableSpace
 from RMS.DetectionTools import binImageCalibration, findMaskPath, loadImageCalibration
 from RMS.Astrometry.ApplyRecalibrate import applyRecalibrate
 from RMS.Logger import LoggingManager, getLogger
-from RMS.ContinuousResults import processPendingJoins
+from RMS.ContinuousResults import JOIN_RECORD, processPendingJoins
 from RMS.Misc import RmsDateTime
 
 
@@ -1205,6 +1205,14 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
         # Create the results directory, sorted by the date of the first frame
         results_dir = resultsDirPath(output_dir, img_handle.beginning_datetime, file_base)
         os.makedirs(results_dir, exist_ok=True)
+
+        # With continuous detection, a file processed again (--force) has no done flag and no record of an earlier
+        #   join until it is done: the monitor joins the results of two files once both have a done flag, and
+        #   would otherwise join the old results while they are being written again
+        if config.monitor_continuous:
+            for name in ('done.flag', JOIN_RECORD):
+                if os.path.isfile(os.path.join(results_dir, name)):
+                    os.remove(os.path.join(results_dir, name))
 
         # Initialize the logger for this process
         orig_data_dir = config.data_dir
