@@ -25,6 +25,7 @@ import os
 import numpy as np
 
 from RMS.Astrometry.Conversions import date2JD, jd2Date, JD2HourAngle, JD2LST
+from RMS.Astrometry.CyFunctions import refractionScale
 from RMS.Astrometry.Conversions import trueRaDec2ApparentAltAz
 from RMS.Astrometry.ApplyAstrometry import rotationWrtStandardToPosAngle
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
@@ -572,7 +573,8 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
     platepar.F_scale = scale
 
     # Compute azimuth and altitude from RA/Dec
-    azim, alt = trueRaDec2ApparentAltAz(ra, dec, jd, platepar.lat, platepar.lon)
+    azim, alt = trueRaDec2ApparentAltAz(ra, dec, jd, platepar.lat, platepar.lon, \
+        refraction=platepar.refraction, refraction_scale=refractionScale(platepar.elev))
     platepar.az_centre = azim
     platepar.alt_centre = alt
 
