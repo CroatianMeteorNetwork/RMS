@@ -28,7 +28,7 @@ import json
 import numpy as np
 
 from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
-from RMS.Astrometry.Conversions import raDec2AltAz
+from RMS.Astrometry.Conversions import trueRaDec2ApparentAltAz
 from RMS.Formats import StarCatalog
 from RMS.PatchPhotometry import APERTURE_HALF, EDGE_MARGIN, RING_OFFSETS
 from RMS.Routines.Response import responseOf
@@ -182,7 +182,8 @@ class StarField(object):
 
         # The distortion polynomial folds stars far off the axis back into the frame (see
         # Utils.StillsSampler.inFrontOfCamera)
-        az, alt = raDec2AltAz(ra, dec, jd, pp.lat, pp.lon)
+        az, alt = trueRaDec2ApparentAltAz(np.asarray(ra, dtype=np.float64), np.asarray(dec, dtype=np.float64), jd,
+            pp.lat, pp.lon, refraction=False)
         az, alt = np.radians(az), np.radians(alt)
         az_c, alt_c = np.radians(pp.az_centre), np.radians(pp.alt_centre)
         front = (np.sin(alt)*np.sin(alt_c) + np.cos(alt)*np.cos(alt_c)*np.cos(az - az_c)) > 0.3

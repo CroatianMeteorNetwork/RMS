@@ -107,7 +107,7 @@ def robustFit(A, b, clip=3.0, n_iter=6):
 
 def photometry(args):
 
-    from RMS.Astrometry.Conversions import raDec2AltAz
+    from RMS.Astrometry.Conversions import trueRaDec2ApparentAltAz
     from RMS.Formats.Platepar import Platepar
     from RMS.Formats import StarCatalog
     import RMS.ConfigReader as cr
@@ -141,7 +141,9 @@ def photometry(args):
     alt = [[] for _ in oids]
     for b in blocks:
         jd = b['t']/86400.0 + 2440587.5
-        _, a = raDec2AltAz(b['ra'], b['dec'], jd, pp.lat, pp.lon)
+        # Catalog positions are J2000: precessed to the epoch of date, no refraction
+        _, a = trueRaDec2ApparentAltAz(np.asarray(b['ra'], dtype=np.float64), np.asarray(b['dec'], dtype=np.float64),
+            jd, pp.lat, pp.lon, refraction=False)
         for j, o in enumerate(b['oid']):
             i = pos[int(o)]
 
@@ -276,7 +278,7 @@ def clouds(args):
     """ Per-star transmission against the clear-sky model, per 0.64 s bin and per block, and its
     comparison with the transparency tree, the stills photometry and the flux cloud intervals. """
 
-    from RMS.Astrometry.Conversions import raDec2AltAz
+    from RMS.Astrometry.Conversions import trueRaDec2ApparentAltAz
     from RMS.Formats.Platepar import Platepar
     from RMS.PatchPhotometry import CLEAR_FLUX_FRAC, SNR_MIN
     import RMS.ConfigReader as cr
@@ -301,7 +303,8 @@ def clouds(args):
         s, _ = blockStats(p)
         t = d['t']
         jd = float(np.mean(t))/86400.0 + 2440587.5
-        _, alt = raDec2AltAz(d['ra'], d['dec'], jd, pp.lat, pp.lon)
+        _, alt = trueRaDec2ApparentAltAz(np.asarray(d['ra'], dtype=np.float64), np.asarray(d['dec'], dtype=np.float64),
+            jd, pp.lat, pp.lon, refraction=False)
         X = 1.0/np.sin(np.radians(np.clip(alt, 5, 90)))
         r2 = ((s['x'] - W/2.0)**2 + (s['y'] - H/2.0)**2)/(H/2.0)**2
         col = np.array([colour.get(int(o), np.nan) for o in d['oid']])
@@ -474,7 +477,7 @@ def limitingMagnitude(args):
     fraction of its 0.64 s bins whose median transmission is above clear_t. """
 
     from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
-    from RMS.Astrometry.Conversions import raDec2AltAz
+    from RMS.Astrometry.Conversions import trueRaDec2ApparentAltAz
     from RMS.Formats import FFfile
     from RMS.Formats.Platepar import Platepar
     from Utils.Flux import stellarLMModel
@@ -518,7 +521,8 @@ def limitingMagnitude(args):
 
         _, ra, dec, _ = xyToRaDecPP([jd]*gx.size, gx.ravel(), gy.ravel(), [1]*gx.size, pp,
                                     extinction_correction=False, jd_time=True)
-        _, alt = raDec2AltAz(np.array(ra), np.array(dec), jd, pp.lat, pp.lon)
+        _, alt = trueRaDec2ApparentAltAz(np.asarray(ra, dtype=np.float64), np.asarray(dec, dtype=np.float64), jd,
+            pp.lat, pp.lon, refraction=False)
         Xc = (1.0/np.sin(np.radians(np.clip(np.array(alt), 5, 90)))).reshape(gx.shape)
 
         # Per-frame noise of a box sum on the sky (block background), per cell from the probes
@@ -528,7 +532,8 @@ def limitingMagnitude(args):
 
         # Stars: transmission per block and per 0.64 s bin, per-frame S/N
         jd_s = jd
-        _, alt_s = raDec2AltAz(d['ra'], d['dec'], jd_s, pp.lat, pp.lon)
+        _, alt_s = trueRaDec2ApparentAltAz(np.asarray(d['ra'], dtype=np.float64),
+            np.asarray(d['dec'], dtype=np.float64), jd_s, pp.lat, pp.lon, refraction=False)
         Xs = 1.0/np.sin(np.radians(np.clip(alt_s, 5, 90)))
         r2s = ((s['x'] - W/2.0)**2 + (s['y'] - H/2.0)**2)/(H/2.0)**2
         col = np.array([colour.get(int(o), col_med) for o in d['oid']])
