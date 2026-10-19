@@ -55,8 +55,11 @@ log = getLogger("logger")
 MIN_MATCHED_FRACTION = 0.15
 
 # Smallest number of observations of a star in an input for its residual there to be kept (its clear-sky residual is
-#   a low quantile of its residuals)
+#   a low quantile of its residuals). A short input (e.g. 30 s of frames) has fewer chunks: there, a star has to be seen
+#   in all its chunks, but in at least MIN_STAR_OBS_SHORT of them, so that short inputs also build the reference of
+#   the camera (the median over the latest inputs of every star smooths their fewer observations)
 MIN_STAR_OBS = 5
+MIN_STAR_OBS_SHORT = 2
 
 # Quantile of the residuals of a star in an input taken as its residual on clear sky there (%), and of the zero
 #   points of the inputs taken as the zero point of clear sky (%)
@@ -73,6 +76,20 @@ MIN_SEEN_FRACTION = 0.5
 #   matched stars)
 MIN_RELIABLE = 100
 
+
+
+def minStarObs(n_chunks):
+    """ The smallest number of observations of a star in an input of n_chunks used chunks for its residual there to
+        be kept: MIN_STAR_OBS, or all the chunks of a shorter input, but at least MIN_STAR_OBS_SHORT.
+
+    Arguments:
+        n_chunks: [int] Number of the used chunks of the input.
+
+    Return:
+        [int]
+    """
+
+    return min(MIN_STAR_OBS, max(MIN_STAR_OBS_SHORT, int(n_chunks)))
 
 
 def starKeys(ra, dec):
@@ -709,7 +726,7 @@ class SkyQualityMap(object):
         self.star_keys, star_ref, star_seen, clear_zero_point = self.starReferences(usable)
         reliable = star_seen >= RELIABLE_FRACTION
 
-        # Without the reference of any star (a short input, with fewer than MIN_STAR_OBS chunks, and no reference
+        # Without the reference of any star (an input of a single usable chunk, and no reference
         #   of the camera yet) the sky quality is not known, rather than clouded everywhere
         if not np.isfinite(star_ref).any():
             raise CalibrationError('no star has a reference (too few chunks and no reference of the camera)')
@@ -807,7 +824,7 @@ class SkyQualityMap(object):
             is reliably seen on clear sky and how often, and the zero point of clear sky.
 
         The residual of a star in an input is the STAR_QUANTILE quantile of its residuals in the usable chunks
-        (with at least MIN_STAR_OBS of them), relative to the zero point of the input (the median of these over
+        (with at least MIN_STAR_OBS of them, or all of them for an input of fewer chunks, see minStarObs), relative to the zero point of the input (the median of these over
         the stars). Its reference is the median of its residuals in the other inputs in the reference, or, without
         them, its residual in this input (which a cloud during the whole input would bias towards the cloud). A
         star is reliable if it is seen in at least RELIABLE_FRACTION of the chunks in which it is in the image, in
@@ -869,7 +886,7 @@ class SkyQualityMap(object):
                 by default (all).
 
         Return:
-            (keys, values, rates): sorted keys, residuals (NaN with fewer than MIN_STAR_OBS observations) and seen
+            (keys, values, rates): sorted keys, residuals (NaN with fewer observations than minStarObs) and seen
                 fractions (NaN without the catalog stars in the image).
         """
 
@@ -890,7 +907,7 @@ class SkyQualityMap(object):
         order = np.argsort(inverse, kind='stable')
         bounds = np.r_[0, np.cumsum(counts)]
         values = np.full(len(keys), np.nan)
-        for j in np.nonzero(counts >= MIN_STAR_OBS)[0]:
+        for j in np.nonzero(counts >= minStarObs(np.count_nonzero(use)))[0]:
             values[j] = np.percentile(obs[order[bounds[j]:bounds[j + 1]], 0], STAR_QUANTILE)
 
         # The fraction of the chunks in which every star is in the image (on clear sky) in which it is seen
