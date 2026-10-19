@@ -726,8 +726,8 @@ class SkyQualityMap(object):
         self.star_keys, star_ref, star_seen, clear_zero_point = self.starReferences(usable)
         reliable = star_seen >= RELIABLE_FRACTION
 
-        # Without the reference of any star (an input of a single usable chunk, and no reference
-        #   of the camera yet) the sky quality is not known, rather than clouded everywhere
+        # Without the reference of any star (an input of a single usable chunk, and no reference of the camera
+        #   yet) the sky quality is not known, rather than clouded everywhere
         if not np.isfinite(star_ref).any():
             raise CalibrationError('no star has a reference (too few chunks and no reference of the camera)')
 
@@ -824,12 +824,13 @@ class SkyQualityMap(object):
             is reliably seen on clear sky and how often, and the zero point of clear sky.
 
         The residual of a star in an input is the STAR_QUANTILE quantile of its residuals in the usable chunks
-        (with at least MIN_STAR_OBS of them, or all of them for an input of fewer chunks, see minStarObs), relative to the zero point of the input (the median of these over
-        the stars). Its reference is the median of its residuals in the other inputs in the reference, or, without
-        them, its residual in this input (which a cloud during the whole input would bias towards the cloud). A
-        star is reliable if it is seen in at least RELIABLE_FRACTION of the chunks in which it is in the image, in
-        the median of the other inputs (or in this one, without them). The zero point of clear sky is the
-        STAR_QUANTILE quantile of the zero points of the other inputs (or the one of this input, without them).
+        (with at least MIN_STAR_OBS of them, or all of them for an input of fewer chunks, see minStarObs),
+        relative to the zero point of the input (the median of these over the stars). Its reference is the median
+        of its residuals in the other inputs in the reference, or, without them, its residual in this input (which
+        a cloud during the whole input would bias towards the cloud). A star is reliable if it is seen in at least
+        RELIABLE_FRACTION of the chunks in which it is in the image, in the median of the other inputs (or in this
+        one, without them). The zero point of clear sky is the STAR_QUANTILE quantile of the zero points of the
+        other inputs (or the one of this input, without them).
 
         Arguments:
             usable: [ndarray] Boolean, the usable chunks.
