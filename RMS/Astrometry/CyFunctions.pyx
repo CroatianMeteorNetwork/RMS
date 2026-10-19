@@ -2062,6 +2062,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
     cdef int index_offset
     cdef double radius, theta, sin_t, cos_t
     cdef double ra_ref_now_corr, ra, dec, dec_ref_corr, pos_angle_ref_now_corr
+    cdef double vx, vy, vz
     cdef DateFrame date_frame
 
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data = np.zeros_like(jd_data)
@@ -2172,6 +2173,10 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
             # Frame rotations and sidereal time for the refraction
             if refraction:
                 date_frame = dateFrame(jd, radians(lon))
+
+            # Earth velocity for the annual aberration
+            if aberration:
+                vx, vy, vz = earthVelocityJ2000(jd)
 
 
         ### APPLY DISTORTION CORRECTION ###
@@ -2334,7 +2339,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
 
         # Annual aberration: apparent direction seen from the moving Earth -> catalog direction
         if aberration:
-            ra, dec = removeAberration(ra, dec, jd)
+            ra, dec = shiftDirection(ra, dec, -vx, -vy, -vz)
 
 
 
