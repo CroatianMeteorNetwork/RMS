@@ -779,3 +779,39 @@ def test_persistence_kept_past_a_segment_too_short_to_search(monkeypatch):
 
     mfd.detectMatchedFilterSegments(handle, config, 256)
     assert used['persistence'] == 'counts to 512'
+
+
+def test_segments_corrected_for_the_rolling_shutter_once(monkeypatch):
+    """ The detections of the segments of an input are corrected for a rolling shutter once, together, after they
+        are joined (the segments themselves are searched without the correction, see detectMatchedFilter). """
+
+    import RMS.MatchedFilterDetection as mfd
+
+    # An input of 2048 frames, searched in segments
+    config = cr.Config()
+    config.mf_block_frames = 256
+    config.mf_segment_overlap = 256
+    config.ff_min_stars = 1
+    handle = _Input(total_frames=2048)
+
+    # Stars in every chunk, and the frame range of every segment searched, without detections
+    def stars(img_handle, config, chunk_range=None, **kwargs):
+        from RMS.Formats.FFfile import constructFFName
+        return [[constructFFName('XX0001', handle.currentFrameTime(frame_no=c*128, dt_obj=True)), [(1.0,)*8]*5]
+                for c in range(*chunk_range)]
+
+    segments, corrected = [], []
+    def detect(img_handle, config, frame_range=None, **kwargs):
+        segments.append(frame_range)
+        return [], None
+
+    # The calls of the rolling-shutter correction are counted
+    monkeypatch.setattr(mfd, 'extractStarsFrameInterface', stars)
+    monkeypatch.setattr(mfd, 'detectMatchedFilter', detect)
+    monkeypatch.setattr(mfd, 'skyQuality', lambda *args, **kwargs: None)
+    monkeypatch.setattr(mfd, 'correctRollingShutter', lambda detections, *args: corrected.append(detections) or detections)
+
+    # The segments are searched as parts of the input (no correction there), the joined detections corrected once
+    mfd.detectMatchedFilterSegments(handle, config, 768)
+    assert all(frame_range is not None for frame_range in segments)
+    assert len(corrected) == 1

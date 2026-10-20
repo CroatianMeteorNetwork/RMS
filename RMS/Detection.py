@@ -3942,7 +3942,8 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                         #   binning (the crop of the capture is in the rows of the unbinned image, and only the
                         #   inputs from the RMS capture are cropped)
                         bin_factor = config.detection_binning_factor if (img_handle.input_type != 'ff') else 1
-                        frame_no = RollingShutterCorrection.correctFrameTime(frame_no, y_centroid*bin_factor,
+                        frame_no = RollingShutterCorrection.correctFrameTime(frame_no,
+                            y_centroid*bin_factor + (bin_factor - 1)/2.0,
                             img_handle.ff.maxpixel.shape[0]*bin_factor, config, fps=getattr(img_handle, 'fps', None),
                             cropped=RollingShutterCorrection.croppedInput(img_handle.input_type))
 

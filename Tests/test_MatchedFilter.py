@@ -616,6 +616,30 @@ def test_short_track_rejected(config):
     assert len(detections) == 0
 
 
+def test_rolling_shutter_corrects_the_frames(config):
+    """ With a rolling shutter (deinterlace_order -1), the frames of the centroids of the whole input are later by
+        the share of the readout time of their row; with a global shutter, or for a segment of the input (corrected
+        with the other segments), they are unchanged.
+    """
+
+    # The detection with a global shutter
+    obj = linearObject(3.0, 20, 100, 0.3, -0.15, 100, 400)
+    _, global_shutter = runDetector(_SynthHandle([obj]), config)
+
+    # A sensor read in 32 ms at 25 fps: 0.8 frames from the top row to the bottom row
+    config.deinterlace_order = -1
+    config.rolling_shutter_readout = 0.032
+    rolling = mfd.detectMatchedFilter(_SynthHandle([obj]), config)
+    assert (len(global_shutter) == 1) and (len(rolling) == 1)
+    cent_g, cent_r = global_shutter[0][2], rolling[0][2]
+    assert np.allclose(cent_r[:, 1:], cent_g[:, 1:])
+    assert np.allclose(cent_r[:, 0] - cent_g[:, 0], 0.8*cent_g[:, 2]/SIZE)
+
+    # A segment of the input is not corrected on its own
+    segment = mfd.detectMatchedFilter(_SynthHandle([obj]), config, frame_range=(0, 512))
+    assert np.allclose(segment[0][2][:, 0], cent_g[:, 0])
+
+
 ### Output ###
 
 def test_ftpdetectinfo_round_trip(config, tmp_path):
