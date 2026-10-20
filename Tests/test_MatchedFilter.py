@@ -1955,6 +1955,95 @@ def test_merge_tracks_through_a_bridge(config):
     assert len(det.mergeTracks([sparse, dense])) == 1
 
 
+def test_merged_track_stays_one_object(config):
+    """ Tracks are merged pairwise: a track A, two hits which continue A and then turn away (e.g. noise, or a
+        piece of another object), and a track B which continues those two hits. A and the two hits pass the tests
+        of the merging, and the merged track would then be continued by B, giving one track of two objects. The
+        union of A and the two hits doesn't move as one object, so they are not merged, and A and B stay apart.
+    """
+
+    det = MatchedFilterDetector(_SynthHandle([]), config)
+    row = lambda f, x, y: [f, x, y, 8.0, 1.0, 0.0, 8, 2]
+
+    # A moves along x at 1 px per frame; the two hits continue it and then turn away by 20 px
+    a = np.array([row(f, 100 + f, 200.0) for f in np.arange(3.5, 100, 8)])
+    n = np.array([row(107.5, 207.5, 200.0), row(115.5, 215.5, 220.0)])
+
+    # B continues the turn of the two hits, at the velocity of the end of the track A and the two hits would have
+    vx, vy = det._endVelocity(det._union(a, n))
+    b = np.array([row(f, 215.5 + vx*(f - 115.5), 220.0 + vy*(f - 115.5)) for f in np.arange(123.5, 220, 8)])
+
+    merged = det.mergeTracks([a, n, b])
+
+    # No track contains hits of both A and B
+    for tr in merged:
+        assert not ((tr[:, 0] < 100).any() and (tr[:, 0] > 120).any())
+
+    # The pieces of one straight track are still merged
+    c = np.array([row(f, 100 + f, 200.0) for f in np.arange(107.5, 220, 8)])
+    assert len(det.mergeTracks([a, c])) == 1
+
+
+def test_ghosts_of_bright_objects_removed(config):
+    """ The sums of the search along other velocities through a bright object give tracks along its path at other
+        speeds (ghosts), which are removed. A fainter object on the same path at the same speed (e.g. a train of
+        objects) and an object crossing the path are kept.
+    """
+
+    det = MatchedFilterDetector(_SynthHandle([]), config)
+    row = lambda f, x, y, z: [f, x, y, z, 2.0, 0.0, 8, 2]
+
+    # The bright object, at 2 px per frame along x
+    bright = np.array([row(f, 100 + 2*f, 300.0, 100.0) for f in np.arange(3.5, 200, 8)])
+
+    # Ghosts: on its path at 3 px per frame and at 1 px per frame, during its time
+    ghost_fast = np.array([row(f, 150 + 3*(f - 40), 300.5, 20.0) for f in (43.5, 51.5, 59.5)])
+    ghost_slow = np.array([row(f, 300 + 1*(f - 100), 299.5, 20.0) for f in (99.5, 107.5, 115.5, 123.5)])
+
+    # A fainter object following on the path at the same speed, and one crossing the path
+    follower = np.array([row(f, 40 + 2*f, 300.0, 20.0) for f in np.arange(35.5, 200, 8)])
+    crossing = np.array([row(f, 250.0, 200 + 2*f, 20.0) for f in np.arange(3.5, 100, 8)])
+
+    tracks = [bright, ghost_fast, ghost_slow, follower, crossing]
+    kept = det.removeGhosts(tracks)
+
+    assert len(kept) == 3
+    assert any(tr is bright for tr in kept)
+    assert any(tr is follower for tr in kept)
+    assert any(tr is crossing for tr in kept)
+
+
+def test_streak_duplicates_removed():
+    """ A fast object (10 px per frame) measured twice, at the middle of its streak and 11 px ahead of it, with the
+        same light curve, is one object; two objects moving together 15 px apart with their own light curves, and
+        two slow objects close together, are two.
+    """
+
+    from RMS.MatchedFilterDetection import removeStreakDuplicates
+
+    f = np.arange(100.0, 140.0)
+    rng = np.random.default_rng(3)
+    light = 1000*(1.5 + np.sin(f/3.0))
+    det = lambda x, y, inten: [0.0, 0.0, np.column_stack([f, x, y, inten, np.zeros_like(f), np.full_like(f, 10.0),
+                                                         np.zeros_like(f)])]
+
+    # The object, and its second measurement 11 px ahead and 5 px across, a little shorter
+    obj = det(10*f, 0.15*10*f, light)
+    second = det(10*f + 11 + rng.normal(0, 0.3, len(f)), 0.15*10*f - 5, 0.8*light)
+    second[2] = second[2][3:]
+    assert len(removeStreakDuplicates([obj, second], 2.4)) == 1
+
+    # Two objects moving together, 15 px apart (within the reach of a second measurement), each with its own light
+    #   curve
+    other = det(10*f + 15, 0.15*10*f, 1000*(1.5 + np.cos(f/5.0)))
+    assert len(removeStreakDuplicates([obj, other], 2.4)) == 2
+
+    # Two slow objects close together (e.g. two objects at nearly the same place) with flat light curves
+    slow_a = det(500 + 0.05*f, 300.0 + 0*f, np.full_like(f, 800.0))
+    slow_b = det(505 + 0.05*f, 302.0 + 0*f, np.full_like(f, 790.0))
+    assert len(removeStreakDuplicates([slow_a, slow_b], 2.4)) == 2
+
+
 def test_flashes_without_light_between_are_linked(config):
     """ An object seen only in its flashes (2 frames every 16 frames): the hits of the runs with a flash have a
         poorly known velocity, so they are linked by their positions. The flashes count fully in the search only

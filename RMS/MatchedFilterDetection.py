@@ -18,7 +18,9 @@ an object at 1.5 times the noise per frame is at 6 sigma in a run of 16 frames.
        which stay on the same pixels for most of a block (part of its median) are found by comparing the
        medians of the blocks, aligned on the stars.
     3. Linking: the hits of consecutive runs are linked into tracks, predicting the next hit from the motion of
-       the track, and the tracks of the same object are merged.
+       the track, and the tracks of the same object are merged (only where the merged track moves as one
+       object). The sums along other velocities through a bright object give tracks along its path at other
+       speeds (ghosts), which are removed.
     4. Measurement: a moving PSF is fitted jointly to short runs of the unbinned frames, at the position
        predicted from the track (see MatchedFilterKernels.fitMovingPSF). The run length is chosen per track,
        as short as the required position accuracy allows (every frame for bright objects), and the track is
@@ -29,6 +31,8 @@ an object at 1.5 times the noise per frame is at 6 sigma in a run of 16 frames.
        significant, and the light of the object has to be concentrated like that of a point source.
     6. Photometry: the background-subtracted sum of the pixels along the motion in every frame of the track,
        on the scale of the star intensities of the photometric calibration.
+    7. Duplicates: the pieces of a track are joined, and the detections of an object measured twice are removed,
+       also a fast object measured at two places of its streak (moving together, with the same light curve).
 
 The results are written as an FTPdetectinfo file with the suffix "mf", apart from the results of the normal
 detection, and recalibrated with the platepar. It runs in the monitor (mf_enable) after the normal detection
@@ -205,6 +209,37 @@ SEARCH_MIN_SIGMA = 1.0
 # Hits stronger than LINK_STRONG times the threshold are linked by their positions only: such a hit can come
 #   from a single bright frame of its run (e.g. a flash), whose velocity is not known (see linkHits)
 LINK_STRONG = 3.0
+
+# Two tracks are merged only if their union moves as one object where they meet (see _validMerge): every hit within
+#   MERGE_CHECK_RUNS runs of the junction is within the tolerance of the merging of a smooth path through its
+#   neighbours within MERGE_CHECK_RUNS runs, a parabola from MERGE_CHECK_PARABOLA neighbours on, else a line. The
+#   tolerance grows by MERGE_CHECK_SPREAD of the distance the object moves from the nearest neighbour (the error of
+#   the velocity of the path over the extrapolation)
+MERGE_CHECK_RUNS = 4
+MERGE_CHECK_PARABOLA = 5
+MERGE_CHECK_SPREAD = 0.05
+
+# The sums of the search along other velocities through a bright object give hits along its path, which link into
+#   tracks moving along the path at other speeds (ghosts, see removeGhosts). A track is a ghost of a track at least
+#   GHOST_STRENGTH times stronger if GHOST_ON_PATH of its hits are within GHOST_RADIUS bins (of the coarser search
+#   bin of the two) of the path of the stronger track, within its time, and its velocity differs from the velocity of
+#   the stronger track by more than GHOST_SPEED_DIFF of its speed (a track at the speed of the stronger one is the
+#   same object or one following it, e.g. in a train of objects, see removeShadows)
+GHOST_STRENGTH = 2.0
+GHOST_ON_PATH = 0.8
+GHOST_RADIUS = 2.0
+GHOST_SPEED_DIFF = 0.2
+
+# A fast object (moving at least a PSF width per frame) can be measured twice, e.g. at the middle of its streak and
+#   at its leading end (see removeStreakDuplicates). A detection is a second measurement of a longer one if they
+#   share STREAK_DUPLICATE_SHARED of its frames, in which it keeps its offset from the longer one (scatter below a
+#   PSF width), the offset is within the streak (the motion during a frame) plus STREAK_DUPLICATE_FWHM PSF widths,
+#   and both have the same light curve: a correlation of the logarithms of their intensities of at least
+#   STREAK_DUPLICATE_CORRELATION, or both flat (the scatter of the logarithm below STREAK_DUPLICATE_FLAT)
+STREAK_DUPLICATE_SHARED = 0.5
+STREAK_DUPLICATE_FWHM = 3.0
+STREAK_DUPLICATE_CORRELATION = 0.7
+STREAK_DUPLICATE_FLAT = 0.05
 
 # Chains of faint objects (see linkFaintHits): a chain starts from two hits FAINT_SEED_FRAMES apart (frames), each
 #   within FAINT_SEED_RADIUS (px) plus FAINT_SEED_SPREAD (px per frame, the error of the velocity of a hit) times the
@@ -2167,7 +2202,7 @@ class MatchedFilterDetector(object):
                         if len(fr):
                             dx = np.interp(fr, m[:, 0], m[:, 1]) - np.interp(fr, tr[:, 0], tr[:, 1])
                             dy = np.interp(fr, m[:, 0], m[:, 2]) - np.interp(fr, tr[:, 0], tr[:, 2])
-                            if np.median(np.hypot(dx, dy)) <= tol:
+                            if (np.median(np.hypot(dx, dy)) <= tol) and self._validMerge(m, tr, tol):
                                 merged[k] = self._union(m, tr)
                                 info[k] = self._trackInfo(merged[k])
                                 joined = True
@@ -2190,7 +2225,8 @@ class MatchedFilterDetector(object):
                     # The second track has to begin at the extrapolated position. The error of the extrapolation
                     #   grows with the distance travelled over the gap (5% of it, a velocity error of 5%)
                     pred = first[-1, 1:3] + np.array([vx, vy])*gap
-                    if np.hypot(*(second[0, 1:3] - pred)) <= tol + 0.05*gap*math.hypot(vx, vy):
+                    if (np.hypot(*(second[0, 1:3] - pred)) <= tol + 0.05*gap*math.hypot(vx, vy)) \
+                            and self._validMerge(m, tr, tol):
                         merged[k] = self._union(m, tr)
                         info[k] = self._trackInfo(merged[k])
                         joined = True
@@ -2201,6 +2237,62 @@ class MatchedFilterDetector(object):
                 info.append(tr_info)
 
         return merged
+
+
+    def _validMerge(self, a, b, tol):
+        """ Whether the union of two tracks moves as one object where they meet. The tests of _mergeOnce compare
+            the two tracks only with each other: a track merged with two hits of the noise which happen to continue
+            it, or with a piece of another object which crosses it, meets them, and the merged track is then
+            compared with the next tracks, so tracks of several objects and of the noise can grow into one track
+            across the image (and a real object whose hits go into it is lost). Here every hit of the union near
+            the junction (the overlap in time of the tracks, or the gap between them, and MERGE_CHECK_RUNS runs
+            around it) has to be within the tolerance of a smooth path through its neighbours, fitted without it:
+            a line, or a parabola with enough neighbours (curved tracks, e.g. by the distortion of the lens).
+
+        Arguments:
+            a: [ndarray] Hits of a track as rows [frame, x, y, z, vx, vy, run, ...], sorted by time.
+            b: [ndarray] Hits of the other track, likewise.
+            tol: [float] Tolerance of the merging (px).
+
+        Return:
+            [bool] True if the union is one object.
+        """
+
+        u = self._union(a, b)
+        f = u[:, 0]
+
+        # The junction: the overlap in time of the tracks, or the gap between them
+        lo, hi = max(a[0, 0], b[0, 0]), min(a[-1, 0], b[-1, 0])
+        if hi < lo:
+            lo, hi = hi, lo
+
+        # The neighbours of a hit are within MERGE_CHECK_RUNS runs of the longest run of the hits (the run of a hit
+        #   is its 7th column, the slow search has no runs)
+        run = float(np.max(u[:, 6])) if u.shape[1] > 6 else float(self.opts.slow_run_frames)
+        window = MERGE_CHECK_RUNS*run
+
+        for i in np.nonzero((f >= lo - window) & (f <= hi + window))[0]:
+
+            # The neighbours, without the hit and without the hits in its frame (of another tier of the search,
+            #   whose positions are not independent of it)
+            nb = np.nonzero((np.abs(f - f[i]) <= window) & (f != f[i]))[0]
+            if len(nb) < 2:
+                continue
+
+            # A smooth path through the neighbours, at the time of the hit
+            deg = 2 if len(nb) >= MERGE_CHECK_PARABOLA else 1
+            t = f[nb] - f[i]
+            x = np.polyval(np.polyfit(t, u[nb, 1], deg), 0.0)
+            y = np.polyval(np.polyfit(t, u[nb, 2], deg), 0.0)
+
+            # The tolerance of the merging, plus the error of the velocity of the path times the distance the
+            #   object moves from the nearest neighbour (the path is extrapolated to a hit beyond its neighbours)
+            vx, vy = np.polyfit(t, u[nb, 1], 1)[0], np.polyfit(t, u[nb, 2], 1)[0]
+            reach = MERGE_CHECK_SPREAD*np.min(np.abs(t))*math.hypot(vx, vy)
+            if math.hypot(u[i, 1] - x, u[i, 2] - y) > tol + reach:
+                return False
+
+        return True
 
 
     def _trackInfo(self, track):
@@ -2251,6 +2343,75 @@ class MatchedFilterDetector(object):
 
         u = np.vstack([a, b])
         return u[np.argsort(u[:, 0], kind='stable')]
+
+
+    def removeGhosts(self, tracks):
+        """ Remove the ghosts of bright objects. The search sums the frames along every velocity, and the sums
+            along other velocities than the one of a bright object still pass through the object: they give hits
+            on the path of the object, at its positions of other times, which link into tracks moving along the
+            path at other speeds (often many of them, of a few hits each). Such a track stays on the path of a
+            much stronger track during its time, but moves at another velocity (see GHOST_STRENGTH and the
+            following constants). Unlike a shadow (see removeShadows) it doesn't stay close to the stronger track at
+            the same times.
+
+        Arguments:
+            tracks: [list] Tracks as arrays of rows [frame, x, y, z, vx, vy, run, bin], sorted by time.
+
+        Return:
+            [list] The tracks which are not ghosts, in the same order.
+        """
+
+        if len(tracks) < 2:
+            return tracks
+
+        # The strength of a track (the combined significance of its hits, see removeShadows), its velocity (a
+        #   straight line fitted to its positions in time, or the median velocity of its hits if they are all in
+        #   one frame), its time span and its bin
+        strength = np.array([np.sum(tr[:, 3])/math.sqrt(len(tr)) for tr in tracks])
+        vel = np.array([(np.polyfit(tr[:, 0], tr[:, 1], 1)[0], np.polyfit(tr[:, 0], tr[:, 2], 1)[0])
+                        if np.ptp(tr[:, 0]) > 0 else (np.median(tr[:, 4]), np.median(tr[:, 5])) for tr in tracks])
+        bins = np.array([self.trackBin(tr) for tr in tracks])
+        run = np.array([float(np.max(tr[:, 6])) if tr.shape[1] > 6 else float(self.opts.slow_run_frames)
+                        for tr in tracks])
+
+        # Only the tracks of at least 3 hits have a path to compare with, strongest first
+        ghost = np.zeros(len(tracks), dtype=bool)
+        for i in np.argsort(-strength):
+            if ghost[i] or (len(tracks[i]) < 3):
+                continue
+            ref = tracks[i]
+            speed = math.hypot(*vel[i])
+            if speed <= 0:
+                continue
+
+            # The segments of the path of the stronger track
+            a, d = ref[:-1, 1:3], np.diff(ref[:, 1:3], axis=0)
+            length2 = np.maximum(np.sum(d**2, axis=1), 1e-12)
+            t0, t1 = ref[0, 0] - run[i], ref[-1, 0] + run[i]
+
+            for j in np.nonzero((strength*GHOST_STRENGTH <= strength[i]) & ~ghost)[0]:
+                tr = tracks[j]
+
+                # Most of its hits within the time of the stronger track
+                inside = (tr[:, 0] >= t0) & (tr[:, 0] <= t1)
+                if inside.mean() < GHOST_ON_PATH:
+                    continue
+
+                # At another velocity than the stronger track
+                if math.hypot(*(vel[j] - vel[i])) <= GHOST_SPEED_DIFF*speed:
+                    continue
+
+                # Most of its hits on the path: the distance of every hit from the nearest segment of the path
+                p = tr[:, None, 1:3]
+                u = np.clip(np.sum((p - a[None])*d[None], axis=2)/length2[None], 0.0, 1.0)
+                dist = np.min(np.hypot(*(p - (a[None] + u[..., None]*d[None])).transpose(2, 0, 1)), axis=1)
+                if np.mean(dist <= GHOST_RADIUS*max(bins[i], bins[j])) >= GHOST_ON_PATH:
+                    ghost[j] = True
+
+        if ghost.any():
+            log.info('Matched filter: {:d} ghosts of bright objects removed'.format(int(ghost.sum())))
+
+        return [tr for tr, g in zip(tracks, ghost) if not g]
 
 
     def removeShadows(self, tracks):
@@ -2639,10 +2800,13 @@ class MatchedFilterDetector(object):
         # The duplicates: detections of the same object close to a longer one, also further along the motion when
         #   the light between them is connected (the same bright object measured twice), or on it in a part of
         #   their frames (a piece of the sums of other velocities through the object which runs into it)
-        return removeDuplicateDetections(trimmed, fwhm*self.det_bin, 3*fwhm*self.det_bin,
-                                         connected=connected if connected is not None else self.connectedLight,
-                                         max_connected_along=DUPLICATE_ALONG*fwhm*self.det_bin,
-                                         min_coincident=DUPLICATE_COINCIDENT)
+        detections = removeDuplicateDetections(trimmed, fwhm*self.det_bin, 3*fwhm*self.det_bin,
+                                               connected=connected if connected is not None else self.connectedLight,
+                                               max_connected_along=DUPLICATE_ALONG*fwhm*self.det_bin,
+                                               min_coincident=DUPLICATE_COINCIDENT)
+
+        # A fast object measured twice along its streak, further apart than the duplicates above
+        return removeStreakDuplicates(detections, fwhm*self.det_bin)
 
 
     def run(self):
@@ -2677,8 +2841,9 @@ class MatchedFilterDetector(object):
         #   the sums of other velocities through a bright object, linked to its track by their position)
         linked = [cleanTrackHits(tr, min_hits=self.opts.min_hits) for tr in linked]
 
-        # Keep the tracks in the speed range which move far enough, without the ones following stronger tracks
-        tracks = self.removeShadows([tr for tr in linked if self.acceptTrack(tr)])
+        # Keep the tracks in the speed range which move far enough, without the ghosts of bright objects (along
+        #   their path at other speeds) and the tracks following stronger tracks
+        tracks = self.removeShadows(self.removeGhosts([tr for tr in linked if self.acceptTrack(tr)]))
 
         # The time of the measurement grows with the number of tracks, which can be large in bad conditions
         #   (e.g. thin clouds, a very bright star): the strongest tracks are kept, so a file can't take much
@@ -3823,6 +3988,76 @@ def curvatureSignificant(t, x, y, f_min=CURVATURE_MIN_F):
     #   floor keeps exact (noise-free) positions from dividing by zero
     scatter = max(rss_quad/(2*n - 6), 1e-12)
     return (rss_line - rss_quad)/2.0/scatter > f_min
+
+
+def removeStreakDuplicates(detections, fwhm):
+    """ Remove the second measurements of fast objects. The light of an object moving several pixels per frame is
+        a streak, and the object can be measured twice in it, e.g. at its middle and at its leading end, which gives
+        two detections moving together, the length of the streak apart (often also across it, as the leading end
+        of a bright streak is wide). They are further apart than the duplicates of removeDuplicateDetections, but
+        they are one object: they move rigidly together and have the same light curve, which two objects don't.
+        The longer detection is kept (see STREAK_DUPLICATE_SHARED and the following constants).
+
+    Arguments:
+        detections: [list] Detections as [rho, theta, centroids], centroids rows [frame, x, y, intensity, ...].
+        fwhm: [float] The PSF width (FWHM) in the pixels of the centroids.
+
+    Return:
+        [list] Detections without the second measurements, in the original order.
+    """
+
+    # Longest first, so the second measurement is removed in favour of the longer detection
+    order = sorted(range(len(detections)), key=lambda i: -len(detections[i][2]))
+
+    kept = []
+    for i in order:
+
+        cent = np.asarray(detections[i][2])
+        duplicate = False
+
+        for j in kept:
+
+            ref = np.asarray(detections[j][2])
+
+            # The shared frames
+            _, a, b = np.intersect1d(np.round(cent[:, 0], 1), np.round(ref[:, 0], 1), return_indices=True)
+            if len(a) < max(3, STREAK_DUPLICATE_SHARED*len(cent)):
+                continue
+
+            # Only a fast object has a streak: the speed of the longer detection (px per frame)
+            if np.ptp(ref[:, 0]) <= 0:
+                continue
+            speed = math.hypot(np.polyfit(ref[:, 0], ref[:, 1], 1)[0], np.polyfit(ref[:, 0], ref[:, 2], 1)[0])
+            if speed < fwhm:
+                continue
+
+            # A rigid offset within the streak
+            d = cent[a, 1:3] - ref[b, 1:3]
+            offset = np.median(d, axis=0)
+            if math.hypot(*offset) > speed + STREAK_DUPLICATE_FWHM*fwhm:
+                continue
+            if math.hypot(*(1.4826*np.median(np.abs(d - offset), axis=0))) > fwhm:
+                continue
+
+            # The same light curve
+            log_cent = np.log10(np.maximum(cent[a, 3], 1e-6))
+            log_ref = np.log10(np.maximum(ref[b, 3], 1e-6))
+            if max(np.std(log_cent), np.std(log_ref)) < STREAK_DUPLICATE_FLAT:
+                duplicate = True
+            elif min(np.std(log_cent), np.std(log_ref)) > 0:
+                duplicate = np.corrcoef(log_cent, log_ref)[0, 1] >= STREAK_DUPLICATE_CORRELATION
+
+            if duplicate:
+                break
+
+        if not duplicate:
+            kept.append(i)
+
+    if len(kept) < len(detections):
+        log.info('Matched filter: {:d} second measurements of fast objects removed'.format(len(detections)
+                                                                                           - len(kept)))
+
+    return [detections[i] for i in sorted(kept)]
 
 
 def cleanTrackHits(hits, min_kept=0.5, min_hits=3):
