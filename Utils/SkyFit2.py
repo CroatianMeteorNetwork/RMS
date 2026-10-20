@@ -17645,8 +17645,12 @@ class PlateTool(QtWidgets.QMainWindow):
             else:
                 img_h = self.img.data.shape[1]
 
-            # Compute the corrected frame time
-            frame_no = RollingShutterCorrection.correctRollingShutterTemporal(frame, pick['y_centroid'], img_h)
+            # Compute the corrected frame time, with the readout time of the rows of the sensor and the crop of
+            #   the capture for the inputs from the RMS capture (see RMS.Routines.RollingShutterCorrection)
+            fps = getattr(self.img_handle, 'fps', None) if self.img_handle is not None else None
+            cropped = (self.img_handle is None) or RollingShutterCorrection.croppedInput(self.img_handle.input_type)
+            frame_no = RollingShutterCorrection.correctFrameTime(frame, pick['y_centroid'], img_h, self.config,
+                                                                 fps=fps, cropped=cropped)
 
         # If global shutter, do no correction
         else:
