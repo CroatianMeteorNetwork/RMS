@@ -1984,6 +1984,18 @@ def test_merged_track_stays_one_object(config):
     assert len(det.mergeTracks([a, c])) == 1
 
 
+def test_merge_with_shared_neighbour_times(config):
+    """ Two 2-hit tracks of one object from two bins of the search share both of their times: the neighbours of a
+        hit are then at one time only, which gives no path, and the tracks are still merged.
+    """
+
+    det = MatchedFilterDetector(_SynthHandle([]), config)
+    a = np.array([[20.0, 120.0, 200.0, 8.0, 1.0, 0.0, 8, 2], [28.0, 128.0, 200.0, 8.0, 1.0, 0.0, 8, 2]])
+    b = np.array([[20.0, 120.5, 200.3, 8.0, 1.0, 0.0, 8, 4], [28.0, 128.4, 199.8, 8.0, 1.0, 0.0, 8, 4]])
+    assert det._validMerge(a, b, 4.0)
+    assert len(det.mergeTracks([a, b])) == 1
+
+
 def test_ghosts_of_bright_objects_removed(config):
     """ The sums of the search along other velocities through a bright object give tracks along its path at other
         speeds (ghosts), which are removed. A fainter object on the same path at the same speed (e.g. a train of
@@ -2016,7 +2028,8 @@ def test_ghosts_of_bright_objects_removed(config):
 def test_streak_duplicates_removed():
     """ A fast object (10 px per frame) measured twice, at the middle of its streak and 11 px ahead of it, with the
         same light curve, is one object; two objects moving together 15 px apart with their own light curves, and
-        two slow objects close together, are two.
+        two slow objects close together, are two. Objects of steady brightness moving together are one object only
+        with light between them.
     """
 
     from RMS.MatchedFilterDetection import removeStreakDuplicates
@@ -2042,6 +2055,16 @@ def test_streak_duplicates_removed():
     slow_a = det(500 + 0.05*f, 300.0 + 0*f, np.full_like(f, 800.0))
     slow_b = det(505 + 0.05*f, 302.0 + 0*f, np.full_like(f, 790.0))
     assert len(removeStreakDuplicates([slow_a, slow_b], 2.4)) == 2
+
+    # Objects of steady brightness moving together 12 px apart: two objects without light between them, one object
+    #   with its streak between them
+    steady = det(10*f, 0.15*10*f, np.full_like(f, 900.0))
+    steady_ahead = det(10*f + 12, 0.15*10*f, np.full_like(f, 880.0))
+    dark = lambda frame, x1, y1, x2, y2: 0.0
+    lit = lambda frame, x1, y1, x2, y2: 1.0
+    assert len(removeStreakDuplicates([steady, steady_ahead], 2.4)) == 2
+    assert len(removeStreakDuplicates([steady, steady_ahead], 2.4, connected=dark)) == 2
+    assert len(removeStreakDuplicates([steady, steady_ahead], 2.4, connected=lit)) == 1
 
 
 def test_flashes_without_light_between_are_linked(config):

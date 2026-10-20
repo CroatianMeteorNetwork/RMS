@@ -235,7 +235,8 @@ GHOST_SPEED_DIFF = 0.2
 #   share STREAK_DUPLICATE_SHARED of its frames, in which it keeps its offset from the longer one (scatter below a
 #   PSF width), the offset is within the streak (the motion during a frame) plus STREAK_DUPLICATE_FWHM PSF widths,
 #   and both have the same light curve: a correlation of the logarithms of their intensities of at least
-#   STREAK_DUPLICATE_CORRELATION, or both flat (the scatter of the logarithm below STREAK_DUPLICATE_FLAT)
+#   STREAK_DUPLICATE_CORRELATION, or both flat (the scatter of the logarithm below STREAK_DUPLICATE_FLAT) with the
+#   light connected between them (a flat light curve doesn't tell two objects moving together apart)
 STREAK_DUPLICATE_SHARED = 0.5
 STREAK_DUPLICATE_FWHM = 3.0
 STREAK_DUPLICATE_CORRELATION = 0.7
@@ -2276,11 +2277,15 @@ class MatchedFilterDetector(object):
             # The neighbours, without the hit and without the hits in its frame (of another tier of the search,
             #   whose positions are not independent of it)
             nb = np.nonzero((np.abs(f - f[i]) <= window) & (f != f[i]))[0]
-            if len(nb) < 2:
+
+            # A path needs neighbours at two times at least (the neighbours can share times too), a parabola at
+            #   three
+            n_times = len(np.unique(f[nb]))
+            if n_times < 2:
                 continue
 
             # A smooth path through the neighbours, at the time of the hit
-            deg = 2 if len(nb) >= MERGE_CHECK_PARABOLA else 1
+            deg = 2 if (len(nb) >= MERGE_CHECK_PARABOLA) and (n_times >= 3) else 1
             t = f[nb] - f[i]
             x = np.polyval(np.polyfit(t, u[nb, 1], deg), 0.0)
             y = np.polyval(np.polyfit(t, u[nb, 2], deg), 0.0)
@@ -2806,7 +2811,8 @@ class MatchedFilterDetector(object):
                                                min_coincident=DUPLICATE_COINCIDENT)
 
         # A fast object measured twice along its streak, further apart than the duplicates above
-        return removeStreakDuplicates(detections, fwhm*self.det_bin)
+        return removeStreakDuplicates(detections, fwhm*self.det_bin,
+                                      connected=connected if connected is not None else self.connectedLight)
 
 
     def run(self):
@@ -3990,17 +3996,24 @@ def curvatureSignificant(t, x, y, f_min=CURVATURE_MIN_F):
     return (rss_line - rss_quad)/2.0/scatter > f_min
 
 
-def removeStreakDuplicates(detections, fwhm):
+def removeStreakDuplicates(detections, fwhm, connected=None):
     """ Remove the second measurements of fast objects. The light of an object moving several pixels per frame is
         a streak, and the object can be measured twice in it, e.g. at its middle and at its leading end, which gives
         two detections moving together, the length of the streak apart (often also across it, as the leading end
         of a bright streak is wide). They are further apart than the duplicates of removeDuplicateDetections, but
         they are one object: they move rigidly together and have the same light curve, which two objects don't.
-        The longer detection is kept (see STREAK_DUPLICATE_SHARED and the following constants).
+        Objects of steady brightness have flat light curves, which can't tell them apart, so then the light
+        also has to be connected between the two detections (the streak). The longer detection is kept (see
+        STREAK_DUPLICATE_SHARED and the following constants).
 
     Arguments:
         detections: [list] Detections as [rho, theta, centroids], centroids rows [frame, x, y, intensity, ...].
         fwhm: [float] The PSF width (FWHM) in the pixels of the centroids.
+
+    Keyword arguments:
+        connected: [function] connected(frame, x1, y1, x2, y2) gives the fraction of the segment between two
+            points which is lit (None if unknown), see MatchedFilterDetector.connectedLight. None by default, in
+            which case detections with flat light curves are kept.
 
     Return:
         [list] Detections without the second measurements, in the original order.
@@ -4039,11 +4052,18 @@ def removeStreakDuplicates(detections, fwhm):
             if math.hypot(*(1.4826*np.median(np.abs(d - offset), axis=0))) > fwhm:
                 continue
 
-            # The same light curve
+            # The same light curve; flat light curves only with the light connected between the detections in
+            #   most of the sampled shared frames
             log_cent = np.log10(np.maximum(cent[a, 3], 1e-6))
             log_ref = np.log10(np.maximum(ref[b, 3], 1e-6))
             if max(np.std(log_cent), np.std(log_ref)) < STREAK_DUPLICATE_FLAT:
-                duplicate = True
+                if connected is not None:
+                    lit = []
+                    for k in np.unique(np.linspace(0, len(a) - 1, 5).astype(int)):
+                        frac = connected(cent[a[k], 0], cent[a[k], 1], cent[a[k], 2], ref[b[k], 1], ref[b[k], 2])
+                        if frac is not None:
+                            lit.append(frac >= 0.9)
+                    duplicate = (len(lit) > 0) and (np.mean(lit) >= 0.8)
             elif min(np.std(log_cent), np.std(log_ref)) > 0:
                 duplicate = np.corrcoef(log_cent, log_ref)[0, 1] >= STREAK_DUPLICATE_CORRELATION
 
