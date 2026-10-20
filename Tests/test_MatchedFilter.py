@@ -717,6 +717,22 @@ def test_ftpdetectinfo_round_trip(config, tmp_path):
     assert np.allclose(np.diff(picks[:, 0]), np.diff(cent[:, 0]), atol=0.01)
 
 
+def test_gap_pieces_count_the_faint_chains_of_all_parts():
+    """ An input with a gap in the recording is searched in parts: the faint chains measured and the detections
+        from them are counted over all parts, not only the main one. """
+
+    import types
+
+    def part(measured, detected):
+        return types.SimpleNamespace(psf_sigma=1.0, timing={}, cloud_rows_removed=0, cloud_removed_row_frames=[],
+                                     cloud_detections_removed=0, cloud_removed_frames=[], tracks_dropped=0,
+                                     tracks_measured=0, significances=[], deviation_rejected=0, photometry={},
+                                     sky_map=None, faint_measured=measured, faint_detected=detected)
+
+    run = mfd.GapPieces([part(2, 1), part(3, 2)], [(0, 100), (120, 200)], [120], [0.5])
+    assert (run.faint_measured, run.faint_detected) == (5, 3)
+
+
 def test_config_parse(tmp_path):
     """ The options of the [MatchedFilter] section of the config are parsed (booleans, lists, numbers and
         strings).

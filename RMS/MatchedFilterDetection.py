@@ -4931,6 +4931,8 @@ class GapPieces(object):
         self.cloud_removed_frames = [f for det in detectors for f in det.cloud_removed_frames]
         self.tracks_dropped = sum(det.tracks_dropped for det in detectors)
         self.tracks_measured = sum(det.tracks_measured for det in detectors)
+        self.faint_measured = sum(det.faint_measured for det in detectors)
+        self.faint_detected = sum(det.faint_detected for det in detectors)
         self.significances = [sig for det in detectors for sig in det.significances]
         self.deviation_rejected = sum(det.deviation_rejected for det in detectors)
         self.photometry = {key: value for det in detectors for key, value in det.photometry.items()}
@@ -4985,8 +4987,8 @@ class GapPieces(object):
             'tracks': tracks,
             'linear_structure_rejected': sum(int(track.get('linear_structure', False)) for track in tracks),
             'deviation_rejected': int(self.deviation_rejected),
-            'faint_measured': int(sum(det.faint_measured for det in self.detectors)),
-            'faint_detected': int(sum(det.faint_detected for det in self.detectors)),
+            'faint_measured': int(self.faint_measured),
+            'faint_detected': int(self.faint_detected),
             'time_gaps': [{'frame': int(f), 'gap_s': round(float(g), 3)}
                           for f, g in zip(self.gaps, self.gap_seconds)],
         })
