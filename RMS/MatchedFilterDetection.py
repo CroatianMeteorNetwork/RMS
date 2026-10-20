@@ -205,6 +205,28 @@ SEARCH_MIN_SIGMA = 1.0
 #   from a single bright frame of its run (e.g. a flash), whose velocity is not known (see linkHits)
 LINK_STRONG = 3.0
 
+# Chains of faint objects (see linkFaintHits): a chain starts from two hits FAINT_SEED_FRAMES apart (frames), each
+#   within FAINT_SEED_RADIUS (px) plus FAINT_SEED_SPREAD (px per frame, the error of the velocity of a hit) times the
+#   time between them of the position predicted from the other one with its velocity. It takes the hits within
+#   FAINT_LINE_RADIUS of the line through its hits, up to FAINT_SEED_FRAMES[1] beyond its ends, and needs hits in
+#   FAINT_MIN_RUNS runs over FAINT_MIN_SPAN frames. The velocities of the hits of a chain agree within
+#   FAINT_VELOCITY_STEPS steps of the velocity grids of their searches
+FAINT_SEED_FRAMES = (16, 160)
+FAINT_SEED_RADIUS = 4.0
+FAINT_SEED_SPREAD = 0.1
+FAINT_LINE_RADIUS = 3.0
+FAINT_VELOCITY_STEPS = 3.0
+FAINT_MIN_RUNS = 4
+FAINT_MIN_SPAN = 30
+
+# A chain is measured if the PSF-weighted signal along its line is FAINT_MIN_SIGNIFICANCE (sigma) above the same
+#   positions at other times (see faintSignificance), below mf_track_significance as the line through the hits is
+#   less accurate than the measured track. A measurement of a chain combines enough frames for FAINT_SAMPLE_SNR
+#   times the noise, up to FAINT_MAX_MEASURE_FRAMES
+FAINT_MIN_SIGNIFICANCE = 8.0
+FAINT_SAMPLE_SNR = 4.0
+FAINT_MAX_MEASURE_FRAMES = 64
+
 # Search of very slow objects (see slowSearch): the medians of the blocks are compared with the medians of the
 #   blocks SLOW_REF_BLOCKS (and one more) before and after, shifted by the motion of the stars; candidates above
 #   SLOW_THRESHOLD (sigma) in at least SLOW_MIN_BLOCKS consecutive blocks are linked, up to SLOW_MAX_SPEED (px per
@@ -401,6 +423,11 @@ class MatchedFilterOptions(object):
         self.smooth_frames = config.mf_smooth_frames
         self.max_tracks = config.mf_max_tracks
         self.link_max_gap = config.mf_link_max_gap
+
+        # Faint objects: the threshold of the hits linked into chains over the whole input (0 for none), and the
+        #   largest number of chains measured (see MatchedFilterDetector.faintTracks)
+        self.faint_threshold = config.mf_faint_threshold
+        self.faint_max_tracks = config.mf_faint_max_tracks
 
         # Tiers of the velocity search: the largest speed of a tier in binned px per frame, and the coarsest bin
         #   (see MatchedFilterDetector.searchTiers)
@@ -690,6 +717,17 @@ class MatchedFilterDetector(object):
         # Number of the weakest candidate tracks which were not measured (see mf_max_tracks), and of the measured ones
         self.tracks_dropped = 0
         self.tracks_measured = 0
+
+        # Faint objects (see faintTracks): searched for if the faint threshold is below the threshold. The hits
+        #   between the two thresholds as rows [frame, x, y, z, vx, vy, run, bin] (collected in parts during the
+        #   search), the number of the chains measured and of the detections from them, and the ids of the
+        #   measurements of the chains
+        self.faint = 0 < self.opts.faint_threshold < self.opts.threshold
+        self.faint_parts = []
+        self.faint_hits = np.zeros((0, 8), dtype=np.float32)
+        self.faint_measured = 0
+        self.faint_detected = 0
+        self.faint_ids = set()
 
         # Photometry of every frame of the verified tracks: id(centroids) -> (frames, intensities, saturated
         #   pixel counts, noise of the intensities)
@@ -1299,6 +1337,7 @@ class MatchedFilterDetector(object):
                 device_frames = {}
 
         hits = []
+        faint = []
         for run_frames, b, stacker in stackers:
 
             # The binned frames and the static mask of the bin of this stacker
@@ -1376,11 +1415,25 @@ class MatchedFilterDetector(object):
                 #   The neighbourhood of the local maxima is +-4 unbinned px (5x5 pixels of 2x2 bins), at least the 3x3
                 #   neighbours on coarser bins, so the peaks of nearby objects are not suppressed by a coarser tier
                 half = max(1, int(round(4.0/b)))
-                peaks = (zmax == cv2.dilate(zmax, np.ones((2*half + 1, 2*half + 1), np.uint8))) & above
+                local_max = zmax == cv2.dilate(zmax, np.ones((2*half + 1, 2*half + 1), np.uint8))
+                peaks = local_max & above
                 for yb, xb in zip(*np.nonzero(peaks)):
                     vxb, vyb = stacker.velocities[vel_idx[yb, xb]]
                     hits.append(Hit(block_first + r0 + (run_frames - 1)/2.0, (xb + 0.5)*b - 0.5,
                                     (yb + 0.5)*b - 0.5, vxb*b, vyb*b, float(zmax[yb, xb]), run_frames, b))
+
+                # The local maxima between the faint threshold and the threshold, for the chains of faint objects
+                #   (see faintTracks), kept as compact rows: there are many of them
+                if self.faint:
+                    yb, xb = np.nonzero(local_max & (zmax > self.opts.faint_threshold) & ~above)
+                    vel = stacker.velocities[vel_idx[yb, xb]]*b
+                    faint.append(np.column_stack([np.full(len(yb), block_first + r0 + (run_frames - 1)/2.0),
+                                                  (xb + 0.5)*b - 0.5, (yb + 0.5)*b - 0.5, zmax[yb, xb], vel,
+                                                  np.full(len(yb), run_frames), np.full(len(yb), b)]
+                                                 ).astype(np.float32))
+
+        # The faint hits of the block, combined with those of all blocks at the end of the search
+        self.faint_parts += faint
 
         return hits
 
@@ -1586,6 +1639,8 @@ class MatchedFilterDetector(object):
             input (e.g. flickering pixels, variable stars). It is judged over the whole input (over the segments
             so far when it is read in segments), as an object which moves little stays at a position for a large
             part of a block: at the smallest motions of the search it takes a few hundred frames to cross the PSF.
+            The faint hits collected by the search (faint_parts) are kept in faint_hits without those at persistent
+            pixels.
 
         Arguments:
             hits: [list] Hits of the search.
@@ -1613,6 +1668,18 @@ class MatchedFilterDetector(object):
             yb = int(round((h.y + 0.5)/b - 0.5))
             if not mask[yb, xb]:
                 kept.append(h)
+
+        # The faint hits of all blocks (see searchBlock), the same way
+        if self.faint_parts:
+            faint = np.vstack(self.faint_parts)
+            self.faint_parts = []
+            keep = np.ones(len(faint), dtype=bool)
+            for (run_frames, b), mask in persistent.items():
+                sel = np.nonzero((faint[:, 6] == run_frames) & (faint[:, 7] == b))[0]
+                xb = np.round((faint[sel, 1] + 0.5)/b - 0.5).astype(int)
+                yb = np.round((faint[sel, 2] + 0.5)/b - 0.5).astype(int)
+                keep[sel[mask[yb, xb]]] = False
+            self.faint_hits = faint[keep]
 
         return kept
 
@@ -2289,6 +2356,161 @@ class MatchedFilterDetector(object):
         return max(self.psf_sigma, SEARCH_MIN_SIGMA)
 
 
+    ### Faint objects ###
+
+    def faintTracks(self, hits, tracks):
+        """ Tracks of faint objects: chains of the hits down to the faint threshold over the whole input (see
+            linkFaintHits), away from the tracks which are measured anyway, whose signal along their line is
+            significant (see faintSignificance). The frames of their measurements follow from that signal.
+
+        Arguments:
+            hits: [list] Hits of the search (above the threshold).
+            tracks: [list] Tracks which are measured, arrays of hits.
+
+        Return:
+            [list] (hits of the chain, frames per measurement) of the chains to measure, the most significant first.
+        """
+
+        if not self.faint:
+            return []
+
+        # All hits down to the faint threshold (a faint object can have a few hits above the threshold too). The
+        #   faint hits are not needed any more
+        strong = np.array([[h.frame, h.x, h.y, h.z, h.vx, h.vy, h.run, h.bin] for h in hits]).reshape(-1, 8)
+        pool = np.vstack([strong, self.faint_hits.astype(np.float64)])
+        self.faint_hits = np.zeros((0, 8), dtype=np.float32)
+
+        # Without the hits near the tracks which are measured anyway (their objects, and the sums of other velocities
+        #   through them, see removeShadows), also in the frames which their measurement reaches beyond their hits
+        #   (see TrackMeasurement), where their positions are extrapolated with the velocities of their end hits
+        keep = np.ones(len(pool), dtype=bool)
+        order = np.argsort(pool[:, 0], kind='stable')
+        frames = pool[order, 0]
+        margin = 2*max(max(self.opts.run_frames), 16)
+        for tr in tracks:
+            tr = tr[np.argsort(tr[:, 0], kind='stable')]
+            i0, i1 = np.searchsorted(frames, [tr[0, 0] - margin, tr[-1, 0] + margin])
+            idx = order[i0:i1]
+            t = pool[idx, 0]
+            x = np.interp(t, tr[:, 0], tr[:, 1])
+            y = np.interp(t, tr[:, 0], tr[:, 2])
+            before, after = t < tr[0, 0], t > tr[-1, 0]
+            x[before] = tr[0, 1] + tr[0, 4]*(t[before] - tr[0, 0])
+            y[before] = tr[0, 2] + tr[0, 5]*(t[before] - tr[0, 0])
+            x[after] = tr[-1, 1] + tr[-1, 4]*(t[after] - tr[-1, 0])
+            y[after] = tr[-1, 2] + tr[-1, 5]*(t[after] - tr[-1, 0])
+            keep[idx[np.hypot(pool[idx, 1] - x, pool[idx, 2] - y) <= SHADOW_RADIUS]] = False
+
+        # The chains in the speed range which move far enough (as the tracks, see acceptTrack)
+        t1 = time()
+        chains = [ch for ch in linkFaintHits(pool[keep]) if self.acceptTrack(ch)]
+        self.timing['faint_link'] += time() - t1
+
+        # The chains whose signal along their line is significant, the most significant ones
+        t1 = time()
+        significance = self.faintSignificance(chains)
+        self.timing['faint_significance'] += time() - t1
+        ranked = [i for i in np.argsort(-significance, kind='stable') if significance[i] >= FAINT_MIN_SIGNIFICANCE]
+        ranked = ranked[:self.opts.faint_max_tracks]
+        log.info('Matched filter: {:d} faint hits, {:d} chains, {:d} significant ({:d} measured)'.format(
+            int(keep.sum()), len(chains), int(np.sum(significance >= FAINT_MIN_SIGNIFICANCE)), len(ranked)))
+
+        faint = []
+        for i in ranked:
+            ch = chains[i]
+
+            # The frames per measurement: the smallest power of two which gives FAINT_SAMPLE_SNR from the signal of
+            #   a frame (the significance spread over the frames of the chain), which divides the blocks (so the
+            #   measurements don't straddle them)
+            frame_snr = significance[i]/math.sqrt(np.ptp(ch[:, 0]) + 1)
+            n = 1
+            while (2*n <= FAINT_MAX_MEASURE_FRAMES) and (self.opts.block_frames % (2*n) == 0) \
+                    and (frame_snr*math.sqrt(n) < FAINT_SAMPLE_SNR):
+                n *= 2
+            faint.append((ch, n))
+
+        return faint
+
+
+    def faintSignificance(self, chains):
+        """ The significance of the signal along the line of every chain: the PSF-weighted signal at the positions
+            of the line in the frames from its first to its last hit, minus the signal at the same positions when
+            the object is elsewhere, the smaller of two tests as in verify: before and after the chain, and in the
+            frames of the chain in the reverse order.
+
+        Arguments:
+            chains: [list] Chains of hits, sorted by frame.
+
+        Return:
+            [ndarray] Significance of every chain (sigma).
+        """
+
+        if not chains:
+            return np.zeros(0)
+
+        fwhm = 2.355*self.psf_sigma
+        starts = np.array(self.block_starts)
+        tests = []
+        for ch in chains:
+
+            # The line through the hits, in every frame from the first to the last hit
+            frames = np.arange(int(math.ceil(ch[0, 0])), int(math.floor(ch[-1, 0])) + 1)
+            fit_x, fit_y = TrackMeasurement._robustLineFit(ch[:, 0], ch[:, 1], ch[:, 2])
+            xs, ys = np.polyval(fit_x, frames), np.polyval(fit_y, frames)
+
+            # The same positions when the object is at least 3 PSF widths away (at least 16 frames before and
+            #   after, in the frames of the input), and in the frames of the chain in the reverse order
+            shift = int(math.ceil(max(3*fwhm/max(math.hypot(fit_x[0], fit_y[0]), 1e-3), 16)))
+            off_f = np.concatenate([frames - shift, frames + shift])
+            inside = (off_f >= 0) & (off_f < self.total_frames)
+            sets = {'on': (frames, xs, ys), 'off': (off_f[inside], np.tile(xs, 2)[inside], np.tile(ys, 2)[inside]),
+                    'reverse': (frames, xs[::-1], ys[::-1])}
+
+            # The positions of every test in each block of frames, and their sums (sum(g*z), sum(g^2), see
+            #   forcedTrackSignal)
+            tests.append({key: (s, blockIndices(s[0], starts, end=self.block_ends[-1]), [0.0, 0.0])
+                          for key, s in sets.items()})
+
+        # The sums of all tests, block by block, without the pixels of the stars (see verify)
+        radius = int(math.ceil(2.5*self.psf_sigma))
+        for k, (first, last) in enumerate(zip(self.block_starts, self.block_ends)):
+
+            active = [c for c in tests if any(k in idx for _, idx, _ in c.values())]
+            if not active:
+                continue
+            z, _ = self.normalizedBlock(k)
+            excluded = (self.static_masks[k] | (self.backgrounds[k].stars > 0)).astype(np.uint8)
+
+            def sumBlock(c):
+                """ Add the sums of the tests of a chain in this block. """
+
+                for (fr, x, y), idx, sums in c.values():
+                    sel = idx.get(k)
+                    if sel is not None:
+                        sgz, sgg = forcedTrackSignal(z, fr[sel] - first, x[sel], y[sel], self.psf_sigma, radius,
+                                                     excluded)
+                        sums[0] += sgz
+                        sums[1] += sgg
+
+            self.inThreads(sumBlock, active)
+
+        # The signal along the line minus the signal of each test scaled to the same weights, in units of the noise
+        #   of the difference (see verify), the smaller of the two
+        significance = np.zeros(len(tests))
+        for i, c in enumerate(tests):
+            on_gz, on_gg = c['on'][2]
+            values = []
+            for key in ('off', 'reverse'):
+                gz, gg = c[key][2]
+                if (on_gg <= 0) or (gg <= 0):
+                    values = [0.0]
+                    break
+                values.append((on_gz - gz*on_gg/gg)/math.sqrt(on_gg*(1 + on_gg/gg)))
+            significance[i] = min(values)
+
+        return significance
+
+
     ### Measurement ###
 
     def polarLine(self, cent):
@@ -2465,9 +2687,13 @@ class MatchedFilterDetector(object):
             self.maskObjects([tr[:, :3] for tr in slow_tracks])
             self.timing['slow_background'] += time() - t1
 
+        # Faint objects: chains of the hits down to the faint threshold away from these tracks, measured with them
+        faint = self.faintTracks(hits, tracks)
+
         # Pass 2: measure the tracks on the unbinned frames (the positions, verification and photometry)
         t1 = time()
-        measured = self.measure(tracks)
+        measured = self.measure(tracks, faint)
+        self.faint_detected += sum(id(cent) in self.faint_ids for cent in measured)
         self.timing['measure'] += time() - t1
 
         # Convert the measurements to the detections of the normal detection
@@ -2672,6 +2898,8 @@ class MatchedFilterDetector(object):
                        for s in self.significances],
             'linear_structure_rejected': int(sum(bool(s[-1]) for s in self.significances)),
             'deviation_rejected': int(self.deviation_rejected),
+            'faint_measured': int(self.faint_measured),
+            'faint_detected': int(self.faint_detected),
         }
 
 
@@ -2715,23 +2943,43 @@ class MatchedFilterDetector(object):
         return times
 
 
-    def measure(self, tracks):
+    def measure(self, tracks, faint=()):
         """ Pass 2: measure every track on the unbinned frames by fitting a moving PSF to short runs of frames,
             following the track with a local motion model.
 
         Arguments:
             tracks: [list] Tracks of hits.
 
+        Keyword arguments:
+            faint: [list] (hits of the chain, frames per measurement) of the chains of faint objects (see
+                faintTracks), measured the same way with the given frames per measurement. Empty by default.
+
         Return:
             [list] Centroid arrays of the accepted tracks.
         """
 
-        if not tracks:
+        if not (tracks or faint):
             return []
+
+        # The measurements of a faint chain combine up to FAINT_MAX_MEASURE_FRAMES frames, its position is
+        #   predicted from its hits over the reach of the chain (they are sparse), and it is measured as far as that
+        #   reach beyond its hits (the object is often visible beyond the runs where the noise added to it)
+        faint_opts = copy.copy(self.opts)
+        faint_opts.max_measure_frames = max(self.opts.max_measure_frames, FAINT_MAX_MEASURE_FRAMES)
+        items = [(tr, None) for tr in tracks] + list(faint)
+
+        def state(i):
+            """ The measurement state of the i-th track. """
+
+            tr, n = items[i]
+            if n is None:
+                return TrackMeasurement(tr, self.opts, self.psf_sigma)
+            return TrackMeasurement(tr, faint_opts, self.psf_sigma, n_frames=n, window=FAINT_SEED_FRAMES[1],
+                                    extend=FAINT_SEED_FRAMES[1])
 
         # Every track is followed through the blocks of frames by its own measurement state, which predicts
         #   the position of the object from the hits of the search and then from its own measurements
-        states = [TrackMeasurement(tr, self.opts, self.psf_sigma) for tr in tracks]
+        states = [state(i) for i in range(len(items))]
         self.measurePass(states)
         cents = [st.centroids() for st in states]
 
@@ -2742,13 +2990,17 @@ class MatchedFilterDetector(object):
         if slow:
             t1 = time()
             self.maskObjects([cents[i] for i in slow])
-            again = [TrackMeasurement(tracks[i], self.opts, self.psf_sigma) for i in slow]
+            again = [state(i) for i in slow]
             self.measurePass(again)
             for i, st in zip(slow, again):
                 cent = st.centroids()
                 if cent is not None:
                     cents[i] = cent
             self.timing['slow_background'] += time() - t1
+
+        # The measurements of the faint chains, counted in the summary
+        self.faint_ids = {id(cent) for cent in cents[len(tracks):] if cent is not None}
+        self.faint_measured += len(faint)
 
         return self.verify([cent for cent in cents if cent is not None])
 
@@ -3606,6 +3858,183 @@ def cleanTrackHits(hits, min_kept=0.5, min_hits=3):
     return hits[keep]
 
 
+def linkFaintHits(hits, seed_frames=FAINT_SEED_FRAMES, seed_radius=FAINT_SEED_RADIUS,
+                  seed_spread=FAINT_SEED_SPREAD, line_radius=FAINT_LINE_RADIUS, velocity_steps=FAINT_VELOCITY_STEPS,
+                  min_runs=FAINT_MIN_RUNS, min_span=FAINT_MIN_SPAN):
+    """ Link the hits of faint objects into chains along straight tracks. A faint object is above the threshold of
+        its hits only in some runs (where the noise adds to it), with gaps of many runs between them, so its hits
+        are linked along a line over long times instead of from run to run (see MatchedFilterDetector.linkHits).
+        A chain starts from a pair of hits whose positions and velocities agree, and takes the hits along the line
+        through its hits until they don't change. Most pairs are of the noise and find too few hits along their
+        line, so the hits along the line of every pair are first counted for all pairs at once, and only the pairs
+        with enough of them are grown into chains, the strongest first.
+
+    The velocity of a hit is known to about a step of the velocity grid of its search (bin/(run - 1) px per frame),
+    so the velocities are compared within velocity_steps such steps.
+
+    Arguments:
+        hits: [ndarray] Hits as rows [frame, x, y, z, vx, vy, run, bin].
+
+    Keyword arguments:
+        seed_frames: [tuple] Smallest and largest time between the two hits of a pair (frames), also the reach of a
+            chain beyond its ends. FAINT_SEED_FRAMES by default.
+        seed_radius: [float] Largest distance of a hit of a pair from the position predicted from the other one
+            with its velocity (px), at the shortest time between them. FAINT_SEED_RADIUS by default.
+        seed_spread: [float] Growth of that distance with the time between the hits (px per frame), from the error
+            of the velocities of the hits. FAINT_SEED_SPREAD by default.
+        line_radius: [float] Largest distance of a hit of a chain from its line (px). FAINT_LINE_RADIUS by default.
+        velocity_steps: [float] Largest difference of the velocities of the hits of a pair, and of the velocity of
+            a hit of a chain from the motion along its line, in steps of the velocity grid of the hit.
+            FAINT_VELOCITY_STEPS by default.
+        min_runs: [int] Smallest number of runs with a hit of a chain. FAINT_MIN_RUNS by default.
+        min_span: [float] Smallest time from the first to the last hit of a chain (frames). FAINT_MIN_SPAN by
+            default.
+
+    Return:
+        [list] Chains, each an array of hits sorted by frame, at most one hit per run.
+    """
+
+    if len(hits) < min_runs:
+        return []
+
+    # The hits by the middle frame of their run (the runs of every length have their own middle frames), with a
+    #   spatial index of every run, and the largest velocity difference of every hit
+    times, inverse = np.unique(hits[:, 0], return_inverse=True)
+    order = np.argsort(inverse, kind='stable')
+    members = np.split(order, np.cumsum(np.bincount(inverse, minlength=len(times)))[:-1])
+    trees = [cKDTree(hits[m, 1:3]) for m in members]
+    dv_max = velocity_steps*hits[:, 7]/np.maximum(hits[:, 6] - 1, 1)
+
+    ### Pairs of hits ###
+
+    # For every run, the hits of the runs seed_frames before it, at the positions predicted with their velocity,
+    #   are looked up all at once within the largest distance, and the nearest few hits taken (more than a few are
+    #   rare away from bright objects)
+    pairs = []
+    for kb in range(len(times)):
+        dt_runs = times[kb] - times
+        earlier = np.nonzero((dt_runs >= seed_frames[0]) & (dt_runs <= seed_frames[1]))[0]
+        if not len(earlier):
+            continue
+        a = np.concatenate([members[k] for k in earlier])
+        dt = times[kb] - hits[a, 0]
+        px = hits[a, 1] + hits[a, 4]*dt
+        py = hits[a, 2] + hits[a, 5]*dt
+        dist, near = trees[kb].query(np.column_stack([px, py]), k=8,
+                                     distance_upper_bound=seed_radius + seed_spread*seed_frames[1])
+        rows, cols = np.nonzero(np.isfinite(dist))
+        a, b, dt = a[rows], members[kb][near[rows, cols]], dt[rows]
+
+        # Each hit within the distance of the time between them from the position predicted from the other one
+        #   (so the line through them agrees with the velocities of both), and their velocities alike
+        reach = seed_radius + seed_spread*dt
+        back_x, back_y = hits[b, 1] - hits[b, 4]*dt, hits[b, 2] - hits[b, 5]*dt
+        ok = (np.hypot(hits[b, 1] - px[rows], hits[b, 2] - py[rows]) <= reach) \
+            & (np.hypot(hits[a, 1] - back_x, hits[a, 2] - back_y) <= reach) \
+            & (np.hypot(hits[b, 4] - hits[a, 4], hits[b, 5] - hits[a, 5]) <= np.maximum(dv_max[a], dv_max[b]))
+        pairs.append(np.column_stack([a[ok], b[ok]]))
+
+    pairs = np.vstack(pairs) if pairs else np.zeros((0, 2), dtype=int)
+    if not len(pairs):
+        return []
+
+    ### ###
+
+    ### Hits along the line of every pair ###
+
+    # The line through the two hits of every pair, and the runs it reaches (seed_frames[1] beyond the hits)
+    a, b = pairs[:, 0], pairs[:, 1]
+    span = hits[b, 0] - hits[a, 0]
+    vx = (hits[b, 1] - hits[a, 1])/span
+    vy = (hits[b, 2] - hits[a, 2])/span
+    lo = hits[a, 0] - seed_frames[1]
+    hi = hits[b, 0] + seed_frames[1]
+
+    # The runs with a hit near the line of every pair (with a velocity like the motion along it), their number,
+    #   the first and the last such run, and the sum of the significances of the hits (the nearest in every run)
+    n_runs = np.zeros(len(pairs), dtype=int)
+    first = np.full(len(pairs), np.inf)
+    last = np.full(len(pairs), -np.inf)
+    strength = np.zeros(len(pairs))
+    for k, t in enumerate(times):
+        sel = np.nonzero((lo <= t) & (hi >= t))[0]
+        if not len(sel):
+            continue
+        px = hits[a[sel], 1] + vx[sel]*(t - hits[a[sel], 0])
+        py = hits[a[sel], 2] + vy[sel]*(t - hits[a[sel], 0])
+        dist, near = trees[k].query(np.column_stack([px, py]), k=4, distance_upper_bound=line_radius)
+        rows, cols = np.nonzero(np.isfinite(dist))
+        j = members[k][near[rows, cols]]
+        ok = np.hypot(hits[j, 4] - vx[sel[rows]], hits[j, 5] - vy[sel[rows]]) <= dv_max[j]
+
+        # Every pair counts the run once (the look-up gives the nearest hits first)
+        rows, j = rows[ok], j[ok]
+        rows, keep = np.unique(rows, return_index=True)
+        sel, j = sel[rows], j[keep]
+        n_runs[sel] += 1
+        first[sel] = np.minimum(first[sel], t)
+        last[sel] = np.maximum(last[sel], t)
+        strength[sel] += hits[j, 3]
+
+    # Only the pairs with enough runs along their line are grown into chains, the strongest first
+    candidates = np.nonzero((n_runs >= min_runs) & (last - first >= min_span))[0]
+    candidates = candidates[np.argsort(-strength[candidates], kind='stable')]
+
+    ### ###
+
+    ### Chains ###
+
+    # One index of all hits, with the run as a coordinate far larger than the radius (the hits of other runs are
+    #   never near), for the look-up of the hits along a line in all runs at once
+    run_step = 10.0*line_radius
+    tree = cKDTree(np.column_stack([run_step*inverse, hits[:, 1], hits[:, 2]]))
+    used = np.zeros(len(hits), dtype=bool)
+    chains = []
+    for c in candidates:
+
+        # The hits of a chain are in one chain only
+        if used[a[c]] or used[b[c]]:
+            continue
+
+        # The chain grows from its pair: the hits near its line in the runs it reaches (the nearest one of every
+        #   run), until they don't change (at most 4 times)
+        chain = np.array([a[c], b[c]])
+        for _ in range(4):
+
+            # The line fitted through the hits of the chain, and the runs it reaches
+            t = hits[chain, 0]
+            fit_x = np.polyfit(t, hits[chain, 1], 1)
+            fit_y = np.polyfit(t, hits[chain, 2], 1)
+            ks = np.nonzero((times >= t.min() - seed_frames[1]) & (times <= t.max() + seed_frames[1]))[0]
+            px, py = np.polyval(fit_x, times[ks]), np.polyval(fit_y, times[ks])
+            dist, near = tree.query(np.column_stack([run_step*ks, px, py]), k=4, distance_upper_bound=line_radius)
+
+            # The hits within both tolerances which are in no other chain, the nearest of every run
+            rows, cols = np.nonzero(np.isfinite(dist))
+            j = near[rows, cols]
+            ok = (~used[j]) & (np.hypot(hits[j, 4] - fit_x[0], hits[j, 5] - fit_y[0]) <= dv_max[j])
+            j = j[ok]
+            j = j[np.unique(inverse[j], return_index=True)[1]]
+
+            # A chain which lost its hits keeps the ones it had
+            if len(j) < 2:
+                break
+            if np.array_equal(np.sort(j), np.sort(chain)):
+                break
+            chain = j
+
+        # A chain needs hits in enough runs over a long enough time
+        t = hits[chain, 0]
+        if (len(chain) < min_runs) or (np.ptp(t) < min_span):
+            continue
+        used[chain] = True
+        chains.append(hits[chain[np.argsort(t, kind='stable')]])
+
+    ### ###
+
+    return chains
+
+
 def weightedMedian(values, weights):
     """ The median of the values weighted by the weights: the value at which half of the weight is reached. """
 
@@ -3811,28 +4240,37 @@ def smoothPositions(cent, half_window, reject=5.0):
 
 
 class TrackMeasurement(object):
-    def __init__(self, hits, opts, psf_sigma):
+    def __init__(self, hits, opts, psf_sigma, n_frames=None, window=None, extend=None):
         """ Measurement of one track: the runs of frames to fit, the motion model, and the centroids.
 
         Arguments:
             hits: [ndarray] Hits of the track, rows [frame, x, y, z, vx, vy, run].
             opts: [MatchedFilterOptions] Options.
             psf_sigma: [float] PSF sigma (px).
+
+        Keyword arguments:
+            n_frames: [int] Frames per measurement, a power of two. None by default (chosen on the first fits, see
+                measureBlock).
+            window: [int] The hits within this many frames are used for the prediction of the position (see
+                predict). None by default (64 frames, at least 4 runs of the longest search).
+            extend: [int] Frames measured before the first and after the last hit. None by default (two runs of
+                the longest search, at least 32 frames).
         """
 
         self.hits = hits
         self.opts = opts
         self.psf_sigma = psf_sigma
+        self.window = window
 
         # The frames to measure: the frames of the hits, extended by two runs of the longest search (at least 32
-        #   frames) at both ends, as the object can be visible beyond the runs in which it was found
+        #   frames, unless given) at both ends, as the object can be visible beyond the runs in which it was found
         run = int(np.max(hits[:, 6]))
-        ext = 2*max(run, 16)
+        ext = extend if extend is not None else 2*max(run, 16)
         self.first = int(math.floor(hits[0, 0] - ext))
         self.last = int(math.ceil(hits[-1, 0] + ext))
 
-        # Frames per measurement, chosen on the first fits
-        self.n_frames = None
+        # Frames per measurement, given or chosen on the first fits
+        self.n_frames = n_frames
         self.probe = []
 
         # Lines fitted through the hits, per 16 frames (see predict)
@@ -3858,9 +4296,10 @@ class TrackMeasurement(object):
             drift away with the noise). Beyond the hits, extrapolated from the nearby accepted measurements.
         """
 
-        # The hits within the window (at least 64 frames, 4 runs of the longest search) of the frame are used
+        # The hits within the window (at least 64 frames, 4 runs of the longest search, unless given) of the frame
+        #   are used
         h = self.hits
-        window = max(64, 4*int(np.max(h[:, 6])))
+        window = self.window if self.window else max(64, 4*int(np.max(h[:, 6])))
 
         # The line through the hits changes slowly along the track, it is fitted once per 16 frames
         key = int(frame//16)
@@ -4546,6 +4985,8 @@ class GapPieces(object):
             'tracks': tracks,
             'linear_structure_rejected': sum(int(track.get('linear_structure', False)) for track in tracks),
             'deviation_rejected': int(self.deviation_rejected),
+            'faint_measured': int(sum(det.faint_measured for det in self.detectors)),
+            'faint_detected': int(sum(det.faint_detected for det in self.detectors)),
             'time_gaps': [{'frame': int(f), 'gap_s': round(float(g), 3)}
                           for f, g in zip(self.gaps, self.gap_seconds)],
         })
@@ -5141,6 +5582,8 @@ class SegmentedRun(object):
             'tracks': tracks,
             'linear_structure_rejected': sum(int(track.get('linear_structure', False)) for track in tracks),
             'deviation_rejected': self.deviation_rejected,
+            'faint_measured': int(sum(det.faint_measured for _, det in run)),
+            'faint_detected': int(sum(det.faint_detected for _, det in run)),
             'segments': [{'first_frame': int(f), 'end_frame': int(e), 'searched': det is not None}
                          for (f, e), det in zip(self.ranges, self.detectors)],
             'frames_read': int(self.buffer.frames_read),

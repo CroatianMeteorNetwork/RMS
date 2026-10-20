@@ -441,6 +441,40 @@ def test_hits_with_another_velocity_removed_from_a_track():
     assert len(mfd.cleanTrackHits(mixed)) == len(mixed)
 
 
+def test_faint_hits_linked_along_a_line():
+    """ The hits of a faint object in a few runs far apart (where the noise added to it) are linked into one chain
+        along its line, among the hits of the noise as dense as at a low threshold on real frames.
+    """
+
+    rng = np.random.default_rng(7)
+
+    # Hits of the noise: random positions and velocities, 1000 in every run of 8 frames over 512 frames of a
+    #   1000 x 1000 px image, as rows [frame, x, y, z, vx, vy, run, bin]
+    noise = []
+    for t in np.arange(3.5, 512, 8.0):
+        noise.append(np.column_stack([np.full(1000, t), rng.uniform(0, 1000, (1000, 2)), rng.uniform(3, 4, 1000),
+                                      rng.uniform(-3, 3, (1000, 2)), np.full(1000, 8.0), np.full(1000, 2.0)]))
+    noise = np.vstack(noise)
+
+    # The object in 6 of the 64 runs, 7 to 13 runs apart, at its position and velocity with errors like those of
+    #   the search (1 px, and 0.07 px per frame along each axis)
+    t = np.arange(3.5, 512, 8.0)[[5, 13, 20, 29, 37, 50]]
+    obj = np.column_stack([t, 200 + 1.2*t + rng.normal(0, 1, len(t)), 300 - 0.5*t + rng.normal(0, 1, len(t)),
+                           rng.uniform(3, 4, len(t)), 1.2 + rng.normal(0, 0.07, len(t)),
+                           -0.5 + rng.normal(0, 0.07, len(t)), np.full(len(t), 8.0), np.full(len(t), 2.0)])
+    hits = np.vstack([noise, obj])
+    chains = mfd.linkFaintHits(hits)
+
+    # One chain holds all hits of the object, and at most one hit of the noise
+    def isObject(rows):
+        return np.isin(rows[:, 1], obj[:, 1])
+
+    with_object = [ch for ch in chains if isObject(ch).any()]
+    assert len(with_object) == 1
+    assert isObject(with_object[0]).sum() == len(obj)
+    assert (~isObject(with_object[0])).sum() <= 1
+
+
 def test_smooth_positions_reduce_errors_without_bias():
     """ Noisy positions along a curved track (a bend of 4 px over 400 frames, as across a distorted field):
         combining them over +-64 frames reduces the error several times and does not follow the noise.
@@ -616,6 +650,41 @@ def test_short_track_rejected(config):
     assert len(detections) == 0
 
 
+def test_faint_object_found_by_faint_linking(config):
+    """ An object with a peak SNR of 1 per frame moving at 0.85 px/frame for 120 frames is below the threshold of
+        the search in most runs and is not found. The chains of the hits down to the faint threshold find it, and
+        it is measured to better than half a pixel over most of its track.
+    """
+
+    obj = linearObject(1.0, 10, 20, 0.8, 0.3, 300, 420)
+    det, detections = runDetector(_SynthHandle([obj]), config)
+    assert len(detections) == 0
+    assert (not det.faint) and (len(det.faint_hits) == 0)
+
+    config.mf_faint_threshold = 3.0
+    det, detections = runDetector(_SynthHandle([obj]), config)
+    assert len(detections) == 1
+    cent = detections[0][2]
+    assert np.sqrt(np.mean(truthError(cent, obj)**2)) < 0.5
+    assert cent[-1, 0] - cent[0, 0] > 0.7*(obj['f1'] - obj['f0'])
+    assert det.summary()['faint_detected'] == 1
+
+
+def test_no_faint_detections_in_noise_and_stars(config):
+    """ The chains of the noise and of faint stars are not significant: no detections with the faint linking. A
+        faint threshold at or above the threshold turns it off.
+    """
+
+    config.mf_faint_threshold = 3.0
+    for seed in (5, 6):
+        det, detections = runDetector(_SynthHandle([], seed=seed, n_faint_stars=30), config)
+        assert len(detections) == 0
+        assert det.summary()['faint_detected'] == 0
+
+    config.mf_faint_threshold = config.mf_threshold
+    assert not MatchedFilterDetector(_SynthHandle([]), config).faint
+
+
 ### Output ###
 
 def test_ftpdetectinfo_round_trip(config, tmp_path):
@@ -656,7 +725,7 @@ def test_config_parse(tmp_path):
     path = os.path.join(str(tmp_path), '.config')
     with open(path, 'w') as f:
         f.write("[System]\nstationID: XX0001\n\n[MatchedFilter]\nmf_enable: true\nmf_run_frames: 4, 8\n"
-                "mf_threshold: 6.5\nmf_gpu: off\nmf_min_frames: 30\n")
+                "mf_threshold: 6.5\nmf_gpu: off\nmf_min_frames: 30\nmf_faint_threshold: 3.5\nmf_faint_max_tracks: 20\n")
 
     config = cr.parse(path)
 
@@ -665,6 +734,7 @@ def test_config_parse(tmp_path):
     assert config.mf_threshold == 6.5
     assert config.mf_gpu == 'off'
     assert config.mf_min_frames == 30
+    assert (config.mf_faint_threshold == 3.5) and (config.mf_faint_max_tracks == 20)
 
 
 ### Operation ###
