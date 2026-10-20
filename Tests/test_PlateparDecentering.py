@@ -219,3 +219,27 @@ def test_flag_changes_keep_the_radial_coefficients_of_every_type():
         assert np.array_equal(pp.x_poly_fwd[:2], before[:2])
         assert np.array_equal(pp.x_poly_fwd[4:], before[4:]), dist_type
         assert coeffs['k%d' % pp.radialTermCount()] == before[-1]
+
+
+def test_radial_order_change_keeps_the_decentering():
+    """ Changing the radial order with the decentering correction on (as the distortion type selector of SkyFit2
+        does) keeps the decentering coefficients and the radial coefficients of the lower order. """
+
+    pp = makePlatepar()
+    pp.remapCoeffsForFlagChange('decentering_corr', True)
+    pp.x_poly_fwd[-4:] = [0.001, -0.002, 0.0005, -0.0003]
+    before = pp.extractRadialCoeffs()
+
+    # Down to radial3-odd: k1 and the decentering coefficients stay, k2 and k3 go
+    pp.setDistortionType("radial3-odd", reset_params=False)
+    coeffs = pp.extractRadialCoeffs()
+    assert len(pp.x_poly_fwd) == pp.poly_length
+    assert coeffs['k1'] == before['k1']
+    assert [coeffs[k] for k in ('p1', 'p2', 'p3', 'p4')] == [before[k] for k in ('p1', 'p2', 'p3', 'p4')]
+
+    # Back up to radial7-odd: the decentering coefficients stay, the higher radial ones start from zero
+    pp.setDistortionType("radial7-odd", reset_params=False)
+    coeffs = pp.extractRadialCoeffs()
+    assert len(pp.x_poly_fwd) == pp.poly_length
+    assert (coeffs['k1'], coeffs['k2'], coeffs['k3']) == (before['k1'], 0.0, 0.0)
+    assert [coeffs[k] for k in ('p1', 'p2', 'p3', 'p4')] == [before[k] for k in ('p1', 'p2', 'p3', 'p4')]

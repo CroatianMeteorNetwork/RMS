@@ -389,6 +389,15 @@ class Platepar(object):
                 if distortion_type[-3:] != self.distortion_type[-3:]:
                     reset_params = True
 
+            # With the decentering correction its coefficients follow the radial ones, so a change of the radial
+            #   order moves them: the coefficients are read in the layout of the current type, to be rebuilt in the
+            #   layout of the new one below
+            remap = None
+            if (not reset_params) and getattr(self, 'decentering_corr', False) \
+                    and self.distortion_type.startswith("radial") and (distortion_type != self.distortion_type):
+                remap = [self.extractRadialCoeffs(arr) for arr in (self.x_poly_fwd, self.x_poly_rev,
+                                                                    self.y_poly_fwd, self.y_poly_rev)]
+
             self.distortion_type = distortion_type
 
             # Get the polynomial length
@@ -422,6 +431,12 @@ class Platepar(object):
         # Reset distortion parameters
         if reset_params:
             self.resetDistortionParameters()
+
+        # Rebuild the coefficients read above in the layout of the new type (radial coefficients beyond its order
+        #   are dropped, the decentering coefficients kept)
+        elif remap is not None:
+            self.x_poly_fwd, self.x_poly_rev, self.y_poly_fwd, self.y_poly_rev = [
+                self.buildRadialCoeffs(coeffs, target_dist_type=distortion_type) for coeffs in remap]
 
         # Set the correct polynomial size
         self.padDictParams()
