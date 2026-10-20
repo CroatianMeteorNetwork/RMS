@@ -2235,6 +2235,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
     sigRefractionToggled = QtCore.pyqtSignal()
     sigEqAspectToggled = QtCore.pyqtSignal()
     sigAsymmetryCorrToggled = QtCore.pyqtSignal()
+    sigDecenteringCorrToggled = QtCore.pyqtSignal()
     sigForceDistortionToggled = QtCore.pyqtSignal()
     sigOnVignettingFixedToggled = QtCore.pyqtSignal()
     sigFitOnlyPointingToggled = QtCore.pyqtSignal()
@@ -2245,6 +2246,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
     DEFAULT_REFRACTION = True
     DEFAULT_EQUAL_ASPECT = True
     DEFAULT_ASYMMETRY_CORR = True
+    DEFAULT_DECENTERING_CORR = False
     DEFAULT_FORCE_DISTORTION_CENTRE = False
     DEFAULT_DISTORTION_TYPE = "radial7-odd"
     DEFAULT_EXTINCTION_SCALE = 0.6
@@ -2385,6 +2387,13 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         full_layout.addWidget(self.asymmetryCorr)
         if not self.gui.platepar.distortion_type.startswith('radial'):
             self.asymmetryCorr.hide()
+
+        # Decentering of the radial distortion (a lens element off the optical axis, Brown-Conrady)
+        self.decenteringCorr = QtWidgets.QCheckBox('Decentering Correction')
+        self.decenteringCorr.released.connect(self.onDecenteringCorrToggled)
+        full_layout.addWidget(self.decenteringCorr)
+        if not self.gui.platepar.distortion_type.startswith('radial'):
+            self.decenteringCorr.hide()
 
         self.fdistortion = QtWidgets.QCheckBox('Force Distortion Centre')
         self.fdistortion.released.connect(self.onForceDistortionToggled)
@@ -2729,6 +2738,21 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         # Emit signal to trigger display updates (connected to onFitParametersChanged)
         self.sigEqAspectToggled.emit()
 
+    def onDecenteringCorrToggled(self):
+        new_value = self.decenteringCorr.isChecked()
+        # Remap coefficients with stash to preserve/restore values when toggling
+        self._remapCoeffsWithStash('decentering_corr', new_value)
+
+        # Update GUI to reflect new poly_length and coefficient values
+        self.fit_parameters.changeNumberShown(self.gui.platepar.poly_length)
+        self.fit_parameters.updateValues()
+
+        # Update restore defaults button state
+        self.updateRestoreDefaultsButton()
+
+        # Emit signal to trigger display updates (connected to onFitParametersChanged)
+        self.sigDecenteringCorrToggled.emit()
+
     def onAsymmetryCorrToggled(self):
         new_value = self.asymmetryCorr.isChecked()
         # Remap coefficients with stash to preserve/restore values when toggling
@@ -2914,10 +2938,12 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         if self.gui.platepar.distortion_type.startswith('radial'):
             self.eqAspect.show()
             self.asymmetryCorr.show()
+            self.decenteringCorr.show()
             self.fdistortion.show()
         else:
             self.eqAspect.hide()
             self.asymmetryCorr.hide()
+            self.decenteringCorr.hide()
             self.fdistortion.hide()
 
         # Update restore defaults button state
@@ -2950,15 +2976,18 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.fit_only_pointing.setChecked(self.gui.fit_only_pointing)
         self.eqAspect.setChecked(self.gui.platepar.equal_aspect)
         self.asymmetryCorr.setChecked(self.gui.platepar.asymmetry_corr)
+        self.decenteringCorr.setChecked(getattr(self.gui.platepar, 'decentering_corr', False))
         self.fdistortion.setChecked(self.gui.platepar.force_distortion_centre)
 
         if self.gui.platepar.distortion_type.startswith('radial'):
             self.eqAspect.show()
             self.asymmetryCorr.show()
+            self.decenteringCorr.show()
             self.fdistortion.show()
         else:
             self.eqAspect.hide()
             self.asymmetryCorr.hide()
+            self.decenteringCorr.hide()
             self.fdistortion.hide()
 
         # Update restore defaults button state
@@ -2973,6 +3002,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
                 pp.refraction == self.DEFAULT_REFRACTION and
                 pp.equal_aspect == self.DEFAULT_EQUAL_ASPECT and
                 pp.asymmetry_corr == self.DEFAULT_ASYMMETRY_CORR and
+                getattr(pp, 'decentering_corr', False) == self.DEFAULT_DECENTERING_CORR and
                 pp.force_distortion_centre == self.DEFAULT_FORCE_DISTORTION_CENTRE and
                 pp.distortion_type == self.DEFAULT_DISTORTION_TYPE and
                 pp.extinction_scale == self.DEFAULT_EXTINCTION_SCALE and
@@ -3034,6 +3064,11 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
             self._remapCoeffsWithStash('asymmetry_corr', self.DEFAULT_ASYMMETRY_CORR)
             self.asymmetryCorr.setChecked(self.DEFAULT_ASYMMETRY_CORR)
 
+        # Restore decentering correction
+        if getattr(pp, 'decentering_corr', False) != self.DEFAULT_DECENTERING_CORR:
+            self._remapCoeffsWithStash('decentering_corr', self.DEFAULT_DECENTERING_CORR)
+            self.decenteringCorr.setChecked(self.DEFAULT_DECENTERING_CORR)
+
         # Restore force distortion centre
         if pp.force_distortion_centre != self.DEFAULT_FORCE_DISTORTION_CENTRE:
             self._remapCoeffsWithStash('force_distortion_centre', self.DEFAULT_FORCE_DISTORTION_CENTRE)
@@ -3062,10 +3097,12 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         if pp.distortion_type.startswith('radial'):
             self.eqAspect.show()
             self.asymmetryCorr.show()
+            self.decenteringCorr.show()
             self.fdistortion.show()
         else:
             self.eqAspect.hide()
             self.asymmetryCorr.hide()
+            self.decenteringCorr.hide()
             self.fdistortion.hide()
 
         # Update button state
