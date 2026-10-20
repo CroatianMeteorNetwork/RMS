@@ -781,6 +781,16 @@ class Config:
         # darkened, never brightened, so no highlight is clipped. 0 disables.
         self.timelapse_frames_dejump_s = 120.0
 
+        # 10-bit frames timelapse (H.264 High 10, keeps the 16-bit stacked frames' precision): CRF per
+        # mode (constant quantizer), raised together for a day predicted over the size budget (MB per
+        # camera-day, 0 = no budget), but never past the per-mode maximum (quality wins)
+        self.timelapse_frames_10bit = False
+        self.timelapse_frames_crf_day = 16.0
+        self.timelapse_frames_crf_night = 22.0
+        self.timelapse_frames_crf_max_day = 20.0
+        self.timelapse_frames_crf_max_night = 25.0
+        self.timelapse_frames_budget_mb = 300.0
+
 
         #### Shower association
 
@@ -2119,6 +2129,22 @@ def parseTimelapse(config, parser):
 
     if parser.has_option(section, "timelapse_frames_dejump_s"):
         config.timelapse_frames_dejump_s = max(0.0, parser.getfloat(section, "timelapse_frames_dejump_s"))
+
+    if parser.has_option(section, "timelapse_frames_10bit"):
+        config.timelapse_frames_10bit = parser.getboolean(section, "timelapse_frames_10bit")
+
+    for key in ("timelapse_frames_crf_day", "timelapse_frames_crf_night",
+                "timelapse_frames_crf_max_day", "timelapse_frames_crf_max_night"):
+        if parser.has_option(section, key):
+            setattr(config, key, min(51.0, max(0.0, parser.getfloat(section, key))))
+
+    # A maximum below its target would make the target unreachable
+    config.timelapse_frames_crf_max_day = max(config.timelapse_frames_crf_max_day, config.timelapse_frames_crf_day)
+    config.timelapse_frames_crf_max_night = max(config.timelapse_frames_crf_max_night,
+                                                config.timelapse_frames_crf_night)
+
+    if parser.has_option(section, "timelapse_frames_budget_mb"):
+        config.timelapse_frames_budget_mb = max(0.0, parser.getfloat(section, "timelapse_frames_budget_mb"))
 
 
 def parseColors(config, parser):
