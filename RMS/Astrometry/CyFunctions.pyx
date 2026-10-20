@@ -1006,6 +1006,7 @@ cdef int radialTermCount(str dist_type):
         Platepar.radialTermCount): the decentering coefficients follow them in the distortion arrays.
     """
 
+    # The radial coefficients of every radial type (k1 for radial3-odd up to k1...k4 for radial9-odd and radial5-all)
     if dist_type == "radial3-odd":
         return 1
     elif (dist_type == "radial5-odd") or (dist_type == "radial3-all"):
