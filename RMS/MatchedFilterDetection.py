@@ -2447,7 +2447,7 @@ class MatchedFilterDetector(object):
 
         fwhm = 2.355*self.psf_sigma
         starts = np.array(self.block_starts)
-        tests = []
+        tests, motions = [], []
         for ch in chains:
 
             # The line through the hits, in every frame from the first to the last hit
@@ -2468,24 +2468,30 @@ class MatchedFilterDetector(object):
             tests.append({key: (s, blockIndices(s[0], starts, end=self.block_ends[-1]), [0.0, 0.0])
                           for key, s in sets.items()})
 
+            # With the streak search, the motion of the object during a frame (the PSF smeared along it, see
+            #   verify)
+            motions.append((fit_x[0], fit_y[0]) if self.opts.streak_search else (0.0, 0.0))
+
         # The sums of all tests, block by block, without the pixels of the stars (see verify)
         radius = int(math.ceil(2.5*self.psf_sigma))
         for k, (first, last) in enumerate(zip(self.block_starts, self.block_ends)):
 
-            active = [c for c in tests if any(k in idx for _, idx, _ in c.values())]
+            active = [i for i, c in enumerate(tests) if any(k in idx for _, idx, _ in c.values())]
             if not active:
                 continue
             z, _ = self.normalizedBlock(k)
             excluded = (self.static_masks[k] | (self.backgrounds[k].stars > 0)).astype(np.uint8)
 
-            def sumBlock(c):
+            def sumBlock(i):
                 """ Add the sums of the tests of a chain in this block. """
 
-                for (fr, x, y), idx, sums in c.values():
+                vx, vy = motions[i]
+                radius_streak = radius + int(math.ceil(0.5*math.hypot(vx, vy)))
+                for (fr, x, y), idx, sums in tests[i].values():
                     sel = idx.get(k)
                     if sel is not None:
-                        sgz, sgg = forcedTrackSignal(z, fr[sel] - first, x[sel], y[sel], self.psf_sigma, radius,
-                                                     excluded)
+                        sgz, sgg = forcedTrackSignal(z, fr[sel] - first, x[sel], y[sel], self.psf_sigma,
+                                                     radius_streak, excluded, vx, vy)
                         sums[0] += sgz
                         sums[1] += sgg
 

@@ -716,6 +716,33 @@ def test_ftpdetectinfo_round_trip(config, tmp_path):
     assert np.allclose(np.diff(picks[:, 0]), np.diff(cent[:, 0]), atol=0.01)
 
 
+def test_faint_significance_with_the_streak_search(config, monkeypatch):
+    """ With the streak search, the signal along the line of a faint chain is summed with the PSF smeared along
+        the motion of the object during a frame, as in verify; without it, as a point source. """
+
+    obj = linearObject(1.0, 10, 20, 0.8, 0.3, 300, 420)
+    frames = np.arange(300, 420, 10.0)
+    chain = np.column_stack([frames, 10 + 0.8*(frames - 300), 20 + 0.3*(frames - 300)])
+
+    # The motion passed to the sums of the signal
+    motions = []
+    signal = mfd.forcedTrackSignal
+
+    def spy(*args):
+        motions.append(args[-2:] if len(args) > 7 else (0.0, 0.0))
+        return signal(*args)
+
+    for streak, expected in ((False, (0.0, 0.0)), (True, (0.8, 0.3))):
+        config.mf_faint_threshold = 3.0
+        config.mf_streak_search = streak
+        det, _ = runDetector(_SynthHandle([obj]), config)
+        monkeypatch.setattr(mfd, 'forcedTrackSignal', spy)
+        del motions[:]
+        det.faintSignificance([chain])
+        monkeypatch.setattr(mfd, 'forcedTrackSignal', signal)
+        assert motions and all(np.allclose(m, expected, atol=1e-6) for m in motions)
+
+
 def test_gap_pieces_count_the_faint_chains_of_all_parts():
     """ An input with a gap in the recording is searched in parts: the faint chains measured are counted over
         all parts, not only the main one. """
