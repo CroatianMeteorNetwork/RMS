@@ -243,3 +243,24 @@ def test_radial_order_change_keeps_the_decentering():
     assert len(pp.x_poly_fwd) == pp.poly_length
     assert (coeffs['k1'], coeffs['k2'], coeffs['k3']) == (before['k1'], 0.0, 0.0)
     assert [coeffs[k] for k in ('p1', 'p2', 'p3', 'p4')] == [before[k] for k in ('p1', 'p2', 'p3', 'p4')]
+
+
+def test_old_pickled_platepar():
+    """ A platepar pickled before the decentering correction existed (e.g. in a SkyFit2 state file) loads with
+        the correction off and keeps working: its coefficients, the flag toggles and a change of the radial order. """
+
+    import pickle
+
+    # A platepar as pickled before the option existed: without the attribute
+    pp = makePlatepar()
+    del pp.__dict__['decentering_corr']
+    old = pickle.loads(pickle.dumps(pp))
+    assert old.decentering_corr is False
+    assert np.allclose(old.x_poly_fwd, makePlatepar().x_poly_fwd)
+
+    # Usable as any platepar
+    assert old.extractRadialCoeffs()['p1'] == 0.0
+    old.remapCoeffsForFlagChange('decentering_corr', True)
+    assert old.poly_length == makePlatepar().poly_length + 4
+    old.setDistortionType("radial5-odd", reset_params=False)
+    assert len(old.x_poly_fwd) == old.poly_length

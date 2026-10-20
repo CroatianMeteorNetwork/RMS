@@ -2086,6 +2086,20 @@ class Platepar(object):
 
         return True
 
+    def __setstate__(self, state):
+        """ Restore a pickled platepar (e.g. from a SkyFit2 state file). A platepar pickled before an option existed
+            gets its default, as when a platepar file is loaded (see loadFromDict).
+
+        Arguments:
+            state: [dict] The attributes of the pickled platepar.
+        """
+
+        self.__dict__.update(state)
+
+        # The decentering correction (platepars pickled before it existed have none)
+        if 'decentering_corr' not in self.__dict__:
+            self.decentering_corr = False
+
     def loadFromDict(self, platepar_dict, use_flat=None):
         """Load the platepar from a dictionary."""
 
