@@ -650,6 +650,38 @@ def test_short_track_rejected(config):
     assert len(detections) == 0
 
 
+### Output ###
+
+def test_ftpdetectinfo_round_trip(config, tmp_path):
+    """ The detections saved as an FTPdetectinfo with the suffix "mf" (as the normal detection saves its
+        detections) are read back with the same positions and times.
+    """
+
+    obj = linearObject(4.0, 25, 30, 0.3, 0.15, 40, 300)
+    handle = _SynthHandle([obj])
+    _, detections = runDetector(handle, config)
+    assert len(detections) == 1
+
+    # Save without stars, with the suffix of the matched filter
+    _, _, ftp_name = saveResultsFrameInterface([], detections, handle, config, output_suffix='mf',
+                                               output_dir=str(tmp_path))
+    assert ftp_name.endswith('_mf.txt')
+
+    # Read it back in the format of the writer
+    _, _, meteors = FTPdetectinfo.readFTPdetectinfo(str(tmp_path), ftp_name, ret_input_format=True)
+    assert len(meteors) == 1
+
+    # Centroid rows: frame (relative to the time in the FF name), x, y, ...
+    picks = np.array(meteors[0][4], dtype=np.float64)
+    cent = detections[0][2]
+    assert len(picks) == len(cent)
+    assert np.allclose(picks[:, 1], cent[:, 1], atol=0.01)
+    assert np.allclose(picks[:, 2], cent[:, 2], atol=0.01)
+
+    # The times are kept, the frames are counted from the time in the name
+    assert np.allclose(np.diff(picks[:, 0]), np.diff(cent[:, 0]), atol=0.01)
+
+
 def test_faint_object_found_by_faint_linking(config):
     """ An object with a peak SNR of 1 per frame moving at 0.85 px/frame for 120 frames is below the threshold of
         the search in most runs and is not found. The chains of the hits down to the faint threshold find it, and
@@ -686,38 +718,6 @@ def test_no_faint_detections_in_noise_and_stars(config):
     # The option is off when the faint threshold is not below the threshold
     config.mf_faint_threshold = config.mf_threshold
     assert not MatchedFilterDetector(_SynthHandle([]), config).faint
-
-
-### Output ###
-
-def test_ftpdetectinfo_round_trip(config, tmp_path):
-    """ The detections saved as an FTPdetectinfo with the suffix "mf" (as the normal detection saves its
-        detections) are read back with the same positions and times.
-    """
-
-    obj = linearObject(4.0, 25, 30, 0.3, 0.15, 40, 300)
-    handle = _SynthHandle([obj])
-    _, detections = runDetector(handle, config)
-    assert len(detections) == 1
-
-    # Save without stars, with the suffix of the matched filter
-    _, _, ftp_name = saveResultsFrameInterface([], detections, handle, config, output_suffix='mf',
-                                               output_dir=str(tmp_path))
-    assert ftp_name.endswith('_mf.txt')
-
-    # Read it back in the format of the writer
-    _, _, meteors = FTPdetectinfo.readFTPdetectinfo(str(tmp_path), ftp_name, ret_input_format=True)
-    assert len(meteors) == 1
-
-    # Centroid rows: frame (relative to the time in the FF name), x, y, ...
-    picks = np.array(meteors[0][4], dtype=np.float64)
-    cent = detections[0][2]
-    assert len(picks) == len(cent)
-    assert np.allclose(picks[:, 1], cent[:, 1], atol=0.01)
-    assert np.allclose(picks[:, 2], cent[:, 2], atol=0.01)
-
-    # The times are kept, the frames are counted from the time in the name
-    assert np.allclose(np.diff(picks[:, 0]), np.diff(cent[:, 0]), atol=0.01)
 
 
 def test_faint_significance_with_the_streak_search(config, monkeypatch):
