@@ -41,12 +41,73 @@ from RMS.Routines.MaskImage import getMaskFile
 from RMS.Math import angularSeparation, RMSD
 
 
-# Default fitting parameters (matching SkyFit2's "Restore Defaults" button)
+# Default fitting parameters, used when the config file doesn't set the model of the platepar (see
+#   platepar_distortion_type in the config file)
 DEFAULT_DISTORTION_TYPE = "radial7-odd"
 DEFAULT_EQUAL_ASPECT = True
 DEFAULT_ASYMMETRY_CORR = True
+DEFAULT_DECENTERING_CORR = False
 DEFAULT_FORCE_DISTORTION_CENTRE = False
 DEFAULT_REFRACTION = True
+
+# Flags of the radial distortion types, in the order they are set
+MODEL_FLAGS = ('equal_aspect', 'asymmetry_corr', 'decentering_corr', 'force_distortion_centre')
+
+
+def plateparModel(config, distortion_type=None, equal_aspect=None, asymmetry_corr=None, decentering_corr=None,
+                  force_distortion_centre=None):
+    """ The model of a platepar fitted from scratch: the given settings, and for the ones which are not given the
+        settings of the config file (platepar_distortion_type and the flags after it), or the defaults of this module
+        if the config doesn't have them.
+
+    Arguments:
+        config: [Config] Configuration, None to use only the given settings and the defaults.
+
+    Keyword arguments:
+        distortion_type: [str] Distortion type. None by default, in which case it is taken from the config.
+        equal_aspect: [bool] Equal aspect ratio of the radial distortion types. None by default, as above.
+        asymmetry_corr: [bool] Asymmetry correction of the radial distortion types. None by default, as above.
+        decentering_corr: [bool] Decentering correction of the radial distortion types. None by default, as above.
+        force_distortion_centre: [bool] The distortion centre is fixed at the centre of the image. None by default,
+            as above.
+
+    Return:
+        [dict] The settings by the name of their platepar attribute.
+    """
+
+    given = {'distortion_type': distortion_type, 'equal_aspect': equal_aspect, 'asymmetry_corr': asymmetry_corr,
+             'decentering_corr': decentering_corr, 'force_distortion_centre': force_distortion_centre}
+    defaults = {'distortion_type': DEFAULT_DISTORTION_TYPE, 'equal_aspect': DEFAULT_EQUAL_ASPECT,
+                'asymmetry_corr': DEFAULT_ASYMMETRY_CORR, 'decentering_corr': DEFAULT_DECENTERING_CORR,
+                'force_distortion_centre': DEFAULT_FORCE_DISTORTION_CENTRE}
+
+    # A setting which is not given comes from the config file (the option is the name with a platepar_ prefix)
+    model = {}
+    for name, value in given.items():
+        if value is None:
+            value = getattr(config, 'platepar_' + name, defaults[name])
+        model[name] = value
+
+    return model
+
+
+def applyPlateparModel(platepar, model, reset_params=False):
+    """ Set the model of a platepar (see plateparModel): the flags first, each moving the coefficients to its layout,
+        then the distortion type.
+
+    Arguments:
+        platepar: [Platepar] Platepar, changed in place.
+        model: [dict] The settings by the name of their platepar attribute.
+
+    Keyword arguments:
+        reset_params: [bool] Reset the distortion coefficients to zero. False by default, in which case the
+            coefficients which the new model also has are kept.
+    """
+
+    for flag in MODEL_FLAGS:
+        platepar.remapCoeffsForFlagChange(flag, model[flag])
+
+    platepar.setDistortionType(model['distortion_type'], reset_params=reset_params)
 
 
 def scoreFrameDistribution(star_data, img_width, img_height, n_grid=4):
@@ -322,15 +383,15 @@ def printFitResiduals(paired_stars, platepar, jd, ff_dt):
 
 
 def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
-                    fov_w_hint=None, ff_name=None, distortion_type=DEFAULT_DISTORTION_TYPE,
-                    equal_aspect=DEFAULT_EQUAL_ASPECT, asymmetry_corr=DEFAULT_ASYMMETRY_CORR,
-                    force_distortion_centre=DEFAULT_FORCE_DISTORTION_CENTRE,
+                    fov_w_hint=None, ff_name=None, distortion_type=None,
+                    equal_aspect=None, asymmetry_corr=None,
+                    force_distortion_centre=None,
                     refraction=DEFAULT_REFRACTION,
                     photometric_sigma=DEFAULT_PHOTOMETRIC_SIGMA,
                     fwhm_mult=DEFAULT_BLEND_FWHM_MULT,
                     wide_fov_search=False,
                     final_catalog_stars=None,
-                    verbose=True):
+                    verbose=True, decentering_corr=None):
     """
     Automatically create a platepar from CALSTARS data in a directory.
 
@@ -353,11 +414,14 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
         ff_name: [str] Optional specific FF filename to use. If None, selects best frame
                  from CALSTARS automatically.
 
-    Keyword arguments (final fit settings - match SkyFit2 defaults):
-        distortion_type: [str] Distortion model for final fit (default: "radial5-odd")
-        equal_aspect: [bool] Equal aspect ratio constraint (default: True)
-        asymmetry_corr: [bool] Asymmetry correction (default: False)
-        force_distortion_centre: [bool] Force distortion centre to image centre (default: False)
+    Keyword arguments (final fit settings, see plateparModel):
+        distortion_type: [str] Distortion model for final fit (default: platepar_distortion_type of the config)
+        equal_aspect: [bool] Equal aspect ratio constraint (default: platepar_equal_aspect of the config)
+        asymmetry_corr: [bool] Asymmetry correction (default: platepar_asymmetry_corr of the config)
+        force_distortion_centre: [bool] Force distortion centre to image centre (default:
+            platepar_force_distortion_centre of the config)
+        decentering_corr: [bool] Decentering correction (default: platepar_decentering_corr of the config). Last
+            in the signature, so the positions of the older arguments are unchanged.
         refraction: [bool] Apply refraction correction (default: True)
 
     Keyword arguments (filtering parameters):
@@ -373,6 +437,11 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
         matched_stars: [list] List of matched star pairs
         best_ff: [str] Filename of the frame used for fitting
     """
+    # The model of the final fit: the settings which are not given come from the config file
+    model = plateparModel(config, distortion_type=distortion_type, equal_aspect=equal_aspect,
+                          asymmetry_corr=asymmetry_corr, decentering_corr=decentering_corr,
+                          force_distortion_centre=force_distortion_centre)
+
     if verbose:
         print("=" * 70)
         print("Auto Platepar Fitting")
@@ -543,14 +612,13 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
                 print("Tight FOV search failed, trying wide FOV search...")
             return autoFitPlatepar(
                 dir_path, config, catalog_stars, platepar_template=platepar_template,
-                fov_w_hint=fov_w_hint, ff_name=best_ff, distortion_type=distortion_type,
-                equal_aspect=equal_aspect, asymmetry_corr=asymmetry_corr,
-                force_distortion_centre=force_distortion_centre,
+                fov_w_hint=fov_w_hint, ff_name=best_ff,
                 refraction=refraction,
                 photometric_sigma=photometric_sigma,
                 fwhm_mult=fwhm_mult,
                 wide_fov_search=True,
-                verbose=verbose
+                verbose=verbose,
+                **model
             )
 
         if verbose:
@@ -584,6 +652,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
     platepar.refraction = True
     platepar.equal_aspect = True
     platepar.asymmetry_corr = False
+    platepar.decentering_corr = False
     platepar.force_distortion_centre = False
     platepar.setDistortionType("radial5-odd", reset_params=True)
 
@@ -671,18 +740,14 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
     if verbose:
         print()
         print("Final fit with user settings...")
-        print("  distortion_type: {:s}".format(distortion_type))
-        print("  equal_aspect: {:s}".format(str(equal_aspect)))
-        print("  asymmetry_corr: {:s}".format(str(asymmetry_corr)))
-        print("  force_distortion_centre: {:s}".format(str(force_distortion_centre)))
+        print("  distortion_type: {:s}".format(model['distortion_type']))
+        for flag in MODEL_FLAGS:
+            print("  {:s}: {:s}".format(flag, str(model[flag])))
         print("  refraction: {:s}".format(str(refraction)))
 
-    # Use remapCoeffsForFlagChange to properly handle coefficient structure changes
-    platepar.remapCoeffsForFlagChange('equal_aspect', equal_aspect)
-    platepar.remapCoeffsForFlagChange('asymmetry_corr', asymmetry_corr)
-    platepar.remapCoeffsForFlagChange('force_distortion_centre', force_distortion_centre)
+    # The model of the final fit, the coefficients moved to its layout
+    applyPlateparModel(platepar, model)
     platepar.refraction = refraction
-    platepar.setDistortionType(distortion_type, reset_params=False)
 
     # Extract coordinates for final fit
     img_coords = np.array(paired_stars.imageCoords())
@@ -755,15 +820,21 @@ if __name__ == "__main__":
     parser.add_argument("dir_path", help="Path to directory with CALSTARS file")
     parser.add_argument("-c", "--config", nargs=1, metavar='CONFIG_PATH', type=str, help="Path to config file", default=None)
 
-    # Fitting parameters (matching SkyFit2 defaults)
-    parser.add_argument("--distortion", default=DEFAULT_DISTORTION_TYPE,
-                        help="Distortion type (default: {:s})".format(DEFAULT_DISTORTION_TYPE))
-    parser.add_argument("--no-equal-aspect", action="store_true",
-                        help="Disable equal aspect ratio constraint (default: enabled)")
-    parser.add_argument("--no-asymmetry-corr", action="store_true",
-                        help="Disable asymmetry correction (default: enabled)")
-    parser.add_argument("--force-distortion-centre", action="store_true",
-                        help="Force distortion centre to image centre (default: disabled)")
+    # Fitting parameters: the model of the platepar is taken from the config file (platepar_distortion_type and the
+    #   flags after it) unless these options set it
+    parser.add_argument("--distortion", default=None,
+                        help="Distortion type (default: platepar_distortion_type of the config file)")
+    for flag, name, on_text, off_text in (
+            ('equal_aspect', 'equal-aspect', 'Enable the equal aspect ratio constraint',
+             'Disable the equal aspect ratio constraint'),
+            ('asymmetry_corr', 'asymmetry-corr', 'Enable the asymmetry correction', 'Disable the asymmetry correction'),
+            ('decentering_corr', 'decentering-corr', 'Enable the decentering correction',
+             'Disable the decentering correction'),
+            ('force_distortion_centre', 'force-distortion-centre', 'Force the distortion centre to the image centre',
+             'Fit the distortion centre')):
+        parser.add_argument("--" + name, dest=flag, action="store_const", const=True, default=None,
+                            help="{:s} (default: platepar_{:s} of the config file)".format(on_text, flag))
+        parser.add_argument("--no-" + name, dest=flag, action="store_const", const=False, help=off_text)
     parser.add_argument("--no-refraction", action="store_true",
                         help="Disable refraction correction (default: enabled)")
 
@@ -793,8 +864,9 @@ if __name__ == "__main__":
     platepar, matched_stars, best_ff = autoFitPlatepar(
         args.dir_path, config, catalog_stars,
         distortion_type=args.distortion,
-        equal_aspect=not args.no_equal_aspect,
-        asymmetry_corr=not args.no_asymmetry_corr,
+        equal_aspect=args.equal_aspect,
+        asymmetry_corr=args.asymmetry_corr,
+        decentering_corr=args.decentering_corr,
         force_distortion_centre=args.force_distortion_centre,
         refraction=not args.no_refraction,
         photometric_sigma=args.photom_sigma,
