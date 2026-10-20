@@ -276,6 +276,11 @@ class Config:
         self.fov_w = 64.0
         self.fov_h = 35.0
         self.deinterlace_order = -2
+
+        # Rolling shutter (deinterlace_order -1): the measured time in which the sensor reads all its rows (s), 0
+        #   for no correction (see RMS.Routines.RollingShutterCorrection)
+        self.rolling_shutter_readout = 0.0
+
         self.mask_file = "mask.bmp"
 
         self.data_dir = "~/RMS_data"
@@ -1623,6 +1628,9 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "deinterlace_order"):
         config.deinterlace_order = parser.getint(section, "deinterlace_order")
+
+    if parser.has_option(section, "rolling_shutter_readout"):
+        config.rolling_shutter_readout = parser.getfloat(section, "rolling_shutter_readout")
 
     if parser.has_option(section, "mask"):
         config.mask_file = os.path.basename(parser.get(section, "mask"))
