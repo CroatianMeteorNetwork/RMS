@@ -200,6 +200,12 @@ class Platepar(object):
         self.force_distortion_centre = False
         self.asymmetry_corr = True
 
+        # Decentering correction of the radial distortion (Brown-Conrady): a lens element shifted or tilted off the
+        #   optical axis displaces the image by p1, p2 (amount and direction of the shift) times the square of the
+        #   radius, and p3, p4 times its fourth power. Its coefficients follow the radial ones in the distortion
+        #   arrays. Off by default
+        self.decentering_corr = False
+
         # Station coordinates
         self.lat = self.lon = self.elev = 0
 
@@ -383,6 +389,15 @@ class Platepar(object):
                 if distortion_type[-3:] != self.distortion_type[-3:]:
                     reset_params = True
 
+            # With the decentering correction its coefficients follow the radial ones, so a change of the radial
+            #   order moves them: the coefficients are read in the layout of the current type, to be rebuilt in the
+            #   layout of the new one below
+            remap = None
+            if (not reset_params) and getattr(self, 'decentering_corr', False) \
+                    and self.distortion_type.startswith("radial") and (distortion_type != self.distortion_type):
+                remap = [self.extractRadialCoeffs(arr) for arr in (self.x_poly_fwd, self.x_poly_rev,
+                                                                    self.y_poly_fwd, self.y_poly_rev)]
+
             self.distortion_type = distortion_type
 
             # Get the polynomial length
@@ -405,12 +420,23 @@ class Platepar(object):
                 if not self.asymmetry_corr:
                     self.poly_length -= 2
 
+            # Add the decentering coefficients (p1, p2, p3, p4) for radial distortions if they are used
+            if distortion_type.startswith("radial"):
+                if self.decentering_corr:
+                    self.poly_length += 4
+
         else:
             raise ValueError("The distortion type is not recognized: {:s}".format(self.distortion_type))
 
         # Reset distortion parameters
         if reset_params:
             self.resetDistortionParameters()
+
+        # Rebuild the coefficients read above in the layout of the new type (radial coefficients beyond its order
+        #   are dropped, the decentering coefficients kept)
+        elif remap is not None:
+            self.x_poly_fwd, self.x_poly_rev, self.y_poly_fwd, self.y_poly_rev = [
+                self.buildRadialCoeffs(coeffs, target_dist_type=distortion_type) for coeffs in remap]
 
         # Set the correct polynomial size
         self.padDictParams()
@@ -1865,7 +1891,7 @@ class Platepar(object):
             index_offset += 2
 
         result = {'x0': 0.0, 'y0': 0.0, 'xy': 0.0, 'a1': 0.0, 'a2': 0.0,
-                  'k1': 0.0, 'k2': 0.0, 'k3': 0.0, 'k4': 0.0}
+                  'k1': 0.0, 'k2': 0.0, 'k3': 0.0, 'k4': 0.0, 'p1': 0.0, 'p2': 0.0, 'p3': 0.0, 'p4': 0.0}
 
         # Extract coefficients based on current flags
         idx = 0
@@ -1895,20 +1921,37 @@ class Platepar(object):
             idx += 1
 
         # Radial distortion coefficients (k1, k2, k3, k4)
-        # Number depends on distortion type: radial3-odd has k1, radial5-odd has k1,k2, etc.
-        if idx < len(x_poly):
-            result['k1'] = x_poly[idx]
-        idx += 1
-        if idx < len(x_poly):
-            result['k2'] = x_poly[idx]
-        idx += 1
-        if idx < len(x_poly):
-            result['k3'] = x_poly[idx]
-        idx += 1
-        if idx < len(x_poly):
-            result['k4'] = x_poly[idx]
+        # Number depends on distortion type: radial3-odd has k1, radial5-odd has k1,k2, etc. With the decentering
+        #   correction only the radial coefficients of the type are read, the decentering coefficients follow them
+        n_radial = self.radialTermCount() if self.decentering_corr else 4
+        for i, key in enumerate(('k1', 'k2', 'k3', 'k4')[:n_radial]):
+            if idx + i < len(x_poly):
+                result[key] = x_poly[idx + i]
+
+        # Decentering coefficients (p1, p2, p3, p4), after the radial ones
+        if self.decentering_corr:
+            for i, key in enumerate(('p1', 'p2', 'p3', 'p4')):
+                if idx + n_radial + i < len(x_poly):
+                    result[key] = x_poly[idx + n_radial + i]
 
         return result
+
+    def radialTermCount(self, dist_type=None):
+        """Number of the radial distortion coefficients (k1, k2, ...) of a radial distortion type.
+
+        Arguments:
+            dist_type: [str] Radial distortion type. None by default (the current distortion type).
+
+        Returns:
+            int: Number of the radial coefficients: the full length of the type without the distortion centre
+                (2), the aspect (1) and the asymmetry (2) parameters.
+        """
+        # The current distortion type by default
+        if dist_type is None:
+            dist_type = self.distortion_type
+
+        # The full length of the type, without the centre, the aspect and the asymmetry parameters
+        return self.distortion_type_poly_length[self.distortion_type_list.index(dist_type)] - 5
 
     def buildRadialCoeffs(self, coeffs_dict, target_dist_type=None):
         """Build a coefficient array from logical radial distortion coefficients.
@@ -1943,18 +1986,15 @@ class Platepar(object):
             result.append(coeffs_dict.get('a1', 0.0))
             result.append(coeffs_dict.get('a2', 0.0))
 
-        # Radial distortion coefficients - number depends on target type
-        result.append(coeffs_dict.get('k1', 0.0))
+        # Radial distortion coefficients - number depends on target type (radial3-odd has k1, radial5-odd and
+        #   radial3-all have k1, k2, etc.)
+        for key in ('k1', 'k2', 'k3', 'k4')[:self.radialTermCount(target_dist_type)]:
+            result.append(coeffs_dict.get(key, 0.0))
 
-        if target_dist_type in ["radial5-odd", "radial7-odd", "radial9-odd",
-                                "radial4-all", "radial5-all"]:
-            result.append(coeffs_dict.get('k2', 0.0))
-
-        if target_dist_type in ["radial7-odd", "radial9-odd", "radial5-all"]:
-            result.append(coeffs_dict.get('k3', 0.0))
-
-        if target_dist_type in ["radial9-odd"]:
-            result.append(coeffs_dict.get('k4', 0.0))
+        # The decentering coefficients follow the radial ones
+        if self.decentering_corr:
+            for key in ('p1', 'p2', 'p3', 'p4'):
+                result.append(coeffs_dict.get(key, 0.0))
 
         return np.array(result)
 
@@ -2046,6 +2086,20 @@ class Platepar(object):
 
         return True
 
+    def __setstate__(self, state):
+        """ Restore a pickled platepar (e.g. from a SkyFit2 state file). A platepar pickled before an option existed
+            gets its default, as when a platepar file is loaded (see loadFromDict).
+
+        Arguments:
+            state: [dict] The attributes of the pickled platepar.
+        """
+
+        self.__dict__.update(state)
+
+        # The decentering correction (platepars pickled before it existed have none)
+        if 'decentering_corr' not in self.__dict__:
+            self.decentering_corr = False
+
     def loadFromDict(self, platepar_dict, use_flat=None):
         """Load the platepar from a dictionary."""
 
@@ -2072,6 +2126,10 @@ class Platepar(object):
         # Add asymmetry correction
         if not 'asymmetry_corr' in self.__dict__:
             self.asymmetry_corr = False
+
+        # Add the decentering correction (platepars from before it existed have none)
+        if not 'decentering_corr' in self.__dict__:
+            self.decentering_corr = False
 
         # Add forcing distortion centre to image center
         if not 'force_distortion_centre' in self.__dict__:
@@ -2499,7 +2557,11 @@ class Platepar(object):
             if self.asymmetry_corr:
                 out_str += "      a1, a2 (deg), "
 
-            out_str += "      k1,       k2,       k3,       k4\n"
+            # The radial coefficients, followed by the decentering ones if they are used
+            if self.decentering_corr:
+                out_str += "      k1, ..., p1, p2, p3, p4 (decentering)\n"
+            else:
+                out_str += "      k1,       k2,       k3,       k4\n"
 
             dist_string = ""
 
