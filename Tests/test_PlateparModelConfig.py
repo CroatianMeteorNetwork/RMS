@@ -117,6 +117,20 @@ def test_model_applied_to_a_platepar():
     assert not np.any(pp.x_poly_fwd[2:])
 
 
+def test_positional_arguments_of_autofitplatepar_unchanged():
+
+    # The new decentering setting is after the older arguments, which keep their positions
+    try:
+        from inspect import getfullargspec as argspec
+    except ImportError:
+        from inspect import getargspec as argspec
+    args = argspec(AutoPlatepar.autoFitPlatepar).args
+    assert args == ['dir_path', 'config', 'catalog_stars', 'platepar_template', 'fov_w_hint', 'ff_name',
+                    'distortion_type', 'equal_aspect', 'asymmetry_corr', 'force_distortion_centre', 'refraction',
+                    'photometric_sigma', 'fwhm_mult', 'wide_fov_search', 'final_catalog_stars', 'verbose',
+                    'decentering_corr']
+
+
 def test_skyfit2_restores_the_model_of_the_config():
 
     pytest.importorskip("pyqtgraph")

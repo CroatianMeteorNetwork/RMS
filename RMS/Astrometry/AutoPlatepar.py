@@ -385,13 +385,13 @@ def printFitResiduals(paired_stars, platepar, jd, ff_dt):
 def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
                     fov_w_hint=None, ff_name=None, distortion_type=None,
                     equal_aspect=None, asymmetry_corr=None,
-                    force_distortion_centre=None, decentering_corr=None,
+                    force_distortion_centre=None,
                     refraction=DEFAULT_REFRACTION,
                     photometric_sigma=DEFAULT_PHOTOMETRIC_SIGMA,
                     fwhm_mult=DEFAULT_BLEND_FWHM_MULT,
                     wide_fov_search=False,
                     final_catalog_stars=None,
-                    verbose=True):
+                    verbose=True, decentering_corr=None):
     """
     Automatically create a platepar from CALSTARS data in a directory.
 
@@ -420,7 +420,8 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
         asymmetry_corr: [bool] Asymmetry correction (default: platepar_asymmetry_corr of the config)
         force_distortion_centre: [bool] Force distortion centre to image centre (default:
             platepar_force_distortion_centre of the config)
-        decentering_corr: [bool] Decentering correction (default: platepar_decentering_corr of the config)
+        decentering_corr: [bool] Decentering correction (default: platepar_decentering_corr of the config). Last
+            in the signature, so the positions of the older arguments are unchanged.
         refraction: [bool] Apply refraction correction (default: True)
 
     Keyword arguments (filtering parameters):
