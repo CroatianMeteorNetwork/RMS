@@ -1177,7 +1177,14 @@ def processFramesFiles(config):
             cleanup_mode=config.frame_cleanup,
             threads=config.timelapse_frames_threads,
             dejump_sigma=config.timelapse_frames_dejump_s,
-            gamma=config.gamma
+            gamma=config.gamma,
+            high_bit=config.timelapse_frames_10bit,
+            crf_day=config.timelapse_frames_crf_day,
+            crf_night=config.timelapse_frames_crf_night,
+            crf_max_day=config.timelapse_frames_crf_max_day,
+            crf_max_night=config.timelapse_frames_crf_max_night,
+            budget_mb=config.timelapse_frames_budget_mb,
+            frame_interval=config.frame_save_aligned_interval
         )
 
     except Exception as exc:

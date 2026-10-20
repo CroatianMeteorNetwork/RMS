@@ -11,6 +11,7 @@ import shutil
 import traceback
 import argparse
 import os
+import tempfile
 
 import cv2
 import numpy as np
@@ -22,6 +23,7 @@ from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName, filenameToDatetime
 from RMS.Misc import mkdirP, RmsDateTime, tarWithProgress, getRmsRootDir
 from RMS.Logger import getLogger
+from RMS.FrameStack import STACK_SCALE
 
 log = getLogger("rmslogger")
 
@@ -590,7 +592,14 @@ def generateTimelapseFromFrameBlocks(frame_blocks,
                                      use_color=True,
                                      threads=2,
                                      dejump_sigma=120.0,
-                                     gamma=0.5):
+                                     gamma=0.5,
+                                     high_bit=False,
+                                     crf_day=16.0,
+                                     crf_night=22.0,
+                                     crf_max_day=20.0,
+                                     crf_max_night=25.0,
+                                     budget_mb=300.0,
+                                     frame_interval=5.0):
     """Create one timelapse per block and return their paths.
 
     Arguments:
@@ -608,13 +617,31 @@ def generateTimelapseFromFrameBlocks(frame_blocks,
         threads: [int] x264 encoder threads. 2 by default.
         dejump_sigma: [float] Exposure de-jump time scale (s), 0 disables. 120 by default.
         gamma: [float] Camera gamma for the de-jump. 0.5 by default.
+        high_bit: [bool] 10-bit encoder (see generateTimelapseFromFrames), with the CRFs planned
+            against the size budget (planTimelapseCrfs). False by default.
+        crf_day, crf_night, crf_max_day, crf_max_night: [float] 10-bit target and maximum CRF per mode.
+        budget_mb: [float] 10-bit size budget, MB per camera-day; 0 = no budget. 300 by default.
+        frame_interval: [float] Seconds between saved frames (the budget's frames per day). 5 by default.
 
     Return:
         results: [list[tuple[str, str] | None]] One *(mp4_path, json_path)*
             per block, or *None* if that block failed.
     """
+    # 10-bit: one CRF per block, planned for all blocks together against the size budget
+    plan = [None]*len(frame_blocks)
+    if high_bit:
+        ffmpeg_path = isFfmpegWorking()
+        if ffmpeg_path and x264HighBitWorks(ffmpeg_path):
+            try:
+                plan = planTimelapseCrfs(frame_blocks, ffmpeg_path, crf_day=crf_day, crf_night=crf_night,
+                                         crf_max_day=crf_max_day, crf_max_night=crf_max_night,
+                                         budget_mb=budget_mb, frame_interval=frame_interval, threads=threads,
+                                         use_color=use_color, tmp_dir=frames_root)
+            except Exception as e:
+                log.warning("Timelapse CRF plan failed, using the target CRFs: {}".format(e))
+
     results = []
-    for block in frame_blocks:
+    for block, block_plan in zip(frame_blocks, plan):
         if not block:
             results.append(None)
             continue
@@ -641,7 +668,12 @@ def generateTimelapseFromFrameBlocks(frame_blocks,
             use_color=use_color,
             threads=threads,
             dejump_sigma=dejump_sigma,
-            gamma=gamma
+            gamma=gamma,
+            high_bit=high_bit,
+            crf=block_plan[0] if block_plan else None,
+            night=block_plan[1] if block_plan else None,
+            crf_day=crf_day,
+            crf_night=crf_night
         )
 
         results.append((mp4_path, json_path) if mp4_path else None)
@@ -660,6 +692,13 @@ def generateTimelapseFromDir(dir_path,
                              threads=2,
                              dejump_sigma=120.0,
                              gamma=0.5,
+                             high_bit=False,
+                             crf_day=16.0,
+                             crf_night=22.0,
+                             crf_max_day=20.0,
+                             crf_max_night=25.0,
+                             budget_mb=300.0,
+                             frame_interval=5.0,
                              ):
     """Build a single timelapse from every image under *dir_path*.
 
@@ -677,6 +716,8 @@ def generateTimelapseFromDir(dir_path,
         threads: [int] x264 encoder threads. 2 by default.
         dejump_sigma: [float] Exposure de-jump time scale (s), 0 disables. 120 by default.
         gamma: [float] Camera gamma for the de-jump. 0.5 by default.
+        high_bit, crf_day, crf_night, crf_max_day, crf_max_night, budget_mb, frame_interval: the 10-bit
+            encoder and its CRF plan, as in generateTimelapseFromFrameBlocks.
 
     Return:
         (video_path, json_path): [tuple[str, str] | (None, None)]
@@ -703,7 +744,17 @@ def generateTimelapseFromDir(dir_path,
         video_name = _buildName(station, t0, t1, MP4_SUFFIX)
         video_path = os.path.join(dir_path, video_name)
 
-    # 3 - delegate to the frame-streamer ------------------------------------
+    # 3 - 10-bit: the CRF against the size budget -----------------------------
+    plan = None
+    if high_bit:
+        ffmpeg_path = isFfmpegWorking()
+        if ffmpeg_path and x264HighBitWorks(ffmpeg_path):
+            plan = planTimelapseCrfs([img_paths], ffmpeg_path, crf_day=crf_day, crf_night=crf_night,
+                                     crf_max_day=crf_max_day, crf_max_night=crf_max_night, budget_mb=budget_mb,
+                                     frame_interval=frame_interval, threads=threads, use_color=use_color,
+                                     tmp_dir=os.path.dirname(os.path.abspath(video_path)))[0]
+
+    # 4 - delegate to the frame-streamer ------------------------------------
     return generateTimelapseFromFrames(
         image_files=img_paths,
         frames_root=frames_root,
@@ -716,6 +767,11 @@ def generateTimelapseFromDir(dir_path,
         threads=threads,
         dejump_sigma=dejump_sigma,
         gamma=gamma,
+        high_bit=high_bit,
+        crf=plan[0] if plan else None,
+        night=plan[1] if plan else None,
+        crf_day=crf_day,
+        crf_night=crf_night,
     )
 
 
@@ -854,6 +910,342 @@ def dejumpGains(times, exposures, modes, sigma_s, gamma, gain_range=DEJUMP_GAIN_
     return np.clip(gains, gain_range[0], gain_range[1])
 
 
+# x264 parameters of the frames timelapse (the reasons are in generateTimelapseFromFrames)
+X264_PARAMS = "psy-rd=0.0,0.0:aq-strength=0.5"
+
+# The 10-bit encoder adds (benchmarks 2026-10-15..20, US05E1/F1 8-frame stacks, synthetic contrails):
+# - qcomp=1: one quantizer for every frame. x264's default 0.6 raises the quantizer of busy frames, and
+#   night sky noise is busy to x264: a night "CRF 27" was coded at QP 30, in flat 16x16 blocks.
+# - trellis=0: trellis quantization zeroes faint coefficients. Off, the faintest detectable contrail is
+#   23 % fainter at night at 5 KB/frame (11 % at 8-12 KB/frame), for 7 % less CPU; neutral by day.
+# - 8x8dct=0 at night only: in heavily compressed dark sky the 8x8 intra vertical prediction chains rows
+#   into flickering vertical stripes; without the 8x8 transform none appear down to 2.8 KB/frame. By day
+#   it codes contrails and cloud edges (off: 3 px contrails keep 1-12 % less) and no stripes were seen.
+X264_PARAMS_10BIT = X264_PARAMS + ":qcomp=1:trellis=0"
+X264_PARAMS_10BIT_NIGHT = X264_PARAMS_10BIT + ":8x8dct=0"
+
+# Frames sampled per block to predict the size of a 10-bit timelapse (planTimelapseCrfs)
+BUDGET_SAMPLE_FRAMES = 60
+
+_X264_10BIT_OK = {}
+
+
+def x264HighBitWorks(ffmpeg_path):
+    """ True if this ffmpeg's libx264 encodes 10-bit H.264 (High 10). Cached per ffmpeg.
+
+    Arguments:
+        ffmpeg_path: [str] ffmpeg executable.
+
+    Return:
+        [bool]
+    """
+    if ffmpeg_path not in _X264_10BIT_OK:
+        try:
+            r = subprocess.run([ffmpeg_path, "-nostdin", "-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=64x64:d=0.04",
+                                "-c:v", "libx264", "-profile:v", "high10", "-pix_fmt", "yuv420p10le", "-f", "null", "-"],
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+            _X264_10BIT_OK[ffmpeg_path] = (r.returncode == 0)
+        except Exception:
+            _X264_10BIT_OK[ffmpeg_path] = False
+    return _X264_10BIT_OK[ffmpeg_path]
+
+
+def x264Args(crf, threads, high_bit=False, night=False):
+    """ ffmpeg output options of the frames timelapse encoder, without the container options.
+
+    Arguments:
+        crf: [float] x264 CRF.
+        threads: [int] Encoder threads.
+
+    Keyword arguments:
+        high_bit: [bool] 10-bit (High 10) encoder. False by default (8-bit High).
+        night: [bool] Night frames (10-bit only: no 8x8 transform). False by default.
+
+    Return:
+        [list[str]]
+    """
+    if high_bit:
+        return ["-c:v", "libx264",
+                "-crf", "{:.2f}".format(crf),
+                "-x264-params", X264_PARAMS_10BIT_NIGHT if night else X264_PARAMS_10BIT,
+                "-profile:v", "high10",
+                "-preset", "medium",
+                "-pix_fmt", "yuv420p10le",
+                "-threads", str(int(threads)),
+                "-g", "1",
+                "-bf", "0"]
+    return ["-c:v", "libx264",
+            "-crf", str(crf),
+            "-x264-params", X264_PARAMS,
+            "-profile:v", "high",      # baseline, main, high
+            "-preset", "medium",       # fast, medium, slow to change size/processing speed
+            "-pix_fmt", "yuv420p",
+            "-threads", str(int(threads)),
+            "-g", "1",
+            "-bf", "0"]
+
+
+def blockIsNight(image_files, is_color):
+    """ True for a block of night frames: most frames carry the night suffix (_n), or, when no frame
+        carries a mode suffix, the frames are grayscale.
+
+    Arguments:
+        image_files: [list[str]] Image paths.
+        is_color: [bool] The frames are colour.
+
+    Return:
+        [bool]
+    """
+    modes = [_modeFromName(p) for p in image_files]
+    n_night, n_day = modes.count('n'), modes.count('d')
+    if n_night or n_day:
+        return n_night > n_day
+    return not is_color
+
+
+def toEncoderDepth(image, high_bit):
+    """ A saved frame at the encoder's input depth.
+
+    Stacked frames (RMS.FrameStack) are 16-bit with STACK_SCALE per 8-bit code, single frames 8-bit.
+    The 10-bit encoder takes 16-bit input (8-bit frames are scaled up, exactly); the 8-bit encoder
+    takes 8-bit (16-bit frames are rounded).
+
+    Arguments:
+        image: [ndarray] uint8 or uint16 image.
+        high_bit: [bool] 16-bit output.
+
+    Return:
+        [ndarray] uint16 if high_bit else uint8.
+    """
+    if high_bit:
+        if image.dtype == np.uint8:
+            return np.left_shift(image.astype(np.uint16), int(np.log2(STACK_SCALE)))
+        return image
+    if image.dtype != np.uint8:
+        return cv2.addWeighted(image, 1.0/STACK_SCALE, image, 0.0, 0.0, dtype=cv2.CV_8U)
+    return image
+
+
+def stampTime(image, img_path):
+    """ Burn the station and UTC time from a frame's file name into its bottom-left corner, white text
+        with a black outline for visibility, in place.
+
+    Arguments:
+        image: [ndarray] uint8 or uint16 frame.
+        img_path: [str] The frame's path.
+
+    Return:
+        image: [ndarray] The same array.
+    """
+    image_name_parts = os.path.basename(img_path).split('_')
+    station_id = image_name_parts[0]
+    extracted_time = datetime.strptime(image_name_parts[1] + image_name_parts[2], "%Y%m%d%H%M%S")
+
+    text = station_id + " " + extracted_time.strftime("%Y-%m-%d %H:%M:%S") + " UTC"
+    position = (10, image.shape[0] - 6)
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.4
+    thickness = 1
+
+    white = 65535 if image.dtype == np.uint16 else 255
+    cv2.putText(image, text, position, font, font_scale, (0, 0, 0), thickness + 2, cv2.LINE_AA)
+    cv2.putText(image, text, position, font, font_scale, (white, white, white), thickness, cv2.LINE_AA)
+    return image
+
+
+def toEncoderChannels(image, use_color):
+    """ A frame with the channels the encoder was promised: BGR when use_color, else grayscale. """
+    if use_color:
+        if image.ndim == 2:
+            return cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+        if image.shape[2] == 4:
+            return cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
+    elif image.ndim == 3:
+        return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    return image
+
+
+def probeFrames(image_files, sample_size=10):
+    """ Size and colour of a block's frames, from the first readable of its first frames.
+
+    Works backward from the last image in the sample window, as the first images are sometimes not
+    representative in case of multiple captures per camera (e.g. main capture controls camera mode and
+    passive auxiliary captures).
+
+    Arguments:
+        image_files: [list[str]] Image paths.
+
+    Keyword arguments:
+        sample_size: [int] How many of the first frames to try. 10 by default.
+
+    Return:
+        (width, height, is_color): [tuple] or None if none of them could be read.
+    """
+    n = min(sample_size, len(image_files))
+    for i in range(n):
+        image = cv2.imread(image_files[n - 1 - i], cv2.IMREAD_UNCHANGED)
+        if image is not None:
+            height, width = image.shape[:2]
+            return width, height, (image.ndim == 3) and (image.shape[2] > 1)
+    return None
+
+
+def sampleBytesPerFrame(ffmpeg_path, image_files, width, height, use_color, high_bit, encoder_args, tmp_dir=None):
+    """ Mean coded size of some frames under several encoder settings, in one read of the frames.
+
+    Arguments:
+        ffmpeg_path: [str] ffmpeg executable.
+        image_files: [list[str]] The frames to encode.
+        width, height: [int] Frame size; frames of another size are skipped.
+        use_color: [bool] Colour encode.
+        high_bit: [bool] 16-bit input (the 10-bit encoder).
+        encoder_args: [list[list[str]]] x264Args of each setting.
+
+    Keyword arguments:
+        tmp_dir: [str] Where the temporary H.264 streams go. System temp by default.
+
+    Return:
+        [list[float | None]] Bytes per frame of each setting (raw H.264, no container), None if it failed.
+    """
+    pix_fmt = ("bgr48le" if use_color else "gray16le") if high_bit else ("bgr24" if use_color else "gray")
+    procs, paths = [], []
+    for args in encoder_args:
+        fd, path = tempfile.mkstemp(suffix=".h264", dir=tmp_dir)
+        os.close(fd)
+        paths.append(path)
+        procs.append(subprocess.Popen([ffmpeg_path, "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
+                                       "-f", "rawvideo", "-vcodec", "rawvideo", "-s", "{}x{}".format(width, height),
+                                       "-pix_fmt", pix_fmt, "-r", "30", "-i", "-"] + args + ["-f", "h264", path],
+                                      stdin=subprocess.PIPE))
+    n_frames = 0
+    try:
+        for img_path in image_files:
+            image = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
+            if (image is None) or (image.shape[:2] != (height, width)):
+                continue
+            image = toEncoderDepth(image, high_bit)
+            try:
+                stampTime(image, img_path)              # the time stamp costs bytes too (~2 KB/frame)
+            except Exception:
+                pass
+            data = toEncoderChannels(image, use_color).tobytes()
+            for proc in procs:
+                proc.stdin.write(data)
+            n_frames += 1
+        sizes = []
+        for proc, path in zip(procs, paths):
+            proc.stdin.close()
+            proc.wait()
+            ok = (proc.returncode == 0) and (n_frames > 0) and (os.path.getsize(path) > 0)
+            sizes.append(os.path.getsize(path)/float(n_frames) if ok else None)
+        return sizes
+    except Exception as e:
+        log.warning("Timelapse size sample failed: {}".format(e))
+        return [None]*len(encoder_args)
+    finally:
+        for proc, path in zip(procs, paths):
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+            if os.path.exists(path):
+                os.remove(path)
+
+
+def planTimelapseCrfs(frame_blocks, ffmpeg_path, crf_day=16.0, crf_night=22.0, crf_max_day=20.0, crf_max_night=25.0,
+                      budget_mb=300.0, frame_interval=5.0, threads=2, use_color=True, tmp_dir=None):
+    """ CRF of each block's 10-bit timelapse under a size budget per camera-day.
+
+    Each mode has a target CRF (constant quantizer, so constant quality) and a maximum. The size at a
+    fixed CRF follows the sky (day blocks 2.7-5x between clear and cloudy), so the size of every block
+    is predicted from BUDGET_SAMPLE_FRAMES frames spread over it, encoded at its target and at its
+    maximum CRF (log-linear in between). If the blocks are predicted over the budget, every block's CRF
+    is raised by the same step until they fit, but no block past its maximum: quality wins over the
+    budget, and that is logged as a warning.
+
+    Arguments:
+        frame_blocks: [list[list[str]]] The blocks to encode (each block one mode).
+        ffmpeg_path: [str] ffmpeg executable.
+
+    Keyword arguments:
+        crf_day, crf_night: [float] Target CRF per mode.
+        crf_max_day, crf_max_night: [float] Maximum CRF per mode.
+        budget_mb: [float] MB per camera-day (86400 s of frames at frame_interval); 0 = no budget.
+        frame_interval: [float] Seconds between saved frames.
+        threads: [int] Encoder threads of the sample encodes.
+        use_color: [bool] Colour encode where the frames are colour.
+        tmp_dir: [str] Directory of the temporary sample streams.
+
+    Return:
+        plan: [list[tuple[float, bool] | None]] (CRF, night) per block, None for a block too short to encode.
+    """
+    blocks = []
+    for block in frame_blocks:
+        probe = probeFrames(block) if (block and len(block) >= 10) else None
+        if probe is None:
+            blocks.append(None)
+            continue
+        width, height, is_color = probe
+        night = blockIsNight(block, use_color and is_color)
+        target, top = (crf_night, crf_max_night) if night else (crf_day, crf_max_day)
+        blocks.append(dict(files=block, n=len(block), night=night, target=float(target), top=float(max(top, target)),
+                           width=width, height=height, color=use_color and is_color))
+
+    live = [b for b in blocks if b is not None]
+    plan = [None if b is None else (round(b["target"], 2), b["night"]) for b in blocks]
+    if (not live) or (budget_mb <= 0):
+        return plan
+
+    # Predicted bytes per frame at the target and at the maximum CRF
+    for b in live:
+        step = max(1, b["n"]//BUDGET_SAMPLE_FRAMES)
+        settings = [x264Args(b["target"], threads, high_bit=True, night=b["night"])]
+        if b["top"] > b["target"]:
+            settings.append(x264Args(b["top"], threads, high_bit=True, night=b["night"]))
+        sizes = sampleBytesPerFrame(ffmpeg_path, b["files"][step//2::step], b["width"], b["height"], b["color"], True,
+                                    settings, tmp_dir=tmp_dir)
+        if any(x is None for x in sizes):
+            log.warning("Timelapse size could not be predicted, using the target CRFs")
+            return plan
+        b["bpf_target"], b["bpf_top"] = sizes[0], sizes[-1]
+
+    def bytesAt(b, crf):
+        if b["top"] <= b["target"]:
+            return b["n"]*b["bpf_target"]
+        f = (crf - b["target"])/(b["top"] - b["target"])
+        return b["n"]*np.exp((1 - f)*np.log(b["bpf_target"]) + f*np.log(b["bpf_top"]))
+
+    def total(step):
+        return sum(bytesAt(b, min(b["target"] + step, b["top"])) for b in live)
+
+    n_frames = sum(b["n"] for b in live)
+    budget = budget_mb*1e6*n_frames/(86400.0/frame_interval)
+    step_max = max(b["top"] - b["target"] for b in live)
+    if total(0) <= budget:
+        step = 0.0
+    elif total(step_max) > budget:
+        step = step_max
+    else:
+        lo, hi = 0.0, step_max
+        for _ in range(30):
+            mid = (lo + hi)/2
+            lo, hi = (mid, hi) if total(mid) > budget else (lo, mid)
+        step = hi
+
+    for b in live:
+        crf = min(b["target"] + step, b["top"])
+        log.info("Timelapse plan: {:s} block of {:d} frames: CRF {:.2f} (target {:.1f}, max {:.1f}), predicted "
+                 "{:.1f} KB/frame, {:.1f} MB".format("night" if b["night"] else "day", b["n"], crf, b["target"],
+                                                       b["top"], bytesAt(b, crf)/b["n"]/1e3, bytesAt(b, crf)/1e6))
+    log.info("Timelapse budget {:.0f} MB per camera-day = {:.1f} MB for these {:d} frames: predicted {:.1f} MB at the "
+             "target CRFs, {:.1f} MB as planned (CRF +{:.2f})".format(budget_mb, budget/1e6, n_frames, total(0)/1e6,
+                                                                       total(step)/1e6, step))
+    if total(step) > budget:
+        log.warning("Timelapse over budget at the maximum CRFs: predicted {:.1f} MB > {:.1f} MB. Quality wins: "
+                    "encoding at the maximum CRFs".format(total(step)/1e6, budget/1e6))
+
+    return [None if b is None else (round(min(b["target"] + step, b["top"]), 2), b["night"]) for b in blocks]
+
+
 def generateTimelapseFromFrames(image_files,
                                 frames_root,
                                 video_path,
@@ -864,7 +1256,12 @@ def generateTimelapseFromFrames(image_files,
                                 use_color=True,
                                 threads=2,
                                 dejump_sigma=120.0,
-                                gamma=0.5):
+                                gamma=0.5,
+                                high_bit=False,
+                                crf=None,
+                                night=None,
+                                crf_day=16.0,
+                                crf_night=22.0):
     """Stream images into ffmpeg and write a timelapse without temp JPGs.
 
     Arguments:
@@ -884,6 +1281,14 @@ def generateTimelapseFromFrames(image_files,
         dejump_sigma: [float] Time scale (s) of the exposure de-jump (dejumpGains) applied to frames
             with exposure metadata; 0 disables it. 120 by default.
         gamma: [float] Camera gamma (config.gamma) used by the de-jump. 0.5 by default.
+        high_bit: [bool] 10-bit encoder (H.264 High 10, X264_PARAMS_10BIT): codes 16-bit stacked frames
+            (RMS.FrameStack) at their precision. Falls back to the 8-bit encoder when this ffmpeg's
+            libx264 cannot do 10-bit. False by default.
+        crf: [float | None] 10-bit: the CRF (planTimelapseCrfs); None = crf_day or crf_night by mode.
+            The 8-bit encoder always uses base_crf (+2 for grayscale).
+        night: [bool | None] 10-bit: night frames (no 8x8 transform); None = from the file names
+            (blockIsNight).
+        crf_day, crf_night: [float] 10-bit CRF per mode when crf is None. 16 and 22 by default.
 
     Return:
         (video_path, json_path): [tuple[str, str] | (None, None)]
@@ -908,35 +1313,11 @@ def generateTimelapseFromFrames(image_files,
     # Process a valid first image to get dimensions
     # Try up to 10 images to find a valid one for dimensions
     # Necessary for the streaming method
-    sample_size = min(10, len(image_files))
-    found_valid_image = False
-    width, height = 0, 0
-    
-    for i in range(sample_size):
-
-        # work backward from the last image in the sample window as the first images are sometimes not
-        # representative in case of multiple captures per camera
-        # (e.g. main capture controls camera mode and passive auxiliary captures)
-        idx = sample_size - 1 - i
-
-        sample_image = cv2.imread(image_files[idx], cv2.IMREAD_UNCHANGED)
-
-        if sample_image is not None:
-
-            # Get dimensions from the first valid image
-            height, width = sample_image.shape[:2]
-
-            # Determine if the image is grayscale or color
-            channels = 1 if sample_image.ndim == 2 else sample_image.shape[2]
-
-            is_color = channels > 1
-
-            found_valid_image = True
-            break
-    
-    if not found_valid_image:
+    probe = probeFrames(image_files)
+    if probe is None:
         log.error("Error: Could not find any valid images to determine dimensions.")
         return None, None
+    width, height, is_color = probe
     
     # Set up ffmpeg command 
     ffmpeg_path = isFfmpegWorking()
@@ -944,8 +1325,22 @@ def generateTimelapseFromFrames(image_files,
         log.warning("ffmpeg not available on this installation.")
         return None, None
 
-    # Configure ffmpeg command based on color mode
-    if use_color and is_color:
+    if high_bit and not x264HighBitWorks(ffmpeg_path):
+        log.warning("This ffmpeg's libx264 cannot encode 10-bit: using the 8-bit timelapse encoder")
+        high_bit = False
+
+    # Don't use color if grayscale
+    use_color = use_color and is_color
+
+    if high_bit:
+        # 10-bit: CRF by mode (or as planned against the size budget), 16-bit input
+        if night is None:
+            night = blockIsNight(image_files, use_color)
+        if crf is None:
+            crf = crf_night if night else crf_day
+        pix_fmt = "bgr48le" if use_color else "gray16le"
+
+    elif use_color:
         # If the image is color, use the base CRF value
         crf = base_crf
 
@@ -958,9 +1353,6 @@ def generateTimelapseFromFrames(image_files,
 
         # Set pixel format for grayscale
         pix_fmt = "gray"
-
-        # Don't use color if grayscale
-        use_color = False
 
     # Encoder settings, from benchmarks on NR-off (grainy) science-camera stills, 2026-09 and 2026-10:
     # - No maxrate/bufsize cap. The old 2M/4M cap was pinned on 74% of a real night's frames and
@@ -976,8 +1368,7 @@ def generateTimelapseFromFrames(image_files,
     #   frame is also a keyframe when the server fetches one by timestamp.
     # x264-params: ':' separates options, and the two psy-rd values need a ',' (a ':' there makes
     # ffmpeg 6.1 silently drop everything after it).
-    x264_params = "psy-rd=0.0,0.0:aq-strength=0.5"
-
+    # The 10-bit encoder's additions are explained at X264_PARAMS_10BIT.
     ffmpeg_cmd = [ffmpeg_path, "-y", "-nostdin", '-hide_banner', 
                   '-loglevel', 'error',
                   "-f", "rawvideo", 
@@ -985,18 +1376,10 @@ def generateTimelapseFromFrames(image_files,
                   "-s", "{}x{}".format(width, height),
                   "-pix_fmt", pix_fmt,
                   "-r", str(fps),
-                  "-i", "-",
-                  "-c:v", "libx264",
-                  "-crf", str(crf),
-                  "-x264-params", x264_params,
-                  "-profile:v", "high",      # baseline, main, high
-                  "-preset", "medium",       # fast, medium, slow to change size/processing speed
-                  "-pix_fmt", "yuv420p",
-                  "-movflags", "faststart",  # Optimize for streaming
-                  "-threads", str(int(threads)),
-                  "-g", "1",
-                  "-bf", "0",
-                  temp_video_path]           # Use temporary path
+                  "-i", "-"] \
+        + x264Args(crf, threads, high_bit=high_bit, night=bool(night)) \
+        + ["-movflags", "faststart",  # Optimize for streaming
+           temp_video_path]           # Use temporary path
     
     # Per-frame metadata embedded in the saved frames, read before encoding: the de-jump needs every
     # frame's exposure up front, and cleanup may delete the frames afterwards
@@ -1033,6 +1416,8 @@ def generateTimelapseFromFrames(image_files,
 
     log.info("Starting ffmpeg process for {}...".format(video_path))
     log.info("Video mode: {}".format('Color' if use_color else 'Grayscale'))
+    if high_bit:
+        log.info("10-bit encoder, {} frames, CRF {:.2f}".format('night' if night else 'day', crf))
     ffmpeg_process = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE)
     
     # Initialize timestamp JSON data
@@ -1056,47 +1441,31 @@ def generateTimelapseFromFrames(image_files,
             skipped_count += 1
             continue  # Skip this frame
 
+        # The encoder's input depth: 16-bit for the 10-bit encoder, else 8-bit
+        image = toEncoderDepth(image, high_bit)
+
         # Exposure de-jump, before the timestamp is stamped so the text keeps its levels
         gain = 1.0
-        if (gains is not None) and (gains[index] != 1.0) and (image.dtype == np.uint8):
+        if (gains is not None) and (gains[index] != 1.0):
             gain = float(gains[index])
-            image = cv2.LUT(image, np.clip(np.round(np.arange(256)*gain), 0, 255).astype(np.uint8))
+            if image.dtype == np.uint8:
+                image = cv2.LUT(image, np.clip(np.round(np.arange(256)*gain), 0, 255).astype(np.uint8))
+            else:
+                image = cv2.addWeighted(image, gain, image, 0.0, 0.0, dtype=cv2.CV_16U)
         
-        # Extract timestamp from filename
+        # Stamp the time from the filename
         try:
-            image_name_parts = os.path.basename(img_path).split('_')
-            station_id = image_name_parts[0]
-            extracted_time = datetime.strptime(image_name_parts[1] + image_name_parts[2], "%Y%m%d%H%M%S")
-            
+            stampTime(image, img_path)
+
             # Record timestamp data (only for frames that are successfully processed)
             timestamp_data[str(processed_count)] = "_".join(os.path.basename(img_path).split('.')[0].split('_')[1:])
 
-            # Add timestamp with outline for better visibility
-            text = station_id + " " + extracted_time.strftime("%Y-%m-%d %H:%M:%S") + " UTC"
-            position = (10, image.shape[0] - 6)
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            font_scale = 0.4
-            thickness = 1
-            
-            # Create text with outline (black background, white text)
-            cv2.putText(image, text, position, font, font_scale, (0, 0, 0), thickness + 2, cv2.LINE_AA)
-            cv2.putText(image, text, position, font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA)
-            
         except Exception as e:
             log.warning("Warning: Error processing metadata for {}: {}".format(img_path, e))
         
-        # Handle color conversion based on target mode
+        # Handle color conversion based on target mode (we promised ffmpeg colour or gray)
         try:
-            if use_color:
-                # we promised ffmpeg bgr24
-                if image.ndim == 2:
-                    image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
-                elif image.shape[2] == 4:
-                    image = cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
-            else:
-                # we promised ffmpeg gray
-                if image.ndim == 3:
-                    image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            image = toEncoderChannels(image, use_color)
 
             # Write frame to ffmpeg
             ffmpeg_process.stdin.write(image.tobytes())
@@ -1292,6 +1661,17 @@ def main():
                         help='Image files: exposure de-jump time scale in seconds, 0 disables (default: 120)')
     parser.add_argument('--gamma', type=float, default=0.5,
                         help='Image files: camera gamma used by the de-jump (default: 0.5)')
+    parser.add_argument('--10bit', dest='high_bit', action='store_true',
+                        help='Image files: 10-bit encoder (H.264 High 10), CRF by mode (--crf is not used)')
+    parser.add_argument('--crf-day', type=float, default=16.0, help='10-bit: target CRF of day frames (default: 16)')
+    parser.add_argument('--crf-night', type=float, default=22.0, help='10-bit: target CRF of night frames (default: 22)')
+    parser.add_argument('--crf-max-day', type=float, default=20.0, help='10-bit: maximum CRF of day frames (default: 20)')
+    parser.add_argument('--crf-max-night', type=float, default=25.0,
+                        help='10-bit: maximum CRF of night frames (default: 25)')
+    parser.add_argument('--budget-mb', type=float, default=300.0,
+                        help='10-bit: size budget in MB per camera-day, 0 = none (default: 300)')
+    parser.add_argument('--interval', type=float, default=5.0,
+                        help='10-bit: seconds between frames, for the budget (default: 5)')
 
 
     
@@ -1351,6 +1731,13 @@ def main():
                 use_color=not args.grayscale,
                 dejump_sigma=args.dejump,
                 gamma=args.gamma,
+                high_bit=args.high_bit,
+                crf_day=args.crf_day,
+                crf_night=args.crf_night,
+                crf_max_day=args.crf_max_day,
+                crf_max_night=args.crf_max_night,
+                budget_mb=args.budget_mb,
+                frame_interval=args.interval,
             )
 
             # Record and print completion time and duration
