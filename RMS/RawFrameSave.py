@@ -30,6 +30,7 @@ from RMS.Logger import getLogger, getLoggingQueue, initChildProcess
 from RMS.Misc import mkdirP, setParentDeathSignal, AtomicFlag, stableDoubleRead
 from RMS.HighlightRebuild import rebuildGreen, rebuildGreenInvert
 from RMS.FrameMetadata import NFIELDS as META_FIELDS, rowToDict, writeImage, greenCeiling
+from RMS.FrameStack import STACK_SCALE, stackToImage
 
 # Get the logger from the main module
 log = getLogger("rmslogger")
@@ -42,7 +43,7 @@ class RawFrameSaver(multiprocessing.Process):
     running = False
     
     def __init__(self, saved_frames_dir, array1, start_time1, array2, start_time2, tsArray1, tsArray2, daytime_mode, config, raw_array_shape,
-                 metaArray1=None, metaArray2=None):
+                 metaArray1=None, metaArray2=None, stackArray1=None, stackArray2=None):
         """
 
         Arguments:
@@ -61,6 +62,10 @@ class RawFrameSaver(multiprocessing.Process):
             metaArray1, metaArray2: multiprocessing.Array bases of the per-frame exposure records
                 (RMS.FrameMetadata rows), or None. Embedded in the saved images when
                 config.save_frame_metadata is on.
+            stackArray1, stackArray2: multiprocessing.Array bases of (frame count, first frame time,
+                last frame time) per buffered frame when the frames are stacks (config.frame_stack):
+                the buffers then hold uint16 sums, saved as 16-bit PNG means (RMS.FrameStack). None
+                for single frames.
 
         """
 
@@ -83,6 +88,10 @@ class RawFrameSaver(multiprocessing.Process):
         self.meta2_base = metaArray2
         self.meta1 = None
         self.meta2 = None
+        self.stack1_base = stackArray1
+        self.stack2_base = stackArray2
+        self.stack1 = None
+        self.stack2 = None
         self.start_time1 = start_time1
         self.start_time2 = start_time2
         self.daytime_mode = daytime_mode
@@ -149,11 +158,18 @@ class RawFrameSaver(multiprocessing.Process):
 
             frame, timestamp = item[0], item[1]
             meta_row = item[2] if len(item) > 2 else None
+            stack_row = item[3] if len(item) > 3 else None
             frame_info = None
 
             # If timestamp is 0, then we've reached the end and this is the last block 
             if timestamp == 0:
                 break
+
+            # A stack: the sum of its frames -> 16-bit mean, STACK_SCALE per 8-bit code
+            stack_n = 0
+            if stack_row is not None:
+                stack_n = int(stack_row[0])
+                frame = stackToImage(frame, stack_n)
 
             # Handle when frame has only two channels (yuyv/uyvy)
             # OpenCV only supports 1, 3, or 4 color channels
@@ -168,11 +184,20 @@ class RawFrameSaver(multiprocessing.Process):
 
             if rebuild:
                 try:
+                    # The rebuild works on 8-bit codes: a 16-bit stack is rebuilt through its 8-bit
+                    # rounding, and only the pixels the rebuild changed take the rebuilt values
+                    frame8 = frame if frame.dtype == np.uint8 else \
+                        cv2.addWeighted(frame, 1.0/STACK_SCALE, frame, 0.0, 0.0, dtype=cv2.CV_8U)
                     if invert:
-                        frame, info = rebuildGreenInvert(frame, rowToDict(meta_row))
+                        new8, info = rebuildGreenInvert(frame8, rowToDict(meta_row))
                     else:
-                        frame, info = rebuildGreen(frame, ceiling=greenCeiling(meta_row))
+                        new8, info = rebuildGreen(frame8, ceiling=greenCeiling(meta_row))
                     if info is not None:
+                        if frame.dtype == np.uint8:
+                            frame = new8
+                        else:
+                            changed = np.any(new8 != frame8, axis=-1)
+                            frame[changed] = new8[changed].astype(np.uint16)*STACK_SCALE
                         rebuilt.append(info)
                         frame_info = info
                 except Exception as e:
@@ -200,8 +225,8 @@ class RawFrameSaver(multiprocessing.Process):
             else:
                 mode_suffix = "_n"
 
-            # Create the filename
-            if self.config.frame_file_type == 'png':
+            # Create the filename (stacks are always 16-bit PNG)
+            if (self.config.frame_file_type == 'png') or stack_n:
                 file_extension = '.png'
             else:
                 file_extension = '.jpg'
@@ -223,6 +248,11 @@ class RawFrameSaver(multiprocessing.Process):
             try:
                 if file_extension == '.png':
                     params = [int(cv2.IMWRITE_PNG_COMPRESSION), self.config.png_compression]
+
+                    # 16-bit: the RLE strategy writes the same size in half the time (0.43 vs 0.9 s
+                    # for a 1080p colour stack at level 3)
+                    if frame.dtype == np.uint16:
+                        params += [int(cv2.IMWRITE_PNG_STRATEGY), int(cv2.IMWRITE_PNG_STRATEGY_RLE)]
                 else:
                     params = [int(cv2.IMWRITE_JPEG_QUALITY), self.config.jpgs_quality]
 
@@ -231,6 +261,13 @@ class RawFrameSaver(multiprocessing.Process):
                     meta = dict(meta or {})
                     meta["highlight_rebuild"] = {k: (round(v, 4) if isinstance(v, float) else v)
                                                  for k, v in frame_info.items()}
+
+                # A stack always says what it is: frames averaged, their time span, and the scale
+                # of the 16-bit values (codes = value/stack_scale)
+                if stack_n:
+                    meta = dict(meta or {})
+                    meta.update(stack_n=stack_n, stack_scale=STACK_SCALE,
+                                stack_t0=round(float(stack_row[1]), 6), stack_t1=round(float(stack_row[2]), 6))
                 if meta:
                     meta["saved_utc"] = round(float(timestamp), 6)
                     n_meta += 1
@@ -260,12 +297,13 @@ class RawFrameSaver(multiprocessing.Process):
 
 
     @staticmethod
-    def _block(frames, timestamps, meta):
-        """ [(frame, timestamp, meta row or None)] of one buffer. The meta rows are copied (the
-            capture process reuses them), the frames are views as before. """
-        if meta is None:
-            return [(f, ts, None) for f, ts in zip(frames, timestamps)]
-        return [(f, ts, m.copy()) for f, ts, m in zip(frames, timestamps, meta)]
+    def _block(frames, timestamps, meta, stack=None):
+        """ [(frame, timestamp, meta row or None, stack row or None)] of one buffer. The meta and
+            stack rows are copied (the capture process reuses them), the frames are views as before. """
+        n = len(timestamps)
+        meta = [None]*n if meta is None else [m.copy() for m in meta]
+        stack = [None]*n if stack is None else [r.copy() for r in stack]
+        return [(f, ts, m, r) for f, ts, m, r in zip(frames, timestamps, meta, stack)]
 
     def ensureViews(self):
         """ Build numpy views over the shared multiprocessing.Array bases if not already built.
@@ -280,10 +318,13 @@ class RawFrameSaver(multiprocessing.Process):
             self.array2 = np.ctypeslib.as_array(self.array2_base.get_obj()).reshape(self.raw_array_shape)
             self.timeStamps1 = np.ctypeslib.as_array(self.timeStamps1_base.get_obj())
             self.timeStamps2 = np.ctypeslib.as_array(self.timeStamps2_base.get_obj())
+            n = self.raw_array_shape[0]
             if self.meta1_base is not None and self.meta2_base is not None:
-                n = self.raw_array_shape[0]
                 self.meta1 = np.ctypeslib.as_array(self.meta1_base.get_obj()).reshape(n, META_FIELDS)
                 self.meta2 = np.ctypeslib.as_array(self.meta2_base.get_obj()).reshape(n, META_FIELDS)
+            if self.stack1_base is not None and self.stack2_base is not None:
+                self.stack1 = np.ctypeslib.as_array(self.stack1_base.get_obj()).reshape(n, 3)
+                self.stack2 = np.ctypeslib.as_array(self.stack2_base.get_obj()).reshape(n, 3)
 
 
     def stop(self):
@@ -317,11 +358,13 @@ class RawFrameSaver(multiprocessing.Process):
 
         leftovers = []
         if (array1 is not None) and (timestamps1 is not None):
-            for frame, ts, meta in self._block(array1, timestamps1, getattr(self, 'meta1', None)):
-                if ts: leftovers.append((frame.copy(), float(ts), None if meta is None else meta.copy()))
+            for frame, ts, meta, stack in self._block(array1, timestamps1, getattr(self, 'meta1', None),
+                                                      getattr(self, 'stack1', None)):
+                if ts: leftovers.append((frame.copy(), float(ts), meta, stack))
         if (array2 is not None) and (timestamps2 is not None):
-            for frame, ts, meta in self._block(array2, timestamps2, getattr(self, 'meta2', None)):
-                if ts: leftovers.append((frame.copy(), float(ts), None if meta is None else meta.copy()))
+            for frame, ts, meta, stack in self._block(array2, timestamps2, getattr(self, 'meta2', None),
+                                                      getattr(self, 'stack2', None)):
+                if ts: leftovers.append((frame.copy(), float(ts), meta, stack))
         if leftovers:
             log.info("Flushing %d tail-end raw frames before shutdown", len(leftovers))
             self.saveFramesToDisk(leftovers, self.daytime_mode)
@@ -422,7 +465,7 @@ class RawFrameSaver(multiprocessing.Process):
                     # Copy raw (frames, timestamps)
                     # Clear out the timestamp array so it can be used by 
                     # saveFramesToDisk to halt
-                    frametimes = self._block(self.array1, self.timeStamps1, self.meta1)
+                    frametimes = self._block(self.array1, self.timeStamps1, self.meta1, self.stack1)
                     self.timeStamps1.fill(0)
                     raw_buffer_one = True
 
@@ -434,7 +477,7 @@ class RawFrameSaver(multiprocessing.Process):
                     # Copy raw (frames, timestamps)
                     # Clear out the timestamp array so it can be used by 
                     # saveFramesToDisk to halt
-                    frametimes = self._block(self.array2, self.timeStamps2, self.meta2)
+                    frametimes = self._block(self.array2, self.timeStamps2, self.meta2, self.stack2)
                     self.timeStamps2.fill(0)
                     raw_buffer_one = False
 

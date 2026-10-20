@@ -434,6 +434,10 @@ class Config:
         # temperature) as a JSON line in the PNG/JPEG. See RMS.FrameMetadata.
         self.save_frame_metadata = False
 
+        # Saved frame = mean of this many consecutive frames centred on each save tick, saved as a 16-bit
+        # PNG (value = 256 * mean 8-bit code). 1 = the single tick frame. See RMS.FrameStack.
+        self.frame_stack = 1
+
         # Set the time interval for saving video frames (s) aligned on reference epoch (not exposed in .config)
         self.frame_save_aligned_interval = 5.0
 
@@ -1451,6 +1455,13 @@ def parseCapture(config, parser):
     # Embed per-frame exposure metadata in saved frames
     if parser.has_option(section, "save_frame_metadata"):
         config.save_frame_metadata = parser.getboolean(section, "save_frame_metadata")
+
+    # Burst stacking of the saved frames
+    if parser.has_option(section, "frame_stack"):
+        config.frame_stack = parser.getint(section, "frame_stack")
+        if not 1 <= config.frame_stack <= 32:
+            log.warning("frame_stack must be 1..32, not {0}. It has been reset to 1!".format(config.frame_stack))
+            config.frame_stack = 1
 
     # Load the interval for saving video frame
     if parser.has_option(section, "frame_save_aligned_interval"):
