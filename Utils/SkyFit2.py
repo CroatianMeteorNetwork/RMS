@@ -3484,6 +3484,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.param_manager.sigRefractionToggled.connect(self.onRefractionChanged)
         self.tab.param_manager.sigEqAspectToggled.connect(self.onFitParametersChanged)
         self.tab.param_manager.sigForceDistortionToggled.connect(self.onFitParametersChanged)
+        self.tab.param_manager.sigDecenteringCorrToggled.connect(self.onFitParametersChanged)
         self.tab.param_manager.sigOnVignettingFixedToggled.connect(self.onVignettingChanged)
 
         # Connect astrometry & photometry buttons to functions
@@ -9621,6 +9622,9 @@ class PlateTool(QtWidgets.QMainWindow):
             if not hasattr(self.platepar, "asymmetry_corr"):
                 self.platepar.asymmetry_corr = False
 
+            if not hasattr(self.platepar, "decentering_corr"):
+                self.platepar.decentering_corr = False
+
             if not hasattr(self.platepar, "extinction_scale"):
                 self.platepar.extinction_scale = 1.0
 
@@ -12826,6 +12830,7 @@ class PlateTool(QtWidgets.QMainWindow):
         user_distortion_type = self.platepar.distortion_type
         user_equal_aspect = self.platepar.equal_aspect
         user_asymmetry_corr = self.platepar.asymmetry_corr
+        user_decentering_corr = self.platepar.decentering_corr
         user_force_distortion_centre = self.platepar.force_distortion_centre
         user_refraction = self.platepar.refraction
         user_fit_only_pointing = self.fit_only_pointing
@@ -12923,6 +12928,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.platepar.refraction = True
             self.platepar.remapCoeffsForFlagChange('equal_aspect', True)
             self.platepar.remapCoeffsForFlagChange('asymmetry_corr', False)
+            self.platepar.remapCoeffsForFlagChange('decentering_corr', False)
             self.platepar.remapCoeffsForFlagChange('force_distortion_centre', False)
             self.platepar.setDistortionType("radial5-odd", reset_params=False)
 
@@ -13014,6 +13020,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # Use remapCoeffsForFlagChange to properly handle coefficient structure changes
         self.platepar.remapCoeffsForFlagChange('equal_aspect', user_equal_aspect)
         self.platepar.remapCoeffsForFlagChange('asymmetry_corr', user_asymmetry_corr)
+        self.platepar.remapCoeffsForFlagChange('decentering_corr', user_decentering_corr)
         self.platepar.remapCoeffsForFlagChange('force_distortion_centre', user_force_distortion_centre)
         self.platepar.refraction = user_refraction
         self.fit_only_pointing = user_fit_only_pointing
@@ -13735,6 +13742,7 @@ class PlateTool(QtWidgets.QMainWindow):
         user_distortion_type = self.platepar.distortion_type
         user_equal_aspect = self.platepar.equal_aspect
         user_asymmetry_corr = self.platepar.asymmetry_corr
+        user_decentering_corr = self.platepar.decentering_corr
         user_force_distortion_centre = self.platepar.force_distortion_centre
         user_refraction = self.platepar.refraction
         user_fit_only_pointing = self.fit_only_pointing
@@ -13744,6 +13752,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.platepar.refraction = True
         self.platepar.equal_aspect = True
         self.platepar.asymmetry_corr = False
+        self.platepar.decentering_corr = False
         self.platepar.force_distortion_centre = False
 
         # Start with radial5-odd for initial fitting, reset distortion params
@@ -13981,6 +13990,7 @@ class PlateTool(QtWidgets.QMainWindow):
             print("Restoring user settings: {:s}".format(user_distortion_type))
             self.platepar.remapCoeffsForFlagChange('equal_aspect', user_equal_aspect)
             self.platepar.remapCoeffsForFlagChange('asymmetry_corr', user_asymmetry_corr)
+            self.platepar.remapCoeffsForFlagChange('decentering_corr', user_decentering_corr)
             self.platepar.remapCoeffsForFlagChange('force_distortion_centre', user_force_distortion_centre)
             self.platepar.setDistortionType(user_distortion_type, reset_params=False)
             self.platepar.refraction = user_refraction
@@ -14021,6 +14031,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Restore user's settings even if fit failed
             self.platepar.equal_aspect = user_equal_aspect
             self.platepar.asymmetry_corr = user_asymmetry_corr
+            self.platepar.decentering_corr = user_decentering_corr
             self.platepar.force_distortion_centre = user_force_distortion_centre
             self.platepar.setDistortionType(user_distortion_type, reset_params=True)
             self.platepar.refraction = user_refraction
@@ -17645,8 +17656,12 @@ class PlateTool(QtWidgets.QMainWindow):
             else:
                 img_h = self.img.data.shape[1]
 
-            # Compute the corrected frame time
-            frame_no = RollingShutterCorrection.correctRollingShutterTemporal(frame, pick['y_centroid'], img_h)
+            # Compute the corrected frame time, with the readout time of the rows of the sensor and the crop of
+            #   the capture for the inputs from the RMS capture (see RMS.Routines.RollingShutterCorrection)
+            fps = getattr(self.img_handle, 'fps', None) if self.img_handle is not None else None
+            cropped = (self.img_handle is None) or RollingShutterCorrection.croppedInput(self.img_handle.input_type)
+            frame_no = RollingShutterCorrection.correctFrameTime(frame, pick['y_centroid'], img_h, self.config,
+                                                                 fps=fps, cropped=cropped)
 
         # If global shutter, do no correction
         else:
