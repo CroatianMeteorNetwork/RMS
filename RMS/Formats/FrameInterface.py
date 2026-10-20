@@ -1668,6 +1668,9 @@ class InputTypeImages(InputType):
 
 
 
+        # Whether the time of the beginning is the time of the first frame from its header (see below)
+        beginning_from_frames = False
+
         ### Try to detect if the given images are UWO-style PNGs ###
 
         self.uwo_png_mode = False
@@ -1685,6 +1688,7 @@ class InputTypeImages(InputType):
             # Get the beginning time
             self.loadFrame(fr_no=0)
             beginning_time = self.dt_frame_time
+            beginning_from_frames = True
 
             print('UWO PNG mode')
 
@@ -1732,6 +1736,7 @@ class InputTypeImages(InputType):
 
             # Set the begin time if in the FRIPON mode
             beginning_time = self.dt_frame_time
+            beginning_from_frames = True
 
             # Load info for CABERNET
             if self.cabernet_status:
@@ -1818,9 +1823,10 @@ class InputTypeImages(InputType):
         else:
             self.beginning_datetime = beginning_time
 
-        # The time of the beginning corrected by frame_time_offset (the timestamps of the frames read from their
-        #   headers are corrected when they are read)
-        self.beginning_datetime = self.offsetDatetime(self.beginning_datetime)
+        # The time of the beginning corrected by frame_time_offset, unless it is the time of the first frame read
+        #   from its header, which was corrected when the frame was read
+        if not beginning_from_frames:
+            self.beginning_datetime = self.offsetDatetime(self.beginning_datetime)
 
 
 

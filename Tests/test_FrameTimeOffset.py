@@ -96,6 +96,27 @@ def test_image_directory_corrected(tmp_path):
         assert (b - a).total_seconds() == pytest.approx(OFFSET)
 
 
+def test_fits_frames_corrected_once(tmp_path):
+
+    from astropy.io import fits
+
+    # A directory of FITS frames with the time of every frame in its header, the beginning taken from the first one
+    d = tmp_path/'fits'
+    d.mkdir()
+    for i in range(4):
+        hdu = fits.PrimaryHDU(np.zeros((32, 48), dtype=np.uint16))
+        hdu.header['DATE-OBS'] = (T0 + datetime.timedelta(seconds=0.04*i)).strftime('%Y-%m-%dT%H:%M:%S.%f')
+        hdu.header['EXPOSURE'] = 0.04
+        hdu.writeto(str(d/'frame_{:03d}.fit'.format(i)))
+
+    corrected = InputTypeImages(str(d), makeConfig(OFFSET))
+
+    # The beginning and the frames are corrected once
+    assert (corrected.beginning_datetime - T0).total_seconds() == pytest.approx(OFFSET)
+    for i, t in zip([0, 3], frameTimes(corrected, [0, 3])):
+        assert (t - T0).total_seconds() == pytest.approx(0.04*i + OFFSET)
+
+
 def test_video_file_corrected(tmp_path):
 
     # A video file timed by its name
