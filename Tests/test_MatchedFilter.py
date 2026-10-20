@@ -656,11 +656,13 @@ def test_faint_object_found_by_faint_linking(config):
         it is measured to better than half a pixel over most of its track.
     """
 
+    # Without the faint linking: not found, and no faint hits kept
     obj = linearObject(1.0, 10, 20, 0.8, 0.3, 300, 420)
     det, detections = runDetector(_SynthHandle([obj]), config)
     assert len(detections) == 0
     assert (not det.faint) and (len(det.faint_hits) == 0)
 
+    # With it: found and measured over most of its track
     config.mf_faint_threshold = 3.0
     det, detections = runDetector(_SynthHandle([obj]), config)
     assert len(detections) == 1
@@ -675,11 +677,13 @@ def test_no_faint_detections_in_noise_and_stars(config):
         faint threshold at or above the threshold turns it off.
     """
 
+    # Noise and faint stars only, two noise realizations
     config.mf_faint_threshold = 3.0
     for seed in (5, 6):
         det, detections = runDetector(_SynthHandle([], seed=seed, n_faint_stars=30), config)
         assert len(detections) == 0
 
+    # The option is off when the faint threshold is not below the threshold
     config.mf_faint_threshold = config.mf_threshold
     assert not MatchedFilterDetector(_SynthHandle([]), config).faint
 
@@ -720,6 +724,7 @@ def test_faint_significance_with_the_streak_search(config, monkeypatch):
     """ With the streak search, the signal along the line of a faint chain is summed with the PSF smeared along
         the motion of the object during a frame, as in verify; without it, as a point source. """
 
+    # An object and a chain of hits on its line
     obj = linearObject(1.0, 10, 20, 0.8, 0.3, 300, 420)
     frames = np.arange(300, 420, 10.0)
     chain = np.column_stack([frames, 10 + 0.8*(frames - 300), 20 + 0.3*(frames - 300)])
@@ -732,6 +737,7 @@ def test_faint_significance_with_the_streak_search(config, monkeypatch):
         motions.append(args[-2:] if len(args) > 7 else (0.0, 0.0))
         return signal(*args)
 
+    # Without the streak search a point source, with it the motion of the chain per frame
     for streak, expected in ((False, (0.0, 0.0)), (True, (0.8, 0.3))):
         config.mf_faint_threshold = 3.0
         config.mf_streak_search = streak
@@ -749,12 +755,14 @@ def test_gap_pieces_count_the_faint_chains_of_all_parts():
 
     import types
 
+    # The detectors of two parts, with their counts of faint chains
     def part(measured):
         return types.SimpleNamespace(psf_sigma=1.0, timing={}, cloud_rows_removed=0, cloud_removed_row_frames=[],
                                      cloud_detections_removed=0, cloud_removed_frames=[], tracks_dropped=0,
                                      tracks_measured=0, significances=[], deviation_rejected=0, photometry={},
                                      sky_map=None, faint_measured=measured)
 
+    # The whole range counts the chains of both parts
     run = mfd.GapPieces([part(2), part(3)], [(0, 100), (120, 200)], [120], [0.5])
     assert run.faint_measured == 5
 

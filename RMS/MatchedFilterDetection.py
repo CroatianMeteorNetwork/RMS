@@ -1672,6 +1672,8 @@ class MatchedFilterDetector(object):
             self.faint_parts = []
             keep = np.ones(len(faint), dtype=bool)
             for (run_frames, b), mask in persistent.items():
+
+                # The hits of the runs of this length and bin at the persistent pixels of that search are dropped
                 sel = np.nonzero((faint[:, 6] == run_frames) & (faint[:, 7] == b))[0]
                 xb = np.round((faint[sel, 1] + 0.5)/b - 0.5).astype(int)
                 yb = np.round((faint[sel, 2] + 0.5)/b - 0.5).astype(int)
@@ -2368,6 +2370,7 @@ class MatchedFilterDetector(object):
             [list] (hits of the chain, frames per measurement) of the chains to measure, the most significant first.
         """
 
+        # Only with a faint threshold below the threshold
         if not self.faint:
             return []
 
@@ -2385,6 +2388,9 @@ class MatchedFilterDetector(object):
         frames = pool[order, 0]
         margin = 2*max(max(self.opts.run_frames), 16)
         for tr in tracks:
+
+            # The hits in the frames of the track and its margins, and the positions of the track at their frames:
+            #   interpolated between its hits, extrapolated beyond them
             tr = tr[np.argsort(tr[:, 0], kind='stable')]
             i0, i1 = np.searchsorted(frames, [tr[0, 0] - margin, tr[-1, 0] + margin])
             idx = order[i0:i1]
@@ -2396,6 +2402,8 @@ class MatchedFilterDetector(object):
             y[before] = tr[0, 2] + tr[0, 5]*(t[before] - tr[0, 0])
             x[after] = tr[-1, 1] + tr[-1, 4]*(t[after] - tr[-1, 0])
             y[after] = tr[-1, 2] + tr[-1, 5]*(t[after] - tr[-1, 0])
+
+            # The hits near the track are left out
             keep[idx[np.hypot(pool[idx, 1] - x, pool[idx, 2] - y) <= SHADOW_RADIUS]] = False
 
         # The chains in the speed range which move far enough (as the tracks, see acceptTrack)
@@ -2445,6 +2453,7 @@ class MatchedFilterDetector(object):
         if not chains:
             return np.zeros(0)
 
+        # The three tests of every chain (on its line, off it in time, in reverse order) and the motion of its object
         fwhm = 2.355*self.psf_sigma
         starts = np.array(self.block_starts)
         tests, motions = [], []
@@ -2476,6 +2485,7 @@ class MatchedFilterDetector(object):
         radius = int(math.ceil(2.5*self.psf_sigma))
         for k, (first, last) in enumerate(zip(self.block_starts, self.block_ends)):
 
+            # The chains with a test in this block, and the normalized frames of the block without the stars
             active = [i for i, c in enumerate(tests) if any(k in idx for _, idx, _ in c.values())]
             if not active:
                 continue
@@ -2485,6 +2495,7 @@ class MatchedFilterDetector(object):
             def sumBlock(i):
                 """ Add the sums of the tests of a chain in this block. """
 
+                # The patch includes half the streak of the object
                 vx, vy = motions[i]
                 radius_streak = radius + int(math.ceil(0.5*math.hypot(vx, vy)))
                 for (fr, x, y), idx, sums in tests[i].values():
@@ -2504,6 +2515,8 @@ class MatchedFilterDetector(object):
             on_gz, on_gg = c['on'][2]
             values = []
             for key in ('off', 'reverse'):
+
+                # A test without positions in the frames (e.g. a chain over the whole input) gives no significance
                 gz, gg = c[key][2]
                 if (on_gg <= 0) or (gg <= 0):
                     values = [0.0]
@@ -2972,6 +2985,7 @@ class MatchedFilterDetector(object):
         def state(i):
             """ The measurement state of the i-th track. """
 
+            # A track of the search, or a faint chain with its frames per measurement and the reach of its hits
             tr, n = items[i]
             if n is None:
                 return TrackMeasurement(tr, self.opts, self.psf_sigma)
@@ -3894,6 +3908,7 @@ def linkFaintHits(hits, seed_frames=FAINT_SEED_FRAMES, seed_radius=FAINT_SEED_RA
         [list] Chains, each an array of hits sorted by frame, at most one hit per run.
     """
 
+    # Too few hits for any chain
     if len(hits) < min_runs:
         return []
 
@@ -3934,6 +3949,7 @@ def linkFaintHits(hits, seed_frames=FAINT_SEED_FRAMES, seed_radius=FAINT_SEED_RA
             & (np.hypot(hits[b, 4] - hits[a, 4], hits[b, 5] - hits[a, 5]) <= np.maximum(dv_max[a], dv_max[b]))
         pairs.append(np.column_stack([a[ok], b[ok]]))
 
+    # The pairs of all runs, no chains without them
     pairs = np.vstack(pairs) if pairs else np.zeros((0, 2), dtype=int)
     if not len(pairs):
         return []
