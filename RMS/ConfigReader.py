@@ -1018,6 +1018,15 @@ class Config:
         #   the cost of more search time
         self.mf_streak_search = False
 
+        # Faint objects: the hits of the search down to this threshold are linked into chains along straight tracks
+        #   over the whole input, and the chains whose signal summed along them is significant are measured like the
+        #   other tracks (see MatchedFilterDetector.faintTracks). An object below mf_threshold in most runs is then
+        #   still found from the runs where the noise adds to it. 0 disables it
+        self.mf_faint_threshold = 0.0
+
+        # Largest number of faint chains measured per file (or segment), the most significant ones
+        self.mf_faint_max_tracks = 50
+
         # Saturation level of the raw frames (ADU): the saturated pixels are left out of the position fits and
         #   counted in the saturation column of the detections. 0 uses 98% of the range of the bit depth (some
         #   cameras saturate well below it)
@@ -2433,7 +2442,7 @@ def parseMatchedFilter(config, parser):
     for name in ("mf_block_frames", "mf_slow_run_frames", "mf_min_hits",
                  "mf_max_measure_frames", "mf_min_centroids", "mf_edge_margin", "mf_min_frames", "mf_threads",
                  "mf_smooth_frames", "mf_saturation_level", "mf_max_tracks", "mf_link_max_gap", "mf_max_bin",
-                 "mf_cloud_min_matched", "mf_segment_overlap"):
+                 "mf_cloud_min_matched", "mf_segment_overlap", "mf_faint_max_tracks"):
         if parser.has_option(section, name):
             setattr(config, name, parser.getint(section, name))
 
@@ -2441,7 +2450,7 @@ def parseMatchedFilter(config, parser):
                  "mf_min_sample_snr", "mf_star_threshold", "mf_persistence", "mf_clip", "mf_trail_level", "mf_min_displacement",
                  "mf_sigma_scale", "mf_track_significance", "mf_tier_speed", "mf_cloud_max_offset",
                  "mf_buffer_memory", "mf_cache_memory", "mf_line_concentration", "mf_track_deviation_fwhm",
-                 "mf_track_deviation_length"):
+                 "mf_track_deviation_length", "mf_faint_threshold"):
         if parser.has_option(section, name):
             setattr(config, name, parser.getfloat(section, name))
 
