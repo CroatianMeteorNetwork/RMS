@@ -73,6 +73,7 @@ from RMS.Formats.Platepar import Platepar
 from RMS.Logger import getLogger, LoggingManager
 from RMS.Routines import Image
 from RMS.Routines import MaskImage
+from RMS.Routines import RollingShutterCorrection
 from RMS.Routines.DynamicFTPCompressionCy import sampleMedianMAD
 from RMS.Routines.SkyQuality import CalibrationError, SkyQualityMap, SkyReference, chunkFirstFrames
 from RMS.Routines.MatchedFilterKernels import (DeviceFrames, VelocityStacker, fitMovingPSF, forcedTrackSignal,
@@ -4251,6 +4252,41 @@ def skyQuality(img_handle, config, star_list, platepar, reference_dir=None, inpu
 
 
 
+def correctRollingShutter(detections, img_handle, config):
+    """ Correct the frames of the centroids for a rolling shutter (deinterlace_order -1): a point at the row y is
+        recorded later than the top row of its frame by y/rows of the readout time of the sensor (see
+        RMS.Routines.RollingShutterCorrection). Applied once to the detections of the whole input, the frames
+        within the input stay unchanged until then.
+
+    Arguments:
+        detections: [list] Detections as [rho, theta, centroids], centroids rows [frame, x, y, ...] in the
+            unbinned image.
+        img_handle: [FrameInterface] Image handle of the input.
+        config: [Config] Configuration object.
+
+    Return:
+        [list] The detections, their frames corrected in place (unchanged without a rolling shutter).
+    """
+
+    # Only a rolling shutter is corrected
+    if config.deinterlace_order != -1:
+        return detections
+
+    # The rows of the unbinned image; the readout time and the crop of the capture come from the config (only the
+    #   inputs from the RMS capture are cropped)
+    det_bin = config.detection_binning_factor if img_handle.input_type != 'ff' else 1
+    n_rows = img_handle.nrows*det_bin
+    cropped = RollingShutterCorrection.croppedInput(img_handle.input_type)
+
+    # Move the frame of every centroid by the time its row was read after the top row
+    for det in detections:
+        cent = det[2]
+        cent[:, 0] = RollingShutterCorrection.correctFrameTime(cent[:, 0], cent[:, 2], n_rows, config,
+                                                               fps=getattr(img_handle, 'fps', None), cropped=cropped)
+
+    return detections
+
+
 def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=None, star_list=None,
                         return_detector=False, platepar=None, reference_dir=None, input_name='', frame_range=None,
                         persistence_prior=None, sky_range=None, persistence_until=None, max_tracks=None,
@@ -4326,16 +4362,20 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
                                                 persistence_prior_frames=persistence_prior_frames,
                                                 track_deviation=track_deviation)
 
-        return (detections, detector) if return_detector else detections
-
     # Otherwise the whole range is searched at once
-    detections, detector = detectRange(img_handle, config, mask=mask, dark=dark, flat_struct=flat_struct,
-                                       star_list=star_list, platepar=platepar, reference_dir=reference_dir,
-                                       input_name=input_name, frame_range=frame_range,
-                                       persistence_prior=persistence_prior, sky_range=sky_range,
-                                       persistence_until=persistence_until, max_tracks=max_tracks,
-                                       persistence_prior_frames=persistence_prior_frames,
-                                       track_deviation=track_deviation, update_sky=(frame_range is None))
+    else:
+        detections, detector = detectRange(img_handle, config, mask=mask, dark=dark, flat_struct=flat_struct,
+                                           star_list=star_list, platepar=platepar, reference_dir=reference_dir,
+                                           input_name=input_name, frame_range=frame_range,
+                                           persistence_prior=persistence_prior, sky_range=sky_range,
+                                           persistence_until=persistence_until, max_tracks=max_tracks,
+                                           persistence_prior_frames=persistence_prior_frames,
+                                           track_deviation=track_deviation, update_sky=(frame_range is None))
+
+    # The times of the detections of the whole input are corrected for a rolling shutter (the detections of the
+    #   segments of an input are corrected together, see detectMatchedFilterSegments)
+    if frame_range is None:
+        detections = correctRollingShutter(detections, img_handle, config)
 
     return (detections, detector) if return_detector else detections
 
@@ -5408,6 +5448,9 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
 
     run = SegmentedRun(img_handle, ranges, detectors, cuts, sky_map, buffer, timing, removed_rows=removed_rows,
                        removed_first=removed_first, deviation_rejected=len(deviating))
+
+    # The times of the detections of the whole input are corrected for a rolling shutter
+    detections = correctRollingShutter(detections, img_handle, config)
 
     return star_list, detections, run, buffer
 
