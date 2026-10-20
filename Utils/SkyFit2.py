@@ -184,7 +184,7 @@ from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, trueRaDec2Apparent
     apparentAltAz2TrueRADec, J2000_JD, jd2Date, datetime2JD, JD2LST, geo2Cartesian, vector2RaDec, raDec2Vector
 from RMS.Astrometry.AstrometryNet import astrometryNetSolve
 from RMS.Astrometry.ApplyRecalibrate import recalibrateFF
-from RMS.Astrometry.AutoPlatepar import selectBestFrame, autoFitPlatepar
+from RMS.Astrometry.AutoPlatepar import selectBestFrame, autoFitPlatepar, plateparModel, applyPlateparModel
 from RMS.Astrometry.NNalign import alignPlatepar
 import RMS.ConfigReader as cr
 from RMS.ExtractStars import extractStarsAndSave, extractStarsFF
@@ -10780,9 +10780,13 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.updateDistortion()
                 self.updateStars()
 
-            # Make new platepar
+            # Make new platepar, its model of the distortion shown in the fit parameters
             elif (event.key() == QtCore.Qt.Key.Key_N) and (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier):
                 self.makeNewPlatepar()
+                self.tab.param_manager.updatePlatepar()
+                self.updateLeftLabels()
+                self.updateDistortion()
+                self.updateStars()
 
             # Show distortion
             elif (event.key() == QtCore.Qt.Key.Key_I) and (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier):
@@ -14686,8 +14690,9 @@ class PlateTool(QtWidgets.QMainWindow):
         scale_y = self.config.fov_h/self.config.height
         self.platepar.F_scale = 1.0/((scale_x + scale_y)/2)
 
-        # Reset the distortion coeffs
-        self.platepar.resetDistortionParameters()
+        # The model of the distortion from the config file, with the coefficients reset
+        applyPlateparModel(self.platepar, plateparModel(self.config), reset_params=True)
+        self.dist_type_index = self.platepar.distortion_type_list.index(self.platepar.distortion_type)
 
 
         # Set station ID

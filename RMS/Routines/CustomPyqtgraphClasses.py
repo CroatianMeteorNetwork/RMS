@@ -2259,14 +2259,10 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
     sigFitOnlyPointingToggled = QtCore.pyqtSignal()
     sigRestoreDefaultsPressed = QtCore.pyqtSignal()
 
-    # Default settings for SkyFit2 Fit Parameters tab
+    # Default settings for SkyFit2 Fit Parameters tab (the default model of the distortion comes from the config
+    #   file, see defaultModel)
     DEFAULT_FIXED_SCALE = False
     DEFAULT_REFRACTION = True
-    DEFAULT_EQUAL_ASPECT = True
-    DEFAULT_ASYMMETRY_CORR = True
-    DEFAULT_DECENTERING_CORR = False
-    DEFAULT_FORCE_DISTORTION_CENTRE = False
-    DEFAULT_DISTORTION_TYPE = "radial7-odd"
     DEFAULT_EXTINCTION_SCALE = 0.6
     DEFAULT_VIGNETTING_FIXED = True
 
@@ -3011,18 +3007,31 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         # Update restore defaults button state
         self.updateRestoreDefaultsButton()
 
+    def defaultModel(self):
+        """ The default model of the distortion: the one of the config file (platepar_distortion_type and the flags
+            after it), see AutoPlatepar.plateparModel.
+
+        Return:
+            [dict] The settings by the name of their platepar attribute.
+        """
+
+        from RMS.Astrometry.AutoPlatepar import plateparModel
+
+        return plateparModel(getattr(self.gui, 'config', None))
+
     def isAtDefaults(self):
         """Check if current settings match the defaults."""
         pp = self.gui.platepar
         gui = self.gui
+        model = self.defaultModel()
         return (gui.fixed_scale == self.DEFAULT_FIXED_SCALE and
                 gui.fit_only_pointing == False and
                 pp.refraction == self.DEFAULT_REFRACTION and
-                pp.equal_aspect == self.DEFAULT_EQUAL_ASPECT and
-                pp.asymmetry_corr == self.DEFAULT_ASYMMETRY_CORR and
-                getattr(pp, 'decentering_corr', False) == self.DEFAULT_DECENTERING_CORR and
-                pp.force_distortion_centre == self.DEFAULT_FORCE_DISTORTION_CENTRE and
-                pp.distortion_type == self.DEFAULT_DISTORTION_TYPE and
+                pp.equal_aspect == model['equal_aspect'] and
+                pp.asymmetry_corr == model['asymmetry_corr'] and
+                getattr(pp, 'decentering_corr', False) == model['decentering_corr'] and
+                pp.force_distortion_centre == model['force_distortion_centre'] and
+                pp.distortion_type == model['distortion_type'] and
                 pp.extinction_scale == self.DEFAULT_EXTINCTION_SCALE and
                 pp.vignetting_fixed == self.DEFAULT_VIGNETTING_FIXED)
 
@@ -3055,6 +3064,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         """Restore all default settings for the Fit Parameters tab."""
         pp = self.gui.platepar
         gui = self.gui
+        model = self.defaultModel()
 
         # Restore fixed scale
         if gui.fixed_scale != self.DEFAULT_FIXED_SCALE:
@@ -3073,30 +3083,30 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
             self.refraction.setChecked(self.DEFAULT_REFRACTION)
 
         # Restore equal aspect
-        if pp.equal_aspect != self.DEFAULT_EQUAL_ASPECT:
-            self._remapCoeffsWithStash('equal_aspect', self.DEFAULT_EQUAL_ASPECT)
-            self.eqAspect.setChecked(self.DEFAULT_EQUAL_ASPECT)
+        if pp.equal_aspect != model['equal_aspect']:
+            self._remapCoeffsWithStash('equal_aspect', model['equal_aspect'])
+            self.eqAspect.setChecked(model['equal_aspect'])
 
         # Restore asymmetry correction
-        if pp.asymmetry_corr != self.DEFAULT_ASYMMETRY_CORR:
-            self._remapCoeffsWithStash('asymmetry_corr', self.DEFAULT_ASYMMETRY_CORR)
-            self.asymmetryCorr.setChecked(self.DEFAULT_ASYMMETRY_CORR)
+        if pp.asymmetry_corr != model['asymmetry_corr']:
+            self._remapCoeffsWithStash('asymmetry_corr', model['asymmetry_corr'])
+            self.asymmetryCorr.setChecked(model['asymmetry_corr'])
 
         # Restore decentering correction
-        if getattr(pp, 'decentering_corr', False) != self.DEFAULT_DECENTERING_CORR:
-            self._remapCoeffsWithStash('decentering_corr', self.DEFAULT_DECENTERING_CORR)
-            self.decenteringCorr.setChecked(self.DEFAULT_DECENTERING_CORR)
+        if getattr(pp, 'decentering_corr', False) != model['decentering_corr']:
+            self._remapCoeffsWithStash('decentering_corr', model['decentering_corr'])
+            self.decenteringCorr.setChecked(model['decentering_corr'])
 
         # Restore force distortion centre
-        if pp.force_distortion_centre != self.DEFAULT_FORCE_DISTORTION_CENTRE:
-            self._remapCoeffsWithStash('force_distortion_centre', self.DEFAULT_FORCE_DISTORTION_CENTRE)
-            self.fdistortion.setChecked(self.DEFAULT_FORCE_DISTORTION_CENTRE)
+        if pp.force_distortion_centre != model['force_distortion_centre']:
+            self._remapCoeffsWithStash('force_distortion_centre', model['force_distortion_centre'])
+            self.fdistortion.setChecked(model['force_distortion_centre'])
 
         # Restore distortion type
-        if pp.distortion_type != self.DEFAULT_DISTORTION_TYPE:
-            self._changeDistortionTypeWithStash(self.DEFAULT_DISTORTION_TYPE)
+        if pp.distortion_type != model['distortion_type']:
+            self._changeDistortionTypeWithStash(model['distortion_type'])
             self.distortion_type.setCurrentIndex(
-                pp.distortion_type_list.index(self.DEFAULT_DISTORTION_TYPE))
+                pp.distortion_type_list.index(model['distortion_type']))
             self.fit_parameters.changeNumberShown(pp.poly_length)
             self.fit_parameters.updateValues()
 
