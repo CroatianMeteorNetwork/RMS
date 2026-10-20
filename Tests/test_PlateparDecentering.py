@@ -62,12 +62,15 @@ def test_flag_adds_and_removes_the_coefficients():
         turning it off gives the original arrays back. """
 
     for dist_type in RADIAL_TYPES:
+
+        # Distinct coefficients of the type, to see where each one goes
         pp = makePlatepar()
         pp.setDistortionType(dist_type, reset_params=True)
         pp.x_poly_fwd = np.arange(1, pp.poly_length + 1)/100.0
         pp.x_poly_rev = -np.arange(1, pp.poly_length + 1)/100.0
         before_fwd, before_rev, length = pp.x_poly_fwd.copy(), pp.x_poly_rev.copy(), pp.poly_length
 
+        # On: 4 zero coefficients after the others
         pp.remapCoeffsForFlagChange('decentering_corr', True)
         assert pp.poly_length == length + 4
         assert np.array_equal(pp.x_poly_fwd[:length], before_fwd)
@@ -75,6 +78,7 @@ def test_flag_adds_and_removes_the_coefficients():
         coeffs = pp.extractRadialCoeffs()
         assert (coeffs['p1'], coeffs['p2'], coeffs['p3'], coeffs['p4']) == (0, 0, 0, 0)
 
+        # Off again: the original arrays
         pp.remapCoeffsForFlagChange('decentering_corr', False)
         assert pp.poly_length == length
         assert np.array_equal(pp.x_poly_fwd, before_fwd) and np.array_equal(pp.x_poly_rev, before_rev)
@@ -155,6 +159,7 @@ def test_saved_and_loaded(tmp_path):
     """ The correction and its coefficients are saved and read back; a platepar saved without it reads with the
         correction off and unchanged arrays. """
 
+    # A platepar without the correction, and the same with it
     pp = makePlatepar()
     plain = os.path.join(str(tmp_path), 'plain.cal')
     pp.write(plain)
@@ -164,6 +169,7 @@ def test_saved_and_loaded(tmp_path):
     path = os.path.join(str(tmp_path), 'decentering.cal')
     pp.write(path)
 
+    # Read back with its coefficients
     loaded = Platepar()
     loaded.read(path)
     assert loaded.decentering_corr
@@ -187,6 +193,7 @@ def test_type_conversion_keeps_the_decentering():
     pp.remapCoeffsForFlagChange('decentering_corr', True)
     pp.x_poly_fwd[-4:] = [0.001, -0.002, 0.0005, -0.0003]
 
+    # Convert to radial3-odd as the staged fit does
     x_new, _ = pp.convertDistortionCoeffs("radial3-odd")
     pp.setDistortionType("radial3-odd", reset_params=False)
     pp.x_poly_fwd = x_new
@@ -205,6 +212,7 @@ def test_flag_changes_keep_the_radial_coefficients_of_every_type():
         pp.x_poly_fwd = np.arange(1, pp.poly_length + 1)/100.0
         before = pp.x_poly_fwd.copy()
 
+        # The asymmetry off and on again: the centre and the radial coefficients stay
         pp.remapCoeffsForFlagChange('asymmetry_corr', False)
         pp.remapCoeffsForFlagChange('asymmetry_corr', True)
         coeffs = pp.extractRadialCoeffs()

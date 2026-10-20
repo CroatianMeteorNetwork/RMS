@@ -1931,9 +1931,11 @@ class Platepar(object):
             int: Number of the radial coefficients: the full length of the type without the distortion centre
                 (2), the aspect (1) and the asymmetry (2) parameters.
         """
+        # The current distortion type by default
         if dist_type is None:
             dist_type = self.distortion_type
 
+        # The full length of the type, without the centre, the aspect and the asymmetry parameters
         return self.distortion_type_poly_length[self.distortion_type_list.index(dist_type)] - 5
 
     def buildRadialCoeffs(self, coeffs_dict, target_dist_type=None):
@@ -2526,6 +2528,7 @@ class Platepar(object):
             if self.asymmetry_corr:
                 out_str += "      a1, a2 (deg), "
 
+            # The radial coefficients, followed by the decentering ones if they are used
             if self.decentering_corr:
                 out_str += "      k1, ..., p1, p2, p3, p4 (decentering)\n"
             else:
