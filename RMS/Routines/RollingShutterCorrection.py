@@ -11,9 +11,9 @@ where readout_frames is the readout time in frames (readout time times the frame
 
 The readout time depends on the sensor and its mode (a sensor which can run at 30 fps, recording at 10 fps, reads
 its rows in a third of a frame), so it is measured and set in seconds with rolling_shutter_readout in the config
-(see readoutFrames); 0 (the default) makes no correction. It is measured on objects seen at the same time by a
-camera with a global shutter, or on objects of known positions: the time offset of the points grows linearly with
-their row, and the readout time is the offset from the top row to the bottom row.
+(see readoutFrames); 0 (the default) makes no correction. It is the row time of the sensor mode times the number
+of rows (from the sensor specification), or it is measured: the time offset of the points of a moving object grows
+linearly with their row, and the readout time is the offset from the top row to the bottom row.
 
 An image cropped in the capture (video_crop, or the region of interest roi_up/roi_down) still comes from all the rows
 of the sensor: its first row is the row 'top' of the sensor, which reads n_rows + top + bottom rows in the readout
