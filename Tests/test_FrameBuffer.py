@@ -405,7 +405,7 @@ class _SegmentDetector(object):
         self.cloud_removed_frames, self.timing, self.aperture_correction = [], {}, None
         self.cloud_rows_removed, self.tracks_dropped, self.psf_sigma = 0, 0, 0.7
         self.cloud_removed_row_frames = []
-        self.faint_measured, self.faint_detected = 0, 0
+        self.faint_measured = 0
 
     def frameTimes(self, frames):
         return []

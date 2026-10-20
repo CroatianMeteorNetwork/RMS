@@ -720,14 +720,11 @@ class MatchedFilterDetector(object):
 
         # Faint objects (see faintTracks): searched for if the faint threshold is below the threshold. The hits
         #   between the two thresholds as rows [frame, x, y, z, vx, vy, run, bin] (collected in parts during the
-        #   search), the number of the chains measured and of the detections from them, and the ids of the
-        #   measurements of the chains
+        #   search), and the number of the chains measured
         self.faint = 0 < self.opts.faint_threshold < self.opts.threshold
         self.faint_parts = []
         self.faint_hits = np.zeros((0, 8), dtype=np.float32)
         self.faint_measured = 0
-        self.faint_detected = 0
-        self.faint_ids = set()
 
         # Photometry of every frame of the verified tracks: id(centroids) -> (frames, intensities, saturated
         #   pixel counts, noise of the intensities)
@@ -2693,7 +2690,6 @@ class MatchedFilterDetector(object):
         # Pass 2: measure the tracks on the unbinned frames (the positions, verification and photometry)
         t1 = time()
         measured = self.measure(tracks, faint)
-        self.faint_detected += sum(id(cent) in self.faint_ids for cent in measured)
         self.timing['measure'] += time() - t1
 
         # Convert the measurements to the detections of the normal detection
@@ -2899,7 +2895,6 @@ class MatchedFilterDetector(object):
             'linear_structure_rejected': int(sum(bool(s[-1]) for s in self.significances)),
             'deviation_rejected': int(self.deviation_rejected),
             'faint_measured': int(self.faint_measured),
-            'faint_detected': int(self.faint_detected),
         }
 
 
@@ -2998,8 +2993,7 @@ class MatchedFilterDetector(object):
                     cents[i] = cent
             self.timing['slow_background'] += time() - t1
 
-        # The measurements of the faint chains, counted in the summary
-        self.faint_ids = {id(cent) for cent in cents[len(tracks):] if cent is not None}
+        # The faint chains measured, counted in the summary
         self.faint_measured += len(faint)
 
         return self.verify([cent for cent in cents if cent is not None])
@@ -4932,7 +4926,6 @@ class GapPieces(object):
         self.tracks_dropped = sum(det.tracks_dropped for det in detectors)
         self.tracks_measured = sum(det.tracks_measured for det in detectors)
         self.faint_measured = sum(det.faint_measured for det in detectors)
-        self.faint_detected = sum(det.faint_detected for det in detectors)
         self.significances = [sig for det in detectors for sig in det.significances]
         self.deviation_rejected = sum(det.deviation_rejected for det in detectors)
         self.photometry = {key: value for det in detectors for key, value in det.photometry.items()}
@@ -4988,7 +4981,6 @@ class GapPieces(object):
             'linear_structure_rejected': sum(int(track.get('linear_structure', False)) for track in tracks),
             'deviation_rejected': int(self.deviation_rejected),
             'faint_measured': int(self.faint_measured),
-            'faint_detected': int(self.faint_detected),
             'time_gaps': [{'frame': int(f), 'gap_s': round(float(g), 3)}
                           for f, g in zip(self.gaps, self.gap_seconds)],
         })
@@ -5585,7 +5577,6 @@ class SegmentedRun(object):
             'linear_structure_rejected': sum(int(track.get('linear_structure', False)) for track in tracks),
             'deviation_rejected': self.deviation_rejected,
             'faint_measured': int(sum(det.faint_measured for _, det in run)),
-            'faint_detected': int(sum(det.faint_detected for _, det in run)),
             'segments': [{'first_frame': int(f), 'end_frame': int(e), 'searched': det is not None}
                          for (f, e), det in zip(self.ranges, self.detectors)],
             'frames_read': int(self.buffer.frames_read),

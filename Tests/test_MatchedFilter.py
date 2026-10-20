@@ -667,7 +667,7 @@ def test_faint_object_found_by_faint_linking(config):
     cent = detections[0][2]
     assert np.sqrt(np.mean(truthError(cent, obj)**2)) < 0.5
     assert cent[-1, 0] - cent[0, 0] > 0.7*(obj['f1'] - obj['f0'])
-    assert det.summary()['faint_detected'] == 1
+    assert det.summary()['faint_measured'] >= 1
 
 
 def test_no_faint_detections_in_noise_and_stars(config):
@@ -679,7 +679,6 @@ def test_no_faint_detections_in_noise_and_stars(config):
     for seed in (5, 6):
         det, detections = runDetector(_SynthHandle([], seed=seed, n_faint_stars=30), config)
         assert len(detections) == 0
-        assert det.summary()['faint_detected'] == 0
 
     config.mf_faint_threshold = config.mf_threshold
     assert not MatchedFilterDetector(_SynthHandle([]), config).faint
@@ -718,19 +717,19 @@ def test_ftpdetectinfo_round_trip(config, tmp_path):
 
 
 def test_gap_pieces_count_the_faint_chains_of_all_parts():
-    """ An input with a gap in the recording is searched in parts: the faint chains measured and the detections
-        from them are counted over all parts, not only the main one. """
+    """ An input with a gap in the recording is searched in parts: the faint chains measured are counted over
+        all parts, not only the main one. """
 
     import types
 
-    def part(measured, detected):
+    def part(measured):
         return types.SimpleNamespace(psf_sigma=1.0, timing={}, cloud_rows_removed=0, cloud_removed_row_frames=[],
                                      cloud_detections_removed=0, cloud_removed_frames=[], tracks_dropped=0,
                                      tracks_measured=0, significances=[], deviation_rejected=0, photometry={},
-                                     sky_map=None, faint_measured=measured, faint_detected=detected)
+                                     sky_map=None, faint_measured=measured)
 
-    run = mfd.GapPieces([part(2, 1), part(3, 2)], [(0, 100), (120, 200)], [120], [0.5])
-    assert (run.faint_measured, run.faint_detected) == (5, 3)
+    run = mfd.GapPieces([part(2), part(3)], [(0, 100), (120, 200)], [120], [0.5])
+    assert run.faint_measured == 5
 
 
 def test_config_parse(tmp_path):
