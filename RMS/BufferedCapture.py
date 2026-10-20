@@ -48,6 +48,7 @@ from RMS.Misc import obfuscatePassword
 from RMS.Routines.GstreamerCapture import GstVideoFile, getStructureValue
 from RMS.Formats.ObservationSummary import addObsParam, getObservationSummaryDict
 from RMS.RawFrameSave import RawFrameSaver
+from RMS.FrameStack import FrameStacker
 from RMS.FrameMetadata import NFIELDS as FRAME_META_FIELDS, fillRow as fillFrameMetaRow
 from RMS.Misc import RmsDateTime, mkdirP, UTCFromTimestamp, frameBufferShape, runWithTimeout, AtomicFlag
 from RMS.Formats import FTfile, FTStruct
@@ -331,10 +332,15 @@ class BufferedCapture(Process):
         self.shared_raw_array = None   # primary raw-frame buffer
         self.shared_raw_array2 = None  # secondary raw-frame buffer
 
+        # Saved frame = mean of this many consecutive frames centred on each save tick (RMS.FrameStack).
+        # 1 = the single tick frame, as before
+        self.frame_stack = max(1, int(getattr(self.config, 'frame_stack', 1)))
+
         if self.config.save_frames:
 
-            # Frame saving block size - these many raw frames are written to buffer before saving to disk
-            self.num_raw_frames = 10
+            # Frame saving block size - these many raw frames are written to buffer before saving to disk.
+            # Stacked frames are uint16 sums, so half as many keep the buffer the same size
+            self.num_raw_frames = 10 if self.frame_stack == 1 else 5
 
             self.start_raw_time1 = Value('d', 0.0, lock=False)
             self.start_raw_time2 = Value('d', 0.0, lock=False)
@@ -345,6 +351,14 @@ class BufferedCapture(Process):
             # metadata embedded in saved frames (RMS.FrameMetadata, config.save_frame_metadata)
             self.shared_meta_base = Array(ctypes.c_double, self.num_raw_frames*FRAME_META_FIELDS)
             self.shared_meta_base2 = Array(ctypes.c_double, self.num_raw_frames*FRAME_META_FIELDS)
+
+            # Stacked frames: how many frames each buffered sum holds, and the times of its first and
+            # last frame (None when frames are not stacked)
+            self.shared_stack_base = None
+            self.shared_stack_base2 = None
+            if self.frame_stack > 1:
+                self.shared_stack_base = Array(ctypes.c_double, self.num_raw_frames*3)
+                self.shared_stack_base2 = Array(ctypes.c_double, self.num_raw_frames*3)
 
         # Initialize shared counter for dropped frames
         # lock=False: the capture child is the only writer (increments), the
@@ -2307,12 +2321,13 @@ class BufferedCapture(Process):
 
             log.debug("Creating shared arrays with shape: {}".format(array_shape))
 
-            # Initialize shared memory arrays
-            self.shared_raw_array_base = Array(ctypes.c_uint8, buffer_size)
+            # Initialize shared memory arrays (uint16 sums when frames are stacked)
+            ctype = ctypes.c_uint8 if self.frame_stack == 1 else ctypes.c_uint16
+            self.shared_raw_array_base = Array(ctype, buffer_size)
             self.shared_raw_array = np.ctypeslib.as_array(self.shared_raw_array_base.get_obj())
             self.shared_raw_array = self.shared_raw_array.reshape(array_shape)
 
-            self.shared_raw_array_base2 = Array(ctypes.c_uint8, buffer_size)
+            self.shared_raw_array_base2 = Array(ctype, buffer_size)
             self.shared_raw_array2 = np.ctypeslib.as_array(self.shared_raw_array_base2.get_obj())
             self.shared_raw_array2 = self.shared_raw_array2.reshape(array_shape)
 
@@ -2410,6 +2425,15 @@ class BufferedCapture(Process):
                     self.num_raw_frames, FRAME_META_FIELDS)
                 self.sharedMeta2 = np.ctypeslib.as_array(self.shared_meta_base2.get_obj()).reshape(
                     self.num_raw_frames, FRAME_META_FIELDS)
+
+                # Burst stacking of the saved frames
+                self.frame_stacker = None
+                if self.frame_stack > 1:
+                    self.sharedStack = np.ctypeslib.as_array(self.shared_stack_base.get_obj()).reshape(self.num_raw_frames, 3)
+                    self.sharedStack2 = np.ctypeslib.as_array(self.shared_stack_base2.get_obj()).reshape(self.num_raw_frames, 3)
+                    self.frame_stacker = FrameStacker(self.frame_stack, self.config.frame_save_aligned_interval,
+                                                      self.config.fps, ref=self.sync_tick_reference)
+                    log.info("Saved frames: mean of {:d} frames per tick, 16-bit PNG".format(self.frame_stack))
 
                 # Raw frame arrays will be initialized after we know the frame shape
                 self.shared_raw_array_base = None
@@ -2663,14 +2687,18 @@ class BufferedCapture(Process):
                 if ret and (self._last_frame_meta is not None):
                     self._sei_blk.add(self._last_frame_meta[3])
 
-                # Set flag to save a raw frame
-                save_this_frame = (self.config.save_frames and
-                                   self.video_file is None and
-                                   self.shouldSaveFrame(frame_timestamp)
-                                   )
+                # Set flag to save a raw frame. Stacked frames (config.frame_stack): the frame that
+                # starts a tick's stack is checked for colour, and the stack is saved when finished (below)
+                save_frames_live = self.config.save_frames and (self.video_file is None)
+                if self.frame_stack > 1:
+                    save_this_frame = False
+                    check_colour = save_frames_live and self.frame_stacker.startsStack(frame_timestamp)
+                else:
+                    save_this_frame = save_frames_live and self.shouldSaveFrame(frame_timestamp)
+                    check_colour = save_this_frame
 
                 # Check if frame contains color information
-                if save_this_frame:
+                if check_colour:
                     gray_result = self.isGrayscale(frame)
                     if gray_result is not None:
                         self.convert_to_gray = gray_result
@@ -2702,11 +2730,19 @@ class BufferedCapture(Process):
                 if self.config.save_frame_times:
                     self.timestamp_buffer.append((total_frames, frame_timestamp))
 
+                # What is saved: this frame, or the stack this frame finished
+                save_frame, save_ts, save_meta, save_stack = frame, frame_timestamp, self._last_frame_meta, None
+                if (self.frame_stack > 1) and save_frames_live:
+                    save_stack = self.frame_stacker.add(frame, frame_timestamp, self._last_frame_meta)
+                    if save_stack is not None:
+                        save_this_frame = True
+                        save_frame, save_ts, save_meta = save_stack.frame_sum, save_stack.timestamp, save_stack.meta
+
                 # If save_frames is set and a video device is used, save a frame every nth frames
                 if save_this_frame:
 
                     # Check if frame shape (color or grayscale) or capture mode changed (day or night)
-                    if (frame.shape != self.current_raw_frame_shape) or \
+                    if (save_frame.shape != self.current_raw_frame_shape) or \
                         (self.current_mode != (self.daytime_mode.value if self.daytime_mode is not None else False)) or \
                         (self.shared_raw_array is None):
 
@@ -2723,7 +2759,7 @@ class BufferedCapture(Process):
                             log.info("Cleaning up existing raw frame saver before mode change")
                             self.releaseRawArrays()
 
-                        if not self.initRawFrameArrays(frame.shape):
+                        if not self.initRawFrameArrays(save_frame.shape):
                             log.error("Failed to reinitialize arrays after mode change")
 
                         else:
@@ -2739,7 +2775,8 @@ class BufferedCapture(Process):
                                 self.daytime_mode.value,
                                 self.config,
                                 self.raw_array_shape,
-                                metaArray1=self.shared_meta_base, metaArray2=self.shared_meta_base2
+                                metaArray1=self.shared_meta_base, metaArray2=self.shared_meta_base2,
+                                stackArray1=self.shared_stack_base, stackArray2=self.shared_stack_base2
                             )
                             self.raw_frame_saver.start()
                             self.raw_frame_count = 0
@@ -2755,31 +2792,36 @@ class BufferedCapture(Process):
                             self.start_raw_time2.value = 0
 
                         # Always set first raw frame timestamp in the beginning of the block
-                        first_raw_frame_timestamp = frame_timestamp 
+                        first_raw_frame_timestamp = save_ts
 
 
                     # Write raw frame and timestamp to one of the two corresponding buffers
                     # Use appropriate indexing based on frame dimensions
-                    if len(frame.shape) == 3:
+                    if len(save_frame.shape) == 3:
                         # Color frame - use 4D indexing
                         if raw_buffer_one:
-                            self.shared_raw_array[self.raw_frame_count, :, :, :] = frame
-                            self.sharedTimestamps[self.raw_frame_count] = frame_timestamp
+                            self.shared_raw_array[self.raw_frame_count, :, :, :] = save_frame
+                            self.sharedTimestamps[self.raw_frame_count] = save_ts
                         else:
-                            self.shared_raw_array2[self.raw_frame_count, :, :, :] = frame
-                            self.sharedTimestamps2[self.raw_frame_count] = frame_timestamp
+                            self.shared_raw_array2[self.raw_frame_count, :, :, :] = save_frame
+                            self.sharedTimestamps2[self.raw_frame_count] = save_ts
                     else:
                         # Grayscale frame - use 3D indexing
                         if raw_buffer_one:
-                            self.shared_raw_array[self.raw_frame_count, :, :] = frame
-                            self.sharedTimestamps[self.raw_frame_count] = frame_timestamp
+                            self.shared_raw_array[self.raw_frame_count, :, :] = save_frame
+                            self.sharedTimestamps[self.raw_frame_count] = save_ts
                         else:
-                            self.shared_raw_array2[self.raw_frame_count, :, :] = frame
-                            self.sharedTimestamps2[self.raw_frame_count] = frame_timestamp
+                            self.shared_raw_array2[self.raw_frame_count, :, :] = save_frame
+                            self.sharedTimestamps2[self.raw_frame_count] = save_ts
 
                     # ...and this frame's exposure record (empty row when there is none)
                     fillFrameMetaRow((self.sharedMeta if raw_buffer_one else self.sharedMeta2)[self.raw_frame_count],
-                                     self._last_frame_meta)
+                                     save_meta)
+
+                    # ...and for a stack, how many frames it holds and their time span
+                    if save_stack is not None:
+                        (self.sharedStack if raw_buffer_one else self.sharedStack2)[self.raw_frame_count] = \
+                            (save_stack.count, save_stack.t_first, save_stack.t_last)
 
                     self.raw_frame_count += 1
 

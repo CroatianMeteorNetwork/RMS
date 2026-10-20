@@ -2,7 +2,8 @@
 
 The FF-based products carry a 10.24 s maxpixel window: "detected" means visible
 at SOME instant of the window, so a cloud edge's crossing time is only known to
-+/- a window. The stills are single ~40 ms exposures every ~5 s - forced patch
++/- a window. The stills are single ~40 ms exposures every ~5 s (or the 16-bit mean
+of frame_stack consecutive frames, 0.32 s for 8, see RMS.FrameStack) - forced patch
 photometry on them (RMS.PatchPhotometry) yields exact visible/occluded states
 at the frames the contrail consumers already use, with edge timing at the still
 cadence instead of the window width. Validated on LP and dark-site cameras:
@@ -55,6 +56,7 @@ import time
 import numpy as np
 
 from RMS.Logger import getLogger
+from RMS.FrameStack import STACK_SCALE
 
 # On-station the capture process owns the handlers and these messages land
 # in the nightly log with timestamps (bare print() lines do not - an 8-hour
@@ -261,9 +263,13 @@ def sampleStillsForNight(config, image_blocks, night_dir):
 
         t_unix[j] = calendar.timegm(t.timetuple()) + t.microsecond/1e6
 
-        img = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+        # Stacked stills (config.frame_stack) are 16-bit, STACK_SCALE per 8-bit code: read them at
+        # their precision, in 8-bit code units like the single-frame stills
+        img = cv2.imread(path, cv2.IMREAD_GRAYSCALE | cv2.IMREAD_ANYDEPTH)
         if img is None:
             continue
+        if img.dtype == np.uint16:
+            img = img.astype(np.float32)/STACK_SCALE
         if W is None:
             H, W = img.shape
 
