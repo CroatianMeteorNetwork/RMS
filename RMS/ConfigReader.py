@@ -286,6 +286,10 @@ class Config:
         #   for no correction (see RMS.Routines.RollingShutterCorrection)
         self.rolling_shutter_readout = 0.0
 
+        # Correction of the timestamps of the frames (s), added when the frames of a recording are read for
+        #   processing (true time = timestamp + correction), see .config
+        self.frame_time_offset = 0.0
+
         self.mask_file = "mask.bmp"
 
         self.data_dir = "~/RMS_data"
@@ -1644,6 +1648,9 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "rolling_shutter_readout"):
         config.rolling_shutter_readout = parser.getfloat(section, "rolling_shutter_readout")
+
+    if parser.has_option(section, "frame_time_offset"):
+        config.frame_time_offset = parser.getfloat(section, "frame_time_offset")
 
     if parser.has_option(section, "mask"):
         config.mask_file = os.path.basename(parser.get(section, "mask"))
