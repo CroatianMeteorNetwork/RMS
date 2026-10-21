@@ -2133,10 +2133,22 @@ def parseTimelapse(config, parser):
     if parser.has_option(section, "timelapse_frames_10bit"):
         config.timelapse_frames_10bit = parser.getboolean(section, "timelapse_frames_10bit")
 
+    # Each option read by its literal name, so Utils.AuditConfig finds it
+    if parser.has_option(section, "timelapse_frames_crf_day"):
+        config.timelapse_frames_crf_day = parser.getfloat(section, "timelapse_frames_crf_day")
+
+    if parser.has_option(section, "timelapse_frames_crf_night"):
+        config.timelapse_frames_crf_night = parser.getfloat(section, "timelapse_frames_crf_night")
+
+    if parser.has_option(section, "timelapse_frames_crf_max_day"):
+        config.timelapse_frames_crf_max_day = parser.getfloat(section, "timelapse_frames_crf_max_day")
+
+    if parser.has_option(section, "timelapse_frames_crf_max_night"):
+        config.timelapse_frames_crf_max_night = parser.getfloat(section, "timelapse_frames_crf_max_night")
+
     for key in ("timelapse_frames_crf_day", "timelapse_frames_crf_night",
                 "timelapse_frames_crf_max_day", "timelapse_frames_crf_max_night"):
-        if parser.has_option(section, key):
-            setattr(config, key, min(51.0, max(0.0, parser.getfloat(section, key))))
+        setattr(config, key, min(51.0, max(0.0, float(getattr(config, key)))))
 
     # A maximum below its target would make the target unreachable
     config.timelapse_frames_crf_max_day = max(config.timelapse_frames_crf_max_day, config.timelapse_frames_crf_day)
