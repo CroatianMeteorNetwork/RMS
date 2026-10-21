@@ -248,3 +248,24 @@ def test_refinement_kept_out_when_not_good_enough(monkeypatch):
     result = recalibrate(perturbed(pp), rows, catalog_stars, config)
 
     assert displacement(searched, result, catalog_stars) < 1e-6
+
+
+def test_forced_fallback_not_refined(monkeypatch):
+    """ The fallback recalibration, limited to larger radii and saved without the goodness check, keeps the result
+        of the search: its loose pairs would pull the least squares fit. """
+
+    pp = makePlatepar()
+    catalog_stars, rows = makeImage(pp, seed=6)
+    config = makeConfig()
+
+    def _fail(*args, **kwargs):
+        """ The refinement must not be called. """
+
+        raise AssertionError('the refinement was used')
+
+    # The forced recalibration with the refinement on fails the test if it calls the refinement
+    monkeypatch.setattr(ApplyRecalibrate, 'refinePointingLSQ', _fail)
+    jd = pp.JD
+    result, _ = ApplyRecalibrate.recalibrateFF(config, perturbed(pp), jd, {jd: rows}, catalog_stars,
+                                               max_match_radius=1.5, force_platepar_save=True)
+    assert result is not None
