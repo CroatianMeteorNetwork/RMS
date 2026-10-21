@@ -646,6 +646,10 @@ class Config:
         #   chaining forward on cloudy nights)
         self.recalibration_min_match_fraction = 0.6
 
+        # Refine the pointing of every per-FF recalibration by least squares on the matched stars (the search
+        #   alone stops within its tolerance, about dist_check_threshold)
+        self.recalibration_lsq_refine = True
+
         ##### Thumbnails
         self.thumb_bin = 4
         self.thumb_stack = 5
@@ -1835,6 +1839,9 @@ def parseCalibration(config, parser):
     if parser.has_option(section, "recalibration_min_match_fraction"):
         config.recalibration_min_match_fraction = parser.getfloat(
             section, "recalibration_min_match_fraction")
+
+    if parser.has_option(section, "recalibration_lsq_refine"):
+        config.recalibration_lsq_refine = parser.getboolean(section, "recalibration_lsq_refine")
 
     if parser.has_option(section, "mask_download_permissive"):
         config.mask_download_permissive = parser.getboolean(section, "mask_download_permissive")
