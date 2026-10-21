@@ -5,6 +5,9 @@ import numpy as np
 
 # Cython import
 cimport numpy as np
+
+# Initialize the NumPy C API (explicit for clarity: Cython 3 (required to build against NumPy 2) emits it itself)
+np.import_array()
 cimport cython
 
 # Import the Python bool type
@@ -73,6 +76,8 @@ cpdef double angularSeparation(double ra1, double dec1, double ra2, double dec2)
 
     Source of the equation: http://www.astronomycafe.net/qadir/q1890.html (May 1, 2016)
 
+    Note that RMS.Math.angularSeparation has the same name but takes and returns radians.
+
     @param ra1: [float] right ascension of the first stars (in degrees)
     @param dec1: [float] declination of the first star (in degrees)
     @param ra2: [float] right ascension of the decons stars (in degrees)
@@ -84,6 +89,7 @@ cpdef double angularSeparation(double ra1, double dec1, double ra2, double dec2)
     cdef double deldec2
     cdef double delra2
     cdef double sindis
+    cdef double cos_sep
 
     # Convert input coordinates to radians
     ra1 = radians(ra1)
@@ -93,7 +99,19 @@ cpdef double angularSeparation(double ra1, double dec1, double ra2, double dec2)
 
 
     # Classical method
-    return degrees(acos(sin(dec1)*sin(dec2) + cos(dec1)*cos(dec2)*cos(ra2 - ra1)))
+    # Rounding can push the cosine slightly above 1 for (nearly) coincident directions, which
+    # would make acos return NaN, so clamp it to the closed interval [-1, 1]. The explicit
+    # comparisons are used instead of fmax(-1.0, fmin(1.0, cos_sep)) because the C fmin/fmax
+    # return the non-NaN operand, which would silently turn a NaN input into 0 or 180 deg.
+    # Mirrors the clip in RMS.Math.angularSeparation (which takes radians, not degrees).
+    cos_sep = sin(dec1)*sin(dec2) + cos(dec1)*cos(dec2)*cos(ra2 - ra1)
+
+    if cos_sep > 1.0:
+        cos_sep = 1.0
+    elif cos_sep < -1.0:
+        cos_sep = -1.0
+
+    return degrees(acos(cos_sep))
 
 
     # # Compute the angular separation using the haversine formula
@@ -194,75 +212,6 @@ def subsetCatalog(np.ndarray[FLOAT_TYPE_t, ndim=2] catalog_list, double ra_c, do
 
 
 
-@cython.boundscheck(False)
-@cython.wraparound(False)
-def matchStars(np.ndarray[FLOAT_TYPE_t, ndim=2] stars_list, np.ndarray[FLOAT_TYPE_t, ndim=1] cat_x_array, \
-    np.ndarray[FLOAT_TYPE_t, ndim=1] cat_y_array, np.ndarray[INT_TYPE_t, ndim=1] cat_good_indices, \
-    double max_radius):
-        
-
-    cdef int i, j
-    cdef unsigned int cat_idx
-    cdef int k = 0
-    cdef double min_dist, dist
-    cdef double cat_match_indx, im_star_y, im_star_x, cat_x, cat_y
-
-    # Get the lengths of input arrays
-    cdef int stars_len = stars_list.shape[0]
-    cdef int cat_len = cat_good_indices.shape[0]
-    
-    # List for matched indices
-    cdef np.ndarray[FLOAT_TYPE_t, ndim=2] matched_indices = np.zeros(shape=(stars_list.shape[0], 3), \
-        dtype=FLOAT_TYPE)
-
-    
-    ### Match image and catalog stars ###
-
-    # Go through all image stars
-    for i in range(stars_len):
-
-        # Extract image star coordinates
-        im_star_y = stars_list[i, 0]
-        im_star_x = stars_list[i, 1]
-
-        min_dist = max_radius
-        cat_match_indx = -1
-
-        # Check for the best match among catalog stars
-        for j in range(cat_len):
-
-            cat_idx = cat_good_indices[j]
-
-            # Extract catalog coordinates
-            cat_x = cat_x_array[cat_idx]
-            cat_y = cat_y_array[cat_idx]
-
-
-            # Calculate the distance between stars
-            dist = sqrt((im_star_x - cat_x)**2 + (im_star_y - cat_y)**2)
-
-            # Set the catalog star as the best match if it is the closest to the image star than any previous
-            if (dist < min_dist):
-                min_dist = dist
-                cat_match_indx = cat_idx
-
-
-        # Take the best matched star if the distance was within the maximum radius
-        if min_dist < max_radius:
-            
-            # Add the matched indices to the output list
-            matched_indices[k, 0] = i
-            matched_indices[k, 1] = cat_match_indx
-            matched_indices[k, 2] = min_dist
-
-            k += 1
-
-
-    
-    # Cut the output list to the number of matched stars
-    matched_indices = matched_indices[:k]
-
-    return matched_indices
 
 
 
@@ -312,7 +261,7 @@ cpdef (double, double) equatorialCoordPrecession(double start_epoch, double fina
         (ra, dec): [tuple of floats] Precessed equatorial coordinates (radians).
     """
 
-    cdef double T, t, zeta, z, theta, A, B, C, ra_corr, dec_corr
+    cdef double T, t, zeta, z, theta, A, B, C, ra_corr, dec_corr, cos_pole_dist
 
 
     T = (start_epoch - J2000_DAYS )/36525.0
@@ -338,7 +287,15 @@ cpdef (double, double) equatorialCoordPrecession(double start_epoch, double fina
 
     # Calculate declination (apply a different equation if close to the pole, closer then 0.5 degrees)
     if (pi/2 - fabs(dec)) < radians(0.5):
-        dec_corr = sign(dec)*acos(sqrt(A**2 + B**2))
+
+        # A, B and C are components of a unit vector, so sqrt(A**2 + B**2) is in [0, 1], but
+        #   rounding can push it just above 1 and make acos return NaN
+        cos_pole_dist = sqrt(A**2 + B**2)
+
+        if cos_pole_dist > 1.0:
+            cos_pole_dist = 1.0
+
+        dec_corr = sign(dec)*acos(cos_pole_dist)
     else:
         dec_corr = asin(C)
 
@@ -1044,6 +1001,22 @@ cpdef (double, double) cartesianToRaDec(np.ndarray[np.float64_t, ndim=1] vec):
 
 
 
+cdef int radialTermCount(str dist_type):
+    """ Number of the radial distortion coefficients (k1, k2, ...) of a radial distortion type (see
+        Platepar.radialTermCount): the decentering coefficients follow them in the distortion arrays.
+    """
+
+    # The radial coefficients of every radial type (k1 for radial3-odd up to k1...k4 for radial9-odd and radial5-all)
+    if dist_type == "radial3-odd":
+        return 1
+    elif (dist_type == "radial5-odd") or (dist_type == "radial3-all"):
+        return 2
+    elif (dist_type == "radial7-odd") or (dist_type == "radial4-all"):
+        return 3
+    else:
+        return 4
+
+
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
@@ -1052,7 +1025,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
     double y_res, double h0, double jd_ref, double ra_ref, double dec_ref, double pos_angle_ref, 
     double pix_scale, np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_rev, 
     np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_rev, str dist_type, bool refraction=True, bool equal_aspect=False, 
-    bool force_distortion_centre=False, bool asymmetry_corr=True):
+    bool force_distortion_centre=False, bool asymmetry_corr=True, bool decentering_corr=False):
     """ Convert RA, Dec to distortion corrected image coordinates. 
 
     Arguments:
@@ -1080,6 +1053,8 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
         force_distortion_centre: [bool] Force the distortion centre to the image centre. False by default.
         asymmetry_corr: [bool] Correct the distortion for asymmetry. Only for radial distortion. True by
             default.
+        decentering_corr: [bool] Correct the radial distortion for decentering (a lens element off the optical
+            axis, Brown-Conrady): the coefficients p1, p2, p3, p4 follow the radial ones. False by default.
     
     Return:
         (x, y): [tuple of ndarrays] Image X and Y coordinates.
@@ -1089,6 +1064,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
     cdef double ra_centre, dec_centre, ra, dec
     cdef double radius, sin_ang, cos_ang, theta, x, y, r, dx, dy, x_img, y_img, r_corr, r_scale
     cdef double x0, y0, xy, a1, a2, k1, k2, k3, k4, k5
+    cdef double p1 = 0, p2 = 0, p3 = 0, p4 = 0, u, v, r2, q1, q2
     cdef int index_offset
 
     # Init output arrays
@@ -1187,6 +1163,13 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
 
         # if x_poly_rev.shape[0] > (9 - index_offset):
         #     k5 = x_poly_rev[9 - index_offset]
+
+        # Decentering coefficients, after the radial ones
+        if decentering_corr:
+            p1 = x_poly_rev[5 - index_offset + radialTermCount(dist_type)]
+            p2 = x_poly_rev[6 - index_offset + radialTermCount(dist_type)]
+            p3 = x_poly_rev[7 - index_offset + radialTermCount(dist_type)]
+            p4 = x_poly_rev[8 - index_offset + radialTermCount(dist_type)]
 
     # If the polynomial distortion was used, unpack the offsets
     else:
@@ -1343,6 +1326,19 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
             dx = x*r_scale - x0
             dy = y*r_scale/(1.0 + xy) - y0 + y*(1.0 - 1.0/(1.0 + xy))
 
+            # Decentering (Brown-Conrady): a lens element off the optical axis displaces the image by p1, p2 (the
+            #   amount and direction of the shift) times the square of the radius, a radial part three times the
+            #   tangential one, and by p3, p4 times its fourth power. In the normalized coordinates of the radial
+            #   distortion, converted to pixels
+            if decentering_corr:
+                u = x/(x_res/2.0)
+                v = y/(x_res/2.0)
+                r2 = u*u + v*v
+                q1 = p1 + p3*r2
+                q2 = p2 + p4*r2
+                dx += (q1*(r2 + 2*u*u) + 2*q2*u*v)*(x_res/2.0)
+                dy += (2*q1*u*v + q2*(r2 + 2*v*v))*(x_res/2.0)
+
 
 
         # Add the distortion
@@ -1424,7 +1420,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
     double h0, double jd_ref, double ra_ref, double dec_ref, double pos_angle_ref, double pix_scale, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_fwd, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_fwd, \
     str dist_type, bool refraction=True, bool equal_aspect=False, bool force_distortion_centre=False,\
-    bool asymmetry_corr=True, bool precompute_pointing_corr=False):
+    bool asymmetry_corr=True, bool precompute_pointing_corr=False, bool decentering_corr=False):
     """
     Arguments:
         jd_data: [ndarray] Julian date of each data point.
@@ -1451,6 +1447,8 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         force_distortion_centre: [bool] Force the distortion centre to the image centre. False by default.
         asymmetry_corr: [bool] Correct the distortion for asymmetry. Only for radial distortion. True by
             default.
+        decentering_corr: [bool] Correct the radial distortion for decentering (a lens element off the optical
+            axis, Brown-Conrady): the coefficients p1, p2, p3, p4 follow the radial ones. False by default.
         precompute_pointing_corr: [bool] Precompute the pointing correction. False by default. This is used
             to speed up the calculation when the input JD is the same for all data points, e.g. during
             plate solving.
@@ -1466,6 +1464,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
     cdef int i
     cdef double jd, x_img, y_img, r, dx, x_corr, dy, y_corr, r_corr, r_scale
     cdef double x0, y0, xy, a1, a2, k1, k2, k3, k4, k5
+    cdef double p1 = 0, p2 = 0, p3 = 0, p4 = 0, u, v, r2, q1, q2
     cdef int index_offset
     cdef double radius, theta, sin_t, cos_t
     cdef double ra_ref_now_corr, ra, dec, dec_ref_corr, pos_angle_ref_now_corr
@@ -1546,6 +1545,13 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
 
         # if x_poly_fwd.shape[0] > (9 - index_offset):
         #     k5 = x_poly_fwd[9 - index_offset]
+
+        # Decentering coefficients, after the radial ones
+        if decentering_corr:
+            p1 = x_poly_fwd[5 - index_offset + radialTermCount(dist_type)]
+            p2 = x_poly_fwd[6 - index_offset + radialTermCount(dist_type)]
+            p3 = x_poly_fwd[7 - index_offset + radialTermCount(dist_type)]
+            p4 = x_poly_fwd[8 - index_offset + radialTermCount(dist_type)]
 
 
     # If the polynomial distortion was used, unpack the offsets
@@ -1683,6 +1689,16 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
             # Compute offsets
             dx = (x_img - x0)*r_scale - x0
             dy = (y_img - y0)*r_scale*(1.0 + xy) - y0*(1.0 + xy) + y_img*xy
+
+            # Decentering (Brown-Conrady), see cyraDecToXY, around the distortion centre
+            if decentering_corr:
+                u = (x_img - x0)/(x_res/2.0)
+                v = (y_img - y0)/(x_res/2.0)
+                r2 = u*u + v*v
+                q1 = p1 + p3*r2
+                q2 = p2 + p4*r2
+                dx += (q1*(r2 + 2*u*u) + 2*q2*u*v)*(x_res/2.0)
+                dy += (2*q1*u*v + q2*(r2 + 2*v*v))*(x_res/2.0)
 
 
         # Correct image coordinates for distortion

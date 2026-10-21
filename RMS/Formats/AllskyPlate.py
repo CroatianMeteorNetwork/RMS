@@ -98,7 +98,9 @@ class AllskyPlate(object):
         a = a%(2*np.pi)
         
         cu = np.cos(a - self.E)*np.sin(self.eps)*np.sin(z) + np.cos(self.eps)*np.cos(z)
-        u = np.arccos(cu)
+
+        # The spherical cosine can round outside [-1, 1], which would make arccos return NaN
+        u = np.arccos(np.clip(cu, -1.0, 1.0))
 
         sb = np.sin(z)*np.sin(a - self.E)*np.sin(self.eps)
         cb = cu*np.cos(self.eps) - np.cos(z)

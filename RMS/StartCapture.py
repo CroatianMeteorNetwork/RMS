@@ -18,7 +18,6 @@ from __future__ import print_function, absolute_import
 
 import os
 import sys
-import glob
 import argparse
 import time
 import datetime
@@ -29,8 +28,137 @@ import ctypes
 import threading
 import multiprocessing
 import traceback
+
+
+def _closeStationLockInChild(lock_file):
+    """ Close the inherited lock fd in a freshly forked child (see _takeStationLock). """
+    try:
+        lock_file.close()
+    except (IOError, OSError):
+        pass
+
+
+def _takeStationLock(station_id):
+    """ Take the per-station single-instance flock, or exit with a clear refusal.
+
+    The lock file lives in tempfile.gettempdir(). NOTE: under a systemd unit with
+    PrivateTmp=true that is a private namespace - a service instance and a manually
+    launched debug instance cannot see each other's locks and will both run. Disable
+    PrivateTmp for the unit if manual runs must be excluded too.
+
+    Return:
+        [file] The open lock file handle (keep a reference for the process lifetime).
+            Exits the process if the lock cannot be acquired.
+    """
+
+    import fcntl
+    import tempfile
+    from multiprocessing import util as mp_util
+
+    lock_path = os.path.join(tempfile.gettempdir(),
+        'rms_startcapture_{:s}.lock'.format(station_id))
+
+    try:
+        # 'a+' never truncates, so on refusal the holder's recorded PID survives for
+        # diagnostics; everything sits in the try so a stale lock file owned by another
+        # user (sticky /tmp) refuses cleanly instead of raising a raw PermissionError
+        lock_file = open(lock_path, 'a+')
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    except (IOError, OSError) as e:
+        holder = ''
+        try:
+            with open(lock_path) as f:
+                holder = f.read().strip()
+        except (IOError, OSError):
+            pass
+        print('Another StartCapture instance appears to be running for station {:s} '
+              '(lock file: {:s}{:s}; error: {!r:s}). Exiting.'.format(
+                  station_id, lock_path,
+                  ', holder PID {:s}'.format(holder) if holder else '', e),
+              file=sys.__stderr__)
+        sys.exit(1)
+
+    # We own the lock now - record our PID (truncating only as the owner)
+    try:
+        lock_file.truncate(0)
+        lock_file.seek(0)
+        lock_file.write(str(os.getpid()))
+        lock_file.flush()
+    except (IOError, OSError):
+        pass
+
+    # The flock is attached to this open file description, which every child forked
+    # from here on inherits. Without this, an orphaned child left behind after the
+    # main process dies keeps holding the lock and every supervisor restart is
+    # refused forever - the incident failure mode, inverted. Closing the inherited
+    # fd right after fork leaves the parent as the sole holder, and the kernel
+    # releases the flock however the parent dies.
+    mp_util.register_after_fork(lock_file, _closeStationLockInChild)
+
+    return lock_file
+
+
+def _earlyStationLock():
+    """ Acquire the per-station single-instance lock BEFORE the heavy imports below.
+
+    A refused duplicate must exit here, in milliseconds, at a few MB of memory. If this
+    only ran after the imports, every duplicate would first load numpy/matplotlib and
+    compile Cython modules - observed in production as ~40 hung duplicates at ~700 MB
+    each. Best effort: if the station ID cannot be determined from the command line, the
+    full guard after config loading (acquireStationLock) still applies.
+    """
+
+    if (os.name != 'posix') or (__name__ != '__main__'):
+        return None
+
+    # Let --help through: argparse only prints and exits, no capture is started, so a
+    # running station must not turn -h into an exit-1 refusal (review finding)
+    if ('-h' in sys.argv[1:]) or ('--help' in sys.argv[1:]):
+        return None
+
+    import re
+
+    # Peek at the config path from the command line without importing ConfigReader
+    config_path = None
+    argv = sys.argv[1:]
+    for i, arg in enumerate(argv):
+        if arg in ('-c', '--config') and (i + 1) < len(argv):
+            config_path = argv[i + 1]
+            break
+        if arg.startswith('--config='):
+            config_path = arg.split('=', 1)[1]
+            break
+
+    # Default deployment launches without -c and reads ./.config from the RMS
+    # directory - peek there so the early lock engages for standard stations too
+    if config_path is None and os.path.isfile('.config'):
+        config_path = '.config'
+
+    if (config_path is None) or (not os.path.isfile(config_path)):
+        return None
+
+    # Peek at the station ID
+    try:
+        with open(config_path) as f:
+            match = re.search(r'^\s*stationID\s*[:=]\s*(\S+)', f.read(), re.MULTILINE | re.IGNORECASE)
+    except (IOError, OSError):
+        return None
+
+    if not match:
+        return None
+
+    station_id = match.group(1).strip()
+
+    return _takeStationLock(station_id)
+
+
+# Keep a reference for the process lifetime - the kernel releases the flock on process death
+_early_station_lock = _earlyStationLock()
+
+
 import git
-from RMS.Formats.ObservationSummary import getObsDBConn, addObsParam
+from RMS.Formats.ObservationSummary import addObsParam, getObservationSummaryDict
 
 import numpy as np
 
@@ -38,7 +166,7 @@ import numpy as np
 from Utils.LiveViewer import LiveViewer
 
 import RMS.ConfigReader as cr
-from RMS.Logger import LoggingManager, getLogger
+from RMS.Logger import LoggingManager, getLogger, checkLoggingHealth
 from RMS.BufferedCapture import BufferedCapture
 from RMS.CaptureDuration import captureDuration
 from RMS.CaptureModeSwitcher import captureModeSwitcher
@@ -46,9 +174,11 @@ from RMS.Compression import Compressor
 from RMS.DeleteOldObservations import deleteOldObservations
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
 from RMS.Formats.FFfile import validFFName
-from RMS.Misc import mkdirP, RmsDateTime, UTCFromTimestamp, disableGitPrompts
+from RMS.Misc import mkdirP, RmsDateTime, UTCFromTimestamp, setMultiprocessingStartMethod, frameBufferShape, \
+    disableGitPrompts
 from RMS.QueuedPool import QueuedPool
-from RMS.Reprocess import getPlatepar, processNight, processFramesFiles
+from RMS.Reprocess import getPlatepar, processNight, processFramesFiles, nightProcessingState, \
+    readProcessingStatus, updateProcessingStatus, NIGHT_PROCESSED, NIGHT_LEGACY_PROCESSED
 from RMS.RunExternalScript import runExternalScript
 from RMS.UploadManager import UploadManager
 from RMS.EventMonitor import EventMonitor
@@ -67,8 +197,7 @@ def breakHandler(signum, frame):
     # Set the flag to stop capturing video
     STOP_CAPTURE = True
 
-    # This log entry is an adhoc fix to prevents Ctrl+C failure until the root cause is identified
-    log.info("Ctrl+C pressed. Setting STOP_CAPTURE to True")
+    log.info("SIGINT received. Setting STOP_CAPTURE to True")
 
 # Save the original event for the Ctrl+C
 ORIGINAL_BREAK_HANDLE = signal.getsignal(signal.SIGINT)
@@ -96,7 +225,142 @@ def resetSIGINT():
 HEARTBEAT_TIMEOUT = 180  # 3 minutes
 
 
-def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
+def acquireStationLock(config):
+    """ Ensure only one StartCapture instance runs per station.
+
+    An external supervisor that respawns stations it believes are down can otherwise pile up
+    duplicate instances - observed in production, where ~40 duplicates of two wedged stations
+    (~700 MB each) drove a machine into OOM. The lock is a flock() on a per-station file, so it
+    is released automatically by the kernel no matter how the process dies.
+
+    Arguments:
+        config: [Config] Station config object.
+
+    Return:
+        [file or None] The open lock file handle (keep a reference for the process lifetime),
+            or None on non-POSIX platforms. Exits the process if another instance holds the lock.
+    """
+
+    if os.name != 'posix':
+        return None
+
+    # The pre-import guard may have already taken the lock for this process - taking a
+    # second flock on the same file from a new fd would wrongly refuse ourselves
+    if _early_station_lock is not None:
+        return _early_station_lock
+
+    return _takeStationLock(str(config.stationID))
+
+
+def takeSessionCut(session_cut, session_cut_time):
+    """ Mark the latest capture session split (polar day or night) as handled and get its time.
+
+    Arguments:
+        session_cut: [multiprocessing.Value] Shared int, incremented by the capture mode switcher on a split.
+        session_cut_time: [multiprocessing.Value] Shared double, Unix time of the last split.
+
+    Return:
+        (session_cut_handled, cut_utc): [tuple]
+            - session_cut_handled: [int] Counter value to compare against to detect the next split.
+            - cut_utc: [datetime] Naive UTC time of the split. The current time if the split time is not
+                available.
+    """
+
+    session_cut_handled = session_cut.value
+
+    cut_utc = None
+    if (session_cut_time is not None) and (session_cut_time.value > 0):
+        cut_utc = UTCFromTimestamp.utcfromtimestamp(session_cut_time.value)
+
+    if cut_utc is None:
+        cut_utc = RmsDateTime.utcnow()
+
+    return session_cut_handled, cut_utc
+
+
+
+def processAndUploadTimelapses(config, upload_manager, cutoff_utc=None):
+    """ Make timelapses from the saved frames, archive them and put them up for upload.
+
+    Arguments:
+        config: [Config] Configuration object.
+        upload_manager: [UploadManager] Upload manager, None to skip the upload.
+
+    Keyword arguments:
+        cutoff_utc: [datetime] Naive UTC time, only frames before it are used. None by default, in which
+            case the frames until the end of the night just captured are used.
+
+    Return:
+        archive_paths: [list[str] | None] Archives put up for upload, None if nothing was made.
+    """
+
+    if not config.timelapse_generate_from_frames:
+        return None
+
+    try:
+        log.info("Processing frame files...")
+        archive_paths = processFramesFiles(config, cutoff_utc=cutoff_utc)          # may return None
+        log.info("Processing frame files done.")
+
+    except Exception:
+        log.exception("An error occurred when processing frame files!")
+        archive_paths = None
+
+    # -- enqueue & upload -----------------------------------------
+    if archive_paths and upload_manager:
+        try:
+            log.info("Adding file to upload list: %s", archive_paths)
+            upload_manager.addFiles(archive_paths)
+            log.info("File added.")
+
+        except Exception:
+            log.exception("Frames upload failed")
+
+    return archive_paths
+
+
+
+def splitSessionTimelapses(config, upload_manager, cutoff_utc, duration=None, keep_paths=None):
+    """ Free up disk space, then make the timelapses of the frames up to a capture session split (polar day or
+        night) and put them up for upload.
+
+    The space is freed before the timelapses are made. When space is short, the cleanup deletes the frame
+    archives with the oldest dates first, and the timelapses of a backlog of frames (e.g. after an outage)
+    would be the oldest ones - they would be deleted before they were uploaded.
+
+    Arguments:
+        config: [Config] Configuration object.
+        upload_manager: [UploadManager] Upload manager, None to skip the upload.
+        cutoff_utc: [datetime] Naive UTC time of the split, only frames before it are used.
+
+    Keyword arguments:
+        duration: [float] Duration of the next capture in seconds, passed to deleteOldObservations. None by
+            default.
+        keep_paths: [list] Night directories and archives which must not be deleted, passed to
+            deleteOldObservations. None by default.
+
+    Return:
+        space_ok: [bool] True if there is enough disk space to continue capturing.
+    """
+
+    log.info('Freeing up disk space...')
+    space_ok = deleteOldObservations(config.data_dir, config.captured_dir, config.archived_dir, config,
+        duration=duration, keep_paths=keep_paths)
+
+    processAndUploadTimelapses(config, upload_manager, cutoff_utc=cutoff_utc)
+
+    # Making the timelapses deletes the source frames, so try again if there was not enough space before
+    if not space_ok:
+        log.info('Freeing up disk space again after making the timelapses...')
+        space_ok = deleteOldObservations(config.data_dir, config.captured_dir, config.archived_dir, config,
+            duration=duration, keep_paths=keep_paths)
+
+    return space_ok
+
+
+
+def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None, session_cut=None,
+    session_cut_handled=None, mode_at_start=None):
     """ The function will wait for the specified time, or it will stop when Enter is pressed. If no time was
         given (in seconds), it will wait until Enter is pressed. Additionally, it will also stop when the camera mode
         (day/night) changes, in case of continuous capture mode.
@@ -107,9 +371,16 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
         buffered_capture: [BufferedCapture] buffered capture process object
         video_file: [str] Path to the video file, if it was given as the video source.
         daytime_mode: [multiprocessing.Value] shared boolean variable to keep track of camera day/night mode switching. None by default.
+        session_cut: [multiprocessing.Value] shared int, incremented by the capture mode switcher when the
+            capture session should be split during polar day or night. None by default.
+        session_cut_handled: [int] Value of session_cut when the last split was handled.
+        mode_at_start: [bool] Camera mode the capture session was started in, a switch is reported if the mode
+            differs from it, also if it already differed when wait() was called. None (by default) to take the
+            mode at the call.
 
     Return:
-        [str] Reason for exit: "normal", "capture_died", "capture_hung", "compressor_died", "mode_switch"
+        [str] Reason for exit: "normal", "capture_died", "capture_hung", "compressor_died", "mode_switch",
+            "session_cut"
     """
 
     global STOP_CAPTURE
@@ -123,7 +394,9 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
     time_start = RmsDateTime.utcnow()
 
     # Remember the initial camera mode value
-    if daytime_mode is not None:
+    if (daytime_mode is not None) and (mode_at_start is not None):
+        daytime_mode_prev = mode_at_start
+    elif daytime_mode is not None:
         daytime_mode_prev = daytime_mode.value
     else:
         daytime_mode_prev = False
@@ -145,10 +418,25 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
                 bc_alive, comp_alive, daytime_mode_prev))
             last_watchdog_log = now
 
+            # Verify the logging pipeline is alive and draining, and restart it if it wedged.
+            # A wedged pipeline makes the station silently log-dark while it keeps running,
+            # which also fools external monitors into respawning duplicate instances
+            try:
+                checkLoggingHealth()
+            except Exception as e:
+                # Bypass the stream redirect: with log_stdout, plain print() goes into the
+                # very pipeline whose failure is being reported (review finding)
+                print('WATCHDOG: logging health check failed: {}'.format(e),
+                      file=sys.__stderr__)
+
 
         # Break in case camera modes switched
         if (daytime_mode is not None) and (daytime_mode_prev != daytime_mode.value):
             return "mode_switch"
+
+        # Break in case the capture session should be split (polar day or night, no mode switches)
+        if (session_cut is not None) and (session_cut.value != session_cut_handled):
+            return "session_cut"
 
 
         # If the compressor has died, restart capture
@@ -183,9 +471,20 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
             if hasattr(buffered_capture, 'heartbeat') and buffered_capture.heartbeat.value > 0:
                 heartbeat_age = time.time() - buffered_capture.heartbeat.value
                 if heartbeat_age > HEARTBEAT_TIMEOUT:
-                    log.warning('WATCHDOG: BufferedCapture heartbeat stale ({:.1f}s old, timeout={:d}s)! Process appears hung...'.format(
-                        heartbeat_age, HEARTBEAT_TIMEOUT))
-                    return "capture_hung"
+
+                    # Re-read before declaring the process hung: on 32-bit ARM a
+                    # c_double store is two word accesses, and a read torn across
+                    # the writer's update can look up to ~1024 s stale (the low
+                    # mantissa words of an epoch-magnitude double). A single
+                    # confirming re-read after a short sleep eliminates acting on
+                    # a torn value - a genuinely hung process stays stale on both
+                    # reads (review finding).
+                    time.sleep(0.1)
+                    heartbeat_age = time.time() - buffered_capture.heartbeat.value
+                    if heartbeat_age > HEARTBEAT_TIMEOUT:
+                        log.warning('WATCHDOG: BufferedCapture heartbeat stale ({:.1f}s old, timeout={:d}s)! Process appears hung...'.format(
+                            heartbeat_age, HEARTBEAT_TIMEOUT))
+                        return "capture_hung"
 
 
         # If some wait time was given, check if it passed
@@ -209,8 +508,213 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None):
 
 
 
+def makeNightDataDir(config):
+    """ Make a new capture directory for a night, named after the current time, and copy the used config file
+        into it.
+
+    Arguments:
+        config: [Config] Configuration object.
+
+    Return:
+        night_data_dir: [str] Full path to the new capture directory.
+    """
+
+    # Create a new directory for captured files based on the current time
+    night_data_dir_name = str(config.stationID) + '_' + RmsDateTime.utcnow().strftime('%Y%m%d_%H%M%S_%f')
+
+    # Full path to the new data directory
+    night_data_dir = os.path.join(os.path.abspath(config.data_dir), config.captured_dir, night_data_dir_name)
+
+    # Make a directory for the next capture
+    mkdirP(night_data_dir)
+
+    log.info('New data directory: {}'.format(night_data_dir))
+
+    # Copy the used config file to the capture directory
+    if os.path.isfile(config.config_file_name):
+        try:
+            shutil.copy2(config.config_file_name, os.path.join(night_data_dir, ".config"))
+        except:
+            log.error("Cannot copy the config file to the capture directory!")
+
+    return night_data_dir
+
+
+
+def startNightDetector(config, night_data_dir, duration, nodetect=False, detect_end=False,
+    resume_capture=False):
+    """ Start the detection of a night capture into the given directory.
+
+    Arguments:
+        config: [Config] Configuration object.
+        night_data_dir: [str] Full path to the capture directory of the night.
+        duration: [float] Duration of the capture in seconds, None if not known.
+
+    Keyword arguments:
+        nodetect: [bool] If True, detection will not be performed. False by default.
+        detect_end: [bool] If True, detection will be performed at the end of the night. False by default.
+        resume_capture: [bool] If True, the FF files already in the directory are queued for detection. False
+            by default.
+
+    Return:
+        detector: [QueuedPool] The running detector, None if detection is off.
+    """
+
+    # Check if the detection should be performed or not
+    if nodetect:
+        detector = None
+
+    else:
+
+        if detect_end and (duration is not None):
+
+            # Delay detection until the end of the night
+            delay_detection = duration
+
+        else:
+            # Delay the detection for 2 minutes after capture start (helps stability)
+            delay_detection = 120
+
+
+        # Add an additional postprocessing delay
+        delay_detection += config.postprocess_delay
+
+
+        # Set a flag file to indicate that previous files are being loaded (if any)
+        capture_resume_file_path = os.path.join(config.data_dir, config.capture_resume_flag_file)
+        with open(capture_resume_file_path, 'w') as f:
+            pass
+
+        # Initialize the detector
+        detector = QueuedPool(detectStarsAndMeteors, cores=1, log=log, delay_start=delay_detection, \
+            backup_dir=night_data_dir, input_queue_maxsize=None)
+        detector.startPool()
+
+
+        # If the capture is being resumed into the directory, load all previously saved FF files
+        if resume_capture:
+
+            # Load all processed FF files
+            for i, ff_name in enumerate(sorted(os.listdir(night_data_dir))):
+
+                # Every 50 files loaded, update the flag file
+                if i%50 == 0:
+                    with open(capture_resume_file_path, 'a') as f:
+                        f.write("{:d}\n".format(i))
+
+
+                # Check if the file is a valid FF files
+                ff_path = os.path.join(night_data_dir, ff_name)
+                if os.path.isfile(ff_path) and (str(config.stationID) in ff_name) and validFFName(ff_name):
+
+                    # Add the FF file to the detector
+                    detector.addJob([night_data_dir, ff_name, config], wait_time=0.005)
+                    log.info("Added existing FF files for detection: {:s}".format(ff_name))
+
+
+        # Remove the flag file
+        if os.path.isfile(capture_resume_file_path):
+            try:
+                os.remove(capture_resume_file_path)
+            except:
+                log.error("There was an error during removing the capture resume flag file: " \
+                    + capture_resume_file_path)
+
+    return detector
+
+
+
+def startNightCompressor(config, night_data_dir, frame_buffers, detector, duration, video_file=None):
+    """ Start the compression of a night capture into the given directory.
+
+    Arguments:
+        config: [Config] Configuration object.
+        night_data_dir: [str] Full path to the capture directory of the night.
+        frame_buffers: [tuple] Shared frame buffers and their start times as given to BufferedCapture,
+            (array1, start_time1, array2, start_time2).
+        detector: [QueuedPool] Detector the compressed files are queued to, None if detection is off.
+        duration: [float] Duration of the capture in seconds, None if not known.
+
+    Keyword arguments:
+        video_file: [str] Path to the video file, if it was given as the video source. None by default.
+
+    Return:
+        compressor: [Compressor] The running compressor.
+    """
+
+    sharedArray, startTime, sharedArray2, start_time2 = frame_buffers
+
+    # Initialize compression
+    compressor = Compressor(night_data_dir, sharedArray, startTime, sharedArray2, start_time2, config,
+        detector=detector)
+
+    # Start the compressor first, the observation summary report can take a while (it queries the camera)
+    compressor.start()
+
+    # Open the observation summary report
+    if video_file is None:
+        log.info(startObservationSummaryReport(config, night_data_dir, duration, force_delete=False))
+
+    return compressor
+
+
+
+def startNightCompression(config, night_data_dir, frame_buffers, duration, nodetect=False, detect_end=False,
+    resume_capture=False, video_file=None):
+    """ Start the detection and the compression of a night capture into the given directory.
+
+    Arguments:
+        config: [Config] Configuration object.
+        night_data_dir: [str] Full path to the capture directory of the night.
+        frame_buffers: [tuple] Shared frame buffers and their start times as given to BufferedCapture,
+            (array1, start_time1, array2, start_time2).
+        duration: [float] Duration of the capture in seconds, None if not known.
+
+    Keyword arguments:
+        nodetect: [bool] If True, detection will not be performed. False by default.
+        detect_end: [bool] If True, detection will be performed at the end of the night. False by default.
+        resume_capture: [bool] If True, the FF files already in the directory are queued for detection. False
+            by default.
+        video_file: [str] Path to the video file, if it was given as the video source. None by default.
+
+    Return:
+        (detector, compressor): [QueuedPool, Compressor] The detector (None if detection is off) and the
+            running compressor.
+    """
+
+    # The detector is started first, the compressor queues the compressed files to it
+    detector = startNightDetector(config, night_data_dir, duration, nodetect=nodetect, detect_end=detect_end,
+        resume_capture=resume_capture)
+
+    compressor = startNightCompressor(config, night_data_dir, frame_buffers, detector, duration,
+        video_file=video_file)
+
+    return detector, compressor
+
+
+
+def stopStartedNight(next_night):
+    """ Stop the compression of a night which was started at a polar night split, when the capture ends
+        before that night was taken over by the capture loop. The night was not processed, so it is
+        reprocessed on the next startup.
+
+    Arguments:
+        next_night: [tuple] (night_data_dir, detector, compressor) of the started night, or None.
+    """
+
+    if next_night is None:
+        return
+
+    night_data_dir, _, compressor = next_night
+
+    log.info('Stopping the compression of the night started at the split: {}'.format(night_data_dir))
+    compressor.stop()
+
+
+
 def runCapture(config, duration=None, video_file=None, nodetect=False, detect_end=False, \
-    upload_manager=None, eventmonitor=None, resume_capture=False, daytime_mode=None, camera_mode_switch_trigger=None):
+    upload_manager=None, eventmonitor=None, resume_capture=False, daytime_mode=None, camera_mode_switch_trigger=None,
+    session_cut=None, session_cut_time=None):
     """ Run capture and compression for the given time.given
     
     Arguments:
@@ -227,6 +731,10 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         eventmonitor: [EventMonitor object]. Event monitor object. None by default.
         resume_capture: [bool] Resume capture in the last data directory in CapturedFiles. False by default.
         daytime_mode: [multiprocessing.Value] shared boolean variable to keep track of camera day/night mode switching. None by default.
+        session_cut: [multiprocessing.Value] shared int, incremented by the capture mode switcher when the
+            capture session should be split once a day during polar day or night (continuous capture only).
+            None by default.
+        session_cut_time: [multiprocessing.Value] shared double, Unix time of the last session split.
 
     Return:
         night_archive_dir: [str] Path to the archive folder of the processed night.
@@ -400,23 +908,26 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     ### then usual. We are applying a dirty fix here where we just add an extra image row and column
     ### if such a memory chunk will be created. The compression is performed, and the image is cropped
     ### back to its original dimensions.
-    array_pad = 0
+    # Compute the shared frame buffer shape (padded to avoid an L2-cache aliasing slowdown).
+    # frameBufferShape() is the single source of truth shared with the child processes.
+    frame_buffer_shape = frameBufferShape(config)
+    frame_buffer_len = frame_buffer_shape[0]*frame_buffer_shape[1]*frame_buffer_shape[2]
 
-    # Check if the image dimensions are divisible by RPi3 L2 cache size and add padding
-    if (256*config.width*config.height)%(512*1024) == 0:
-        array_pad = 1
 
+    # Init arrays for parallel compression on 2 cores.
+    # NOTE: pass the multiprocessing.Array base objects (not numpy views) to the children. A
+    # numpy view over shared memory pickles by value under the 'forkserver'/'spawn' start
+    # methods, which would give each child a private, disconnected copy. The children rebuild
+    # their own numpy view over this shared memory in their run() via frameBufferShape().
+    # The start-time Values are lock-free (read via stableDoubleRead) so a process OOM-killed
+    # mid-write can never orphan a lock the other process then blocks on.
+    sharedArrayBase = multiprocessing.Array(ctypes.c_uint8, frame_buffer_len)
+    sharedArray = sharedArrayBase
+    startTime = multiprocessing.Value('d', 0.0, lock=False)
 
-    # Init arrays for parallel compression on 2 cores
-    sharedArrayBase = multiprocessing.Array(ctypes.c_uint8, 256*(config.width + array_pad)*(config.height + array_pad))
-    sharedArray = np.ctypeslib.as_array(sharedArrayBase.get_obj())
-    sharedArray = sharedArray.reshape(256, (config.height + array_pad), (config.width + array_pad))
-    startTime = multiprocessing.Value('d', 0.0)
-
-    sharedArrayBase2 = multiprocessing.Array(ctypes.c_uint8, 256*(config.width + array_pad)*(config.height + array_pad))
-    sharedArray2 = np.ctypeslib.as_array(sharedArrayBase2.get_obj())
-    sharedArray2 = sharedArray2.reshape(256, (config.height + array_pad), (config.width + array_pad))
-    start_time2 = multiprocessing.Value('d', 0.0)
+    sharedArrayBase2 = multiprocessing.Array(ctypes.c_uint8, frame_buffer_len)
+    sharedArray2 = sharedArrayBase2
+    start_time2 = multiprocessing.Value('d', 0.0, lock=False)
 
     log.info('Initializing frame buffers done!')
 
@@ -439,43 +950,62 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
     # Initialize the detector
     detector = None
 
+    # Path to the archive directory of the processed night (stays None if the night was never processed)
+    night_archive_dir = None
+
+    # Directories and archives of a night split off during the polar night. The new night starts right away,
+    #   while they are still being uploaded and used by the external script, so the disk cleanups up to the
+    #   start of the new night must not delete them
+    keep_paths = None
+
+    # Directory, detector and compressor of the next night, when it was started at a polar night split before
+    #   the split night was processed, so the capture went on in the meantime
+    next_night = None
+
+    # Value of the session split counter when the last split was handled (polar day/night, continuous mode)
+    session_cut_handled = session_cut.value if session_cut is not None else None
+
     # Loop to handle both continuous and standard capture modes
     while True:
 
+        # Time of the session split handled in this iteration (polar day/night), None if there was no split
+        session_cut_utc = None
+
+        # Continuous mode: the night started at a polar night split goes on, it was not interrupted while the
+        #   split night was processed
+        night_started = next_night is not None
+
+        if night_started:
+
+            night_data_dir, detector, compressor = next_night
+            next_night = None
+
+            # The split night is protected only until the new night starts, later cleanups can delete it
+            keep_paths = None
+
         # Continuous mode only: Setup new directories for a new night capture
-        if config.continuous_capture and (not daytime_mode.value) and ran_once:
+        elif config.continuous_capture and (not daytime_mode.value) and ran_once:
 
-            # Create a new directory for captured files based on the current time
-            night_data_dir_name = str(config.stationID) + '_' + RmsDateTime.utcnow().strftime('%Y%m%d_%H%M%S_%f')
-
-            # Full path to the new data directory
-            night_data_dir = os.path.join(os.path.abspath(config.data_dir), config.captured_dir, \
-                night_data_dir_name)
-
-            # Make a directory for the next capture
-            mkdirP(night_data_dir)
-
-            log.info('New data directory: {}'.format(night_data_dir))
-
-            # Copy the used config file to the capture directory
-            if os.path.isfile(config.config_file_name):
-                try:
-                    shutil.copy2(config.config_file_name, os.path.join(night_data_dir, ".config"))
-                except:
-                    log.error("Cannot copy the config file to the capture directory!")
+            night_data_dir = makeNightDataDir(config)
 
 
             # Free up disk space for new capture
             log.info('Freeing up disk space...')
 
-            if not deleteOldObservations(config.data_dir, config.captured_dir, config.archived_dir, config, duration=duration):
+            # The new night directory is kept too, it would be the first to go if no older capture is left
+            if not deleteOldObservations(config.data_dir, config.captured_dir, config.archived_dir, config,
+                    duration=duration, keep_paths=(keep_paths or []) + [night_data_dir]):
 
                 log.error('No more disk space can be freed up! Stopping capture...')
                 disk_full = True
 
+            # The split night is protected only until the new night starts, later cleanups can delete it
+            keep_paths = None
 
-        # Continuous mode only: Daytime capture
-        if config.continuous_capture and daytime_mode.value:
+
+        # Continuous mode only: Daytime capture (not if a night was started at a polar night split, that night is
+        #   captured first)
+        if config.continuous_capture and daytime_mode.value and (not night_started):
 
             log.info('Capturing in daytime mode...')
 
@@ -485,7 +1015,16 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             # Wait loop with watchdog restart capability
             watchdog_restart_count = 0
             while True:
-                wait_result = wait(duration, None, bc, video_file, daytime_mode)
+                wait_result = wait(duration, None, bc, video_file, daytime_mode, session_cut=session_cut,
+                    session_cut_handled=session_cut_handled)
+
+                # The Sun has not set for a day (polar day): split the session, so the daytime frames are
+                # made into a timelapse and uploaded (there is no night to end the session)
+                if wait_result == "session_cut":
+                    session_cut_handled, session_cut_utc = takeSessionCut(session_cut, session_cut_time)
+                    log.info('No sunset for a day (polar day), splitting the daytime capture session at '
+                        '{}'.format(session_cut_utc))
+                    break
 
                 # WATCHDOG: If capture died or hung, restart it and continue waiting
                 if wait_result in ("capture_died", "capture_hung"):
@@ -533,67 +1072,6 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         
             log.info('Capturing in nighttime mode...')
 
-            # Check if the detection should be performed or not
-            if nodetect:
-                detector = None
-
-            else:
-
-                if detect_end and (duration is not None):
-
-                    # Delay detection until the end of the night
-                    delay_detection = duration
-
-                else:
-                    # Delay the detection for 2 minutes after capture start (helps stability)
-                    delay_detection = 120
-
-
-                # Add an additional postprocessing delay
-                delay_detection += config.postprocess_delay
-
-
-                # Set a flag file to indicate that previous files are being loaded (if any)
-                capture_resume_file_path = os.path.join(config.data_dir, config.capture_resume_flag_file)
-                with open(capture_resume_file_path, 'w') as f:
-                    pass
-
-                # Initialize the detector
-                detector = QueuedPool(detectStarsAndMeteors, cores=1, log=log, delay_start=delay_detection, \
-                    backup_dir=night_data_dir, input_queue_maxsize=None)
-                detector.startPool()
-
-
-                # If the capture is being resumed into the directory, load all previously saved FF files
-                if resume_capture:
-
-                    # Load all processed FF files
-                    for i, ff_name in enumerate(sorted(os.listdir(night_data_dir))):
-
-                        # Every 50 files loaded, update the flag file
-                        if i%50 == 0:
-                            with open(capture_resume_file_path, 'a') as f:
-                                f.write("{:d}\n".format(i))
-                                
-
-                        # Check if the file is a valid FF files
-                        ff_path = os.path.join(night_data_dir, ff_name)
-                        if os.path.isfile(ff_path) and (str(config.stationID) in ff_name) and validFFName(ff_name):
-
-                            # Add the FF file to the detector
-                            detector.addJob([night_data_dir, ff_name, config], wait_time=0.005)
-                            log.info("Added existing FF files for detection: {:s}".format(ff_name))
-
-
-                # Remove the flag file
-                if os.path.isfile(capture_resume_file_path):
-                    try:
-                        os.remove(capture_resume_file_path)
-                    except:
-                        log.error("There was an error during removing the capture resume flag file: " \
-                            + capture_resume_file_path)
-
-
             # Initialize the live image viewer
             if config.live_maxpixel_enable:
 
@@ -609,19 +1087,19 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                 live_view = None
 
 
-            # Initialize compression
-            compressor = Compressor(night_data_dir, sharedArray, startTime, sharedArray2, start_time2, config,
-                detector=detector)
+            # Start the detection and the compression of the night, unless the night was already started at a
+            #   polar night split
+            if not night_started:
+                detector, compressor = startNightCompression(config, night_data_dir,
+                    (sharedArray, startTime, sharedArray2, start_time2), duration, nodetect=nodetect,
+                    detect_end=detect_end, resume_capture=resume_capture, video_file=video_file)
 
-            # Open the observation summary report
-            if video_file is None:
-                log.info(startObservationSummaryReport(config, duration, force_delete=False))
+            # Capture until Ctrl+C is pressed / camera switches modes. A night started at a polar night split is
+            #   a night even if the day began while the split night was processed, it then ends at once
+            if night_started:
+                daytime_mode_prev = False
 
-            # Start the compressor
-            compressor.start()
-
-            # Capture until Ctrl+C is pressed / camera switches modes
-            if (daytime_mode is not None):
+            elif (daytime_mode is not None):
                 daytime_mode_prev = daytime_mode.value
 
             # Record start time and original duration for remaining-time calculation
@@ -632,7 +1110,16 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             # Wait loop with watchdog restart capability
             watchdog_restart_count = 0
             while True:
-                wait_result = wait(duration, compressor, bc, video_file, daytime_mode)
+                wait_result = wait(duration, compressor, bc, video_file, daytime_mode, session_cut=session_cut,
+                    session_cut_handled=session_cut_handled, mode_at_start=(False if night_started else None))
+
+                # The Sun has not risen for a day (polar night): split the session, so the night is
+                # processed and uploaded and a new night directory is started (there is no sunrise to end it)
+                if wait_result == "session_cut":
+                    session_cut_handled, session_cut_utc = takeSessionCut(session_cut, session_cut_time)
+                    log.info('No sunrise for a day (polar night), splitting the nighttime capture session at '
+                        '{}'.format(session_cut_utc))
+                    break
 
                 # WATCHDOG: If capture died or hung, restart it and continue waiting
                 # The compressor keeps running since it uses shared memory arrays owned by parent
@@ -689,10 +1176,55 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                 else:
                     break
 
+            # Polar night split: the next night is started right away, so the capture goes on while the split
+            #   night is processed, which can take a long time. Its directory is made and the disk space freed
+            #   while this night's compression still runs, so the next compressor starts right after this one
+            #   stops. Not if the station reboots after the processing, the capture is stopped for it anyway
+            next_night_data_dir = None
+            if (session_cut_utc is not None) and (not STOP_CAPTURE) and (not config.reboot_after_processing):
+
+                next_night_data_dir = makeNightDataDir(config)
+
+                # Free up disk space for the next night, keeping the split night which is yet to be processed and
+                #   the new night directory
+                log.info('Freeing up disk space...')
+                if not deleteOldObservations(config.data_dir, config.captured_dir, config.archived_dir, config,
+                        duration=duration, keep_paths=[night_data_dir, next_night_data_dir]):
+
+                    # Not enough space yet: the next night is started after the split night was processed, as
+                    #   before (making the timelapses of the split night frees up more space)
+                    shutil.rmtree(next_night_data_dir, ignore_errors=True)
+                    next_night_data_dir = None
+
+                # Start the next night's detection while the split night is still compressed, only the start of
+                #   the compressor is left for the handoff
+                else:
+                    next_detector = startNightDetector(config, next_night_data_dir, duration, nodetect=nodetect,
+                        detect_end=detect_end)
+
             # Stop the compressor
             log.debug('Stopping compression...')
             detector = compressor.stop()
             log.debug('Compression stopped')
+
+            # Start the next night's compression right after the split night's stopped
+            if (next_night_data_dir is not None) and (not STOP_CAPTURE):
+
+                next_compressor = startNightCompressor(config, next_night_data_dir,
+                    (sharedArray, startTime, sharedArray2, start_time2), next_detector, duration,
+                    video_file=video_file)
+
+                next_night = (next_night_data_dir, next_detector, next_compressor)
+
+            # Capture was stopped in the meantime, the next night is not started
+            elif next_night_data_dir is not None:
+
+                # Close its idle detector
+                if next_detector is not None:
+                    next_detector.closePool()
+                    next_detector.shutdownManager()
+
+                shutil.rmtree(next_night_data_dir, ignore_errors=True)
 
             if live_view is not None:
 
@@ -720,9 +1252,10 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             log.debug('Capture stopped')
 
             log.info('Total number of late or dropped frames: ' + str(dropped_frames))
-            obs_db_conn = getObsDBConn(config)
-            addObsParam(obs_db_conn, "dropped_frames", dropped_frames)
-            obs_db_conn.close()
+            log.info(f"Starting an observation summary in {night_data_dir}")
+            obs_dict = getObservationSummaryDict(night_data_dir)
+            addObsParam(obs_dict, "dropped_frames", dropped_frames)
+
 
             # Free shared memory after the compressor is done
             try:
@@ -816,6 +1349,9 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                     if detector is not None:
                         del detector
 
+                    # The night started at a polar night split is not captured any further
+                    stopStartedNight(next_night)
+
                     sys.exit()
 
 
@@ -830,63 +1366,106 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                 # Get the detection results from the queue
                 detection_results = detector.getResults()
 
+                # Shut down the Manager server process now that results are collected
+                detector.shutdownManager()
+
             else:
 
                 detection_results = []
 
             # Save detection to disk and archive detection
-            night_archive_dir, archive_name, imgdata_archive_name, metadata_archive_name, _ =  \
-                processNight(night_data_dir, config, detection_results=detection_results, nodetect=nodetect)
+            #   Never let a failure here propagate, as it would terminate the capture loop and no
+            #   further nights would be captured until RMS is restarted. The detection backup files are
+            #   kept on failure, so the night is automatically reprocessed on the next startup
+            night_archive_dir = None
+            night_processed = False
+            try:
+                night_archive_dir, archive_name, imgdata_archive_name, metadata_archive_name, _ =  \
+                    processNight(night_data_dir, config, detection_results=detection_results, \
+                        nodetect=nodetect)
 
-            files_to_add_list_unfiltered = [archive_name, metadata_archive_name, imgdata_archive_name]
-            files_to_add_list = [f for f in files_to_add_list_unfiltered if f is not None]
+                night_processed = True
 
-            # Put the archive up for upload
-            if upload_manager is not None:
-                log.info(f"Adding files to upload list: {files_to_add_list}")
-                upload_manager.addFiles(files_to_add_list)
-                if files_to_add_list:
-                    if len(files_to_add_list) == 1:
-                        log.info("File added.")
-                    else:
-                        log.info("Files added.")
+            except Exception as e:
+                log.error("An error occurred when processing the night directory {:s}!".format(
+                    night_data_dir))
+                log.error(repr(e))
+                log.error(repr(traceback.format_exception(*sys.exc_info())))
 
-                # optional delay (minutes in .config, converted to seconds)
-                upload_manager.delayNextUpload(delay=60*config.upload_delay)
 
-            # Delete detector backup files
-            if detector is not None:
-                detector.deleteBackupFiles()
+            if night_processed:
+
+                files_to_add_list_unfiltered = [archive_name, metadata_archive_name, imgdata_archive_name]
+                files_to_add_list = [f for f in files_to_add_list_unfiltered if f is not None]
+
+                # Put the archive up for upload
+                if upload_manager is not None:
+                    log.info(f"Adding files to upload list: {files_to_add_list}")
+                    upload_manager.addFiles(files_to_add_list)
+                    if files_to_add_list:
+                        if len(files_to_add_list) == 1:
+                            log.info("File added.")
+                        else:
+                            log.info("Files added.")
+
+                    # optional delay (minutes in .config, converted to seconds)
+                    upload_manager.delayNextUpload(delay=60*config.upload_delay)
+
+                # Delete detector backup files
+                if detector is not None:
+                    detector.deleteBackupFiles()
+
+            # Polar night split: keep the night through the cleanups until the new night starts, with its
+            #   archives if it was processed (if not, its data is needed to reprocess it on the next startup)
+            if session_cut_utc is not None:
+                keep_paths = [night_data_dir, night_archive_dir]
+                if night_processed:
+                    keep_paths += files_to_add_list
+
+                # The next night is already being captured into its directory
+                if next_night is not None:
+                    keep_paths.append(next_night[0])
 
 
             # frames -> timelapse(s) -> archive(s) -> upload
-            if config.timelapse_generate_from_frames:
-                try:
-                    log.info("Processing frame files...")
-                    archive_paths = processFramesFiles(config)          # may return None
-                    log.info("Processing frame files done.")
+            if session_cut_utc is None:
+                processAndUploadTimelapses(config, upload_manager)
 
-                except Exception:
-                    log.exception("An error occurred when processing frame files!")
-                    archive_paths = None
-
-                # -- enqueue & upload -----------------------------------------
-                if archive_paths and upload_manager:
-                    try:
-                        log.info("Adding file to upload list: %s", archive_paths)
-                        upload_manager.addFiles(archive_paths)
-                        log.info("File added.")
-
-                    except Exception:
-                        log.exception("Frames upload failed")
+            # Polar night: the frames up to the session split are used. The disk space is freed first, as the
+            #   next night directory is started right away and the cleanup there could otherwise delete the
+            #   new timelapses before they are uploaded. The night that was just processed is kept, as its
+            #   archives are still waiting to be uploaded and the external script still has to run on it
+            elif not splitSessionTimelapses(config, upload_manager, session_cut_utc, duration=duration,
+                    keep_paths=keep_paths):
+                log.error('No more disk space can be freed up! Stopping capture...')
+                disk_full = True
 
 
-            # Run the external script
-            runExternalScript(night_data_dir, night_archive_dir, config)
+            # Run the external script (skip it if the night was not archived, as it takes the archive
+            #   directory as an argument)
+            if night_archive_dir is not None:
+                runExternalScript(night_data_dir, night_archive_dir, config)
+
+            else:
+                log.warning("Skipping the external script, the night was not successfully processed!")
+
+
+        # Continuous mode, polar day: the daytime session was split - make and upload the timelapse of the
+        #   daytime frames up to the split, and free up disk space as no night starts to do it
+        elif config.continuous_capture and daytime_mode_prev and (session_cut_utc is not None) \
+            and (not disk_full):
+
+            if not splitSessionTimelapses(config, upload_manager, session_cut_utc, duration=duration):
+                log.error('No more disk space can be freed up! Stopping capture...')
+                disk_full = True
 
 
         # If capture is terminated manually, or the disk is full, exit program
         if STOP_CAPTURE or (disk_full):
+
+            # The night started at a polar night split is not captured any further
+            stopStartedNight(next_night)
+            next_night = None
 
             # Stop the upload manager
             if upload_manager is not None:
@@ -906,12 +1485,67 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
         # Standard mode: need to run it all just once
         # Continuous mode: if the program just got done with nighttime processing and needs to reboot
         elif (not config.continuous_capture) or (not daytime_mode_prev and config.reboot_after_processing):
-            break 
+
+            # Continuous mode: stop the capture before returning for the reboot. If the reboot
+            # fails, the main loop calls runCapture again - the old capture must not be left
+            # running, or two captures will run in parallel and save every frame twice, with the
+            # old one stamping a stale day/night suffix (it holds the previous daytime_mode)
+            if config.continuous_capture:
+
+                # A night started at a polar night split must not keep running either
+                stopStartedNight(next_night)
+                next_night = None
+
+                log.info('Ending capture before reboot...')
+                dropped_frames = bc.stopCapture()
+                log.info('Total number of late or dropped frames: ' + str(dropped_frames))
+
+                # Record the dropped frame count in the observation summary, same as the
+                # normal stop path above
+                obs_dict = getObservationSummaryDict(night_data_dir)
+                addObsParam(obs_dict, "dropped_frames", dropped_frames)
+
+            break
 
         ran_once = True
 
 
     return night_archive_dir
+
+
+
+def getReprocessAttempts(config, captured_dir_path):
+    """ Read how many times auto-reprocessing has already been attempted on a captured directory.
+
+    Arguments:
+        config: [config object] Configuration read from the .config file.
+        captured_dir_path: [str] Full path to the directory in CapturedFiles.
+
+    Return:
+        [int] Number of previous attempts, 0 if unknown.
+    """
+
+    attempts = readProcessingStatus(config, captured_dir_path).get('failed_reprocess_attempts', 0)
+
+    try:
+        return max(0, int(attempts))
+
+    # A record written by hand or by a future version could hold anything
+    except (TypeError, ValueError):
+        return 0
+
+
+
+def setReprocessAttempts(config, captured_dir_path, attempts):
+    """ Record the number of auto-reprocess attempts made on a captured directory.
+
+    Arguments:
+        config: [config object] Configuration read from the .config file.
+        captured_dir_path: [str] Full path to the directory in CapturedFiles.
+        attempts: [int] Number of attempts to record.
+    """
+
+    updateProcessingStatus(config, captured_dir_path, failed_reprocess_attempts=attempts)
 
 
 
@@ -950,37 +1584,53 @@ def processIncompleteCaptures(config, upload_manager):
         captured_dir_path = os.path.join(config.data_dir, config.captured_dir, captured_subdir)
         log.debug("Checking folder: {:s}".format(captured_subdir))
 
-        # Check if there are any backup pickle files in the capture directory
-        pickle_files = glob.glob("{:s}/rms_queue_bkup_*.pickle".format(captured_dir_path))
-        any_pickle_files = False
-        if len(pickle_files) > 0:
-            any_pickle_files = True
+        # Work out how far processing got on this night. The observation summary is the marker,
+        #   not the detection backups - a night which finished but failed to delete its backups
+        #   used to be reprocessed all over again (issue #418)
+        night_state = nightProcessingState(config, captured_dir_path)
 
-        # Check if there is an FTPdetectinfo file in the directory, indicating the folder was fully
-        #   processed
-        FTPdetectinfo_files = glob.glob('{:s}/FTPdetectinfo_*.txt'.format(captured_dir_path))
-        any_ftpdetectinfo_files = False
-        if len(FTPdetectinfo_files) > 0:
-            any_ftpdetectinfo_files = True
+        if night_state.state in (NIGHT_PROCESSED, NIGHT_LEGACY_PROCESSED):
 
-        # Auto reprocess criteria:
-        #   - Any backup pickle files
-        #   - No pickle and no FTPdetectinfo files
+            # Detection backups left behind by a run which did finish. They are only a resume aid
+            #   for detection, so remove them instead of reprocessing a completed night
+            if night_state.pickle_files:
+                log.info("Removing {:d} stale detection backup(s) from the processed folder {:s}"\
+                    .format(len(night_state.pickle_files), captured_subdir))
 
-        run_reprocess = False
-        if any_pickle_files:
-            run_reprocess = True
-        else:
-            if not any_ftpdetectinfo_files:
-                run_reprocess = True
+                for pickle_file in night_state.pickle_files:
+                    try:
+                        os.remove(pickle_file)
 
-        # Skip the folder if it doesn't need to be reprocessed
-        if not run_reprocess:
-            log.debug("    ... fully processed!")
+                    except Exception as e:
+                        log.error("Could not remove the stale detection backup {:s}: {:s}"\
+                            .format(pickle_file, repr(e)))
+
+            # A missing ArchivedFiles directory only counts as unprocessed if the station asked for
+            #   that, as retention and quota management delete archives on their own schedule
+            if night_state.has_archive_dir or (not config.reprocess_if_archive_missing):
+                log.debug("    ... fully processed!")
+                continue
+
+            log.warning("Folder {:s} looks processed but has no directory in {:s} - reprocessing "
+                "because reprocess_if_archive_missing is enabled"\
+                .format(captured_subdir, config.archived_dir))
+
+
+        # Stop retrying a folder which keeps failing, so it cannot eat the pre-capture window on
+        #   every single start
+        attempts = getReprocessAttempts(config, captured_dir_path)
+        if config.auto_reprocess_max_attempts and (attempts >= config.auto_reprocess_max_attempts):
+            log.warning("Folder {:s} already failed to reprocess {:d} time(s) - skipping. Fix the "
+                "underlying problem and delete {:s} in that folder to retry."\
+                .format(captured_subdir, attempts, config.processing_status_file))
             continue
 
 
         log.info("Found partially-processed data in {:s}".format(captured_dir_path))
+
+        # Count the attempt up front, so a hard crash during reprocessing is counted too
+        setReprocessAttempts(config, captured_dir_path, attempts + 1)
+
         try:
 
             # Reprocess the night
@@ -1007,9 +1657,14 @@ def processIncompleteCaptures(config, upload_manager):
 
             log.info("Folder {:s} reprocessed with success!".format(captured_dir_path))
 
+            # The night is done, so the failure count is no longer meaningful. processNight has
+            #   already marked the night complete, so this only tidies the record
+            setReprocessAttempts(config, captured_dir_path, 0)
+
 
         except Exception as e:
-            log.error("An error occurred when trying to reprocess partially processed data!")
+            log.error("An error occurred when trying to reprocess partially processed data in {:s} "
+                "(attempt {:d})!".format(captured_dir_path, attempts + 1))
             log.error(repr(e))
             log.error(repr(traceback.format_exception(*sys.exc_info())))
 
@@ -1026,6 +1681,12 @@ def processIncompleteCaptures(config, upload_manager):
 
 
 if __name__ == "__main__":
+
+    # Pin the multiprocessing start method for consistent behavior across Python versions
+    # (3.6-3.14). Must be done before any Process/Pool is created (including the logging
+    # listener below). Keeps the platform default where it is safe: fork on Linux
+    # through 3.13; forkserver/spawn only where fork is unavailable or unsafe.
+    setMultiprocessingStartMethod()
 
     # Make sure that no git invocation from this process, or from any of its children, can ever
     # stop and ask for credentials on the terminal and block the whole processing chain
@@ -1072,6 +1733,11 @@ if __name__ == "__main__":
 
     # Load the config file
     config = cr.loadConfigFromDirectory(cml_args.config, os.path.abspath('.'))
+
+
+    # Refuse to start if another instance is already running for this station. Do this before
+    # any heavy initialization so a refused duplicate exits quickly and cheaply
+    station_lock = acquireStationLock(config)
 
 
     # Initialize the logger
@@ -1212,6 +1878,8 @@ if __name__ == "__main__":
     # Automatic running and stopping the capture at sunrise and sunset
     ran_once = False
     slideshow_view = None
+    switcher_stop_event = None
+    capture_switcher = None
     while True:
 
         if config.continuous_capture:
@@ -1225,8 +1893,10 @@ if __name__ == "__main__":
 
             # Calculate when and how should the capture run
             start_time, duration = captureDuration(config.latitude, config.longitude, config.elevation)
-            log.info('Next start time: ' + str(start_time) + ' UTC')
-
+            if isinstance(start_time, bool):
+                log.info(f'captureDuration returned {start_time}')
+            else:
+                log.info(f'Next start time: {start_time} UTC')
 
         # Reboot the computer after processing is done for the previous night
         if ran_once and config.reboot_after_processing:
@@ -1243,7 +1913,7 @@ if __name__ == "__main__":
                 if upload_manager is not None:
 
                     # Prevent rebooting if the upload manager is uploading
-                    if upload_manager.upload_in_progress.value:
+                    if upload_manager.upload_in_progress.is_set():
                         log.info("Reboot delayed for 1 minute due to upload...")
                         reboot_go = False
 
@@ -1261,7 +1931,30 @@ if __name__ == "__main__":
 
                     # Reboot the computer (script needs sudo privileges, works only on Linux)
                     try:
-                        os.system('sudo shutdown -r now')
+                        exit_status = os.system('sudo shutdown -r now')
+
+                        if exit_status == 0:
+
+                            # The reboot command was accepted - wait in place for the system to go
+                            # down. Don't re-run the command, as a repeat invocation during the
+                            # shutdown can return non-zero and falsely report a failure
+                            log.info('Reboot command accepted, waiting for the system to go down...')
+                            time.sleep(300)
+                            log.error('System still running 5 minutes after the reboot command '
+                                'succeeded, giving up on rebooting')
+
+                        else:
+
+                            # os.system returns a wait status, not the exit code directly
+                            if hasattr(os, 'waitstatus_to_exitcode'):
+                                exit_code = os.waitstatus_to_exitcode(exit_status)
+                            else:
+                                exit_code = exit_status >> 8
+
+                            log.error('Reboot command failed with exit code {}, '
+                                'giving up on rebooting'.format(exit_code))
+
+                        break
 
                     except Exception as e:
                         log.debug('Rebooting failed with message:\n' + repr(e))
@@ -1287,6 +1980,10 @@ if __name__ == "__main__":
 
                 ### ###
 
+            # If reboot didn't happen in continuous capture mode, reset so capture resumes normally
+            if config.continuous_capture:
+                log.warning("Reboot did not happen, resuming capture")
+                ran_once = False
 
 
         # Don't start the capture if there's less than 15 minutes left
@@ -1481,17 +2178,34 @@ if __name__ == "__main__":
 
 
         if config.continuous_capture:
-            
+
+            # Stop the previous capture mode switcher thread if it's still running
+            if switcher_stop_event is not None:
+                log.info('Stopping previous capture mode switcher thread...')
+                switcher_stop_event.set()
+                capture_switcher.join(timeout=10)
+                if capture_switcher.is_alive():
+                    log.warning('Previous capture mode switcher thread did not stop in time')
+
             # Setup shared value to communicate day/night switch between processes.
-            daytime_mode = multiprocessing.Value(ctypes.c_bool, False)
-            camera_mode_switch_trigger = multiprocessing.Value(ctypes.c_bool, True)
+            # lock=False on the shared flags: a locked Value can deadlock all sharers if any
+            # process is killed while holding the lock
+            daytime_mode = multiprocessing.Value(ctypes.c_bool, False, lock=False)
+            camera_mode_switch_trigger = multiprocessing.Value(ctypes.c_bool, True, lock=False)
+
+            # Shared values to split the capture session once a day during polar day or night, when the
+            # camera mode never switches
+            session_cut = multiprocessing.Value(ctypes.c_int, 0, lock=False)
+            session_cut_time = multiprocessing.Value(ctypes.c_double, 0.0, lock=False)
 
             # Setup the capture mode switcher on another thread
-            capture_switcher = threading.Thread(target=captureModeSwitcher, args=(config, daytime_mode, camera_mode_switch_trigger))
-            
+            switcher_stop_event = threading.Event()
+            capture_switcher = threading.Thread(target=captureModeSwitcher, args=(config, daytime_mode, camera_mode_switch_trigger, switcher_stop_event),
+                kwargs={'session_cut': session_cut, 'session_cut_time': session_cut_time})
+
             # To make sure the capture switcher thread exits automatically at the end
             capture_switcher.daemon = True
-            
+
             capture_switcher.start()
 
             # Wait for the switcher to complete calculation and switch to correct camera mode
@@ -1510,13 +2224,16 @@ if __name__ == "__main__":
         else:
             daytime_mode = None
             camera_mode_switch_trigger = None
+            session_cut = None
+            session_cut_time = None
             log.info('Starting capture for {:.2f} hours'.format(duration/60/60))
 
 
         # Run capture and compression
         night_archive_dir = runCapture(config, duration=duration, nodetect=cml_args.nodetect, \
             upload_manager=upload_manager, eventmonitor=eventmonitor, detect_end=(cml_args.detectend or config.postprocess_at_end), \
-            resume_capture=cml_args.resume, daytime_mode=daytime_mode, camera_mode_switch_trigger=camera_mode_switch_trigger)
+            resume_capture=cml_args.resume, daytime_mode=daytime_mode, camera_mode_switch_trigger=camera_mode_switch_trigger,
+            session_cut=session_cut, session_cut_time=session_cut_time)
         cml_args.resume = False
 
         # Indicate that the capture was done once

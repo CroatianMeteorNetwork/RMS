@@ -1,5 +1,5 @@
 # RPi Meteor Station
-# Copyright (C) 2025 David Rollinson
+# Copyright (C) 2026 David Rollinson
 # 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -31,38 +31,6 @@ LATEST_LOG_UPLOADS_FILE_NAME = ".latestloguploads.json"
 ISO_DATE_2000 = datetime.datetime(int(2000), int(1), int(1), int(0), int(0), int(0)).isoformat()
 
 log = getLogger("rmslogger")
-
-
-def getTimeOfLastLogEntry(config, log_file):
-    """Get the time in python date time format of the last entry in a log file
-
-    Args:
-        log_file_path: [path] path to the log file
-
-    Returns:
-        [datetime.datetime] time of the last entry in the log file
-    """
-
-    log_file_path = os.path.join(config.data_dir, config.log_dir, log_file)
-
-    # It is quicker to open the whole file using readlines, and pick the last line; but this uses less memory
-    with open(log_file_path, "r") as f:
-        line = ""
-        for line in f:
-            pass
-    last_log_time_string = line.split("-")[0]
-    if last_log_time_string:
-        try:
-            last_log_entry_time_object = datetime.datetime.strptime(last_log_time_string, "%Y/%m/%d %H:%M:%S")
-        except Exception as e:
-            log.error("".join(traceback.format_exception(*sys.exc_info())))
-            last_log_entry_time_object = datetime.datetime.strptime("2000/01/01 00:00", "%Y/%m/%d %H:%M")
-    else:
-        last_log_entry_time_object = datetime.datetime.strptime("2000/01/01 00:00", "%Y/%m/%d %H:%M")
-
-    return  last_log_entry_time_object
-
-
 
 def getLogTypes(config):
     """ Scan the log directory given in the config file, return a list of unique log types
@@ -256,8 +224,7 @@ def makeLogArchives(config, dest_dir, update_tracker=True):
     for log_file_type, log_file_list in zip(log_type_list, log_list_of_lists):
         newest_log_file_for_this_type = sorted(log_file_list, reverse=True)[0]
 
-        last_log_entry_time = getTimeOfLastLogEntry(config, newest_log_file_for_this_type)
-        log.info(f"For log file type {log_file_type} the newest file is {newest_log_file_for_this_type}, last entry is {last_log_entry_time}")
+        log.info(f"For log file type {log_file_type} the newest file is {newest_log_file_for_this_type}")
         last_log_file_timestamp = extractDateFromLogName(config, newest_log_file_for_this_type)
         log_file_type_list.append(log_file_type)
         last_log_file_timestamp_list.append(last_log_file_timestamp)

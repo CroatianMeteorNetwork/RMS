@@ -150,13 +150,13 @@ def loadAST(dir_path, file_name):
     ast.r3 = np.fromfile(fid, dtype=np.int32, count=1)
 
     # Text description
-    ast.text = np.fromfile(fid, dtype='|S'+str(256), count=1)[0].tostring().decode()
+    ast.text = np.fromfile(fid, dtype='|S'+str(256), count=1)[0].tobytes().decode()
 
     # Name of catalogue
-    ast.starcat = np.fromfile(fid, dtype='|S'+str(32), count=1)[0].tostring().decode()
+    ast.starcat = np.fromfile(fid, dtype='|S'+str(32), count=1)[0].tobytes().decode()
 
     # Name of observing site
-    ast.sitename = np.fromfile(fid, dtype='|S'+str(32), count=1)[0].tostring().decode()
+    ast.sitename = np.fromfile(fid, dtype='|S'+str(32), count=1)[0].tobytes().decode()
 
     # Site geo coordinates
     ast.lat = np.fromfile(fid, dtype=np.float64, count=1)[0]
@@ -212,7 +212,9 @@ def loadAST(dir_path, file_name):
     dot += np.cos(a)*np.cos(c)
 
     # FOV width in radians
-    ast.fov = np.arccos(dot)
+    # The dot product of the two unit direction vectors can round outside [-1, 1], which would
+    #   make arccos return NaN, so clamp it
+    ast.fov = np.arccos(np.clip(dot, -1.0, 1.0))
 
     
     a, b = plateASTMap(ast, u, 0.0)
@@ -223,7 +225,7 @@ def loadAST(dir_path, file_name):
     dot += np.cos(a)*np.cos(c)
 
     # FOV ascept (width/height)
-    ast.asp = ast.fov/np.arccos(dot)
+    ast.asp = ast.fov/np.arccos(np.clip(dot, -1.0, 1.0))
 
     ######
 

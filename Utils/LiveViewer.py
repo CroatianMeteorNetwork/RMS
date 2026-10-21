@@ -22,6 +22,7 @@ except:
     import Tkinter as tkinter
 
 from RMS.Formats.FFfile import read as readFF
+from RMS.Misc import AtomicFlag
 from RMS.Formats.FFfile import validFFName
 from RMS.Routines.Image import loadImage
 
@@ -84,7 +85,7 @@ class LiveViewer(multiprocessing.Process):
         self.banner_text = banner_text
         self.update_interval = update_interval
 
-        self.exit = multiprocessing.Event()
+        self.exit = AtomicFlag()
 
         self.first_image = True
 

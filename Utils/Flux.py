@@ -1082,16 +1082,12 @@ def detectMoon(file_list, platepar, config):
         angular_distance = np.degrees(angularSeparation(ra_mid, dec_mid, float(m.ra), float(m.dec)))
 
 
-        # Determine if the Moon is above or below the horizon
-        moon_below_horizon = True
-        try:
-            # Compute the Moon rising and setting time - if it's setting next, it's up
-            moon_below_horizon = o.next_rising(m) < o.next_setting(m)
-        except ephem.AlwaysUpError:
-            moon_below_horizon = False
-
-        except ephem.NeverUpError:
-            moon_below_horizon = True
+        # Determine if the Moon is above or below the horizon from the current altitude of its upper limb
+        #   (with refraction, the same definition ephem uses for the rising and setting times). Don't
+        #   compare the next rising and setting times: in ephem < 4.2 the rising/setting search can loop
+        #   forever for the Moon at high latitudes (e.g. Arrival Heights, Antarctica, on 2026-09-13),
+        #   which hung the night processing
+        moon_below_horizon = (float(m.alt) + float(m.radius)) < float(o.horizon)
 
 
         # Always take observations if the Moon is at less than 25% illumination, regardless of where it is
@@ -1781,7 +1777,11 @@ def sensorCharacterization(config, flux_config, dir_path, meteor_data, default_f
         log.info("Rerunning star detection...")
 
         # Run star extraction again, and now FWHM will be computed
-        calstars_list = extractStarsAndSave(config, dir_path)
+        try:
+            calstars_list = extractStarsAndSave(config, dir_path)
+        except Exception as e:
+            log.error("Star extraction failed: {:s}".format(str(e)))
+            calstars_list = []
 
         # Check for a minimum of detected stars
         for ff_name, star_data in calstars_list:

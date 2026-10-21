@@ -6,16 +6,25 @@ bcrypt<4.0; python_version<'3.8'
 cryptography<4.0; python_version<'3.8'
 numpy>=1.19.0,<1.21.0 ; python_version=='3.6'
 numpy>=1.21.0,<1.24.0 ; python_version>='3.7' and python_version<'3.10'
-numpy>=1.26.0,<2.0.0 ; python_version>='3.10'
+numpy>=1.26.0,<2.0.0 ; python_version>='3.10' and python_version<'3.13'
+# numpy 1.26 never supported Python 3.13+; on 3.14 its temporary-elision refcount
+# heuristic breaks under borrowed stack references and silently corrupts large-array
+# arithmetic in function frames (all-black stacks). 2.3 is the first release with 3.14 wheels.
+numpy>=2.3.0,<3.0.0 ; python_version>='3.13'
 matplotlib>=2.1.1
-pyephem>=3.7.6.0
-cython>=0.27.3
+# ephem < 4.2 can loop forever computing the Moon rising/setting at high latitudes (hung the night
+# processing on AQ000A in Antarctica). Require the library directly: the old "pyephem" name is a stub that
+# doesn't pin a version, so stations were never upgraded
+ephem>=4.2
+cython>=0.27.3 ; python_version<'3.13'
+# NumPy 2 headers require Cython >= 3.0.6 to build the .pyx modules
+cython>=3.0.6 ; python_version>='3.13'
 scipy>=1.0.0
 Pillow>=4.3.0
 astropy>=2.0.3
 imreg_dft @ git+https://github.com/matejak/imreg_dft@master
 configparser==4.0.2
-imageio==2.6.1
+imageio>=2.31
 python-dvr>=0.0.1 ; python_version >='3.6'
 pyqtgraph>=0.12,<0.13 ; python_version >='3.6'
 pyyaml; python_version>='3.6'
@@ -27,8 +36,6 @@ pyclean>=2.7.6; python_version >= "3.5"
 wheel>=0.30.0
 setuptools>=40.0.0
 ifaddr; sys_platform =="win32"
-# PyGObject installed via system package (python3-gi) on Linux
-PyGObject; python_version >= '3.6' and sys_platform != 'linux'
 rawpy; sys_platform == "win32"
 rawpy; sys_platform == "darwin"
 rawpy; sys_platform == "linux" and platform_machine == "x86_64"
