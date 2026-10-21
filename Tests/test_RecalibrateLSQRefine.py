@@ -217,3 +217,34 @@ def test_refinement_off_in_the_config(monkeypatch):
     monkeypatch.setattr(ApplyRecalibrate, 'refinePointingLSQ', _fail)
 
     recalibrate(perturbed(pp), rows, catalog_stars, config)
+
+
+def test_refinement_kept_out_when_not_good_enough(monkeypatch):
+    """ A refined pointing which fails the goodness check (here 0.45 px off, above dist_check_threshold) doesn't
+        replace the result of the search, so the recalibration still succeeds with it. """
+
+    pp = makePlatepar()
+    catalog_stars, rows = makeImage(pp, seed=5)
+    config = makeConfig()
+
+    # The result of the search alone
+    config.recalibration_lsq_refine = False
+    searched = recalibrate(perturbed(pp), rows, catalog_stars, config)
+
+    def _offPointing(config, platepar, jd, star_dict_ff, catalog_stars, fit_radius, check_radius, n_check,
+                     lim_mag=None):
+        """ A refinement which moves the pointing by 0.45 px. """
+
+        off = copy.deepcopy(platepar)
+        off.dec_d += 0.45/off.F_scale
+        _, _, _, matched = ApplyRecalibrate.CheckFit.matchStarsResiduals(config, off, catalog_stars, star_dict_ff,
+                                                                         check_radius, ret_nmatch=True)
+
+        return off, matched
+
+    # The recalibration with the refinement replaced by the one which is off
+    config.recalibration_lsq_refine = True
+    monkeypatch.setattr(ApplyRecalibrate, 'refinePointingLSQ', _offPointing)
+    result = recalibrate(perturbed(pp), rows, catalog_stars, config)
+
+    assert displacement(searched, result, catalog_stars) < 1e-6

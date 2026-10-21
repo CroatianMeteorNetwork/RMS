@@ -494,6 +494,13 @@ def recalibrateFF(
                 n_matched, len(star_dict_ff[jd]), dist, match_radius
             ))
 
+    # Choose which radius will be chosen for the goodness of fit check
+    if max_match_radius is None:
+        goodness_check_radius = match_radius
+
+    else:
+        goodness_check_radius = max_match_radius
+
     # The search stops within its tolerance, so the pointing is refined by least squares on the stars matched
     #   within the smallest radius (not below the radius the matching is limited to). The matched stars of the
     #   refined pointing then replace those of the search (same radius) for the coverage check and the photometry
@@ -506,16 +513,14 @@ def recalibrateFF(
         refined, matched_refined = refinePointingLSQ(config, working_platepar, jd, star_dict_ff, catalog_stars,
                                                      fit_radius, min_match_radius, len(matched_stars_good[jd][0]),
                                                      lim_mag=lim_mag)
-        if refined is not None:
+
+        # The least squares fit can lower the squared distances while raising their median, which the goodness
+        #   check below uses, so the refined pointing is used only if it is good enough on its own (or the
+        #   platepar is saved anyway). Otherwise the result of the search is kept
+        if (refined is not None) and (force_platepar_save or CheckFit.checkFitGoodness(
+                config, refined, catalog_stars, star_dict_ff, goodness_check_radius)):
             working_platepar = refined
             matched_stars_good = matched_refined
-
-    # Choose which radius will be chosen for the goodness of fit check
-    if max_match_radius is None:
-        goodness_check_radius = match_radius
-
-    else:
-        goodness_check_radius = max_match_radius
 
     # If the platepar is good, store it
     if (
