@@ -2533,10 +2533,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.auto_compute_sattracks = show_sattracks  # Enable auto-compute if satellite tracks requested
         self.tle_file = tle_file
         self.satellite_tracks = []
-        
-        # Cache for FOV polygon to avoid recomputation
-        self.fov_poly_cache = None
-        self.fov_poly_jd = None
 
         self.sat_track_curves = []
         self.sat_track_labels = []
@@ -9794,10 +9790,6 @@ class PlateTool(QtWidgets.QMainWindow):
             self.tle_file = None
         if not hasattr(self, "satellite_tracks"):
             self.satellite_tracks = []
-        if not hasattr(self, "fov_poly_cache"):
-            self.fov_poly_cache = None
-        if not hasattr(self, "fov_poly_jd"):
-            self.fov_poly_jd = None
         if not hasattr(self, "sat_track_curves"):
             self.sat_track_curves = []
         if not hasattr(self, "sat_track_labels"):
@@ -12181,6 +12173,49 @@ class PlateTool(QtWidgets.QMainWindow):
         self.img_zoom.setLevels(self.tab.hist.getLevels())
         self.updateLeftLabels()
 
+    def computeFOVPolygon(self, jd):
+        """ Compute the FOV polygon on the sky by sampling the image edges with the current platepar.
+
+        The polygon is not cached because it changes with the platepar as well as with the time, and it
+        only takes a few milliseconds to compute.
+
+        Arguments:
+            jd: [float] Julian date.
+
+        Return:
+            fov_poly: [list] List of (RA, Dec) tuples of the polygon vertices, in degrees.
+        """
+
+        w = self.platepar.X_res
+        h = self.platepar.Y_res
+
+        # Define edges: (x1, y1) -> (x2, y2)
+        edges = [
+            ((0, 0), (w, 0)),   # Top
+            ((w, 0), (w, h)),   # Right
+            ((w, h), (0, h)),   # Bottom
+            ((0, h), (0, 0))    # Left
+        ]
+
+        samples_per_side = 10
+
+        fov_poly = []
+        for (x_start, y_start), (x_end, y_end) in edges:
+            xs = np.linspace(x_start, x_end, samples_per_side, endpoint=False)
+            ys = np.linspace(y_start, y_end, samples_per_side, endpoint=False)
+
+            # Prepare inputs
+            n = len(xs)
+            jd_arr = [jd]*n
+            level_arr = [1]*n
+
+            _, r_arr, d_arr, _ = xyToRaDecPP(jd_arr, xs, ys, level_arr, self.platepar, jd_time=True, extinction_correction=False)
+
+            for r, d in zip(r_arr, d_arr):
+                fov_poly.append((r, d))
+
+        return fov_poly
+
     def updateConstellations(self):
         """ Projects and draws constellation lines. """
 
@@ -12197,43 +12232,12 @@ class PlateTool(QtWidgets.QMainWindow):
         # 0. Generate FOV polygon
         w = self.platepar.X_res
         h = self.platepar.Y_res
-        fov_poly = []
 
-        if self.fov_poly_cache is not None and self.fov_poly_jd == jd:
-            fov_poly = self.fov_poly_cache
-        else:
-            # Define edges: (x1, y1) -> (x2, y2)
-            edges = [
-                ((0, 0), (w, 0)),   # Top
-                ((w, 0), (w, h)),   # Right
-                ((w, h), (0, h)),   # Bottom
-                ((0, h), (0, 0))    # Left
-            ]
-            
-            samples_per_side = 10
-            
-            try:
-                for (x_start, y_start), (x_end, y_end) in edges:
-                    xs = np.linspace(x_start, x_end, samples_per_side, endpoint=False)
-                    ys = np.linspace(y_start, y_end, samples_per_side, endpoint=False)
-                    
-                    # Prepare inputs
-                    n = len(xs)
-                    jd_arr = [jd]*n
-                    level_arr = [1]*n
-                    
-                    _, r_arr, d_arr, _ = xyToRaDecPP(jd_arr, xs, ys, level_arr, self.platepar, jd_time=True, extinction_correction=False)
-                    
-                    for r, d in zip(r_arr, d_arr):
-                        fov_poly.append((r, d))
-                        
-                # Update cache
-                self.fov_poly_cache = fov_poly
-                self.fov_poly_jd = jd
-                
-            except Exception as e:
-                print(f"Error computing FOV polygon for constellations: {e}")
-                return
+        try:
+            fov_poly = self.computeFOVPolygon(jd)
+        except Exception as e:
+            print(f"Error computing FOV polygon for constellations: {e}")
+            return
 
         # 1. Filter using sphericalPolygonCheck
         # Check start and end points
@@ -16911,48 +16915,11 @@ class PlateTool(QtWidgets.QMainWindow):
         jd = datetime2JD(t_start)
         
         # Generate FOV polygon by sampling edges
-        w = self.platepar.X_res
-        h = self.platepar.Y_res
-        
-        # Check if we can use cached FOV polygon
-        fov_poly = []
-        if self.fov_poly_cache is not None and self.fov_poly_jd == jd:
-            fov_poly = self.fov_poly_cache
-            # print("Using cached FOV polygon.")
-        else:
-            # print("Computing FOV polygon...")
-            # Define edges: (x1, y1) -> (x2, y2)
-            edges = [
-                ((0, 0), (w, 0)),   # Top
-                ((w, 0), (w, h)),   # Right
-                ((w, h), (0, h)),   # Bottom
-                ((0, h), (0, 0))    # Left
-            ]
-            
-            samples_per_side = 10
-            
-            try:
-                for (x_start, y_start), (x_end, y_end) in edges:
-                    xs = np.linspace(x_start, x_end, samples_per_side, endpoint=False)
-                    ys = np.linspace(y_start, y_end, samples_per_side, endpoint=False)
-                    
-                    # Prepare inputs
-                    n = len(xs)
-                    jd_arr = [jd]*n
-                    level_arr = [1]*n
-                    
-                    _, r_arr, d_arr, _ = xyToRaDecPP(jd_arr, xs, ys, level_arr, self.platepar, jd_time=True, extinction_correction=False)
-                    
-                    for r, d in zip(r_arr, d_arr):
-                        fov_poly.append((r, d))
-                        
-                # Update cache
-                self.fov_poly_cache = fov_poly
-                self.fov_poly_jd = jd
-                
-            except Exception as e:
-                print(f"Error computing FOV polygon: {e}")
-                return
+        try:
+            fov_poly = self.computeFOVPolygon(jd)
+        except Exception as e:
+            print(f"Error computing FOV polygon: {e}")
+            return
 
         try:
             self.satellite_tracks = predictor.getSatelliteTracks(self.platepar, fov_poly, sats)
