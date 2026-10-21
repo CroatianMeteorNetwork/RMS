@@ -3743,8 +3743,9 @@ class PlateTool(QtWidgets.QMainWindow):
             # Update the great circle
             self.updateGreatCircle()
 
-        # Switch the navigation slider between images and frames
+        # Switch the navigation slider between images and frames, with the picked frames marked
         self.updateImageNavigationDisplay()
+        self.updateNavigationSliderMarks()
 
 
     def changeStation(self, dir_path=None, config_override=None):
@@ -7310,15 +7311,18 @@ class PlateTool(QtWidgets.QMainWindow):
         coloured too (the green of the photometry colouring). """
 
         marks = {}
-        for frame, pick in sorted(self.pick_list.items()):
-            if pick['x_centroid'] is None:
-                continue
 
-            photom_pixels = pick.get('photometry_pixels')
-            if (photom_pixels is not None) and (len(photom_pixels) > 0):
-                marks[frame] = (0, 255, 0)
-            else:
-                marks[frame] = (255, 0, 0)
+        # In SkyFit mode the slider moves through the images, so no frames are marked
+        if self.mode == 'manualreduction':
+            for frame, pick in sorted(self.pick_list.items()):
+                if pick['x_centroid'] is None:
+                    continue
+
+                photom_pixels = pick.get('photometry_pixels')
+                if (photom_pixels is not None) and (len(photom_pixels) > 0):
+                    marks[frame] = (0, 255, 0)
+                else:
+                    marks[frame] = (255, 0, 0)
 
         self.image_navigation_slider.setMarks(marks)
 
