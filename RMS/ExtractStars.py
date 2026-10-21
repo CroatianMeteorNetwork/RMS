@@ -947,14 +947,17 @@ def extractStarsAndSave(config, ff_dir, show_candidates=False):
         # workers waiting for the tasks to finish
         num_cores = min(config.num_cores, len(extraction_list))
 
-        # Run the QueuedPool for detection
-        workpool = QueuedPool(extractStarsFF, cores=num_cores, backup_dir=ff_dir, input_queue_maxsize=None)
+        # Run the QueuedPool for detection. The calibration is the same for every file, so it is given to
+        # the workers once instead of being pickled into every queued job (the mask alone is ~0.9 MB per
+        # FF file at 720p, a flat adds ~15 MB, and all jobs are queued before the pool starts)
+        workpool = QueuedPool(extractStarsFF, cores=num_cores, backup_dir=ff_dir, input_queue_maxsize=None,
+            func_kwargs={'flat_struct': flat_struct, 'dark': dark, 'mask': mask, 'config': config})
 
 
         # Add jobs for the pool
         for ff_name in extraction_list:
             log.info('Adding for extraction: ' + ff_name)
-            workpool.addJob([ff_dir, ff_name, flat_struct, dark, mask, config, None, None, None, None, None, None, None])
+            workpool.addJob([ff_dir, ff_name])
 
 
         log.info('Starting pool...')
