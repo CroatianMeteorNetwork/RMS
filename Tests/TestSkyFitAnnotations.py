@@ -70,6 +70,10 @@ class Reduction(object):
     def computeExposureRatioCorrection(self):
         return 0.0
 
+    def computeIntensitySum(self):
+        """ The picks have no coloured photometry pixels, so their intensity stays 1. """
+        pass
+
     def addPick(self, frame, x, y, **annotations):
         """ Add a main fragment pick in the same format as PlateTool.addCentroid. """
 
