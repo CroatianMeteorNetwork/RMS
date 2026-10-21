@@ -144,14 +144,19 @@ def qmessagebox(message="", title="Error", message_type="warning"):
 
 
 class MarkedSlider(QtWidgets.QSlider):
-  """ A horizontal slider that draws thin red ticks on its groove, under the handle, at the marked values """
+  """ A horizontal slider that draws thin coloured ticks on its groove, under the handle, at the marked values """
   def __init__(self, *args):
     super().__init__(*args)
-    self.marks = []
+    self.marks = {}
 
   def setMarks(self, marks):
-    self.marks = list(marks)
-    self.update()
+    """ Set the marks as a dictionary of slider value: (R, G, B) colour of its tick """
+    marks = dict(marks)
+
+    # Colouring the photometry sets the marks on every mouse move, so only repaint when they change
+    if marks != self.marks:
+      self.marks = marks
+      self.update()
 
   def paintEvent(self, event):
     painter = QtWidgets.QStylePainter(self)
@@ -178,10 +183,10 @@ class MarkedSlider(QtWidgets.QSlider):
 
     # Groove centred on the handle, then the ticks, then a semi-transparent handle on top
     painter.drawPixmap(QtCore.QPointF(0, y - groove_y), pixmap)
-    painter.setPen(QtGui.QPen(QtGui.QColor(255, 0, 0), 1))
-    for mark in self.marks:
+    for mark, color in self.marks.items():
       x = groove.x() + handle_w/2 + QtWidgets.QStyle.sliderPositionFromValue(
         self.minimum(), self.maximum(), mark, groove.width() - handle_w)
+      painter.setPen(QtGui.QPen(QtGui.QColor(*color), 1))
       painter.drawLine(QtCore.QLineF(x, y - 2, x, y + 2))
 
     opt.subControls = sc.SC_SliderHandle

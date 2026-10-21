@@ -7296,9 +7296,7 @@ class PlateTool(QtWidgets.QMainWindow):
         # Plot gap colors
         self.pick_marker.addPoints(pos=data2, size=10, pen=gap_color)
 
-        # Mark the picked frames on the navigation slider
-        self.image_navigation_slider.setMarks(frame for frame, pick in sorted_picks.items()
-            if pick['x_centroid'] is not None)
+        self.updateNavigationSliderMarks()
 
 
         # Draw zoom window picks
@@ -7306,6 +7304,23 @@ class PlateTool(QtWidgets.QMainWindow):
         self.pick_marker2.addPoints(pos=current, size=30, pen=current_pen)
         self.pick_marker2.addPoints(pos=data1, size=10, pen=pick_color)
         self.pick_marker2.addPoints(pos=data2, size=10, pen=gap_color)
+
+    def updateNavigationSliderMarks(self):
+        """ Mark the picked frames on the navigation slider, in red, or in green when their photometry has been
+        coloured too (the green of the photometry colouring). """
+
+        marks = {}
+        for frame, pick in sorted(self.pick_list.items()):
+            if pick['x_centroid'] is None:
+                continue
+
+            photom_pixels = pick.get('photometry_pixels')
+            if (photom_pixels is not None) and (len(photom_pixels) > 0):
+                marks[frame] = (0, 255, 0)
+            else:
+                marks[frame] = (255, 0, 0)
+
+        self.image_navigation_slider.setMarks(marks)
 
     def updateFitResiduals(self):
         """ Draw fit residual lines. """
@@ -16601,6 +16616,8 @@ class PlateTool(QtWidgets.QMainWindow):
                     'photometry_pixels': photometry_pixels}
 
             self.pick_list[frame] = pick
+
+        self.updateNavigationSliderMarks()
 
 
     def getCurrentPick(self):
