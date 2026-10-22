@@ -110,6 +110,8 @@ def read(directory, filename, array=False, full_filename=False, memmap=True):
         ff.first = head['FIRST']
         ff.camno = head['CAMNO']
         ff.fps = head['FPS']
+        # Read the rescaling factor from the header, defaulting to 1.0 if not present
+        ff.rescaling_factor = head.get('RESCALE', 1.0)
 
         # Check for the DATE-OBS field and read datetime from filename it if it doesn't exist
         if 'DATE-OBS' in head:
