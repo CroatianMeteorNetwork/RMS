@@ -24,7 +24,8 @@ import tempfile
 import numpy as np
 
 from RMS.Astrometry.ApplyAstrometry import applyAstrometryFTPdetectinfo, xyToRaDecPP
-from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, raDec2Vector
+from RMS.Astrometry.Conversions import J2000_JD, datetime2JD, geo2Cartesian, raDec2Vector
+from RMS.Astrometry.CyFunctions import equatorialCoordPrecession
 from RMS.Detection import subframePickTime
 from RMS.Formats import FTPdetectinfo
 
@@ -114,14 +115,14 @@ def angularSeparation(ra1, dec1, ra2, dec2):
 
 
 def sunDirection(jd):
-    """ Unit vector of the direction of the Sun (equatorial, J2000), from ephem. """
+    """ Unit vector of the direction of the Sun (equatorial, epoch of date), from ephem. """
 
     import ephem
 
-    # ephem counts days from 1899 Dec 31 12:00 (JD 2415020.0)
+    # ephem counts days from 1899 Dec 31 12:00 (JD 2415020.0); ra/dec are the apparent coordinates of the date
     sun = ephem.Sun(ephem.Date(jd - 2415020.0))
 
-    return np.array(raDec2Vector(np.degrees(float(sun.a_ra)), np.degrees(float(sun.a_dec))))
+    return np.array(raDec2Vector(np.degrees(float(sun.ra)), np.degrees(float(sun.dec))))
 
 
 
@@ -130,7 +131,7 @@ def firstSunlitRange(jd, ra, dec, lat, lon, elev):
 
     Arguments:
         jd: [float] Julian date.
-        ra, dec: [float] Direction of the line of sight (deg).
+        ra, dec: [float] Direction of the line of sight (deg, J2000).
         lat, lon: [float] Position of the observer (deg).
         elev: [float] Elevation of the observer (m).
 
@@ -138,8 +139,11 @@ def firstSunlitRange(jd, ra, dec, lat, lon, elev):
         [float] Range (km), inf if the whole line of sight up to the last tested range is in the shadow.
     """
 
+    # The observer, the line of sight and the Sun in the same frame: equatorial, epoch of date (the observer from
+    #   the sidereal time, the J2000 line of sight precessed to the date)
     station = np.array(geo2Cartesian(lat, lon, elev, jd))/1000.0
-    sight = np.array(raDec2Vector(ra, dec))
+    ra_date, dec_date = equatorialCoordPrecession(J2000_JD.days, jd, np.radians(ra), np.radians(dec))
+    sight = np.array(raDec2Vector(np.degrees(ra_date), np.degrees(dec_date)))
     sun = sunDirection(jd)
 
     # A point is in the shadow if it is on the night side and within the radius of the Earth from the axis of the
