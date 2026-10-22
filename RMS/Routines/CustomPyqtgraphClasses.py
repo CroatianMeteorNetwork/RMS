@@ -4256,8 +4256,7 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.lim_mag.setDecimals(1)
         self.updateLimMag()
         self.lim_mag.valueModified.connect(self.onLimMagChanged)
-        self.lim_mag_label = QtWidgets.QLabel('Lim Mag')
-        form.addRow(self.lim_mag_label, self.lim_mag)
+        form.addRow(QtWidgets.QLabel('Lim Mag'), self.lim_mag)
 
         self.apparent_mag_corr = QtWidgets.QCheckBox('Correct Mag for Ext./Vign.')
         self.apparent_mag_corr.setToolTip(
@@ -4460,8 +4459,6 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.gui.photometry()
 
     def onSkyFit(self):
-        self.lim_mag.show()
-        self.lim_mag_label.show()
         self.apparent_mag_corr.show()
         self.std.show()
         self.std_label.show()
@@ -4490,8 +4487,6 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.updateShowCalStars()
 
     def onManualReduction(self):
-        self.lim_mag.hide()
-        self.lim_mag_label.hide()
         self.apparent_mag_corr.hide()
         self.std.hide()
         self.std_label.hide()
