@@ -875,7 +875,8 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_ye
                 show_plot=False,
                 xlim_shower_limits=True,
                 sol_marker=sol_ref,
-                publication_quality=publication_quality
+                publication_quality=publication_quality,
+                date_axis=(time_extent_flag != "ALL")
             )
 
             # Save the batch flux plot (full metadata)
@@ -888,7 +889,8 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_ye
                 show_plot=False,
                 xlim_shower_limits=True,
                 sol_marker=None,
-                publication_quality=publication_quality
+                publication_quality=publication_quality,
+                date_axis=(time_extent_flag != "ALL")
             )
 
             # Save the results to a CSV file

@@ -28,7 +28,7 @@ from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile
 from RMS.Formats.Showers import FluxShowers, loadRadiantShowers
 from Utils.Flux import calculatePopulationIndex, calculateMassIndex, computeFlux, detectClouds, fluxParser, \
     calculateFixedBins, calculateZHR, massVerniani, loadShower
-from RMS.Routines.SolarLongitude import unwrapSol
+from RMS.Routines.SolarLongitude import unwrapSol, jd2SolLonSteyaert, solLon2jdSteyaert
 from RMS.Misc import formatScientific, roundToSignificantDigits, SegmentedScale, mkdirP
 from RMS.QueuedPool import QueuedPool
 
@@ -1385,8 +1385,235 @@ def fluxBatch(
 
 
 
+# Month names used on the date axis (fixed so the labels don't depend on the system locale)
+DATE_AXIS_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+
+def solToDatetime(sol_deg, dt_ref, sol_ref_deg):
+    """ Find the datetime of the given solar longitude which is closest to the reference epoch.
+
+    Arguments:
+        sol_deg: [float] Solar longitude (deg), J2000.
+        dt_ref: [datetime] Reference epoch.
+        sol_ref_deg: [float] Solar longitude at the reference epoch (deg).
+
+    Return:
+        [datetime] Datetime (UTC) of the given solar longitude.
+    """
+
+    # Wrap the difference to +/-180 deg so showers crossing 0/360 resolve to the nearest epoch
+    dsol = (sol_deg - sol_ref_deg + 180)%360 - 180
+
+    # Guess the time using the mean solar motion, then refine it with the exact inversion (the guess only
+    #   needs to be within a month)
+    dt_guess = jd2Date(datetime2JD(dt_ref) + dsol/360*365.24219, dt_obj=True)
+    jd = solLon2jdSteyaert(dt_guess.year, dt_guess.month, np.radians(sol_deg%360))
+
+    return jd2Date(jd, dt_obj=True)
+
+
+def datetimeToSolPlot(dt, sol_ref_deg):
+    """ Compute the solar longitude of the given datetime, unwrapped to be within 180 deg of the reference
+        solar longitude, so it falls in the plotted range.
+
+    Arguments:
+        dt: [datetime] Datetime (UTC).
+        sol_ref_deg: [float] Reference solar longitude (deg).
+
+    Return:
+        [float] Solar longitude (deg).
+    """
+
+    sol_deg = np.degrees(jd2SolLonSteyaert(datetime2JD(dt)))
+
+    return sol_ref_deg + (sol_deg - sol_ref_deg + 180)%360 - 180
+
+
+def computeDateAxisTicks(dt_beg, dt_end, max_labels=12):
+    """ Choose the UTC tick positions and labels for a date axis covering the given time range. The label
+        step is chosen dynamically, from minutes for short outbursts to months for long showers.
+
+    Arguments:
+        dt_beg: [datetime] Beginning of the range (UTC).
+        dt_end: [datetime] End of the range (UTC).
+
+    Keyword arguments:
+        max_labels: [int] Maximum number of labelled ticks. 12 by default.
+
+    Return:
+        (major_dts, major_labels, minor_dts, axis_label):
+            - major_dts: [list] Datetimes of the labelled ticks.
+            - major_labels: [list] Tick labels.
+            - minor_dts: [list] Datetimes of the unlabelled ticks.
+            - axis_label: [str] Short label with the time scale and the year (or the date if no 00 UTC
+                tick shows it).
+    """
+
+    if dt_end < dt_beg:
+        dt_beg, dt_end = dt_end, dt_beg
+
+    span_minutes = (dt_end - dt_beg).total_seconds()/60
+
+    # Label steps in minutes. Steps shorter than a day divide the day evenly so 00 UTC is always labelled.
+    #   Longer steps are given as fixed days of the month so the labels don't shift from month to month.
+    step_list = [
+        (10, None), (15, None), (30, None), (60, None), (120, None), (180, None), (360, None), (720, None),
+        (1*1440, list(range(1, 32))),
+        (2*1440, list(range(1, 30, 2))),
+        (5*1440, [1, 6, 11, 16, 21, 26]),
+        (10*1440, [1, 11, 21]),
+        (15*1440, [1, 15]),
+        (30*1440, [1]),
+    ]
+
+    # Take the smallest step which doesn't produce too many labels (or the largest one available)
+    step_minutes, month_days = step_list[-1]
+    for step_minutes_temp, month_days_temp in step_list:
+        if span_minutes/step_minutes_temp <= max_labels:
+            step_minutes, month_days = step_minutes_temp, month_days_temp
+            break
+
+    day_beg = datetime.datetime(dt_beg.year, dt_beg.month, dt_beg.day)
+
+    def _dateStr(dt):
+        return "{:s} {:d}".format(DATE_AXIS_MONTHS[dt.month - 1], dt.day)
+
+    def _timeRange(step):
+        """ Generate datetimes between dt_beg and dt_end at the given step (timedelta) starting at 00 UTC. """
+        dt_list = []
+        dt = day_beg
+        while dt <= dt_end:
+            if dt >= dt_beg:
+                dt_list.append(dt)
+            dt += step
+        return dt_list
+
+
+    major_dts = []
+    major_labels = []
+    minor_dts = []
+
+    # Time of day labels, with the date shown at 00 UTC
+    if month_days is None:
+
+        major_dts = _timeRange(datetime.timedelta(minutes=step_minutes))
+        major_labels = [_dateStr(dt) if (dt.hour == 0) and (dt.minute == 0) else dt.strftime("%H:%M")
+            for dt in major_dts]
+
+        # Mark every hour if the labels are sparser than that
+        if step_minutes > 60:
+            minor_dts = [dt for dt in _timeRange(datetime.timedelta(hours=1)) if dt not in major_dts]
+
+    # Date labels, with every 00 UTC marked
+    else:
+
+        day_list = _timeRange(datetime.timedelta(days=1))
+        major_dts = [dt for dt in day_list if dt.day in month_days]
+        major_labels = [_dateStr(dt) for dt in major_dts]
+
+        # Skip the daily ticks for very long ranges where they would merge together
+        if span_minutes <= 120*1440:
+            minor_dts = [dt for dt in day_list if dt not in major_dts]
+
+
+    # Show the year, or the date if no 00 UTC label shows it
+    if dt_beg.year == dt_end.year:
+        year_str = "{:d}".format(dt_beg.year)
+    else:
+        year_str = "{:d}/{:02d}".format(dt_beg.year, dt_end.year%100)
+
+    if (month_days is None) and not any((dt.hour == 0) and (dt.minute == 0) for dt in major_dts):
+        axis_label = "UTC {:d} {:s}".format(dt_beg.year, _dateStr(dt_beg))
+    else:
+        axis_label = "UTC {:s}".format(year_str)
+
+    return major_dts, major_labels, minor_dts, axis_label
+
+
+def uniqueBinYears(bin_datetime_yearly):
+    """ Return a sorted list of unique years covered by the fixed bins (several entries can belong to the
+        same year).
+
+    Arguments:
+        bin_datetime_yearly: [list] Fixed bin datetimes, see calculateFixedBins.
+
+    Return:
+        [list] Years of the middle of each entry.
+    """
+
+    year_list = []
+    for (dt_bin_beg, dt_bin_end), _ in bin_datetime_yearly:
+
+        dt_mid = jd2Date((datetime2JD(dt_bin_beg) + datetime2JD(dt_bin_end))/2, dt_obj=True)
+        year_list.append(dt_mid.year)
+
+    return sorted(set(year_list))
+
+
+def addDateAxis(ax, dt_ref, sol_ref_deg, max_labels=12):
+    """ Add a UTC date axis on top of a plot with solar longitude on the X axis. Only valid for a single
+        year, as the time of a given solar longitude drifts between years.
+
+    Arguments:
+        ax: [Axes] Axis with the solar longitude (deg) on X.
+        dt_ref: [datetime] Reference epoch which determines the year.
+        sol_ref_deg: [float] Solar longitude at the reference epoch (deg).
+
+    Keyword arguments:
+        max_labels: [int] Maximum number of labelled ticks. 12 by default.
+
+    Return:
+        date_ax: [Axes] The date axis.
+    """
+
+    date_ax = ax.twiny()
+
+    # Keep the dates smaller than the main axis labels so they don't compete with the title
+    date_ax.tick_params(axis='x', which='major', labelsize='small')
+
+    # Instead of a full axis label, put the time scale and the year in the top left corner, in line with
+    #   the tick labels
+    tick_offset = plt.rcParams['xtick.major.size'] + plt.rcParams['xtick.major.pad']
+    corner_label = date_ax.annotate("", xy=(0, 1), xycoords='axes fraction', xytext=(-4, tick_offset),
+        textcoords='offset points', ha='right', va='bottom', fontsize='small')
+
+    def _updateTicks(ax_changed):
+
+        x_min, x_max = ax_changed.get_xlim()
+        date_ax.set_xlim(x_min, x_max)
+
+        dt_beg = solToDatetime(x_min, dt_ref, sol_ref_deg)
+        dt_end = solToDatetime(x_max, dt_ref, sol_ref_deg)
+
+        major_dts, major_labels, minor_dts, axis_label = computeDateAxisTicks(dt_beg, dt_end,
+            max_labels=max_labels)
+
+        major_x = [datetimeToSolPlot(dt, sol_ref_deg) for dt in major_dts]
+        minor_x = [datetimeToSolPlot(dt, sol_ref_deg) for dt in minor_dts]
+
+        # A label right at the left edge would run into the corner label, so keep only its tick
+        edge_x = x_min + 0.03*(x_max - x_min)
+        major_x, major_labels, edge_minor_x = (
+            [x for x in major_x if x >= edge_x],
+            [label for x, label in zip(major_x, major_labels) if x >= edge_x],
+            [x for x in major_x if x < edge_x]
+        )
+
+        date_ax.set_xticks(major_x)
+        date_ax.set_xticklabels(major_labels)
+        date_ax.set_xticks(minor_x + edge_minor_x, minor=True)
+        corner_label.set_text(axis_label)
+
+    _updateTicks(ax)
+
+    # Keep the dates in sync when the plot is zoomed in the interactive window
+    ax.callbacks.connect('xlim_changed', _updateTicks)
+
+    return date_ax
+
+
 def plotBatchFlux(fbr, dir_path, output_filename, only_flux=False, compute_single=False, show_plot=True,
-    xlim_shower_limits=False, sol_marker=None, publication_quality=False):
+    xlim_shower_limits=False, sol_marker=None, publication_quality=False, date_axis=True):
     """ Make a plot showing the batch flux results. 
     
     Arguments:
@@ -1404,6 +1631,8 @@ def plotBatchFlux(fbr, dir_path, output_filename, only_flux=False, compute_singl
             None by default, in which case the marker will not be plotted.
         publication_quality: [bool] If True, make the plot publication quality with no grid, larger font,
             and only keeping the flux and TAP subplots, not the individual parameters. False by default.
+        date_axis: [bool] Add a UTC date axis on top of the flux plot. It is only added if all data is from
+            a single year. True by default.
     """
 
 
@@ -1764,7 +1993,19 @@ def plotBatchFlux(fbr, dir_path, output_filename, only_flux=False, compute_singl
     if xlim_shower_limits:
         ax[0].set_xlim(fbr.shower.lasun_beg, fbr.shower.lasun_end)
 
-    
+
+    # Add the UTC date on top of the flux plot. Skip it for multi-year data because the time of a given
+    #   solar longitude drifts between years.
+    if date_axis and len(fbr.comb_sol) and (len(uniqueBinYears(fbr.bin_datetime_yearly)) == 1):
+
+        # Take the reference epoch in the middle of the fixed bins
+        dt_list = fbr.bin_datetime_yearly[0][1]
+        ref_idx = len(dt_list)//2
+
+        addDateAxis(ax[0], dt_list[ref_idx], np.degrees(fbr.sol_bins[ref_idx])%360,
+            max_labels=(8 if publication_quality else 12))
+
+
     plt.tight_layout()
 
     fig_path = os.path.join(dir_path, output_filename + ".png")
