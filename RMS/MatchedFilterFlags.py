@@ -376,16 +376,13 @@ def saveFlaggedDetections(flagged, img_handle, config, output_dir, platepar, chu
         with open(out_path, 'w') as f:
             f.write(text.replace(tmp_dir, output_dir))
 
-        # The flags, by the image and the number of every detection in the file. The writer may reorder the
-        #   detections, so every entry is paired with the flagged detection which starts at its first point
+        # The flags, by the image and the number of every detection in the file. The writer keeps the order of
+        #   the detections, so the entries read back are paired with the flagged detections in order
         entries = FTPdetectinfo.readFTPdetectinfo(output_dir, name)
-        starts = np.array([np.asarray(entry[0][2])[0, 1:3] for entry in flagged], dtype=np.float64)
         with open(os.path.splitext(out_path)[0] + '.csv', 'w') as f:
             writer = csv.writer(f)
             writer.writerow(['ff_name', 'meteor_no', 'flags', 'peak_mag', 'sunlit_ratio'])
-            for entry in entries:
-                first = np.array(entry[11][0][2:4], dtype=np.float64)
-                _, det_flags, det_values = flagged[int(np.argmin(np.hypot(*(starts - first).T)))]
+            for entry, (_, det_flags, det_values) in zip(entries, flagged):
                 writer.writerow([entry[0], int(entry[2]), ';'.join(det_flags),
                                  '{:.2f}'.format(det_values.get('peak_mag', np.nan)),
                                  '{:.2f}'.format(det_values.get('sunlit_ratio', np.nan))])

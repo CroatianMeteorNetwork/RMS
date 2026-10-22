@@ -5043,8 +5043,8 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
         max_tracks: [int] Largest number of candidate tracks which are measured. None by default
             (mf_max_tracks).
         track_deviation: [bool] Whether the detections which wander from a smooth path are removed (see
-            removeDeviatingDetections). False for the segments of an input, whose whole tracks are judged after
-            they are joined. True by default.
+            removeDeviatingDetections and removeWanderingDetections). False for the segments of an input, whose
+            whole tracks are judged after they are joined. True by default.
 
     Return:
         [list] Detections as [rho, theta, centroids], or (detections, detector) with return_detector. The
@@ -5125,6 +5125,7 @@ def detectRange(img_handle, config, mask=None, dark=None, flat_struct=None, star
         detector.opts.max_tracks = max_tracks
     if not track_deviation:
         detector.opts.track_deviation_fwhm = 0.0
+        detector.opts.wander_fwhm = 0.0
     detector.sky_map = skyQuality(img_handle, config, star_list, platepar, reference_dir=reference_dir,
                                   input_name=input_name, frame_range=(sky_range or frame_range),
                                   update=update_sky)

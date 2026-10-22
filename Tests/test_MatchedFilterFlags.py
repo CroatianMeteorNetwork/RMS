@@ -346,3 +346,21 @@ def test_times_from_recorded_frames():
 
     kept, flagged = F.splitFlagged(dets, _GapHandle(MIDNIGHT, 35), config, makePlatepar())
     assert (len(kept), flagged) == (2, [])
+
+
+def test_flags_csv_pairs_by_detection(tmp_path):
+    """ Two flagged detections which start at the same position at different times keep their own flags in the
+        CSV. """
+
+    config = makeConfig()
+    first = wanderingDetection(2.0, 0.0)
+    later = wanderingDetection(2.0, 0.0)
+    later[2] = later[2].copy()
+    later[2][:, 0] += 1000
+    flagged = [(first, ['aircraft'], {'peak_mag': 2.0, 'sunlit_ratio': 3.0}),
+               (later, ['not_sunlit'], {'peak_mag': 7.0, 'sunlit_ratio': 9.0})]
+
+    path = F.saveFlaggedDetections(flagged, _Handle(MIDNIGHT), config, str(tmp_path), makePlatepar())
+    rows = [row.split(',') for row in open(path.replace('.txt', '.csv')).read().splitlines()[1:]]
+
+    assert [(row[2], row[3]) for row in rows] == [('aircraft', '2.00'), ('not_sunlit', '7.00')]
