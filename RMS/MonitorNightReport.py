@@ -1472,6 +1472,11 @@ def generateNightReport(output_dir, night_name, config, results=None, archive=Tr
         _runStep('matched_filter_merge', lambda: mergeNightMatchedFilter(night_dir,
             [os.path.join(output_dir, results_dir) for results_dir in sorted(results)], config))
 
+        # The flagged detections of the matched filter (saved apart from the results) in one file of the night
+        from RMS.MatchedFilterFlags import mergeNightFlagged
+        _runStep('flagged_merge', lambda: mergeNightFlagged(night_dir,
+            [os.path.join(output_dir, results_dir) for results_dir in sorted(results)], config))
+
     upload_files = []
     recalibration = None
     if merged is not None:

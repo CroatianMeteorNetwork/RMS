@@ -486,6 +486,11 @@ class MatchedFilterOptions(object):
         self.speed_min = config.mf_ang_vel_min/scale/fps
         self.speed_max = config.mf_ang_vel_max/scale/fps
 
+        # The long and slow tracks which may not wander from a smooth path (see removeWanderingDetections), in px
+        #   per frame of the unbinned frames and in frames
+        self.wander_fwhm = config.mf_wander_fwhm
+        self.wander_speed, self.wander_frames = wanderLimits(config, fps, size)
+
         # The block length, corrected to a whole number of runs and measurements (see matchedFilterBlockFrames)
         fixed = matchedFilterBlockFrames(config)
         if fixed != self.block_frames:
@@ -2951,10 +2956,14 @@ class MatchedFilterDetector(object):
 
         # The whole tracks which wander sideways from one smooth path are no objects (e.g. pieces of diffuse
         #   light)
-        detections, rejected = removeDeviatingDetections(detections, 2.355*self.psf_sigma*self.det_bin
-                                                         if self.psf_sigma is not None else None,
-                                                         self.opts.track_deviation_fwhm,
+        fwhm = 2.355*self.psf_sigma*self.det_bin if self.psf_sigma is not None else None
+        detections, rejected = removeDeviatingDetections(detections, fwhm, self.opts.track_deviation_fwhm,
                                                          self.opts.track_deviation_length)
+        self.deviation_rejected += len(rejected)
+
+        # Neither are the long tracks of barely moving light which stray around (counted with the above)
+        detections, rejected = removeWanderingDetections(detections, fwhm, self.opts.wander_fwhm,
+                                                         self.opts.wander_speed, self.opts.wander_frames)
         self.deviation_rejected += len(rejected)
 
         # The kept normalized frames are not needed any more (a segmented input keeps the detector of every
@@ -5520,6 +5529,98 @@ def removeDeviatingDetections(detections, fwhm, fwhm_factor, length_factor):
     return kept, rejected
 
 
+def trackWander(cent):
+    """ How far a track strays from one smooth path in any direction: the RMS distance of its rows from a quadratic
+        in time fitted to x and to y. Unlike trackDeviation it also counts the distance along the motion, which is
+        what goes back and forth on a track which barely moves.
+
+    Arguments:
+        cent: [ndarray] Rows of the detection, [frame, x, y, ...], sorted by frame.
+
+    Return:
+        [float] The RMS distance (px), 0 for fewer than 5 rows.
+    """
+
+    if (len(cent) < 5) or (np.ptp(cent[:, 0]) <= 0):
+        return 0.0
+
+    # The time scaled to -0.5 .. 0.5, so the fit is well conditioned for long tracks
+    t = (cent[:, 0] - cent[:, 0].mean())/np.ptp(cent[:, 0])
+    dx = cent[:, 1] - np.polyval(np.polyfit(t, cent[:, 1], 2), t)
+    dy = cent[:, 2] - np.polyval(np.polyfit(t, cent[:, 2], 2), t)
+
+    return float(np.sqrt(np.mean(dx**2 + dy**2)))
+
+
+def removeWanderingDetections(detections, fwhm, fwhm_factor, max_speed, min_frames):
+    """ Remove the long tracks of barely moving light which stray from one smooth path (see trackWander) by more
+        than fwhm_factor PSF FWHMs. A real object which moves this little in a frame stays on a smooth path to well
+        within its PSF, while diffuse light (e.g. a patch of cloud lit from below) wanders around. Only tracks
+        slower than max_speed which last at least min_frames are judged: on a fast or short track the measurements
+        scatter along the motion more.
+
+    Arguments:
+        detections: [list] Detections as [rho, theta, centroids] (unbinned).
+        fwhm: [float or function] FWHM of the PSF (px, unbinned), or a function which gives it for the rows of a
+            detection (see removeDeviatingDetections).
+        fwhm_factor: [float] Wander allowed (FWHMs), 0 to keep all.
+        max_speed: [float] Tracks at least this fast (px/frame, unbinned) are kept.
+        min_frames: [float] Tracks shorter than this (frames) are kept.
+
+    Return:
+        (detections, rejected): [tuple] The detections kept, and (first frame, wander, limit) of the removed ones.
+    """
+
+    # The test is off, or the PSF is unknown
+    if (fwhm_factor <= 0) or (fwhm is None):
+        return list(detections), []
+
+    kept, rejected = [], []
+    for det in detections:
+        cent = det[2]
+
+        # Only long and slow tracks with a known PSF are judged
+        frames = float(cent[-1, 0] - cent[0, 0])
+        speed = float(np.hypot(*(cent[-1, 1:3] - cent[0, 1:3])))/frames if frames > 0 else 0.0
+        track_fwhm = fwhm(cent) if callable(fwhm) else fwhm
+        if (frames < min_frames) or (speed >= max_speed) or (track_fwhm is None):
+            kept.append(det)
+            continue
+
+        wander = trackWander(cent)
+        limit = fwhm_factor*track_fwhm
+        if wander > limit:
+            rejected.append((float(cent[0, 0]), wander, limit))
+            log.info('Matched filter: detection {:.0f}-{:.0f} moves {:.3f} px/frame and strays from a smooth path '
+                     'by {:.2f} px RMS (more than {:.2f} px), rejected'.format(cent[0, 0], cent[-1, 0], speed,
+                                                                             wander, limit))
+        else:
+            kept.append(det)
+
+    return kept, rejected
+
+
+def wanderLimits(config, fps, size=None):
+    """ The speed (px/frame, unbinned) and the length (frames) of the tracks judged by removeWanderingDetections,
+        from mf_wander_ang_vel (deg/s) and mf_wander_duration (s).
+
+    Arguments:
+        config: [Config] Configuration.
+        fps: [float] Frame rate.
+
+    Keyword arguments:
+        size: [tuple] (height, width) of the frames, config.height and config.width if None.
+
+    Return:
+        (max_speed, min_frames): [tuple of floats]
+    """
+
+    height, width = size if size else (config.height, config.width)
+    scale = (config.fov_h/float(height) + config.fov_w/float(width))/2.0
+
+    return config.mf_wander_ang_vel/scale/fps, config.mf_wander_duration*fps
+
+
 def removeInvalidDetections(detections, detector):
     """ The detections which pass the checks of a detection (see isValidDetection). """
 
@@ -6154,6 +6255,12 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
     detections, deviating = removeDeviatingDetections(detections, segmentFWHM, config.mf_track_deviation_fwhm,
                                                       config.mf_track_deviation_length)
 
+    # And the joined long tracks of barely moving light which stray around (counted with the above)
+    max_speed, min_frames = wanderLimits(config, getattr(img_handle, 'fps', None) or config.fps)
+    detections, wandering = removeWanderingDetections(detections, segmentFWHM, config.mf_wander_fwhm, max_speed,
+                                                      min_frames)
+    deviating += wandering
+
     timing['segments_total'] = time() - t0
     log.info('Matched filter: {:d} detections in {:d} segments, {:d} frames read once ({:d} outside the '
              'segments), {:.1f} min'.format(len(detections), len(ranges), buffer.frames_read, buffer.frames_outside,
@@ -6190,10 +6297,32 @@ def saveMatchedFilterResults(detections, star_list, img_handle, config, output_d
         ecsv_out: [bool] Save the detections as ECSV files. False by default.
 
     Return:
-        [str] Path of the FTPdetectinfo.
+        (ftp_path, flagged): [tuple] Path of the FTPdetectinfo, and the number of the detections flagged and saved
+            apart (see RMS.MatchedFilterFlags).
     """
 
+    from RMS.MatchedFilterFlags import saveFlaggedDetections, splitFlagged
+
     os.makedirs(output_dir, exist_ok=True)
+
+    # The detections which are real light but not reflected sunlight (aircraft, ...) are saved apart, in their own
+    #   file which no tool takes for the results (see RMS.MatchedFilterFlags)
+    platepar = None
+    if platepar_path:
+
+        # Platepar.read returns False for a missing file (and nothing otherwise), a damaged file raises
+        try:
+            platepar = Platepar()
+            if platepar.read(platepar_path) is False:
+                platepar = None
+        except Exception:
+            log.warning('Matched filter: the platepar {:s} can\'t be read, nothing is flagged'.format(platepar_path))
+            platepar = None
+    detections, flagged = splitFlagged(detections, img_handle, config, platepar)
+    flagged_path = saveFlaggedDetections(flagged, img_handle, config, output_dir, platepar,
+                                         chunk_frames=chunk_frames, chunk_images=chunk_images)
+    if flagged_path:
+        log.info('Matched filter: {:d} flagged detections saved to: {:s}'.format(len(flagged), flagged_path))
 
     # The FTPdetectinfo and CALSTARS, written as for the normal detection but with the suffix of the matched
     #   filter, so the two never overwrite each other
@@ -6209,7 +6338,7 @@ def saveMatchedFilterResults(detections, star_list, img_handle, config, output_d
         applyRecalibrate(ftp_path, config, generate_plot=False, load_all=load_all, generate_ufoorbit=False,
                          ecsv_out=ecsv_out)
 
-    return ftp_path
+    return ftp_path, len(flagged)
 
 
 
@@ -6354,14 +6483,14 @@ def processFile(file_path, config, output_dir, platepar_path=None, dark_path=Non
                                                star_list=star_list, return_detector=True, platepar=platepar,
                                                reference_dir=reference_dir, input_name=os.path.abspath(file_path))
 
-    ftp_path = saveMatchedFilterResults(detections, star_list, img_handle, config, output_dir,
-                                        platepar_path=platepar_path,
-                                        chunk_frames=getattr(img_handle, 'chunk_frames', 128))
+    ftp_path, flagged = saveMatchedFilterResults(detections, star_list, img_handle, config, output_dir,
+                                                 platepar_path=platepar_path,
+                                                 chunk_frames=getattr(img_handle, 'chunk_frames', 128))
 
     # The done file is written last, so a file with a done file was processed completely
     return saveSummary(output_dir, detector, input_file=os.path.abspath(file_path),
-                       ftpdetectinfo=os.path.basename(ftp_path), detections=len(detections),
-                       stars_extracted=bool(star_list), processing_time_s=round(time() - t0, 1))
+                       ftpdetectinfo=os.path.basename(ftp_path), detections=len(detections) - flagged,
+                       flagged=flagged, stars_extracted=bool(star_list), processing_time_s=round(time() - t0, 1))
 
 
 

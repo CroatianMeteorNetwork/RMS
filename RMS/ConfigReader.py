@@ -995,6 +995,33 @@ class Config:
         self.mf_track_deviation_fwhm = 0.6
         self.mf_track_deviation_length = 0.005
 
+        # Largest RMS distance (PSF FWHMs) of a long track of barely moving light from one smooth path in any
+        #   direction (a quadratic in time): tracks slower than mf_wander_ang_vel (deg/s) which last at least
+        #   mf_wander_duration (s) and stray around more are rejected (e.g. diffuse light). 0 turns the test off
+        self.mf_wander_fwhm = 0.3
+        self.mf_wander_ang_vel = 0.15
+        self.mf_wander_duration = 3.0
+
+        # Detections which are real light but don't shine by reflected sunlight are saved apart from the results,
+        #   in FlaggedDetections_*.txt (in the format of an FTPdetectinfo) with the reasons in FlaggedDetections_*.csv
+        #   (see RMS.MatchedFilterFlags). Not sunlit: wherever along the line of sight the source would have to be for
+        #   its angular velocity to come from at most mf_flag_sunlit_speed km/s across the line of sight, it would be
+        #   in the shadow of the Earth, by more than a factor mf_flag_sunlit_factor in distance.
+        #   mf_flag_sunlit_speed 0 turns the flag off
+        self.mf_flag_sunlit_speed = 8.0
+        self.mf_flag_sunlit_factor = 2.0
+
+        # Aircraft: a detection brighter than mf_flag_aircraft_mag at its peak with another one as bright within
+        #   mf_flag_aircraft_gap s of it, or with another detection moving alongside it at the same time (direction
+        #   within mf_flag_parallel_angle deg, speed within the fraction mf_flag_parallel_speed, at most
+        #   mf_flag_parallel_offset deg to the side), which can't be sunlit (see above). mf_flag_aircraft_mag 0 turns
+        #   the flag off
+        self.mf_flag_aircraft_mag = 4.0
+        self.mf_flag_aircraft_gap = 1.0
+        self.mf_flag_parallel_angle = 3.0
+        self.mf_flag_parallel_speed = 0.15
+        self.mf_flag_parallel_offset = 0.7
+
         # Stars brighter than this in the median of the frames (in the noise of the sky in one frame) are masked
         self.mf_star_threshold = 3.0
 
@@ -2499,7 +2526,10 @@ def parseMatchedFilter(config, parser):
                  "mf_min_sample_snr", "mf_star_threshold", "mf_persistence", "mf_clip", "mf_trail_level", "mf_min_displacement",
                  "mf_sigma_scale", "mf_track_significance", "mf_tier_speed", "mf_cloud_max_offset",
                  "mf_buffer_memory", "mf_cache_memory", "mf_line_concentration", "mf_track_deviation_fwhm",
-                 "mf_track_deviation_length", "mf_faint_threshold"):
+                 "mf_track_deviation_length", "mf_faint_threshold", "mf_wander_fwhm", "mf_wander_ang_vel",
+                 "mf_wander_duration", "mf_flag_sunlit_speed", "mf_flag_sunlit_factor", "mf_flag_aircraft_mag",
+                 "mf_flag_aircraft_gap", "mf_flag_parallel_angle", "mf_flag_parallel_speed",
+                 "mf_flag_parallel_offset"):
         if parser.has_option(section, name):
             setattr(config, name, parser.getfloat(section, name))
 

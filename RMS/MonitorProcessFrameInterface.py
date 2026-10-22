@@ -1433,13 +1433,19 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
                                                                                               config.ff_min_stars))
                     meteor_list, mf_detector = [], None
 
+            # The detections which are real light but not reflected sunlight (aircraft, ...) are saved apart from
+            #   the results, below (see RMS.MatchedFilterFlags)
+            from RMS.MatchedFilterFlags import splitFlagged
+            mf_platepar = readPlatepar(results_platepar_path)
+            meteor_list, mf_flagged = splitFlagged(meteor_list, mf_handle, config, mf_platepar)
+
             # The summary of the matched filter is saved as its done file in the results directory. The
             #   detections themselves are saved below with the stars, as the results of the normal detection
             saveSummary(results_dir, mf_detector, input_file=os.path.abspath(file_path),
-                        detections=len(meteor_list), max_stars=max_stars,
+                        detections=len(meteor_list), flagged=len(mf_flagged), max_stars=max_stars,
                         processing_time_s=round(time.time() - mf_t0, 1))
-            proc_log.info("Matched filter (replacing the normal detection): {:d} detections".format(
-                len(meteor_list)))
+            proc_log.info("Matched filter (replacing the normal detection): {:d} detections, {:d} flagged and "
+                          "saved apart".format(len(meteor_list), len(mf_flagged)))
 
         else:
 
@@ -1467,6 +1473,14 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
             chunk_frames=chunk_frames, output_dir=results_dir,
             chunk_images=chunk_images
         )
+
+        # The flagged detections of the matched filter, in their own file which no tool takes for the results
+        if mf_only:
+            from RMS.MatchedFilterFlags import saveFlaggedDetections
+            flagged_path = saveFlaggedDetections(mf_flagged, mf_handle, config, results_dir, mf_platepar,
+                                                 chunk_frames=chunk_frames, chunk_images=chunk_images)
+            if flagged_path:
+                proc_log.info("Flagged detections saved to: {}".format(flagged_path))
 
         proc_log.info("Detection results saved to: {}".format(results_dir))
 
@@ -1506,17 +1520,18 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
                 # Save the FTPdetectinfo and CALSTARS of the matched filter in its subdirectory, assigned to the
                 #   same chunk images as the normal detections, and recalibrate them with the platepar of the
                 #   results
-                mf_ftp_path = saveMatchedFilterResults(
+                mf_ftp_path, mf_flagged = saveMatchedFilterResults(
                     mf_detections, star_list, img_handle, config, mf_dir,
                     platepar_path=results_platepar_path, chunk_frames=chunk_frames,
                     chunk_images=(image_saver.chunk_images if image_saver is not None else None),
                     ecsv_out=config.monitor_save_ecsv)
                 # The done file is written last: the night report only merges the results which have one
                 saveSummary(mf_dir, mf_detector, input_file=os.path.abspath(file_path),
-                            ftpdetectinfo=os.path.basename(mf_ftp_path), detections=len(mf_detections),
+                            ftpdetectinfo=os.path.basename(mf_ftp_path),
+                            detections=len(mf_detections) - mf_flagged, flagged=mf_flagged,
                             processing_time_s=round(time.time() - mf_t0, 1))
-                proc_log.info("Matched filter: {:d} detections saved to: {}".format(len(mf_detections),
-                                                                                    mf_ftp_path))
+                proc_log.info("Matched filter: {:d} detections saved to: {} ({:d} flagged and saved apart)".format(
+                    len(mf_detections) - mf_flagged, mf_ftp_path, mf_flagged))
 
             except Exception:
                 proc_log.error("The matched-filter detection failed:\n" + traceback.format_exc())
