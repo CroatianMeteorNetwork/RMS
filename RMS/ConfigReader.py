@@ -469,8 +469,8 @@ class Config:
         self.event_monitor_check_interval = 30
         self.event_monitor_check_interval_fast = 5
 
-
-
+        ##### Compression
+        self.hdu_compress = False
 
         ##### Weave compilation arguments
         self.extra_compile_args = getCompileArgs()
@@ -1432,7 +1432,11 @@ def parseBuildArgs(config, parser):
 
 def parseCompression(config, parser):
     section = "Compression"
-    pass
+    if not parser.has_section(section):
+        return
+    
+    if parser.has_option(section, "hdu_compress"):
+        config.hdu_compress = parser.getboolean(section, "hdu_compress")
 
 
 
