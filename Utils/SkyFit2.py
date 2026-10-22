@@ -3644,6 +3644,8 @@ class PlateTool(QtWidgets.QMainWindow):
             self.cursor.hide()
             self.cursor2.hide()
             self.fr_box.hide()
+            self.distortion_center_marker.show()
+            self.distortion_center_marker2.show()
 
             if not first_time and self.img.img_handle.input_type != 'dfn':
                 self.img_zoom.loadImage(self.mode, self.img_type_flag)
@@ -3683,9 +3685,12 @@ class PlateTool(QtWidgets.QMainWindow):
             self.skyfit_button.setDisabled(False)
             self.manualreduction_button.setDisabled(True)
 
-            # The pointing indicator is only relevant in skyfit mode
+            # The pointing indicator and the optical axis cross under it are only relevant in skyfit mode, and
+            #   the cross looks like a pick
             if hasattr(self, 'pointing_indicator'):
                 self.pointing_indicator.hide()
+                self.distortion_center_marker.hide()
+                self.distortion_center_marker2.hide()
 
             self.img_type_flag = 'avepixel'
             self.tab.settings.updateMaxAvePixel()
