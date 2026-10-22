@@ -3,6 +3,8 @@
 
 from __future__ import print_function, division, absolute_import
 
+import argparse
+
 import numpy as np
 
 import matplotlib.pyplot as plt
@@ -139,13 +141,30 @@ def findUnsaturatedMagnitude(app_mag, photom_offset, bg_val, fps, ang_vel, gauss
 
 if __name__ == "__main__":
 
+    arg_parser = argparse.ArgumentParser(description="""Simulate the saturation of a moving meteor \
+modelled as a moving Gaussian, and plot the apparent vs actual magnitude for a range of PSF sizes.""")
 
-    photom_offset = 10.7
+    arg_parser.add_argument('-p', '--photomoffset', metavar='PHOTOM_OFFSET', type=float, default=10.7,
+        help='Photometric offset. Default: 10.7.')
 
+    arg_parser.add_argument('-b', '--background', metavar='BACKGROUND_LVL', type=float, default=60,
+        help='Background level (0-255). Default: 60.')
 
-    background_lvl = 60
-    fps = 25
-    ang_vel = 250 # px/s
+    arg_parser.add_argument('-f', '--fps', metavar='FPS', type=float, default=25,
+        help='Frames per second of the simulated camera. Default: 25.')
+
+    arg_parser.add_argument('-a', '--angvel', metavar='ANG_VEL', type=float, default=250,
+        help='Angular velocity of the meteor in px/s. Default: 250.')
+
+    arg_parser.add_argument('-s', '--stddevs', metavar='GAUSS_STDDEV', type=float, nargs='+',
+        default=[1.5, 1.3, 1.15], help='Gaussian PSF standard deviations to simulate. Default: 1.5 1.3 1.15.')
+
+    cml_args = arg_parser.parse_args()
+
+    photom_offset = cml_args.photomoffset
+    background_lvl = cml_args.background
+    fps = cml_args.fps
+    ang_vel = cml_args.angvel # px/s
 
 
     #print(findUnsaturatedMagnitude(-0.5, photom_offset, 50, 25, 100, 1))
@@ -156,8 +175,8 @@ if __name__ == "__main__":
     app_mag_range = np.append(np.linspace(-0.5, 2, 1000), np.linspace(2, 6, 10))
 
 
-    # Generate a range of gaussian stddevs
-    gauss_stddevs = [1.5, 1.3, 1.15]
+    # Range of gaussian stddevs to simulate
+    gauss_stddevs = cml_args.stddevs
 
 
 
