@@ -25,6 +25,7 @@ import numpy as np
 
 from RMS.Astrometry.ApplyAstrometry import applyAstrometryFTPdetectinfo, xyToRaDecPP
 from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, raDec2Vector
+from RMS.Detection import subframePickTime
 from RMS.Formats import FTPdetectinfo
 
 log = logging.getLogger("logger")
@@ -224,13 +225,15 @@ def flagTracks(tracks, lat, lon, elev, config):
     flags = [[] for _ in tracks]
     values = [{} for _ in tracks]
 
-    # The ratio of the sunlit range is needed by both tests
-    if config.mf_flag_sunlit_speed > 0:
-        for i, track in enumerate(tracks):
-            values[i]['sunlit_ratio'] = sunlitRatio(track, lat, lon, elev, config.mf_flag_sunlit_speed)
+    # The ratio of the sunlit range, needed by both flags. Without a largest speed it can't be computed, and then
+    #   neither flag is applied (the aircraft flag must not take a sunlit group of objects for aircraft)
+    if config.mf_flag_sunlit_speed <= 0:
+        return flags, values
+    for i, track in enumerate(tracks):
+        values[i]['sunlit_ratio'] = sunlitRatio(track, lat, lon, elev, config.mf_flag_sunlit_speed)
 
-    # Not sunlit
-    if config.mf_flag_sunlit_speed > 0:
+    # Not sunlit (mf_flag_sunlit_factor 0 turns this flag alone off)
+    if config.mf_flag_sunlit_factor > 0:
         for i in range(len(tracks)):
             if values[i]['sunlit_ratio'] > config.mf_flag_sunlit_factor:
                 flags[i].append('not_sunlit')
@@ -244,9 +247,7 @@ def flagTracks(tracks, lat, lon, elev, config):
         peaks = [track.peakMagnitude() for track in tracks]
         for i, track in enumerate(tracks):
             values[i]['peak_mag'] = peaks[i]
-            if peaks[i] > config.mf_flag_aircraft_mag:
-                continue
-            if values[i].get('sunlit_ratio', np.inf) < 1.0:
+            if (peaks[i] > config.mf_flag_aircraft_mag) or (values[i]['sunlit_ratio'] < 1.0):
                 continue
 
             for j, other in enumerate(tracks):
@@ -264,13 +265,14 @@ def flagTracks(tracks, lat, lon, elev, config):
 
 
 
-def detectionTrack(det, begin_datetime, fps, platepar):
+def detectionTrack(det, img_handle, fps, platepar):
     """ The Track of a detection of the matched filter, with the coordinates and magnitudes from the platepar.
 
     Arguments:
         det: [list] Detection as [rho, theta, centroids], centroids rows [frame, x, y, intensity, ...].
-        begin_datetime: [datetime] Time of the frame 0 of the input.
-        fps: [float] Frame rate.
+        img_handle: [FrameInterface] Input of the detection: the times of its points are the recorded times of
+            their frames (gaps and dropped frames included), as for the results (see Detection.subframePickTime).
+        fps: [float] Frame rate, for the fractional part of the frame numbers.
         platepar: [Platepar] Platepar of the camera.
 
     Return:
@@ -278,7 +280,7 @@ def detectionTrack(det, begin_datetime, fps, platepar):
     """
 
     cent = np.asarray(det[2], dtype=np.float64)
-    jd = datetime2JD(begin_datetime) + cent[:, 0]/fps/86400.0
+    jd = np.array([datetime2JD(subframePickTime(img_handle, frame, fps)) for frame in cent[:, 0]])
     _, ra, dec, mag = xyToRaDecPP(jd, cent[:, 1], cent[:, 2], np.maximum(cent[:, 3], 1.0), platepar,
                                   jd_time=True, extinction_correction=False)
 
@@ -291,7 +293,7 @@ def splitFlagged(detections, img_handle, config, platepar):
 
     Arguments:
         detections: [list] Detections as [rho, theta, centroids].
-        img_handle: [FrameInterface] Input of the detections (its first frame and frame rate give the times).
+        img_handle: [FrameInterface] Input of the detections (the recorded times of its frames).
         config: [Config] Configuration.
         platepar: [Platepar] Platepar of the camera; without one, nothing is flagged.
 
@@ -301,11 +303,12 @@ def splitFlagged(detections, img_handle, config, platepar):
 
     # Nothing to flag: the detections are returned as they are
     if (platepar is None) or (not detections) \
-            or ((config.mf_flag_aircraft_mag == 0) and (config.mf_flag_sunlit_speed <= 0)):
+            or (config.mf_flag_sunlit_speed <= 0) \
+            or ((config.mf_flag_aircraft_mag == 0) and (config.mf_flag_sunlit_factor <= 0)):
         return detections, []
 
     fps = img_handle.fps if getattr(img_handle, 'fps', None) else config.fps
-    tracks = [detectionTrack(det, img_handle.beginning_datetime, fps, platepar) for det in detections]
+    tracks = [detectionTrack(det, img_handle, fps, platepar) for det in detections]
     flags, values = flagTracks(tracks, platepar.lat, platepar.lon, platepar.elev, config)
 
     kept, flagged = [], []

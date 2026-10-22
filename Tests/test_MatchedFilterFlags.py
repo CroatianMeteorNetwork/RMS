@@ -282,3 +282,67 @@ def test_flagged_file_name_and_merge(tmp_path):
     merged = F.mergeNightFlagged(str(night), [str(results)], config)
     assert merged.endswith('FlaggedDetections_XX0001_20261022_000000_000000.txt')
     assert len(FTPdetectinfo.readFTPdetectinfo(str(night), merged.split('/')[-1])) == 2
+
+
+
+### Options and times ###
+
+def test_flags_off():
+    """ mf_flag_sunlit_factor 0 turns only the not-sunlit flag off; mf_flag_sunlit_speed 0 turns both off, so a
+        bright sunlit group is never taken for aircraft. """
+
+    ra, dec = antiSun(MIDNIGHT)
+    a = makeTrack(MIDNIGHT, ra, dec, 1.0, mag=2.5)
+    b = makeTrack(MIDNIGHT, ra + 2, dec, 1.0, mag=3.0, y0=300)
+
+    flags, _ = F.flagTracks([a, b], LAT, LON, ELEV, makeConfig(mf_flag_sunlit_factor=0))
+    assert flags == [['aircraft'], ['aircraft']]
+
+    flags, values = F.flagTracks([a, b], LAT, LON, ELEV, makeConfig(mf_flag_sunlit_speed=0))
+    assert flags == [[], []]
+    assert values == [{}, {}]
+
+    sunlit = [makeTrack(NOON, ra, dec, 1.0, mag=2.5), makeTrack(NOON, ra, dec, 1.0, mag=2.5, offset=(0, 20))]
+    flags, _ = F.flagTracks(sunlit, LAT, LON, ELEV, makeConfig(mf_flag_sunlit_speed=0))
+    assert flags == [[], []]
+
+
+class _GapHandle(_Handle):
+    """ Frame-based input whose recording stops after a frame and resumes an hour later. """
+
+    def __init__(self, beginning, gap_frame, fps=32.0):
+        super(_GapHandle, self).__init__(beginning, fps=fps)
+        self.gap_frame = gap_frame
+
+    def currentFrameTime(self, frame_no=0, dt_obj=False):
+        """ Time of a frame (datetime), an hour later from the gap on. """
+
+        t = super(_GapHandle, self).currentFrameTime(frame_no=frame_no, dt_obj=dt_obj)
+
+        return t + datetime.timedelta(hours=1) if frame_no >= self.gap_frame else t
+
+
+def brightDetection(first, x0, y0):
+    """ A bright detection of 32 frames moving 1.8 px/frame along x (about 1 deg/s). """
+
+    f = np.arange(first, first + 32, dtype=np.float64)
+    n = len(f)
+    cent = np.column_stack([f, x0 + 1.8*(f - first), np.full(n, y0), np.full(n, 1e6), np.full(n, 50.0),
+                            np.full(n, 100.0), np.zeros(n)])
+
+    return [0.0, 0.0, cent]
+
+
+def test_times_from_recorded_frames():
+    """ Two bright detections a few frames apart are aircraft; across a gap of the recording they are an hour
+        apart, and are not. """
+
+    # Only the aircraft flag
+    config = makeConfig(mf_flag_sunlit_factor=0)
+    dets = [brightDetection(0, 100, 200), brightDetection(40, 100, 350)]
+
+    kept, flagged = F.splitFlagged(dets, _Handle(MIDNIGHT), config, makePlatepar())
+    assert (len(kept), [f[1] for f in flagged]) == (0, [['aircraft'], ['aircraft']])
+
+    kept, flagged = F.splitFlagged(dets, _GapHandle(MIDNIGHT, 35), config, makePlatepar())
+    assert (len(kept), flagged) == (2, [])

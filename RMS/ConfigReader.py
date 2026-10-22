@@ -1007,7 +1007,8 @@ class Config:
         #   (see RMS.MatchedFilterFlags). Not sunlit: wherever along the line of sight the source would have to be for
         #   its angular velocity to come from at most mf_flag_sunlit_speed km/s across the line of sight, it would be
         #   in the shadow of the Earth, by more than a factor mf_flag_sunlit_factor in distance.
-        #   mf_flag_sunlit_speed 0 turns the flag off
+        #   mf_flag_sunlit_factor 0 turns this flag off; mf_flag_sunlit_speed 0 turns both flags off (the aircraft flag
+        #   needs it to tell a sunlit group of objects from aircraft)
         self.mf_flag_sunlit_speed = 8.0
         self.mf_flag_sunlit_factor = 2.0
 
