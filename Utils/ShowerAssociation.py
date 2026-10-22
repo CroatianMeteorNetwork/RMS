@@ -14,7 +14,7 @@ import numpy as np
 import matplotlib.colors as mcolors
 
 from RMS.Astrometry.Conversions import (EARTH_CONSTANTS, datetime2JD,
-                                        jd2Date, raDec2AltAz, raDec2Vector,
+                                        jd2Date, trueRaDec2ApparentAltAz, raDec2Vector,
                                         vector2RaDec, AEH2Range)
 from RMS.Formats.FFfile import filenameToDatetime
 from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile, readFTPdetectinfo
@@ -112,11 +112,11 @@ class MeteorSingleStation(object):
         self.beg_vect = self.cartesian_points[0]
         self.end_vect = self.cartesian_points[-1]
 
-        # Compute alt of the beginning and the last point
-        self.beg_azim, self.beg_alt = raDec2AltAz(self.ra_array[0], self.dec_array[0], self.jd_array[0],
-            self.lat, self.lon)
-        self.end_azim, self.end_alt = raDec2AltAz(self.ra_array[-1], self.dec_array[-1], self.jd_array[-1],
-            self.lat, self.lon)
+        # Compute alt of the beginning and the last point (the centroid RA/Dec are J2000)
+        self.beg_azim, self.beg_alt = trueRaDec2ApparentAltAz(self.ra_array[0], self.dec_array[0],
+            self.jd_array[0], self.lat, self.lon, refraction=False)
+        self.end_azim, self.end_alt = trueRaDec2ApparentAltAz(self.ra_array[-1], self.dec_array[-1],
+            self.jd_array[-1], self.lat, self.lon, refraction=False)
 
 
         # Fit a great circle through observations
@@ -269,9 +269,9 @@ class MeteorSingleStation(object):
             
 
             # Compute alt/az at the peak magnitude point
-            self.peak_azim, self.peak_alt = raDec2AltAz(
+            self.peak_azim, self.peak_alt = trueRaDec2ApparentAltAz(
                 self.ra_array[peak_mag_index], self.dec_array[peak_mag_index],
-                self.jd_array[peak_mag_index], self.lat, self.lon)
+                self.jd_array[peak_mag_index], self.lat, self.lon, refraction=False)
 
             # Get the range to the meteor at the reference height
             r = AEH2Range(self.peak_azim, self.peak_alt, ref_height, self.lat, self.lon, self.elev)
@@ -339,17 +339,19 @@ def estimateMeteorHeight(config, meteor_obj, shower):
     
     # Compute beginning point vector in alt/az
     beg_ra, beg_dec = vector2RaDec(meteor_obj.beg_vect)
-    beg_azim, beg_alt = raDec2AltAz(beg_ra, beg_dec, meteor_obj.jdt_ref, meteor_obj.lat, meteor_obj.lon)
+    beg_azim, beg_alt = trueRaDec2ApparentAltAz(beg_ra, beg_dec, meteor_obj.jdt_ref, meteor_obj.lat,
+        meteor_obj.lon, refraction=False)
     beg_vect_horiz = raDec2Vector(beg_azim, beg_alt)
 
     # Compute end point vector in alt/az
     end_ra, end_dec = vector2RaDec(meteor_obj.end_vect)
-    end_azim, end_alt = raDec2AltAz(end_ra, end_dec, meteor_obj.jdt_ref, meteor_obj.lat, meteor_obj.lon)
+    end_azim, end_alt = trueRaDec2ApparentAltAz(end_ra, end_dec, meteor_obj.jdt_ref, meteor_obj.lat,
+        meteor_obj.lon, refraction=False)
     end_vect_horiz = raDec2Vector(end_azim, end_alt)
 
     # Compute radiant vector in alt/az
-    radiant_azim, radiant_alt = raDec2AltAz(shower.ra, shower.dec, meteor_obj.jdt_ref, meteor_obj.lat,
-        meteor_obj.lon)
+    radiant_azim, radiant_alt = trueRaDec2ApparentAltAz(shower.ra, shower.dec, meteor_obj.jdt_ref,
+        meteor_obj.lat, meteor_obj.lon, refraction=False)
     radiant_vector_horiz = raDec2Vector(radiant_azim, radiant_alt)
 
 
@@ -658,8 +660,8 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
 
 
             # Compute the radiant elevation above the horizon
-            shower.azim, shower.elev = raDec2AltAz(shower.ra, shower.dec, meteor_obj.jdt_ref,
-                config.latitude, config.longitude)
+            shower.azim, shower.elev = trueRaDec2ApparentAltAz(shower.ra, shower.dec, meteor_obj.jdt_ref,
+                config.latitude, config.longitude, refraction=False)
 
 
             ### Compute the association score ###
@@ -822,8 +824,8 @@ def showerAssociation(config, ftpdetectinfo_list, shower_code=None, show_plot=Fa
             ra_gc, dec_gc = meteor_obj.sampleGC(phase_angles)
 
             # Cull all points below the horizon
-            azim_gc, elev_gc = raDec2AltAz(ra_gc, dec_gc, meteor_obj.jdt_ref, config.latitude,
-                config.longitude)
+            azim_gc, elev_gc = trueRaDec2ApparentAltAz(ra_gc, dec_gc, meteor_obj.jdt_ref, config.latitude,
+                config.longitude, refraction=False)
             temp_arr = np.c_[ra_gc, dec_gc]
             temp_arr = temp_arr[elev_gc > 0]
             ra_gc, dec_gc = temp_arr.T

@@ -61,7 +61,8 @@ import RMS.ConfigReader as cr
 import json
 
 from RMS.Formats.CALSTARS import readCALSTARS
-from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm, raDec2Vector, raDec2AltAz
+from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm, raDec2Vector, \
+    trueRaDec2ApparentAltAz
 from RMS.Astrometry.Conversions import latLonAlt2ECEF, AER2LatLonAlt, AEH2Range, ECEF2AltAz, ecef2LatLonAlt, jd2Date
 from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
 from RMS.Logger import getLogger, getLoggingQueue, initChildProcess
@@ -3367,7 +3368,7 @@ def calstarRaDecToDict(data_dir_path, config, pp, pp_recal_json, r_target, d_tar
                                                                 intens_sum_list, ra, dec, bg_lvl_list,
                                                                  amp_list, FWHM_list, mag_arr, x_list,
                                                                  y_list, snr_list, NSatPx_list):
-            az, el = raDec2AltAz(r, d, j, pp.lat, pp.lon)
+            az, el = trueRaDec2ApparentAltAz(r, d, j, pp.lat, pp.lon, refraction=False)
             radius = np.hypot(y - pp.Y_res/2, x - pp.X_res/2)
             actual_deviation_degrees = angularSeparationDeg(r_target, d_target, r, d)
             vignetting, offset = pp.vignetting_coeff, pp.mag_lev
