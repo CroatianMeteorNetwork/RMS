@@ -863,3 +863,66 @@ def test_sections_are_judged_with_their_own_photometry(monkeypatch):
     assert all(s.get('held_out_ok') for s in info['sections'] if s['fitted'])
     assert candidate.vignetting_coeff == pytest.approx(0.00027)
     assert all(fitted)
+
+
+### Chunk times ###
+
+def _writeChunk(dir_path, name, x, y, ff_frames):
+    """ Write a CALSTARS file with one chunk of stars at the given positions. """
+
+    from RMS.Formats import CALSTARS
+
+    rows = [[yi, xi, 1000, 100, 2.0, 20, 50, 0] for xi, yi in zip(x, y)]
+    CALSTARS.writeCALSTARS([[name, rows]], str(dir_path), 'CALSTARS_XX0001_test.txt', 'XX0001', 720, 1280,
+                           chunk_frames=ff_frames)
+
+
+def test_chunk_time_is_the_middle_of_its_frames(tmp_path):
+    """ The stars of a chunk are measured on its frames stacked together, so the time of a chunk is the middle of its
+        frames, the same as the recalibration of the chunk uses, not the time of its first frame. """
+
+    from RMS.Astrometry.Conversions import date2JD, datetime2JD
+    from RMS.Formats import FFfile
+
+    config = cr.parse(REPO_CONFIG)
+    config.fps = 10.0
+    name = 'FF_XX0001_20261021_031500_000_0000000.fits'
+    _writeChunk(tmp_path, name, [100.0], [200.0], 128)
+
+    chunks, ff_frames = ac.readChunks(str(tmp_path), config)
+
+    # 128 frames at 10 fps: the middle is 6.4 s after the first frame
+    assert ff_frames == 128
+    assert abs((chunks[0][1] - datetime2JD(FFfile.filenameToDatetime(name)))*86400 - 6.4) < 1e-3
+    assert chunks[0][1] == date2JD(*FFfile.getMiddleTimeFF(name, config.fps, ret_milliseconds=True, ff_frames=128))
+
+
+def test_chunk_read_from_its_calstars_is_scored_at_its_time(tmp_path):
+    """ A platepar which fits the stars of a chunk exactly scores a distance near zero on the chunk read from its
+        CALSTARS file: the stars are where the sky was in the middle of the chunk (128 frames at 10 fps, 6.4 s after
+        its first frame, which would shift the stars by about 0.4 px on this camera). """
+
+    from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
+    from RMS.Astrometry.Conversions import date2JD
+    from RMS.Formats import FFfile
+
+    config = cr.parse(REPO_CONFIG)
+    config.width, config.height, config.fps = 1280, 720, 10.0
+    platepar = _platepar()
+    name = 'FF_XX0001_20261021_031500_000_0000000.fits'
+    jd_mid = date2JD(*FFfile.getMiddleTimeFF(name, config.fps, ret_milliseconds=True, ff_frames=128))
+
+    # Stars over the image, and the catalog stars where they are on the sky in the middle of the chunk
+    rng = np.random.default_rng(3)
+    x, y = rng.uniform(40, 1240, 200), rng.uniform(40, 680, 200)
+    _, ra, dec, _ = xyToRaDecPP(np.full(len(x), jd_mid), x, y, np.ones(len(x)), platepar,
+                                extinction_correction=False, jd_time=True)
+    catalog_stars = np.column_stack([ra, dec, np.full(len(x), 3.0)])
+    _writeChunk(tmp_path, name, x, y, 128)
+
+    # The chunk read from its file and scored with the platepar as it is
+    chunks, ff_frames = ac.readChunks(str(tmp_path), config)
+    score = ac.scorePlatepar(platepar, chunks, catalog_stars, config, ff_frames=ff_frames, recalibrate=False)
+
+    assert score.n_matched > 150
+    assert score.dist < 0.02

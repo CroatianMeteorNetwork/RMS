@@ -1355,28 +1355,33 @@ def readChunks(results_dir, config):
         config: [Config] Configuration.
 
     Return:
-        (chunks, ff_frames): [tuple] Chunks as (name, jd, stars) sorted in time, and the frames of a chunk.
+        (chunks, ff_frames): [tuple] Chunks as (name, jd, stars) sorted in time, jd the middle of the chunk, and
+            the frames of a chunk.
     """
 
-    from RMS.Astrometry.Conversions import datetime2JD
+    from RMS.Astrometry.Conversions import date2JD
     from RMS.Formats import CALSTARS
-    from RMS.Formats.FFfile import filenameToDatetime
+    from RMS.Formats.FFfile import getMiddleTimeFF
 
     # The CALSTARS file of the file
     names = [name for name in os.listdir(results_dir) if name.startswith('CALSTARS') and name.endswith('.txt')]
     if not names:
         return [], 256
 
-    # The chunks with their times (a chunk whose name has no time is skipped)
+    # The chunks with their times (a chunk whose name has no time is skipped). The stars are measured on the
+    #   frames of a chunk stacked together, so their positions are those of the middle of the chunk: its time is
+    #   the middle, the same as the recalibration of the chunk uses (recalibratePlateparsForFF)
     calstars, ff_frames = CALSTARS.readCALSTARS(results_dir, sorted(names)[0])
+    ff_frames = ff_frames if ff_frames else 256
     chunks = []
     for name, stars in calstars:
         try:
-            chunks.append((name, datetime2JD(filenameToDatetime(name)), np.array(stars, dtype=np.float64)))
+            jd = date2JD(*getMiddleTimeFF(name, config.fps, ret_milliseconds=True, ff_frames=ff_frames))
         except Exception:
             continue
+        chunks.append((name, jd, np.array(stars, dtype=np.float64)))
 
-    return sorted(chunks, key=lambda chunk: chunk[1]), (ff_frames if ff_frames else 256)
+    return sorted(chunks, key=lambda chunk: chunk[1]), ff_frames
 
 
 def _platepar(path, use_flat):
