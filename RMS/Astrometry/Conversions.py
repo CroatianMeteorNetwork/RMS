@@ -259,7 +259,8 @@ def jd2UnixTime(jd, UT_corr=0):
 
 
 def JD2LST(julian_date, lon):
-    """ Convert Julian date to Local Sidereal Time and Greenwich Sidereal Time.
+    """ Convert Julian date to Local Sidereal Time and Greenwich Sidereal Time. Both are mean, not apparent,
+        like cyjd2LST in CyFunctions.
 
     Arguments;
         julian_date: [float] decimal julian date, epoch J2000.0
@@ -314,7 +315,7 @@ def LST2LongitudeEast(julian_date, LST):
         lon: [float] longitude of the observer in degrees
     """
 
-    # Greenwich Sidereal Time (apparent)
+    # Greenwich Sidereal Time (mean)
     _, GST = JD2LST(julian_date, 0)
 
     # Calculate longitude
