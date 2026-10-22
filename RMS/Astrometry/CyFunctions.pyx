@@ -1017,6 +1017,278 @@ cdef int radialTermCount(str dist_type):
         return 4
 
 
+
+### EXACT INVERSE OF THE FORWARD DISTORTION ###
+#
+# cyraDecToXY can take the sky to the image through the forward distortion (x_poly_fwd) instead of the separately
+#   fitted reverse one (x_poly_rev), so that the two directions are exact inverses of each other. A radial model
+#   keeps the direction from the distortion centre and only rescales the radius, which makes its inverse one root
+#   in one variable; the polynomial models and the decentering correction are inverted by Newton's method in the
+#   image plane.
+
+# Not-a-number, for points the forward distortion cannot reach
+cdef double NAN_VALUE = float("nan")
+
+# Upper end, in radius normalized to half the image width, of the search for the rising branch of a radial model
+cdef double RADIAL_BRANCH_LIMIT = 4.0
+
+
+cdef int radialKind(str dist_type):
+    """ The radial distortion type as a number, so that the per-point root does not compare strings. """
+
+    if dist_type == "radial3-all":
+        return 0
+    elif dist_type == "radial4-all":
+        return 1
+    elif dist_type == "radial5-all":
+        return 2
+    elif dist_type == "radial3-odd":
+        return 3
+    elif dist_type == "radial5-odd":
+        return 4
+    elif dist_type == "radial7-odd":
+        return 5
+    else:
+        return 6
+
+
+cdef (double, double) radialFunction(double r, int kind, double k1, double k2, double k3, double k4):
+    """ The corrected radius f(r) of a radial model, as cyXYToRADec computes it, and its derivative f'(r). """
+
+    if kind == 0:
+        return r + k1*r**2 + k2*r**3, 1.0 + 2*k1*r + 3*k2*r**2
+    elif kind == 1:
+        return r + k1*r**2 + k2*r**3 + k3*r**4, 1.0 + 2*k1*r + 3*k2*r**2 + 4*k3*r**3
+    elif kind == 2:
+        return r + k1*r**2 + k2*r**3 + k3*r**4 + k4*r**5, 1.0 + 2*k1*r + 3*k2*r**2 + 4*k3*r**3 + 5*k4*r**4
+    elif kind == 3:
+        return r + k1*r**3, 1.0 + 3*k1*r**2
+    elif kind == 4:
+        return r + k1*r**3 + k2*r**5, 1.0 + 3*k1*r**2 + 5*k2*r**4
+    elif kind == 5:
+        return r + k1*r**3 + k2*r**5 + k3*r**7, 1.0 + 3*k1*r**2 + 5*k2*r**4 + 7*k3*r**6
+    else:
+        return (r + k1*r**3 + k2*r**5 + k3*r**7 + k4*r**9,
+            1.0 + 3*k1*r**2 + 5*k2*r**4 + 7*k3*r**6 + 9*k4*r**8)
+
+
+cdef double radialBranchEnd(int kind, double k1, double k2, double k3, double k4):
+    """ Where the rising branch of f, starting at f(0) = 0, ends: the first point where f' falls to zero. Beyond
+        it the model folds back and has no inverse.
+    """
+
+    cdef int i, n = 4000
+    cdef double r, lo, hi, mid, f, df
+
+    for i in range(1, n + 1):
+        r = RADIAL_BRANCH_LIMIT*i/n
+        f, df = radialFunction(r, kind, k1, k2, k3, k4)
+        if df <= 0:
+
+            # Refine the turning point by bisection
+            lo = RADIAL_BRANCH_LIMIT*(i - 1)/n
+            hi = r
+            for _ in range(60):
+                mid = 0.5*(lo + hi)
+                f, df = radialFunction(mid, kind, k1, k2, k3, k4)
+                if df > 0:
+                    lo = mid
+                else:
+                    hi = mid
+            return lo
+
+    return RADIAL_BRANCH_LIMIT
+
+
+cdef double radialRoot(double target, int kind, double k1, double k2, double k3, double k4, double r_end,
+    double f_end):
+    """ The radius r >= 0 on the rising branch of f with f(r) = target, by Newton's method kept inside a
+        bisection bracket. NaN if the target lies beyond the branch.
+    """
+
+    cdef int i
+    cdef double lo = 0.0, hi = r_end, r, f, df, g, nxt
+
+    if (target < 0) or (target > f_end):
+        return NAN_VALUE
+
+    r = target if target < r_end else r_end
+    for i in range(100):
+        f, df = radialFunction(r, kind, k1, k2, k3, k4)
+        g = f - target
+        if g == 0:
+            return r
+        elif g < 0:
+            lo = r
+        else:
+            hi = r
+
+        nxt = r - g/df if df > 0 else 0.5*(lo + hi)
+        if not ((nxt > lo) and (nxt < hi)):
+            nxt = 0.5*(lo + hi)
+
+        if fabs(nxt - r) <= 1e-15*(1.0 + r):
+            return nxt
+        r = nxt
+
+    return r
+
+
+cdef (double, double) forwardDistortion(double x_img, double y_img, str dist_type, double[:] x_poly,
+    double[:] y_poly, double x0, double y0, double xy, double a1, double a2, double k1, double k2, double k3,
+    double k4, bint decentering_corr, double p1, double p2, double p3, double p4, double x_res):
+    """ The distortion of cyXYToRADec: image coordinates relative to the image centre to corrected ones, both in
+        pixels. Kept identical to the block in cyXYToRADec, which the round-trip tests check.
+    """
+
+    cdef double r, dx = 0, dy = 0, r_corr, r_scale, u, v, r2, q1, q2
+
+    if dist_type.startswith("poly3+radial"):
+
+        r = sqrt((x_img - x0)**2 + (y_img - y0)**2)
+
+        dx = (x0
+            + x_poly[1]*x_img
+            + x_poly[2]*y_img
+            + x_poly[3]*x_img**2
+            + x_poly[4]*x_img*y_img
+            + x_poly[5]*y_img**2
+            + x_poly[6]*x_img**3
+            + x_poly[7]*x_img**2*y_img
+            + x_poly[8]*x_img*y_img**2
+            + x_poly[9]*y_img**3
+            + x_poly[10]*x_img*r
+            + x_poly[11]*y_img*r)
+
+        dy = (y0
+            + y_poly[1]*x_img
+            + y_poly[2]*y_img
+            + y_poly[3]*x_img**2
+            + y_poly[4]*x_img*y_img
+            + y_poly[5]*y_img**2
+            + y_poly[6]*x_img**3
+            + y_poly[7]*x_img**2*y_img
+            + y_poly[8]*x_img*y_img**2
+            + y_poly[9]*y_img**3
+            + y_poly[10]*y_img*r
+            + y_poly[11]*x_img*r)
+
+        if dist_type.endswith("+radial3") or dist_type.endswith("+radial5"):
+            dx += x_poly[12]*x_img*r**3
+            dy += y_poly[12]*y_img*r**3
+
+        if dist_type.endswith("+radial5"):
+            dx += x_poly[13]*x_img*r**5
+            dy += y_poly[13]*y_img*r**5
+
+    elif dist_type.startswith("radial"):
+
+        r = sqrt((x_img - x0)**2 + ((1.0 + xy)*(y_img - y0))**2)
+        r = r + a1*(1.0 + xy)*(y_img - y0)*cos(a2) - a1*(x_img - x0)*sin(a2)
+        r = r/(x_res/2.0)
+
+        r_corr, _ = radialFunction(r, radialKind(dist_type), k1, k2, k3, k4)
+
+        if r == 0:
+            r_scale = 0
+        else:
+            r_scale = (r_corr/r - 1)
+
+        dx = (x_img - x0)*r_scale - x0
+        dy = (y_img - y0)*r_scale*(1.0 + xy) - y0*(1.0 + xy) + y_img*xy
+
+        if decentering_corr:
+            u = (x_img - x0)/(x_res/2.0)
+            v = (y_img - y0)/(x_res/2.0)
+            r2 = u*u + v*v
+            q1 = p1 + p3*r2
+            q2 = p2 + p4*r2
+            dx += (q1*(r2 + 2*u*u) + 2*q2*u*v)*(x_res/2.0)
+            dy += (2*q1*u*v + q2*(r2 + 2*v*v))*(x_res/2.0)
+
+    return x_img + dx, y_img + dy
+
+
+cdef (double, double) invertDistortionNewton(double x_corr, double y_corr, double x_img, double y_img,
+    str dist_type, double[:] x_poly, double[:] y_poly, double x0, double y0, double xy, double a1, double a2,
+    double k1, double k2, double k3, double k4, bint decentering_corr, double p1, double p2, double p3,
+    double p4, double x_res):
+    """ The image coordinates (relative to the image centre) that forwardDistortion takes to (x_corr, y_corr), by
+        Newton's method from (x_img, y_img), with a central-difference Jacobian and the step halved whenever it
+        would not reduce the error.
+    """
+
+    cdef int i, j
+    cdef double h = 1e-4, fx, fy, gx, gy, err, ax, ay, bx, by, cx, cy, ex, ey, j11, j12, j21, j22, det
+    cdef double sx, sy, scale, tx, ty, err_new
+
+    for i in range(50):
+
+        fx, fy = forwardDistortion(x_img, y_img, dist_type, x_poly, y_poly, x0, y0, xy, a1, a2, k1, k2, k3, k4,
+            decentering_corr, p1, p2, p3, p4, x_res)
+        gx = fx - x_corr
+        gy = fy - y_corr
+        err = sqrt(gx*gx + gy*gy)
+        if err < 1e-10:
+            break
+
+        ax, ay = forwardDistortion(x_img + h, y_img, dist_type, x_poly, y_poly, x0, y0, xy, a1, a2, k1, k2, k3,
+            k4, decentering_corr, p1, p2, p3, p4, x_res)
+        bx, by = forwardDistortion(x_img - h, y_img, dist_type, x_poly, y_poly, x0, y0, xy, a1, a2, k1, k2, k3,
+            k4, decentering_corr, p1, p2, p3, p4, x_res)
+        cx, cy = forwardDistortion(x_img, y_img + h, dist_type, x_poly, y_poly, x0, y0, xy, a1, a2, k1, k2, k3,
+            k4, decentering_corr, p1, p2, p3, p4, x_res)
+        ex, ey = forwardDistortion(x_img, y_img - h, dist_type, x_poly, y_poly, x0, y0, xy, a1, a2, k1, k2, k3,
+            k4, decentering_corr, p1, p2, p3, p4, x_res)
+        j11 = (ax - bx)/(2*h)
+        j21 = (ay - by)/(2*h)
+        j12 = (cx - ex)/(2*h)
+        j22 = (cy - ey)/(2*h)
+        det = j11*j22 - j12*j21
+        if det == 0:
+            return NAN_VALUE, NAN_VALUE
+
+        sx = -(gx*j22 - gy*j12)/det
+        sy = -(gy*j11 - gx*j21)/det
+
+        scale = 1.0
+        for j in range(30):
+            tx = x_img + scale*sx
+            ty = y_img + scale*sy
+            fx, fy = forwardDistortion(tx, ty, dist_type, x_poly, y_poly, x0, y0, xy, a1, a2, k1, k2, k3, k4,
+                decentering_corr, p1, p2, p3, p4, x_res)
+            err_new = sqrt((fx - x_corr)**2 + (fy - y_corr)**2)
+            if err_new < err:
+                break
+            scale *= 0.5
+
+        if not (err_new < err):
+            break
+
+        x_img = tx
+        y_img = ty
+
+    if err > 1e-6:
+        return NAN_VALUE, NAN_VALUE
+
+    # A solution where the distortion reverses the orientation of the image (it does not at the image centre)
+    #   lies beyond a fold of the polynomial, on a second sheet that is not the image of the sky: no inverse
+    ax, ay = forwardDistortion(x_img + h, y_img, dist_type, x_poly, y_poly, x0, y0, xy, a1, a2, k1, k2, k3, k4,
+        decentering_corr, p1, p2, p3, p4, x_res)
+    bx, by = forwardDistortion(x_img - h, y_img, dist_type, x_poly, y_poly, x0, y0, xy, a1, a2, k1, k2, k3, k4,
+        decentering_corr, p1, p2, p3, p4, x_res)
+    cx, cy = forwardDistortion(x_img, y_img + h, dist_type, x_poly, y_poly, x0, y0, xy, a1, a2, k1, k2, k3, k4,
+        decentering_corr, p1, p2, p3, p4, x_res)
+    ex, ey = forwardDistortion(x_img, y_img - h, dist_type, x_poly, y_poly, x0, y0, xy, a1, a2, k1, k2, k3, k4,
+        decentering_corr, p1, p2, p3, p4, x_res)
+    if ((ax - bx)*(cy - ey) - (cx - ex)*(ay - by)) <= 0:
+        return NAN_VALUE, NAN_VALUE
+
+    return x_img, y_img
+
+### ###
+
+
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
@@ -1025,7 +1297,8 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
     double y_res, double h0, double jd_ref, double ra_ref, double dec_ref, double pos_angle_ref, 
     double pix_scale, np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_rev, 
     np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_rev, str dist_type, bool refraction=True, bool equal_aspect=False, 
-    bool force_distortion_centre=False, bool asymmetry_corr=True, bool decentering_corr=False):
+    bool force_distortion_centre=False, bool asymmetry_corr=True, bool decentering_corr=False,
+    bool invert_forward=False):
     """ Convert RA, Dec to distortion corrected image coordinates. 
 
     Arguments:
@@ -1055,6 +1328,10 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
             default.
         decentering_corr: [bool] Correct the radial distortion for decentering (a lens element off the optical
             axis, Brown-Conrady): the coefficients p1, p2, p3, p4 follow the radial ones. False by default.
+        invert_forward: [bool] x_poly_rev and y_poly_rev hold the FORWARD distortion (x_poly_fwd, y_poly_fwd),
+            and the image coordinates are those the forward distortion takes to the sky coordinates, so that this
+            function is the exact inverse of cyXYToRADec. A point the forward distortion cannot reach (beyond the
+            first maximum of a radial model) is returned as NaN. False by default.
     
     Return:
         (x, y): [tuple of ndarrays] Image X and Y coordinates.
@@ -1063,7 +1340,10 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
     cdef int i
     cdef double ra_centre, dec_centre, ra, dec
     cdef double radius, sin_ang, cos_ang, theta, x, y, r, dx, dy, x_img, y_img, r_corr, r_scale
-    cdef double x0, y0, xy, a1, a2, k1, k2, k3, k4, k5
+    cdef double x0, y0, xy, a1, a2, k1 = 0, k2 = 0, k3 = 0, k4 = 0, k5 = 0
+    cdef double radius_corr, phi, asym, rho, q, r_end = 0, f_end = 0
+    cdef int kind = 6
+    cdef bint radial_root = False
     cdef double p1 = 0, p2 = 0, p3 = 0, p4 = 0, u, v, r2, q1, q2
     cdef int index_offset
 
@@ -1177,6 +1457,17 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
         y0 = y_poly_rev[0]
 
 
+    # The distortion arrays as memory views, for the inverse's per-point calls
+    cdef double[:] x_poly_view = x_poly_rev
+    cdef double[:] y_poly_view = y_poly_rev
+
+    # The rising branch of a radial model, for its inverse
+    if invert_forward and dist_type.startswith("radial") and (not decentering_corr):
+        radial_root = True
+        kind = radialKind(dist_type)
+        r_end = radialBranchEnd(kind, k1, k2, k3, k4)
+        f_end, _ = radialFunction(r_end, kind, k1, k2, k3, k4)
+
     # Convert all equatorial coordinates to image coordinates
     for i in range(ra_data.shape[0]):
 
@@ -1204,6 +1495,34 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
         y = degrees(radius)*sin(theta)*pix_scale
 
         ### ###
+
+        # Invert the forward distortion: (x, y) are the corrected coordinates the forward distortion produces
+        if invert_forward:
+
+            if radial_root:
+
+                # Direction from the distortion centre is kept; only the radius is rescaled
+                radius_corr = sqrt(x*x + y*y)
+                phi = atan2(y, x)
+                asym = 1.0 + a1*sin(phi - a2)
+                rho = radialRoot(radius_corr*asym/(x_res/2.0), kind, k1, k2, k3, k4, r_end, f_end) \
+                    if asym > 0 else NAN_VALUE
+                q = rho*(x_res/2.0)/asym
+                x_img = q*cos(phi) + x0
+                y_img = q*sin(phi)/(1.0 + xy) + y0
+
+            else:
+
+                # Polynomial models and decentering: Newton's method in the image plane, from the undistorted
+                #   position
+                x_img, y_img = invertDistortionNewton(x, y, x, y, dist_type, x_poly_view, y_poly_view, x0, y0,
+                    xy if dist_type.startswith("radial") else 0.0, a1 if dist_type.startswith("radial") else 0.0,
+                    a2 if dist_type.startswith("radial") else 0.0, k1, k2, k3, k4, decentering_corr, p1, p2, p3, p4,
+                    x_res)
+
+            x_array[i] = x_img + x_res/2.0
+            y_array[i] = y_img + y_res/2.0
+            continue
 
         # Set initial distortion values
         dx = 0
