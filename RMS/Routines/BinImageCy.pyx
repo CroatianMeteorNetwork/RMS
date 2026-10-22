@@ -62,9 +62,10 @@ def binImage(np.ndarray[INT16_TYPE_t, ndim=2] img, int bin_factor, method='avg')
 
 
     if method == 'avg':
-        
-        # If the average is needed, divide the whole image by the bin factor^2
-        out_img = out_img//(bin_factor**2)
+
+        # If the average is needed, divide the whole image by the bin factor^2, rounding
+        # (adding half the divisor before the floor division)
+        out_img = (out_img + (bin_factor*bin_factor)//2)//(bin_factor**2)
 
 
     return out_img
