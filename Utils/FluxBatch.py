@@ -1424,12 +1424,14 @@ def datetimeToSolPlot(dt, sol_ref_deg):
         [float] Solar longitude (deg).
     """
 
+    # Compute the position of the Sun at the given time
     sol_deg = np.degrees(jd2SolLonSteyaert(datetime2JD(dt)))
 
+    # Add or remove full revolutions so the value lands on the same part of the axis as the plotted data
     return sol_ref_deg + (sol_deg - sol_ref_deg + 180)%360 - 180
 
 
-def computeDateAxisTicks(dt_beg, dt_end, max_labels=12):
+def computeDateAxisTicks(dt_beg, dt_end, max_labels=12, label_beg=None):
     """ Choose the UTC tick positions and labels for a date axis covering the given time range. The label
         step is chosen dynamically, from minutes for short outbursts to months for long showers.
 
@@ -1439,6 +1441,8 @@ def computeDateAxisTicks(dt_beg, dt_end, max_labels=12):
 
     Keyword arguments:
         max_labels: [int] Maximum number of labelled ticks. 12 by default.
+        label_beg: [datetime] Ticks before this time are left unlabelled (e.g. to keep the labels clear of
+            other text near the edge of the plot). None by default, in which case all ticks are labelled.
 
     Return:
         (major_dts, major_labels, minor_dts, axis_label):
@@ -1449,6 +1453,7 @@ def computeDateAxisTicks(dt_beg, dt_end, max_labels=12):
                 tick shows it).
     """
 
+    # Make sure the time runs forward and compute the duration that needs to be covered with labels
     if dt_end < dt_beg:
         dt_beg, dt_end = dt_end, dt_beg
 
@@ -1473,22 +1478,28 @@ def computeDateAxisTicks(dt_beg, dt_end, max_labels=12):
             step_minutes, month_days = step_minutes_temp, month_days_temp
             break
 
+    # All ticks are counted from 00 UTC of the first day so they fall on round times
     day_beg = datetime.datetime(dt_beg.year, dt_beg.month, dt_beg.day)
 
     def _dateStr(dt):
+        """ Format the calendar date as e.g. "Oct 23". """
         return "{:s} {:d}".format(DATE_AXIS_MONTHS[dt.month - 1], dt.day)
 
     def _timeRange(step):
         """ Generate datetimes between dt_beg and dt_end at the given step (timedelta) starting at 00 UTC. """
+
+        # Step through round times from the start of the first day, keeping only those inside the range
         dt_list = []
         dt = day_beg
         while dt <= dt_end:
             if dt >= dt_beg:
                 dt_list.append(dt)
             dt += step
+
         return dt_list
 
 
+    # Labelled ticks mark the chosen step, unlabelled ticks fill in the finer divisions
     major_dts = []
     major_labels = []
     minor_dts = []
@@ -1516,14 +1527,26 @@ def computeDateAxisTicks(dt_beg, dt_end, max_labels=12):
             minor_dts = [dt for dt in day_list if dt not in major_dts]
 
 
-    # Show the year, or the date if no 00 UTC label shows it
+    # Ticks in the area which must stay clear of labels are kept, but without labels
+    if label_beg is not None:
+        minor_dts = sorted(minor_dts + [dt for dt in major_dts if dt < label_beg])
+        major_labels = [label for dt, label in zip(major_dts, major_labels) if dt >= label_beg]
+        major_dts = [dt for dt in major_dts if dt >= label_beg]
+
+
+    # Show the year, or the date if no 00 UTC label shows it (this is done after removing the labels so the
+    #   date is not lost if the only 00 UTC label was removed). A range crossing the New Year shows both.
     if dt_beg.year == dt_end.year:
         year_str = "{:d}".format(dt_beg.year)
     else:
         year_str = "{:d}/{:02d}".format(dt_beg.year, dt_end.year%100)
 
     if (month_days is None) and not any((dt.hour == 0) and (dt.minute == 0) for dt in major_dts):
-        axis_label = "UTC {:d} {:s}".format(dt_beg.year, _dateStr(dt_beg))
+
+        # Take the date of the first label, the range can begin just before 00 UTC on the previous day
+        dt_date = major_dts[0] if major_dts else dt_beg
+        axis_label = "UTC {:d} {:s}".format(dt_date.year, _dateStr(dt_date))
+
     else:
         axis_label = "UTC {:s}".format(year_str)
 
@@ -1541,6 +1564,7 @@ def uniqueBinYears(bin_datetime_yearly):
         [list] Years of the middle of each entry.
     """
 
+    # Assign each entry to the year of its middle, so a shower crossing the New Year counts as one year
     year_list = []
     for (dt_bin_beg, dt_bin_end), _ in bin_datetime_yearly:
 
@@ -1566,6 +1590,7 @@ def addDateAxis(ax, dt_ref, sol_ref_deg, max_labels=12):
         date_ax: [Axes] The date axis.
     """
 
+    # Make a second X axis on top which shares the plot area but has its own ticks
     date_ax = ax.twiny()
 
     # Keep the dates smaller than the main axis labels so they don't compete with the title
@@ -1578,32 +1603,29 @@ def addDateAxis(ax, dt_ref, sol_ref_deg, max_labels=12):
         textcoords='offset points', ha='right', va='bottom', fontsize='small')
 
     def _updateTicks(ax_changed):
+        """ Recompute the date ticks for the currently shown solar longitude range. """
 
+        # Line up the date axis with the solar longitude axis
         x_min, x_max = ax_changed.get_xlim()
         date_ax.set_xlim(x_min, x_max)
 
+        # Find the time range covered by the plot
         dt_beg = solToDatetime(x_min, dt_ref, sol_ref_deg)
         dt_end = solToDatetime(x_max, dt_ref, sol_ref_deg)
 
-        major_dts, major_labels, minor_dts, axis_label = computeDateAxisTicks(dt_beg, dt_end,
-            max_labels=max_labels)
-
-        major_x = [datetimeToSolPlot(dt, sol_ref_deg) for dt in major_dts]
-        minor_x = [datetimeToSolPlot(dt, sol_ref_deg) for dt in minor_dts]
-
         # A label right at the left edge would run into the corner label, so keep only its tick
-        edge_x = x_min + 0.03*(x_max - x_min)
-        major_x, major_labels, edge_minor_x = (
-            [x for x in major_x if x >= edge_x],
-            [label for x, label in zip(major_x, major_labels) if x >= edge_x],
-            [x for x in major_x if x < edge_x]
-        )
+        label_beg = solToDatetime(x_min + 0.03*(x_max - x_min), dt_ref, sol_ref_deg)
 
-        date_ax.set_xticks(major_x)
+        major_dts, major_labels, minor_dts, axis_label = computeDateAxisTicks(dt_beg, dt_end,
+            max_labels=max_labels, label_beg=label_beg)
+
+        # Place the ticks at the solar longitudes corresponding to the chosen times
+        date_ax.set_xticks([datetimeToSolPlot(dt, sol_ref_deg) for dt in major_dts])
         date_ax.set_xticklabels(major_labels)
-        date_ax.set_xticks(minor_x + edge_minor_x, minor=True)
+        date_ax.set_xticks([datetimeToSolPlot(dt, sol_ref_deg) for dt in minor_dts], minor=True)
         corner_label.set_text(axis_label)
 
+    # Draw the dates for the initial plot range
     _updateTicks(ax)
 
     # Keep the dates in sync when the plot is zoomed in the interactive window

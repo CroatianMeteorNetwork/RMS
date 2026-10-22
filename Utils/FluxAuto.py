@@ -865,6 +865,10 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_ye
                     batch_flux_output_filename_full + '.png'
                     ]
 
+            # Only the yearly plots get the UTC date axis, as the time of a given solar longitude drifts
+            #   between years
+            date_axis = time_extent_flag != "ALL"
+
             # Save the batch flux plot (only flux)
             plotBatchFlux(
                 fbr, 
@@ -876,7 +880,7 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_ye
                 xlim_shower_limits=True,
                 sol_marker=sol_ref,
                 publication_quality=publication_quality,
-                date_axis=(time_extent_flag != "ALL")
+                date_axis=date_axis
             )
 
             # Save the batch flux plot (full metadata)
@@ -890,7 +894,7 @@ def fluxAutoRun(config, data_path, ref_dt, days_prev=2, days_next=1, all_prev_ye
                 xlim_shower_limits=True,
                 sol_marker=None,
                 publication_quality=publication_quality,
-                date_axis=(time_extent_flag != "ALL")
+                date_axis=date_axis
             )
 
             # Save the results to a CSV file
