@@ -23,12 +23,13 @@ import sys
 import os
 import re
 import argparse
+import tempfile
 from datetime import datetime
 import shutil
 import platform
 from io import StringIO
 
-from Utils.AuditConfig import extractConfigOptions
+from Utils.AuditConfig import extractConfigOptions, readTemplateFromGit
 from RMS.Misc import getRmsRootDir
 
 # Get ConfigReader.py path dynamically
@@ -378,56 +379,85 @@ if __name__ == "__main__":
 
     if args.template:
         template_config_file = args.template
-    
+
+    # If the default template doesn't exist yet (it's only created by RMS_Update.sh), fall back to
+    # the pristine .config tracked in git. A template given explicitly with -t is never substituted -
+    # if that path is wrong, updateConfig() fails with an error as before.
+    template_tmp_path = None
+    if (not args.template) and (not os.path.exists(template_config_file)):
+
+        template_content = readTemplateFromGit()
+
+        if template_content is not None:
+
+            tmp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.configTemplate', delete=False)
+            tmp_file.write(template_content)
+            tmp_file.close()
+
+            template_tmp_path = tmp_file.name
+            template_config_file = template_tmp_path
+
+            print("\nNote: .configTemplate not found, using the repository default .config (via git) "
+                  "as the template.")
+
     print("\nTemplate: {}".format(template_config_file))
 
-    # assume default input
-    original_config_files = [os.path.join(rms_root_dir, ".config")]
+    try:
+        # assume default input
+        original_config_files = [os.path.join(rms_root_dir, ".config")]
 
-    # if multi-cam find and assume those
-    stations_dir = os.path.expanduser("~/source/Stations")
-    if os.path.isdir(stations_dir):
-        for d in os.listdir(stations_dir):
-            f = os.path.join(stations_dir, d, ".config")
-            if os.path.isfile(f):                 # skip broken/missing configs
-                original_config_files.append(f)
-    print("Multi-cam count: {}".format(len(original_config_files) - 1))
+        # if multi-cam find and assume those
+        stations_dir = os.path.expanduser("~/source/Stations")
+        if os.path.isdir(stations_dir):
+            for d in os.listdir(stations_dir):
+                f = os.path.join(stations_dir, d, ".config")
+                if os.path.isfile(f):                 # skip broken/missing configs
+                    original_config_files.append(f)
+        print("Multi-cam count: {}".format(len(original_config_files) - 1))
 
-    # if specified assume
-    if args.input:
-        original_config_files = [args.input]
+        # if specified assume
+        if args.input:
+            original_config_files = [args.input]
 
-    # process each input config
-    for orig_config in original_config_files:
-        log_buffer = StringIO()
-        out_file_name, station_id = updateConfig(orig_config, template_config_file, args, backup=args.update)
+        # process each input config
+        for orig_config in original_config_files:
+            log_buffer = StringIO()
+            out_file_name, station_id = updateConfig(orig_config, template_config_file, args, backup=args.update)
 
-        if args.update:
+            if args.update:
+                try:
+                    shutil.copy(out_file_name, orig_config)
+                    os.remove(out_file_name)
+                    print("Updated\n")
+
+                    log_file = os.path.join(os.path.dirname(orig_config), "{}_MigrateConfig.log".format(station_id))
+                    with open(log_file, "a") as log:
+                        log.write("\n=== Migration Log: {} ===\n\n".format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+                        log.write(log_buffer.getvalue())
+                        log.write("\nMigration applied successfully.\n")
+
+                    log_buffer.close()
+
+                    print("Updated\n")
+
+                except Exception as e:
+                    print("ERROR: Update failed: {}".format(e))
+                    sys.exit(1)
+            else:
+                print("\nSaved new config to: {}".format(out_file_name))
+
+        if not args.update:
+            print(
+                "\nAfter saving a copy of the existing .config, copy/rename new version(s) into production."
+            )
+            print("    e.g. cp ConfigNew_XXxxxx .config \n")
+
+    finally:
+        # Clean up the temporary template extracted from git
+        if template_tmp_path is not None:
             try:
-                shutil.copy(out_file_name, orig_config)
-                os.remove(out_file_name)
-                print("Updated\n")
-
-                log_file = os.path.join(os.path.dirname(orig_config), "{}_MigrateConfig.log".format(station_id))
-                with open(log_file, "a") as log:
-                    log.write("\n=== Migration Log: {} ===\n\n".format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-                    log.write(log_buffer.getvalue())
-                    log.write("\nMigration applied successfully.\n")
-
-                log_buffer.close()
-
-                print("Updated\n")
-
-            except Exception as e:
-                print("ERROR: Update failed: {}".format(e))
-                sys.exit(1)
-        else:
-            print("\nSaved new config to: {}".format(out_file_name))
-
-    if not args.update:
-        print(
-            "\nAfter saving a copy of the existing .config, copy/rename new version(s) into production."
-        )
-        print("    e.g. cp ConfigNew_XXxxxx .config \n")
+                os.remove(template_tmp_path)
+            except OSError:
+                pass
 
     print("Done.\n")

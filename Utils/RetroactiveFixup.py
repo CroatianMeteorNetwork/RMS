@@ -34,7 +34,7 @@ if __name__ == "__main__":
     arg_parser.add_argument('date', metavar='DATE', type=str, \
         help="Reference date in the YYYYMMDD format.")
 
-    arg_parser.add_argument('-c', '--copyconfig', action="store_true", \
+    arg_parser.add_argument('--copyconfig', action="store_true", \
         help="""Copy the config from the data dir closest to the given date to older data directories. """)
 
     # Parse the command line arguments
