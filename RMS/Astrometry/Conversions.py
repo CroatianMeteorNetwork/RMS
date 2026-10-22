@@ -47,11 +47,28 @@ from RMS.GeoidHeightEGM96 import mslToWGS84Height, wgs84toMSLHeight
 import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
 from RMS.Astrometry.CyFunctions import cyaltAz2RADec, cyraDec2AltAz, cyApparentAltAz2TrueRADec, \
-    cyApparentAltAz2TrueRADec_vect, cyTrueRaDec2ApparentAltAz, cyTrueRaDec2ApparentAltAz_vect
+    cyApparentAltAz2TrueRADec_vect, cyTrueRaDec2ApparentAltAz, cyTrueRaDec2ApparentAltAz_vect, cyjd2GST
+from RMS.Astrometry.CyFunctions import cyaltAz2RADec_vect as cyaltAz2RADecArrays, \
+    cyraDec2AltAz_vect as cyraDec2AltAzArrays
+
+
+def broadcastVect(cy_vect):
+    """ Vectorize a CyFunctions array conversion taking (two coordinates, jd, lat, lon), broadcasting the
+        arguments against each other as np.vectorize does. The Cython loop evaluates the sidereal time once
+        per time instead of once per point.
+    """
+
+    def vect(a, b, jd, lat, lon):
+        args = np.broadcast_arrays(*[np.asarray(v, dtype=np.float64) for v in (a, b, jd, lat, lon)])
+        out_a, out_b = cy_vect(*[np.ascontiguousarray(v).ravel() for v in args])
+        return out_a.reshape(args[0].shape), out_b.reshape(args[0].shape)
+
+    return vect
+
 
 # Vectorize some functions
-cyaltAz2RADec_vect = np.vectorize(cyaltAz2RADec, excluded=["jd", "lat", "lon"])
-cyraDec2AltAz_vect = np.vectorize(cyraDec2AltAz, excluded=["jd", "lat", "lon"])
+cyaltAz2RADec_vect = broadcastVect(cyaltAz2RADecArrays)
+cyraDec2AltAz_vect = broadcastVect(cyraDec2AltAzArrays)
 
 ### CONSTANTS ###
 
@@ -258,8 +275,32 @@ def jd2UnixTime(jd, UT_corr=0):
     return date2UnixTime(*jd2Date(jd, UT_corr=UT_corr))
 
 
+def JD2GST(jd):
+    """ Apparent Greenwich sidereal time, the same definition as the astrometric kernels use (mean sidereal
+        time plus the equation of the equinoxes). All sidereal times in RMS come from here or from the
+        kernel's cyjd2GST, which this calls, so hour angles of true-of-date right ascensions are consistent
+        everywhere.
+
+    Arguments:
+        jd: [float or ndarray] Julian date.
+
+    Return:
+        gst: [float or ndarray] Apparent Greenwich sidereal time (deg), in [0, 360).
+
+    """
+
+    if np.ndim(jd) == 0:
+        return cyjd2GST(float(jd))
+
+    # Evaluated once per distinct time
+    jd_unique, inverse = np.unique(np.asarray(jd), return_inverse=True)
+    gst_unique = np.array([cyjd2GST(float(j)) for j in jd_unique], dtype=np.float64)
+
+    return gst_unique[inverse].reshape(np.shape(jd))
+
+
 def JD2LST(julian_date, lon):
-    """ Convert Julian date to Local Sidereal Time and Greenwich Sidereal Time.
+    """ Convert Julian date to apparent Local Sidereal Time and Greenwich Sidereal Time.
 
     Arguments;
         julian_date: [float] decimal julian date, epoch J2000.0
@@ -270,11 +311,8 @@ def JD2LST(julian_date, lon):
             (degrees)
     """
 
-    t = (julian_date - J2000_JD.days)/36525.0
-
-    # Greenwich Sidereal Time
-    GST = 280.46061837 + 360.98564736629*(julian_date - 2451545) + 0.000387933*t**2 - ((t**3)/38710000)
-    GST = (GST + 360)%360
+    # Greenwich Sidereal Time (apparent)
+    GST = JD2GST(julian_date)
 
     # Local Sidereal Time
     LST = (GST + lon + 360)%360
@@ -283,21 +321,23 @@ def JD2LST(julian_date, lon):
 
 
 def JD2HourAngle(jd):
-    """ Convert the given Julian date to hour angle.
+    """ Reference hour angle of a platepar: the apparent Greenwich sidereal time at its reference time. The
+        kernel adds cyjd2LST(jd) - Ho to RA_d to follow the sky, so this has to be the same sidereal time
+        that the kernel uses.
+
     Arguments:
         jd: [float] Julian date.
+
     Return:
         hour_angle: [float] Hour angle (deg), normalized to [0, 360).
+
     """
 
-    T = (jd - 2451545)/36525.0
-    hour_angle = 280.46061837 + 360.98564736629*(jd - 2451545.0) + 0.000387933*T**2 \
-                 - (T**3)/38710000.0
-
-    return hour_angle % 360
+    return JD2GST(jd)
 
 
 ############################
+
 
 
 ### Spatial coordinates transformations ###
@@ -1082,8 +1122,8 @@ def trueRaDec2ApparentAltAz(ra, dec, jd, lat, lon, refraction=True):
     elif isinstance(ra, np.ndarray):
 
         # Convert JD to appropriate format
-        if isinstance(jd, float):
-            jd = np.zeros_like(ra) + jd
+        if np.ndim(jd) == 0:
+            jd = np.zeros_like(ra) + float(jd)
 
         # Compute it for numpy arrays
         azim, elev = cyTrueRaDec2ApparentAltAz_vect(ra, dec, jd, lat, lon, refraction)

@@ -210,7 +210,7 @@ from Utils.KalmanFilter import KalmanFilter
 
 import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
-from RMS.Astrometry.CyFunctions import subsetCatalog, equatorialCoordPrecession
+from RMS.Astrometry.CyFunctions import subsetCatalog, j2000FromTrueOfDate
 from RMS.Astrometry.MatchStars import matchStars
 from RMS.Routines.SatellitePositions import SatellitePredictor, loadTLEs, loadRobustTLEs, findClosestTLEFile, SKYFIELD_AVAILABLE
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
@@ -2297,7 +2297,9 @@ class GeoPoints(object):
 
 
             # Precess RA/Dec to J2000
-            ra, dec = equatorialCoordPrecession(jd, J2000_JD.days, np.radians(ra), np.radians(dec))
+            # The vector was built with the apparent sidereal time, so it is true of date; nutation and
+            #   precession both have to come out on the way to J2000
+            ra, dec = j2000FromTrueOfDate(jd, np.radians(ra), np.radians(dec))
 
             self.ra_data.append(np.degrees(ra))
             self.dec_data.append(np.degrees(dec))
