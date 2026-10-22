@@ -88,6 +88,15 @@ pip install .
 
 Once your system is fully set up and configured (via the `.config` file, as explained in the Wiki), you can run various RMS modules. 
 
+### Available tools
+To see a list of the most commonly used tools with short descriptions, run:
+
+```bash
+python -m RMS
+```
+
+Any of the listed commands can then be run as e.g. `python -m RMS skyfit .` or `python -m RMS status`. A full catalog of the utility scripts is in [Utils/README.md](Utils/README.md).
+
 ### Capturing video and saving data
 To start the automated video capture, navigate to your base RMS folder in the terminal and run:
 
