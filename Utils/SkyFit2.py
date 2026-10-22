@@ -17327,6 +17327,10 @@ class PlateTool(QtWidgets.QMainWindow):
     def saveECSV(self):
         """ Save the picks into the GDEF ECSV standard. """
 
+        # Compute the intensity sum done on the current frame (the ECSV is saved before the FTPdetectinfo,
+        #   so it would otherwise be written without the photometry colored on the frame being shown)
+        self.computeIntensitySum()
+
         # If no picks, save nothing and send no-picks to FTPDetectionInfo save
         if [key for key, val in self.pick_list.items() if (val['x_centroid'] is not None)] == []:
             return False
