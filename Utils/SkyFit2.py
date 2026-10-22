@@ -7253,6 +7253,18 @@ class PlateTool(QtWidgets.QMainWindow):
                     y_array = [y_array]
                     z_array = [z_array]
 
+                # Keep only the arc not farther from the FOV centre than the image corners, as the distortion
+                #   folds the rest of the circle back into the image
+                jd_now = datetime2JD(self.img_handle.currentFrameTime(dt_obj=True))
+                x_res, y_res = self.platepar.X_res, self.platepar.Y_res
+                _, ra_fov, dec_fov, _ = xyToRaDecPP(5*[jd_now], [x_res/2, 0, x_res, 0, x_res], \
+                    [y_res/2, 0, 0, y_res, y_res], np.ones(5), self.platepar, extinction_correction=False, \
+                    jd_time=True)
+                centre, *corners = [raDec2Vector(ra, dec) for ra, dec in zip(ra_fov, dec_fov)]
+                keep = np.flatnonzero(np.dot(np.c_[x_array, y_array, z_array], centre) \
+                    >= np.min(np.dot(corners, centre)))
+                x_array, y_array, z_array = x_array[keep], y_array[keep], z_array[keep]
+
                 # Compute RA/Dec of every points
                 ra_array = []
                 dec_array = []
@@ -7266,8 +7278,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 ra_array, dec_array = np.array(ra_array), np.array(dec_array)
 
                 # Compute image coordinates
-                x_array, y_array = raDecToXYPP(ra_array, dec_array, \
-                    datetime2JD(self.img_handle.currentFrameTime(dt_obj=True)), self.platepar)
+                x_array, y_array = raDecToXYPP(ra_array, dec_array, jd_now, self.platepar)
 
                 # Remove points outside the image
                 filter_arr = (x_array >= 0) & (x_array <= self.platepar.X_res) & (y_array >= 0) \
@@ -7275,20 +7286,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 x_array = x_array[filter_arr]
                 y_array = y_array[filter_arr]
 
-                connect = np.ones_like(x_array)
-                if np.any(~filter_arr):
-
-                    # Find the break in pixel coordinates and create breaks there
-                    x_diff = np.abs(np.diff(x_array))
-                    y_diff = np.abs(np.diff(y_array))
-                    if np.max(x_diff) > np.max(y_diff):
-                        break_indx = np.argmax(x_diff)
-                    else:
-                        break_indx = np.argmax(y_diff)
-
-                    # Find the index where the array breaks
-                    connect[break_indx] = 0
-                    connect[break_indx-1] = 0
+                # Break the line wherever samples were removed
+                connect = np.append(np.diff(keep[filter_arr]) == 1, False)
 
                 
                 self.great_circle_line.setData(x=x_array + 0.5, y=y_array + 0.5, connect=connect)
