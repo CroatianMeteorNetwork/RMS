@@ -1637,12 +1637,15 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
         bottom, top = min(lo, -0.1), top + 0.05*(top - min(lo, -0.1))
         ax_dim.set_ylim(bottom, top)
 
-        # Mark the chunks dimmed beyond the top of the plot (thick clouds) at its top
+        # Mark the chunks dimmed beyond the bottom of the plot (thick clouds) at its bottom
         above = np.isfinite(dimming) & (dimming > top)
         if above.any():
-            ax_dim.plot([t for t, a in zip(times, above) if a], np.full(int(above.sum()), top), '^', color=blue,
+            ax_dim.plot([t for t, a in zip(times, above) if a], np.full(int(above.sum()), top), 'v', color=blue,
                         ms=4, alpha=0.6, clip_on=False, zorder=3)
-    ax_dim.set_ylabel('mag', fontsize=10)
+
+    # Magnitudes grow downwards, so dimmer stars are lower, as in a light curve
+    ax_dim.invert_yaxis()
+    ax_dim.set_ylabel('mag (dimmer down)', fontsize=10)
 
     ### ###
 
@@ -1774,7 +1777,7 @@ def plotSkyConditions(rows, plot_path, title, not_searched=(), detection_times=(
                  + ([Line2D([], [], color=dark, lw=1, ls='--',
                             label='Cloud limit ({:.2f} mag)'.format(cloud_max_offset))]
                     if cloud_max_offset is not None else [])
-                 + [Line2D([], [], color=blue, marker='^', ls='none', ms=5, alpha=0.6, label='Off the scale')]),
+                 + [Line2D([], [], color=blue, marker='v', ls='none', ms=5, alpha=0.6, label='Off the scale')]),
         (ax_clear, [Patch(facecolor=green, alpha=0.3, edgecolor=green, label='Clear part of the image'),
                     Line2D([], [], color='#111827', lw=1.0, ls='--', label='Reliable stars seen')]),
         (ax_stars, [Line2D([], [], color=blue, lw=1.0, label='Extracted'),
