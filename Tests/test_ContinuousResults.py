@@ -164,6 +164,72 @@ def test_detections_across_the_boundary_are_joined_where_they_begin(tmp_path, co
         assert {m['home'] for m in json.load(f)['moved']} == {prev}
 
 
+def test_detections_with_rows_at_other_times_are_joined(tmp_path, config):
+    """ An object measured on several frames together has a row per measurement, and the measurements of the two
+        files are at different times (the files begin at different frames): it is still joined, by its position
+        interpolated between the rows of the other detection. """
+
+    boundary_s = 30.0
+    boundary = (T0 + datetime.timedelta(seconds=boundary_s)).replace(tzinfo=datetime.timezone.utc).timestamp()
+
+    # A row every 4 frames (0.4 s at 10 fps): the earlier file's at 20.0, 20.4, ... and the later file's at 17.4,
+    #   17.8, ... 20.2, 20.6, ..., 2 frames between them
+    earlier = _det(20.0, 29.6)
+    later = _det(17.4, 40.2)
+    for det in (earlier, later):
+        keep = np.arange(0, len(det['times']), 4)
+        det['times'], det['rows'] = det['times'][keep], det['rows'][keep]
+
+    prev = _results(tmp_path, 'prev', [earlier], config)
+    cur = _results(tmp_path, 'cur', [later], config)
+    result = cont.joinResults(prev, cur, boundary, 12.8, config)
+
+    assert result['n_joined'] == 1
+    assert len(cont.readDetections(prev)) == 1 and len(cont.readDetections(cur)) == 0
+
+
+def test_detections_with_rows_of_long_measurements_are_joined(tmp_path, config):
+    """ The faintest objects are measured on up to 64 frames: rows 64 frames apart in both files, 32 frames between
+        the rows of the two files, are still joined. """
+
+    boundary = (T0 + datetime.timedelta(seconds=30.0)).replace(tzinfo=datetime.timezone.utc).timestamp()
+
+    # At 32 fps, a row every 2 s: the earlier file's at 20.0, 22.0, ... and the later file's at 17.0, 19.0, ...
+    earlier = _det(20.0, 29.9, fps=32.0)
+    later = _det(17.0, 40.0, fps=32.0)
+    for det in (earlier, later):
+        keep = np.arange(0, len(det['times']), 64)
+        det['times'], det['rows'] = det['times'][keep], det['rows'][keep]
+
+    prev = _results(tmp_path, 'prev', [earlier], config)
+    cur = _results(tmp_path, 'cur', [later], config)
+    result = cont.joinResults(prev, cur, boundary, 13.0, config)
+
+    assert result['n_joined'] == 1
+    assert len(cont.readDetections(prev)) == 1 and len(cont.readDetections(cur)) == 0
+
+
+def test_long_measurements_joined_with_the_default_context(tmp_path, config):
+    """ With the default borrowed context of 128 frames, an object measured every 64 frames has only 2 rows in it
+        in each file: it is still joined. """
+
+    boundary = (T0 + datetime.timedelta(seconds=30.0)).replace(tzinfo=datetime.timezone.utc).timestamp()
+
+    # At 32 fps, 4 s of borrowed frames: the earlier file's rows at 26.0 and 28.0, the later file's at 27.0 and 29.0
+    earlier = _det(20.0, 29.9, fps=32.0)
+    later = _det(17.0, 40.0, fps=32.0)
+    for det in (earlier, later):
+        keep = np.arange(0, len(det['times']), 64)
+        det['times'], det['rows'] = det['times'][keep], det['rows'][keep]
+
+    prev = _results(tmp_path, 'prev', [earlier], config)
+    cur = _results(tmp_path, 'cur', [later], config)
+    result = cont.joinResults(prev, cur, boundary, 128/32.0, config)
+
+    assert result['n_joined'] == 1
+    assert len(cont.readDetections(prev)) == 1 and len(cont.readDetections(cur)) == 0
+
+
 def test_pending_joins_in_order_after_the_files_are_processed(tmp_path, config):
     """ The joins are done once both files are processed, a file's join after the join of the file before it, and
         an object crossing two boundaries is one detection where it begins. """

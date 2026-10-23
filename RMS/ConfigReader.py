@@ -1016,8 +1016,16 @@ class Config:
         self.mf_gpu = 'auto'
 
         # The positions of the measurements are combined over the measurements within +-this many frames (a
-        #   local quadratic fit of the track), which reduces their errors 2 to 5 times; 0 disables it
-        self.mf_smooth_frames = 64
+        #   local quadratic fit of the track), which reduces their errors 2 to 5 times but makes the positions of
+        #   nearby measurements correlated; 0 (the default) reports the measured positions
+        self.mf_smooth_frames = 0
+
+        # One row per frame in the results: the measurements of faint objects combine several frames, and with this
+        #   option the positions of their frames are interpolated between the measurements (the intensity of every
+        #   frame is kept, for light curves at the full frame rate). By default there is one row per measurement:
+        #   its position as measured, at the middle of its frames, with the mean intensity of its frames, so every
+        #   row is an independent measurement
+        self.mf_per_frame_rows = False
 
         # Largest number of candidate tracks measured per file, or per segment of a file read in segments (the
         #   strongest ones), a safety limit of the processing time in bad conditions (e.g. thin clouds, very bright
@@ -2477,7 +2485,8 @@ def parseMatchedFilter(config, parser):
     if not parser.has_section(section):
         return
 
-    for name in ("mf_enable", "mf_velocity_search", "mf_replace_detection", "mf_cloud_filter", "mf_streak_search"):
+    for name in ("mf_enable", "mf_velocity_search", "mf_replace_detection", "mf_cloud_filter", "mf_streak_search",
+                 "mf_per_frame_rows"):
         if parser.has_option(section, name):
             setattr(config, name, parser.getboolean(section, name))
 
