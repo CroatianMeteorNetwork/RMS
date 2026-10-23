@@ -170,7 +170,7 @@ def findCoefficients(line_list, config=None):
         missing = [name for name, val in [('fireball_max_ang_vel', max_ang_vel),
                                            ('fps', fps), ('fov_h', fov_h), ('fov_w', fov_w),
                                            ('height', height), ('width', width), ('f', f)]
-                   if not val]
+                   if (val is None) or (val <= 0)]
 
         if not missing:
             # deg/s -> original px/frame via the average deg/pixel scale and fps,
@@ -178,7 +178,10 @@ def findCoefficients(line_list, config=None):
             # divides x,y by f, so slopes are in subsampled coordinates).
             scale = (fov_h/float(height) + fov_w/float(width))/2.0
             if scale > 0:
-                max_velocity_px = (max_ang_vel/scale)/float(fps)/float(f)
+                # Never tighter than the legacy 2.0 px/frame: on very wide fields (all-sky
+                # lenses) the converted cap would otherwise drop below it and reject fast
+                # fireballs the old detector kept. The cap only ever widens.
+                max_velocity_px = max(max_velocity_px, (max_ang_vel/scale)/float(fps)/float(f))
         else:
             log.warning("findCoefficients: fireball_max_ang_vel conversion skipped "
                         "(missing/zero: %s); using fallback %.2f px/frame",

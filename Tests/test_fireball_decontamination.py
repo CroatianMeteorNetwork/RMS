@@ -18,6 +18,7 @@ from RMS.VideoExtraction import (
     BRIGHT_PERCENTILE,
     CONTAMINATION_STD_FACTOR,
     MIN_BACKGROUND_PIXELS,
+    TRANSIENT_RATIO,
 )
 from RMS.Routines.Grouping3D import findCoefficients
 
@@ -26,14 +27,16 @@ from RMS.Routines.Grouping3D import findCoefficients
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_compressed(maxpix, stdpix):
+def _make_compressed(maxpix, stdpix, avepix=None):
     """ Build a (4, H, W) uint8 FTP-compressed array from maxpixel/stdpixel planes.
-        maxframe (plane 1) and avepixel (plane 2) are filled with zeros; the
-        decontamination only reads planes 0 (maxpixel) and 3 (stdpixel). """
+        maxframe (plane 1) is zero; avepixel (plane 2) is zero unless given. The
+        decontamination reads planes 0 (maxpixel), 2 (avepixel) and 3 (stdpixel). """
 
     h, w = maxpix.shape
     compressed = np.zeros((4, h, w), dtype=np.uint8)
     compressed[0] = maxpix
+    if avepix is not None:
+        compressed[2] = avepix
     compressed[3] = stdpix
     return compressed
 
@@ -175,6 +178,69 @@ class TestDecontaminateStdpixel:
         assert BRIGHT_PERCENTILE == 90
         assert CONTAMINATION_STD_FACTOR == 3.0
         assert MIN_BACKGROUND_PIXELS == 100
+        assert TRANSIENT_RATIO == 2.0
+
+    def test_persistent_bright_source_is_not_decontaminated(self):
+        """ A twinkling star (or moonlit cloud) is bright in avepixel as well as in
+            maxpixel and has a genuinely high stdpixel. It must keep its stdpixel, so its
+            threshold still keeps it out of the point cloud. """
+
+        maxpix = np.full((100, 100), 20, dtype=np.uint8)
+        avepix = np.full((100, 100), 15, dtype=np.uint8)
+        stdpix = np.full((100, 100), 4, dtype=np.uint8)
+
+        # Star: always present (avepixel 150), scintillating (stdpixel 40), peak 220
+        maxpix[30:33, 30:33] = 220
+        avepix[30:33, 30:33] = 150
+        stdpix[30:33, 30:33] = 40
+        compressed = _make_compressed(maxpix, stdpix, avepix)
+
+        result = decontaminateStdpixel(compressed)
+
+        assert result is compressed
+        assert np.all(result[3][30:33, 30:33] == 40)
+
+    def test_slow_trail_with_near_background_average_is_decontaminated(self):
+        """ A slow fireball pixel lit for ~20 frames: avepixel rises only slightly above
+            the background (top-4 values excluded), maxpixel saturates, stdpixel is
+            inflated. This is contamination and gets replaced. A star in the same frame
+            stays untouched. """
+
+        maxpix = np.full((100, 100), 20, dtype=np.uint8)
+        avepix = np.full((100, 100), 15, dtype=np.uint8)
+        stdpix = np.full((100, 100), 4, dtype=np.uint8)
+
+        maxpix[50, 25:75] = 255   # trail
+        avepix[50, 25:75] = 30    # +15 over background
+        stdpix[50, 25:75] = 60
+
+        maxpix[10, 10] = 220      # star
+        avepix[10, 10] = 150
+        stdpix[10, 10] = 40
+        compressed = _make_compressed(maxpix, stdpix, avepix)
+
+        result = decontaminateStdpixel(compressed)
+
+        assert np.all(result[3][50, 25:75] == 4)
+        assert result[3][10, 10] == 40
+
+    def test_fallback_reference_uses_mask_valid_pixels(self):
+        """ When almost every valid pixel is bright, the reference stdpixel falls back to
+            mask-valid pixels only, so a masked-out region cannot drag it. """
+
+        maxpix = np.full((40, 40), 200, dtype=np.uint8)
+        avepix = np.full((40, 40), 10, dtype=np.uint8)
+        stdpix = np.full((40, 40), 6, dtype=np.uint8)
+        stdpix[:, :20] = 90              # masked half with large stdpixel
+        mask = np.ones((40, 40), dtype=np.uint8)
+        mask[:, :20] = 0
+        compressed = _make_compressed(maxpix, stdpix, avepix)
+
+        result = decontaminateStdpixel(compressed, mask_img=mask)
+
+        # Reference from the valid half (6): nothing there is 3x above it, and the
+        # masked half is never modified
+        assert result is compressed
 
 
 # ---------------------------------------------------------------------------
@@ -222,6 +288,22 @@ class TestFindCoefficientsVelocityCap:
             conservative 2.0 px/frame fallback is used. """
 
         cfg = _Cfg(fov_h=None)
+
+        assert len(findCoefficients([self._slope_line(2.5)], config=cfg)) == 0
+
+    def test_wide_field_never_tightens_below_legacy_cap(self):
+        """ On an all-sky lens the converted cap would fall below 2.0 px/frame; the
+            legacy 2.0 is kept as a floor so fast fireballs are not newly rejected. """
+
+        cfg = _Cfg(fov_h=180.0, fov_w=180.0)
+
+        assert len(findCoefficients([self._slope_line(1.9)], config=cfg)) == 1
+        assert len(findCoefficients([self._slope_line(2.1)], config=cfg)) == 0
+
+    def test_zero_config_value_falls_back(self):
+        """ A zero (not just missing) attribute also falls back to the legacy cap. """
+
+        cfg = _Cfg(fps=0)
 
         assert len(findCoefficients([self._slope_line(2.5)], config=cfg)) == 0
 

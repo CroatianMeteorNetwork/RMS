@@ -46,6 +46,7 @@ log = getLogger("rmslogger")
 BRIGHT_PERCENTILE = 90            # maxpixel percentile above which a pixel is a bright/trail candidate
 CONTAMINATION_STD_FACTOR = 3.0    # stdpixel above this * background median counts as contaminated
 MIN_BACKGROUND_PIXELS = 100       # need at least this many background pixels to trust their median
+TRANSIENT_RATIO = 2.0             # (maxpixel - avepixel) must exceed this * avepixel excess over background
 
 
 def decontaminateStdpixel(compressed, mask_img=None):
@@ -56,6 +57,12 @@ def decontaminateStdpixel(compressed, mask_img=None):
     thresholdAndSubsample then keeps only the near-saturated trail core and drops the
     fainter edges. Replacing the inflated stdpixel with the frame's background median lets
     the whole trail threshold normally, which is the change that actually recovers recall.
+
+    Only transient brightening counts as contamination. avepixel and stdpixel exclude the
+    top 4 values of each pixel (CompressionCy), so a trail pixel's avepixel stays close to
+    the background while its maxpixel is high. Persistent sources (bright twinkling stars,
+    moonlit cloud, the Moon's halo) raise avepixel as much as maxpixel and keep their real
+    stdpixel, which preserves the threshold that keeps them out of the point cloud.
 
     Pure numpy, no Cython, Python 2/Pi compatible. The 4-plane compressed array is copied
     only when contamination is actually present, so the common (no-fireball) path is
@@ -77,6 +84,7 @@ def decontaminateStdpixel(compressed, mask_img=None):
     """
 
     maxpix = compressed[0]
+    avepix = compressed[2]
     stdpix = compressed[3]
 
     # Only trust the mask when it matches the frame resolution. Extractor.__init__ bins
@@ -104,12 +112,24 @@ def decontaminateStdpixel(compressed, mask_img=None):
     if mask_valid is not None:
         bg_mask &= mask_valid
 
+    # Background sample for the reference stdpixel and avepixel. When too few dim pixels
+    # remain, fall back to all mask-valid pixels rather than the whole frame.
     if np.count_nonzero(bg_mask) > MIN_BACKGROUND_PIXELS:
-        std_ref = float(np.median(stdpix[bg_mask]))
+        ref_sel = bg_mask
+    elif mask_valid is not None:
+        ref_sel = mask_valid
     else:
-        std_ref = float(np.median(stdpix))
+        ref_sel = np.ones_like(bright_mask)
+    std_ref = float(np.median(stdpix[ref_sel]))
+    ave_ref = float(np.median(avepix[ref_sel]))
 
-    contaminated = bright_mask & (stdpix > CONTAMINATION_STD_FACTOR*max(std_ref, 1))
+    # Transient test: the brightening above avepixel must dominate the avepixel excess
+    # over the background (int16 to avoid uint8 wrap-around)
+    max_minus_ave = maxpix.astype(np.int16) - avepix.astype(np.int16)
+    ave_excess = np.maximum(avepix.astype(np.int16) - int(round(ave_ref)), 1)
+    transient = max_minus_ave > TRANSIENT_RATIO*ave_excess
+
+    contaminated = bright_mask & transient & (stdpix > CONTAMINATION_STD_FACTOR*max(std_ref, 1))
     if mask_valid is not None:
         contaminated &= mask_valid
 
