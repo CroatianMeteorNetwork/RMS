@@ -218,42 +218,51 @@ def writeDetections(results_dir, dets, config):
 
 
 def _sameObject(a, b, t_lo, t_hi, fps):
-    """ Whether two detections are the same object: rows of the first one within [t_lo, t_hi) at a median distance
-        of at most MAX_COMMON_DISTANCE px from the second one at the same times. The position of the second one at
+    """ Whether two detections are the same object: their rows within [t_lo, t_hi) at a median distance of at most
+        MAX_COMMON_DISTANCE px from the other detection at the same times. The position of the other detection at
         the time of a row is its row at that time (within a third of a frame), or else interpolated between its
         two rows around that time if they are at most MAX_INTERP_FRAMES frames apart: the rows of an object
         measured on several frames together are not at the same times in two inputs which begin at different
-        frames.
+        frames. The rows of both detections are compared with the other one, and MIN_COMMON_FRAMES comparisons
+        are needed, or all those of the rows in the range if there are fewer (an object measured on many frames
+        has few rows in it), but at least 2.
 
     Return:
         [bool]
     """
 
-    # The rows of the first detection in the time range
-    ia = np.nonzero((a['times'] >= t_lo) & (a['times'] < t_hi))[0]
-    if len(ia) == 0:
+    def distances(p, q):
+        """ The distances of the rows of p within the range from q at their times, and the number of the rows. """
+
+        ip = np.nonzero((p['times'] >= t_lo) & (p['times'] < t_hi))[0]
+        tq, xq, yq = q['times'], q['rows'][:, 1], q['rows'][:, 2]
+        dist = []
+        for i in ip:
+            t = p['times'][i]
+
+            # The row of q at the same time
+            j = int(np.argmin(np.abs(tq - t)))
+            if abs(tq[j] - t) <= 0.3/fps:
+                dist.append(np.hypot(*(p['rows'][i, 1:3] - q['rows'][j, 1:3])))
+                continue
+
+            # Otherwise its position interpolated between its rows around that time, if they are close in time
+            k = int(np.searchsorted(tq, t))
+            if (0 < k < len(tq)) and (tq[k] - tq[k - 1] <= MAX_INTERP_FRAMES/fps):
+                w = (t - tq[k - 1])/(tq[k] - tq[k - 1])
+                x, y = xq[k - 1] + w*(xq[k] - xq[k - 1]), yq[k - 1] + w*(yq[k] - yq[k - 1])
+                dist.append(np.hypot(p['rows'][i, 1] - x, p['rows'][i, 2] - y))
+
+        return dist, len(ip)
+
+    dist_a, n_a = distances(a, b)
+    if n_a == 0:
         return False
+    dist_b, n_b = distances(b, a)
+    dist = dist_a + dist_b
+    needed = max(2, min(MIN_COMMON_FRAMES, n_a + n_b))
 
-    tol = 0.3/fps
-    tb, xb, yb = b['times'], b['rows'][:, 1], b['rows'][:, 2]
-    dist = []
-    for i in ia:
-        t = a['times'][i]
-
-        # The row of the second detection at the same time
-        j = int(np.argmin(np.abs(tb - t)))
-        if abs(tb[j] - t) <= tol:
-            dist.append(np.hypot(*(a['rows'][i, 1:3] - b['rows'][j, 1:3])))
-            continue
-
-        # Otherwise its position interpolated between its rows around that time, if they are close in time
-        k = int(np.searchsorted(tb, t))
-        if (0 < k < len(tb)) and (tb[k] - tb[k - 1] <= MAX_INTERP_FRAMES/fps):
-            w = (t - tb[k - 1])/(tb[k] - tb[k - 1])
-            x, y = xb[k - 1] + w*(xb[k] - xb[k - 1]), yb[k - 1] + w*(yb[k] - yb[k - 1])
-            dist.append(np.hypot(a['rows'][i, 1] - x, a['rows'][i, 2] - y))
-
-    return (len(dist) >= MIN_COMMON_FRAMES) and (np.median(dist) <= MAX_COMMON_DISTANCE)
+    return (len(dist) >= needed) and (np.median(dist) <= MAX_COMMON_DISTANCE)
 
 
 

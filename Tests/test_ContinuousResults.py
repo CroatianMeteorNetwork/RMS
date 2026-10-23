@@ -209,6 +209,27 @@ def test_detections_with_rows_of_long_measurements_are_joined(tmp_path, config):
     assert len(cont.readDetections(prev)) == 1 and len(cont.readDetections(cur)) == 0
 
 
+def test_long_measurements_joined_with_the_default_context(tmp_path, config):
+    """ With the default borrowed context of 128 frames, an object measured every 64 frames has only 2 rows in it
+        in each file: it is still joined. """
+
+    boundary = (T0 + datetime.timedelta(seconds=30.0)).replace(tzinfo=datetime.timezone.utc).timestamp()
+
+    # At 32 fps, 4 s of borrowed frames: the earlier file's rows at 26.0 and 28.0, the later file's at 27.0 and 29.0
+    earlier = _det(20.0, 29.9, fps=32.0)
+    later = _det(17.0, 40.0, fps=32.0)
+    for det in (earlier, later):
+        keep = np.arange(0, len(det['times']), 64)
+        det['times'], det['rows'] = det['times'][keep], det['rows'][keep]
+
+    prev = _results(tmp_path, 'prev', [earlier], config)
+    cur = _results(tmp_path, 'cur', [later], config)
+    result = cont.joinResults(prev, cur, boundary, 128/32.0, config)
+
+    assert result['n_joined'] == 1
+    assert len(cont.readDetections(prev)) == 1 and len(cont.readDetections(cur)) == 0
+
+
 def test_pending_joins_in_order_after_the_files_are_processed(tmp_path, config):
     """ The joins are done once both files are processed, a file's join after the join of the file before it, and
         an object crossing two boundaries is one detection where it begins. """
