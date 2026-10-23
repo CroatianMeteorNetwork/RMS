@@ -51,9 +51,11 @@ MAX_JOIN_ATTEMPTS = 3
 MIN_COMMON_FRAMES = 3
 MAX_COMMON_DISTANCE = 3.0
 
-# Rows of the other detection at most this many frames apart are interpolated to the time of a row (an object
-#   measured on several frames together has a row per measurement)
-MAX_INTERP_FRAMES = 32
+# Rows of the other detection at most this many frames apart are interpolated to the time of a row: an object
+#   measured on several frames together has a row per measurement, of up to 64 frames for the faintest ones
+#   (MatchedFilterDetection.FAINT_MAX_MEASURE_FRAMES, not imported here: importing the matched filter initializes
+#   CUDA), and a row of the other detection may be missing
+MAX_INTERP_FRAMES = 128
 
 
 
