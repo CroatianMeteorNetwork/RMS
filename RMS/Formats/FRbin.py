@@ -166,7 +166,7 @@ def read(dir_path, filename):
         fr: [fr_struct instance] 
 
     """
-    if filename[:2] == "FR":
+    if filename[:3] == "FR_":
         fid = open(os.path.join(dir_path, filename), "rb")
     else:
         fid = open(os.path.join(dir_path, "FR_" + filename + ".bin"), "rb")
@@ -199,36 +199,36 @@ def read(dir_path, filename):
 
     return fr
 
-
-def write(fr, dir_path, filename):
-    """ Write FR*.bin structure to a file in specified directory.
-    """
-
-    if filename[:2] == "FR":
-        file = os.path.join(dir_path, filename)
-    else:
-        file = os.path.join(dir_path, "FR_" + filename + ".bin")
-
-    file = os.path.join()
-    with open(file, "wb") as fid:
-        fid.write(struct.pack('I', fr.lines))
-
-        for i in range(fr.lines):
-            fid.write(struct.pack('I', fr.frameNum[i]))
-
-            for z in range(fr.frameNum[i]):
-                fid.write(struct.pack('I', fr.yc[i, z]))
-                fid.write(struct.pack('I', fr.xc[i, z]))
-                fid.write(struct.pack('I', fr.t[i, z]))
-                fid.write(struct.pack('I', fr.size[i, z]))
-                fr.frames[i, z].tofile(fid)
+# This function is not used
+#def write(fr, dir_path, filename):
+#    """ Write FR*.bin structure to a file in specified directory.
+#    """
+#
+#    if filename[:3] == "FR_":
+#        file = os.path.join(dir_path, filename)
+#    else:
+#        file = os.path.join(dir_path, "FR_" + filename + ".bin")
+#
+#    file = os.path.join()
+#    with open(file, "wb") as fid:
+#        fid.write(struct.pack('I', fr.lines))
+#
+#        for i in range(fr.lines):
+#            fid.write(struct.pack('I', fr.frameNum[i]))
+#
+#            for z in range(fr.frameNum[i]):
+#                fid.write(struct.pack('I', fr.yc[i, z]))
+#                fid.write(struct.pack('I', fr.xc[i, z]))
+#                fid.write(struct.pack('I', fr.t[i, z]))
+#                fid.write(struct.pack('I', fr.size[i, z]))
+#                fr.frames[i, z].tofile(fid)
 
 
 def writeArray(arr, dir_path, filename):
     """ Write array with extracted clips to a file in specified directory.
     """
 
-    if filename[:2] == "FR":
+    if filename[:3] == "FR_":
         file = os.path.join(dir_path, filename)
     else:
         file = os.path.join(dir_path, "FR_" + filename + ".bin")
@@ -255,7 +255,7 @@ def validFRName(fr_name):
         fr_name: [str] Name of the FR file
     """
 
-    if fr_name.startswith('FR') and fr_name.endswith('.bin'):
+    if fr_name.startswith('FR_') and fr_name.endswith('.bin'):
         return True
 
     else:
