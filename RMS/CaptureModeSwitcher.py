@@ -3,7 +3,7 @@ from __future__ import print_function, division, absolute_import
 import os
 import json
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta
 import ephem
 import Utils.CameraControl as cc
 from RMS.Logger import getLogger
@@ -21,6 +21,108 @@ CAPTURE_HORIZON_DEG = "-5:26"  # Used for standard capture start/stop (matches C
 # Capture continues briefly after the calculated end time while the pipeline shuts down.
 # This is added to the timelapse cutoff to ensure all captured frames are included.
 SHUTDOWN_INERTIA_SECONDS = 300  # 5 minutes - generous buffer since mode-based splitting prevents mixing
+
+# During polar day or night the Sun is re-checked at this interval, so the end of the polar period (the
+# first real sunset or sunrise) is not missed
+POLAR_RECHECK_SECONDS = 3600
+
+# A capture session is not split if it ended less than this long before the split time, so a split never
+# leaves an almost empty session (e.g. at the pole, when the mode changes shortly before a split)
+MIN_SESSION_SECONDS = 12*3600
+
+# During polar day or night a capture session is split at the latest this long after the last split (at the
+# pole the culmination is not defined, and a polar day may turn into a polar night with a single switch)
+MAX_POLAR_SESSION_SECONDS = 25*3600
+
+
+def captureModeAt(config, when_utc):
+    """ Determine the capture mode (day or night) at the given time, and when it next changes.
+
+    The mode is decided from the current altitude of the Sun relative to the switching horizon. During
+    polar day or night the Sun does not cross the switching horizon and there is no next change.
+
+    Arguments:
+        config: [Config] RMS config object, the station location is used.
+        when_utc: [datetime] Naive UTC time.
+
+    Return:
+        (daytime, next_change, polar): [tuple]
+            - daytime: [bool] True if the Sun is above the switching horizon (daytime mode).
+            - next_change: [datetime] Naive UTC time of the next mode change, None during polar day or night.
+            - polar: [str] None normally, 'day' during polar day, 'night' during polar night.
+    """
+
+    o = ephem.Observer()
+    o.lat = str(config.latitude)
+    o.long = str(config.longitude)
+    o.elevation = config.elevation
+    o.horizon = SWITCH_HORIZON_DEG
+    o.date = ephem.Date(when_utc)
+
+    s = ephem.Sun()
+    s.compute(o)
+
+    # Use the altitude of the upper limb of the Sun (with refraction), the same as ephem uses for the rising
+    # and setting times, so the mode at a rising/setting time matches the event
+    daytime = (float(s.alt) + float(s.radius)) > float(o.horizon)
+
+    try:
+        if daytime:
+            next_change = o.next_setting(s).datetime()
+        else:
+            next_change = o.next_rising(s).datetime()
+
+        return daytime, next_change, None
+
+    # The Sun does not cross the switching horizon - the current state lasts: polar day if the Sun is up,
+    # polar night if it is down. The state is taken from the altitude and not from the error type, as close
+    # to the pole the Sun altitude barely changes during the day and ephem may raise either error
+    except (ephem.AlwaysUpError, ephem.NeverUpError):
+        return daytime, None, ('day' if daytime else 'night')
+
+
+def polarSessionBoundary(config, when_utc, polar):
+    """ Time of the next daily split of the capture session during polar day or night.
+
+    In continuous capture mode, a session normally ends when the camera switches between night and day.
+    During polar day or night there is no switch, so the session is split once a day: at the lower
+    culmination of the Sun during polar day (local solar midnight, the Sun is at its lowest - this is
+    where the night appears first when the polar day ends), and at the upper culmination during polar
+    night (local solar noon, the sky is at its brightest).
+
+    Arguments:
+        config: [Config] RMS config object, the station location is used.
+        when_utc: [datetime] Naive UTC time, the boundary is searched after this time.
+        polar: [str] 'day' or 'night'.
+
+    Return:
+        boundary: [datetime] Naive UTC time of the next session split, within about 24 hours of when_utc.
+    """
+
+    o = ephem.Observer()
+    o.lat = str(config.latitude)
+    o.long = str(config.longitude)
+    o.elevation = config.elevation
+    o.date = ephem.Date(when_utc)
+
+    s = ephem.Sun()
+
+    boundary = None
+    try:
+        if polar == 'day':
+            boundary = o.next_antitransit(s).datetime()
+        else:
+            boundary = o.next_transit(s).datetime()
+
+    except Exception as e:
+        log.warning("Computing the Sun culmination failed: {}".format(repr(e)))
+
+    # Fall back to the next UTC midnight if the culmination is not defined (e.g. at the pole). The solar
+    # day is not exactly 24 hours, so allow some margin
+    if (boundary is None) or (boundary <= when_utc) or (boundary > when_utc + timedelta(hours=25)):
+        boundary = (when_utc + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    return boundary
 
 
 def switchCameraMode(config, daytime_mode, camera_mode_switch_trigger):
@@ -61,8 +163,134 @@ def switchCameraMode(config, daytime_mode, camera_mode_switch_trigger):
         # After failure, retry on next opportunity
         camera_mode_switch_trigger.value = True
 
+def switcherStep(config, state, daytime_mode, camera_mode_switch_trigger, session_cut=None,
+    session_cut_time=None, now_func=RmsDateTime.utcnow, sleep_func=time.sleep):
+    """ One iteration of the capture mode switcher: set the day/night mode, split the capture session if it
+        would otherwise last longer than a day (polar day or night), and return how long to wait until the
+        next iteration.
+
+    A capture session normally ends when the camera switches from night to day. If the camera is still in
+    daytime mode at the lower culmination of the Sun (local solar midnight), or still in nighttime mode at the
+    upper culmination (local solar noon), the Sun has not crossed the switching horizon for a day and the
+    session is split there. This only happens during polar day/night and on the days around them.
+
+    Arguments:
+        config: [Config] RMS config object.
+        state: [dict] State kept between iterations, start with an empty dict.
+        daytime_mode: [multiprocessing.Value] Shared bool, True = daytime, False = nighttime.
+        camera_mode_switch_trigger: [multiprocessing.Value] Shared bool, set to True to switch the camera mode.
+
+    Keyword arguments:
+        session_cut: [multiprocessing.Value] Shared int, incremented when the capture session should be split.
+            None by default, in which case the session is never split.
+        session_cut_time: [multiprocessing.Value] Shared double, Unix time of the last session split. Set
+            before session_cut is incremented.
+        now_func: [function] Returns the current naive UTC time. Used for testing.
+        sleep_func: [function] Sleeps for the given number of seconds. Used for testing.
+
+    Return:
+        time_to_wait: [float] Seconds to wait before the next iteration.
+    """
+
+    is_first_switch = state.get('is_first_switch', True)
+
+    now = now_func()
+    daytime, next_change, polar = captureModeAt(config, now)
+
+
+    # Switch the mode on the first run and when it changes. During polar day or night the Sun is
+    # re-checked every hour, the camera must not be switched (and rebooted) on every check
+    if is_first_switch or (daytime_mode.value != daytime):
+
+        mode_name = "daytime" if daytime else "nighttime"
+
+        if polar is None:
+            log.info("Next event is a {:s} ({}), switching to {:s} mode".format(
+                "sunset" if daytime else "sunrise", next_change, mode_name))
+
+        else:
+            log.info("Polar {:s}: the Sun does not cross the switching horizon, switching to {:s} mode".format(
+                polar, mode_name))
+
+        if config.switch_camera_modes:
+
+            # Delay before switching camera modes to prevent multiple cameras from switching
+            # simultaneously (avoids power spikes). Initial run already has startup delay, so skip the wait
+            if not is_first_switch:
+                sleep_func(config.capture_wait_seconds)
+
+            camera_mode_switch_trigger.value = True
+
+        # A night -> day switch ends the capture session
+        if (not is_first_switch) and daytime:
+            state['last_session_end'] = now
+
+        daytime_mode.value = daytime
+
+        # Refresh the current time after the stagger wait
+        now = now_func()
+
+    state['is_first_switch'] = False
+
+
+    # Split the session at the scheduled culmination if the mode has not changed since it was scheduled
+    cut_at = state.get('cut_at')
+    if (cut_at is not None) and (now >= cut_at):
+
+        if state.get('cut_daytime') == daytime:
+
+            last_end = state.get('last_session_end')
+            if (last_end is None) or (cut_at - last_end >= timedelta(seconds=MIN_SESSION_SECONDS)):
+
+                log.info("The Sun has not crossed the switching horizon for a day ({:s}), splitting the "
+                    "capture session at {}".format("daytime" if daytime else "nighttime", cut_at))
+
+                if session_cut is not None:
+
+                    # Set the time first, the counter change signals that a new split is available
+                    if session_cut_time is not None:
+                        session_cut_time.value = (cut_at - datetime(1970, 1, 1)).total_seconds()
+
+                    session_cut.value += 1
+
+                state['last_session_end'] = cut_at
+
+        cut_at = None
+
+
+    # Schedule the next possible split: solar midnight in daytime, solar noon in nighttime
+    if (cut_at is None) or (state.get('cut_daytime') != daytime):
+        cut_at = polarSessionBoundary(config, now, 'day' if daytime else 'night')
+
+        last_end = state.get('last_session_end')
+        if (polar is not None) and (last_end is not None):
+            cut_at = max(now, min(cut_at, last_end + timedelta(seconds=MAX_POLAR_SESSION_SECONDS)))
+
+        if polar is not None:
+            log.info("Polar {:s}: the capture session will be split daily, next split at {}".format(
+                polar, cut_at))
+
+    state['cut_at'] = cut_at
+    state['cut_daytime'] = daytime
+
+
+    # Wake up just after the next mode change or the next possible split, whichever is first
+    wake_times = [cut_at]
+    if next_change is not None:
+        wake_times.append(next_change)
+
+    time_to_wait = max(0, (min(wake_times) - now).total_seconds()) + 1
+
+    # During polar day or night re-check every hour, to catch the first sunset/sunrise when it ends
+    if polar is not None:
+        time_to_wait = min(time_to_wait, POLAR_RECHECK_SECONDS)
+
+    return time_to_wait
+
+
 # Function to switch capture between day and night modes
-def captureModeSwitcher(config, daytime_mode, camera_mode_switch_trigger, stop_event=None):
+def captureModeSwitcher(config, daytime_mode, camera_mode_switch_trigger, stop_event=None, session_cut=None,
+    session_cut_time=None):
     """ Wait and switch between day and night capture modes based on current time.
 
     Arguments:
@@ -70,96 +298,18 @@ def captureModeSwitcher(config, daytime_mode, camera_mode_switch_trigger, stop_e
         daytime_mode: [multiprocessing.Value] shared boolean variable to communicate the mode switch with other processes
                             True = Day time, False = Night time
         stop_event: [threading.Event] optional event to signal this thread to exit
+        session_cut: [multiprocessing.Value] optional shared int, incremented when the capture session should
+            be split once a day during polar day or night
+        session_cut_time: [multiprocessing.Value] optional shared double, Unix time of the last session split
     """
-    is_first_switch = True  # Track whether it's the initial switch
+
+    state = {}
 
     try:
         while not (stop_event is not None and stop_event.is_set()):
 
-            # Initialize observer
-            o = ephem.Observer()
-            o.lat = str(config.latitude)
-            o.long = str(config.longitude)
-            o.elevation = config.elevation
-
-            # The Sun should be about 9 degrees below the horizon when the capture modes switch
-            o.horizon = SWITCH_HORIZON_DEG
-
-            # Set the current time
-            current_time = RmsDateTime.utcnow()
-            o.date = current_time
-
-            # Calculate sun positions
-            s = ephem.Sun()
-            s.compute()
-
-            # Based on whether next event is a sunrise or sunset, set the value for daytime_mode
-            # Except on initial run, apply the capture_wait_seconds from the config to stagger the mode
-            # switching. This can help prevent disconnects in multi-camera setups
-            try:
-                next_rise = o.next_rising(s).datetime()
-                next_set = o.next_setting(s).datetime()
-
-                if next_set < next_rise:
-                    log.info("Next event is a sunset ({}), switching to daytime mode".format(next_set))
-
-                    if config.switch_camera_modes:
-                        # Delay before switching camera modes to prevent multiple cameras 
-                        # from switching simultaneously (avoids power spikes)
-                        # Initial run already has startup delay, so skip additional wait
-                        if not is_first_switch:
-                            time.sleep(config.capture_wait_seconds)
-                        camera_mode_switch_trigger.value = True
-
-                    daytime_mode.value = True
-
-                    # Refresh the current time after the stagger wait
-                    now = RmsDateTime.utcnow()
-                    time_to_wait = max(0, (next_set - now).total_seconds())
-
-                else:
-                    log.info("Next event is a sunrise ({}), switching to nighttime mode".format(next_rise))
-
-                    if config.switch_camera_modes:
-                        # Delay before switching camera modes to prevent multiple cameras 
-                        # from switching simultaneously (avoids power spikes)
-                        # Initial run already has startup delay, so skip additional wait
-                        if not is_first_switch:
-                            time.sleep(config.capture_wait_seconds)
-                        camera_mode_switch_trigger.value = True
-
-                    daytime_mode.value = False
-                    
-                    # Refresh the current time after the stagger wait
-                    now = RmsDateTime.utcnow()
-                    time_to_wait = max(0, (next_rise - now).total_seconds())
-
-
-            # If the day last more than 24 hours, continue daytime capture for the whole day
-            except ephem.AlwaysUpError:
-
-                if config.switch_camera_modes:
-                    # Switch immediately in polar day conditions
-                    # No sunset to wait for, and startup delay already applied
-                    camera_mode_switch_trigger.value = True
-
-                daytime_mode.value = True
-                time_to_wait = 86400
-
-
-            # If the night lasts more than 24 hours, continue nighttime capture for the whole day
-            except ephem.NeverUpError:
-
-                if config.switch_camera_modes:
-                    # Switch immediately in polar night conditions
-                    # No sunrise to wait for, and startup delay already applied
-                    camera_mode_switch_trigger.value = True
-
-                daytime_mode.value = False
-                time_to_wait = 86400
-
-            # Mark that the first switch has occurred
-            is_first_switch = False
+            time_to_wait = switcherStep(config, state, daytime_mode, camera_mode_switch_trigger,
+                session_cut=session_cut, session_cut_time=session_cut_time)
 
             # Sleep until the next switch time (interruptible via stop_event)
             if stop_event is not None:

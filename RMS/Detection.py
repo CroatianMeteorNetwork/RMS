@@ -1472,12 +1472,17 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                     y_centroid = np.sum(y_weighted.astype(np.float64))/float(max_weights_sum)
 
 
-                    # Correct the rolling shutter effect
+                    # Correct the rolling shutter effect: the row of the centroid is read later than the top row,
+                    #   by its share of the readout time of the sensor (see RMS.Routines.RollingShutterCorrection)
                     if config.deinterlace_order == -1:
 
-                        # Compute the corrected frame time
-                        frame_no = RollingShutterCorrection.correctRollingShutterTemporal(frame_no, \
-                            y_centroid, img_handle.ff.maxpixel.shape[0])
+                        # Compute the corrected frame time, with the row and the height of the image before the
+                        #   binning (the crop of the capture is in the rows of the unbinned image, and only the
+                        #   inputs from the RMS capture are cropped)
+                        bin_factor = config.detection_binning_factor if (img_handle.input_type != 'ff') else 1
+                        frame_no = RollingShutterCorrection.correctFrameTime(frame_no, y_centroid*bin_factor,
+                            img_handle.ff.maxpixel.shape[0]*bin_factor, config, fps=getattr(img_handle, 'fps', None),
+                            cropped=RollingShutterCorrection.croppedInput(img_handle.input_type))
 
 
                     # Get current frame if video or images are used as input

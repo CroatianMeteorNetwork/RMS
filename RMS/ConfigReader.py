@@ -38,6 +38,11 @@ else:
 log = logging.getLogger(__name__)
 
 
+# Distortion types of a platepar (see Platepar.setDistortionType), the options of platepar_distortion_type
+PLATEPAR_DISTORTION_TYPES = ("poly3+radial", "poly3+radial3", "poly3+radial5", "radial3-all", "radial4-all",
+                             "radial5-all", "radial3-odd", "radial5-odd", "radial7-odd", "radial9-odd")
+
+
 # Used to determine if ML filtering is available
 TFLITE_AVAILABLE = False
 
@@ -269,6 +274,15 @@ class Config:
         self.fov_w = 64.0
         self.fov_h = 35.0
         self.deinterlace_order = -2
+
+        # Rolling shutter (deinterlace_order -1): the measured time in which the sensor reads all its rows (s), 0
+        #   for no correction (see RMS.Routines.RollingShutterCorrection)
+        self.rolling_shutter_readout = 0.0
+
+        # Correction of the timestamps of the frames (s), added when the frames of a recording are read for
+        #   processing (true time = timestamp + correction), see .config
+        self.frame_time_offset = 0.0
+
         self.mask_file = "mask.bmp"
 
         self.data_dir = "~/RMS_data"
@@ -596,6 +610,14 @@ class Config:
         self.platepar_remote_name = 'platepar_latest.cal'
         self.remote_platepar_dir = 'platepars'
 
+        # Model of a platepar fitted from scratch by AutoPlatepar, of a new platepar in SkyFit2 and of its default
+        #   settings: the distortion type and the flags of the radial distortion types
+        self.platepar_distortion_type = 'radial7-odd'
+        self.platepar_equal_aspect = True
+        self.platepar_asymmetry_corr = True
+        self.platepar_decentering_corr = False
+        self.platepar_force_distortion_centre = False
+
         # Download remote mask
         self.mask_download_permissive = True
         self.mask_remote_name = 'mask_latest.bmp'
@@ -623,6 +645,10 @@ class Config:
         #   must match to be accepted (guards against sparse spurious fits
         #   chaining forward on cloudy nights)
         self.recalibration_min_match_fraction = 0.6
+
+        # Refine the pointing of every per-FF recalibration by least squares on the matched stars (the search
+        #   alone stops within its tolerance, about dist_check_threshold)
+        self.recalibration_lsq_refine = True
 
         ##### Thumbnails
         self.thumb_bin = 4
@@ -1191,6 +1217,12 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "deinterlace_order"):
         config.deinterlace_order = parser.getint(section, "deinterlace_order")
+
+    if parser.has_option(section, "rolling_shutter_readout"):
+        config.rolling_shutter_readout = parser.getfloat(section, "rolling_shutter_readout")
+
+    if parser.has_option(section, "frame_time_offset"):
+        config.frame_time_offset = parser.getfloat(section, "frame_time_offset")
 
     if parser.has_option(section, "mask"):
         config.mask_file = os.path.basename(parser.get(section, "mask"))
@@ -1761,6 +1793,28 @@ def parseCalibration(config, parser):
     if parser.has_option(section, "remote_platepar_dir"):
         config.remote_platepar_dir = parser.get(section, "remote_platepar_dir")
 
+    # The model of a platepar fitted from scratch. An unknown distortion type keeps the default, as every fit would
+    #   fail with it
+    if parser.has_option(section, "platepar_distortion_type"):
+        distortion_type = parser.get(section, "platepar_distortion_type").strip()
+        if distortion_type in PLATEPAR_DISTORTION_TYPES:
+            config.platepar_distortion_type = distortion_type
+        else:
+            log.warning("Unknown platepar_distortion_type '{:s}', using {:s}. Options: {:s}".format(
+                distortion_type, config.platepar_distortion_type, ", ".join(PLATEPAR_DISTORTION_TYPES)))
+
+    if parser.has_option(section, "platepar_equal_aspect"):
+        config.platepar_equal_aspect = parser.getboolean(section, "platepar_equal_aspect")
+
+    if parser.has_option(section, "platepar_asymmetry_corr"):
+        config.platepar_asymmetry_corr = parser.getboolean(section, "platepar_asymmetry_corr")
+
+    if parser.has_option(section, "platepar_decentering_corr"):
+        config.platepar_decentering_corr = parser.getboolean(section, "platepar_decentering_corr")
+
+    if parser.has_option(section, "platepar_force_distortion_centre"):
+        config.platepar_force_distortion_centre = parser.getboolean(section, "platepar_force_distortion_centre")
+
     if parser.has_option(section, "catalog_mag_limit"):
         config.catalog_mag_limit = parser.getfloat(section, "catalog_mag_limit")
 
@@ -1785,6 +1839,9 @@ def parseCalibration(config, parser):
     if parser.has_option(section, "recalibration_min_match_fraction"):
         config.recalibration_min_match_fraction = parser.getfloat(
             section, "recalibration_min_match_fraction")
+
+    if parser.has_option(section, "recalibration_lsq_refine"):
+        config.recalibration_lsq_refine = parser.getboolean(section, "recalibration_lsq_refine")
 
     if parser.has_option(section, "mask_download_permissive"):
         config.mask_download_permissive = parser.getboolean(section, "mask_download_permissive")
