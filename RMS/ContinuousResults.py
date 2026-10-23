@@ -51,6 +51,10 @@ MAX_JOIN_ATTEMPTS = 3
 MIN_COMMON_FRAMES = 3
 MAX_COMMON_DISTANCE = 3.0
 
+# Rows of the other detection at most this many frames apart are interpolated to the time of a row (an object
+#   measured on several frames together has a row per measurement)
+MAX_INTERP_FRAMES = 32
+
 
 
 def previousInput(file_path, root=None):
@@ -212,8 +216,12 @@ def writeDetections(results_dir, dets, config):
 
 
 def _sameObject(a, b, t_lo, t_hi, fps):
-    """ Whether two detections are the same object: rows at the same times within [t_lo, t_hi), at a median
-        distance of at most MAX_COMMON_DISTANCE px.
+    """ Whether two detections are the same object: rows of the first one within [t_lo, t_hi) at a median distance
+        of at most MAX_COMMON_DISTANCE px from the second one at the same times. The position of the second one at
+        the time of a row is its row at that time (within a third of a frame), or else interpolated between its
+        two rows around that time if they are at most MAX_INTERP_FRAMES frames apart: the rows of an object
+        measured on several frames together are not at the same times in two inputs which begin at different
+        frames.
 
     Return:
         [bool]
@@ -224,13 +232,24 @@ def _sameObject(a, b, t_lo, t_hi, fps):
     if len(ia) == 0:
         return False
 
-    # The distance to the row of the second detection at the same time (within a third of a frame)
     tol = 0.3/fps
+    tb, xb, yb = b['times'], b['rows'][:, 1], b['rows'][:, 2]
     dist = []
     for i in ia:
-        j = int(np.argmin(np.abs(b['times'] - a['times'][i])))
-        if abs(b['times'][j] - a['times'][i]) <= tol:
+        t = a['times'][i]
+
+        # The row of the second detection at the same time
+        j = int(np.argmin(np.abs(tb - t)))
+        if abs(tb[j] - t) <= tol:
             dist.append(np.hypot(*(a['rows'][i, 1:3] - b['rows'][j, 1:3])))
+            continue
+
+        # Otherwise its position interpolated between its rows around that time, if they are close in time
+        k = int(np.searchsorted(tb, t))
+        if (0 < k < len(tb)) and (tb[k] - tb[k - 1] <= MAX_INTERP_FRAMES/fps):
+            w = (t - tb[k - 1])/(tb[k] - tb[k - 1])
+            x, y = xb[k - 1] + w*(xb[k] - xb[k - 1]), yb[k - 1] + w*(yb[k] - yb[k - 1])
+            dist.append(np.hypot(a['rows'][i, 1] - x, a['rows'][i, 2] - y))
 
     return (len(dist) >= MIN_COMMON_FRAMES) and (np.median(dist) <= MAX_COMMON_DISTANCE)
 

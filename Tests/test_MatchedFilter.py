@@ -509,16 +509,18 @@ def test_smooth_positions_reduce_errors_without_bias():
 ### Detection ###
 
 def runDetector(handle, config):
-    """ Run the whole detector on an image handle, return the detector and its detections. """
+    """ Run the whole detector on an image handle, return the detector and its detections, with the rows as
+        reported (one per measurement, or one per frame with mf_per_frame_rows, see outputRows). """
 
     det = MatchedFilterDetector(handle, config)
-    return det, det.run()
+    return det, mfd.outputRows(det.run(), config.mf_per_frame_rows)
 
 
 def test_detects_faint_object_below_single_frame_limit(config):
     """ An object with a peak SNR of 1.5 per frame (far below the normal detection) moving at 0.3 px/frame is
-        found and measured to about half a pixel. Its positions are measured on several frames together, but
-        there is a row for every frame (with the intensity of that frame).
+        found and measured to about half a pixel. Its positions are measured on several frames together, and there
+        is a row for every measurement (at the middle of its frames); with mf_per_frame_rows there is a row for
+        every frame (with the intensity of that frame).
     """
 
     obj = linearObject(1.5, 25, 30, 0.3, 0.12, 40, 470)
@@ -531,9 +533,63 @@ def test_detects_faint_object_below_single_frame_limit(config):
     err = truthError(cent, obj)
     assert np.sqrt(np.mean(err**2)) < 0.6
 
-    # Most of the track is measured, every frame
+    # Most of the track is measured, a row per measurement of several frames
     assert cent[-1, 0] - cent[0, 0] > 0.7*(obj['f1'] - obj['f0'])
+    assert np.all(np.diff(cent[:, 0]) >= 1) and (np.median(np.diff(cent[:, 0])) >= 2)
+
+    # With mf_per_frame_rows, a row for every frame
+    config.mf_per_frame_rows = True
+    _, detections = runDetector(_SynthHandle([obj]), config)
+    cent = detections[0][2]
     assert np.all(np.diff(cent[:, 0]) >= 1) and (np.median(np.diff(cent[:, 0])) == 1)
+
+
+def test_rows_are_measurements():
+    """ The rows of every frame made from measurements (perFrameRows) and the rows of the measurements made back
+        from them (measurementRows): one row per measurement, at its frame (the middle of its frames) and its
+        measured position, with the mean intensity of its frames; a measurement which lost most of its frames (e.g.
+        on clouded sky) is left out, as are the frames of no measurement.
+    """
+
+    # Three measurements of 4 frames and one of 1 frame: [frame, x, y, intensity, background, snr, saturated,
+    #   n_frames, intensities of 8 frames, saturated pixel counts of 8 frames]
+    max_frames = 8
+    meas = []
+    for f, x, y, n in ((11.5, 10.0, 20.0, 4), (15.5, 11.2, 20.4, 4), (19.5, 12.1, 20.9, 4), (22.0, 12.9, 21.1, 1)):
+        intens = [100.0 + 10*k for k in range(n)] + [0.0]*(max_frames - n)
+        meas.append([f, x, y, np.mean(intens[:n]), 5.0, 8.0, 0, n] + intens + [0]*max_frames)
+    meas = np.array(meas)
+
+    frames = mfd.perFrameRows(meas, max_frames)
+    assert len(frames) == 13 and frames.shape[1] == 11
+
+    rows = mfd.measurementRows(frames)
+    assert rows.shape == (4, 7)
+    assert np.allclose(rows[:, 0], meas[:, 0]) and np.allclose(rows[:, 1:3], meas[:, 1:3])
+    assert np.allclose(rows[:, 3], [115.0, 115.0, 115.0, 100.0])
+
+    # The signal-to-noise ratio of a measurement is close to the one it was measured with (the noise of its frames
+    #   is taken from their intensities, which differ here)
+    assert np.allclose(rows[:, 5], 8.0, rtol=0.01)
+
+    # A measurement with only one of its 4 frames left is dropped, one with 2 of 4 is kept
+    kept = frames[~np.isin(frames[:, 0], [14.0, 15.0, 16.0, 19.0, 20.0])]
+    rows = mfd.measurementRows(kept)
+    assert np.allclose(rows[:, 0], [11.5, 19.5, 22.0])
+
+    # With mf_per_frame_rows the rows of every frame are reported as they are
+    det = [[0.0, 0.0, frames]]
+    assert mfd.outputRows(det, True)[0][2].shape == (13, 7)
+    assert mfd.outputRows(det, False)[0][2].shape == (4, 7)
+
+
+def test_measured_positions_by_default():
+    """ By default the positions are reported as measured: no smoothing over the neighbouring measurements and one
+        row per measurement. """
+
+    config = cr.Config()
+    assert config.mf_smooth_frames == 0
+    assert config.mf_per_frame_rows is False
 
 
 def test_bright_object_measured_every_frame(config):
@@ -669,8 +725,9 @@ def test_rolling_shutter_corrects_the_frames(config):
     assert np.allclose(cent_r[:, 1:], cent_g[:, 1:])
     assert np.allclose(cent_r[:, 0] - cent_g[:, 0], 0.8*cent_g[:, 2]/SIZE)
 
-    # A segment of the input is not corrected on its own
+    # A segment of the input is not corrected on its own (its rows are made final with the other segments)
     segment = mfd.detectMatchedFilter(_SynthHandle([obj]), config, frame_range=(0, 512))
+    segment = mfd.outputRows(segment, config.mf_per_frame_rows)
     assert np.allclose(segment[0][2][:, 0], cent_g[:, 0])
 
 
@@ -1769,9 +1826,11 @@ def test_wandering_track_rejected(config, deviation_fwhm):
 
 def test_flashes_kept_in_light_curve(config):
     """ An object below the single-frame limit which flashes for one frame every 24 frames: it is found, and
-        the light curve has the flashes at their full brightness (the positions of faint objects are measured on
-        several frames, but the intensity of every frame is kept).
+        the light curve has the flashes at their full brightness with mf_per_frame_rows (the positions of faint
+        objects are measured on several frames, but the intensity of every frame is kept).
     """
+
+    config.mf_per_frame_rows = True
 
     # A peak SNR of 1.5 between the flashes and 40 in the flashes
     flash_snr, base_snr = 40.0, 1.5

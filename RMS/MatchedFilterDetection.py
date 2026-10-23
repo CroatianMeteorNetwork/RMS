@@ -458,6 +458,7 @@ class MatchedFilterOptions(object):
         self.edge_margin = max(config.detection_border, config.mf_edge_margin)
         self.gpu = config.mf_gpu
         self.smooth_frames = config.mf_smooth_frames
+        self.per_frame_rows = config.mf_per_frame_rows
         self.max_tracks = config.mf_max_tracks
         self.link_max_gap = config.mf_link_max_gap
 
@@ -2820,7 +2821,9 @@ class MatchedFilterDetector(object):
 
         Return:
             [list] Detections as [rho, theta, centroids], centroids rows [frame, x, y, intensity, background,
-                snr, saturated] in the unbinned image, as from Detection.detectMeteors.
+                snr, saturated] in the unbinned image, as from Detection.detectMeteors, one per frame, followed by
+                the columns of the measurement of the frame (see perFrameRows). outputRows makes them the rows as
+                reported (see detectMatchedFilter).
         """
 
         t0 = time()
@@ -2941,6 +2944,7 @@ class MatchedFilterDetector(object):
             #   pixels, summed bins already their sum)
             if self.det_bin > 1:
                 cent[:, 1:3] = cent[:, 1:3]*self.det_bin + (self.det_bin - 1)/2.0
+                cent[:, 8:10] = cent[:, 8:10]*self.det_bin + (self.det_bin - 1)/2.0
                 if self.config.detection_binning_method == 'avg':
                     cent[:, 3] *= self.det_bin**2
 
@@ -3908,9 +3912,11 @@ def perFrameRows(cent, max_frames, phot=None):
             position was not measured), with this photometry. None by default.
 
     Return:
-        [ndarray] Rows [frame, x, y, intensity, background, snr, saturated], one per frame. Without phot, the
-            signal-to-noise ratio of a frame is the one of its measurement divided by the square root of its
-            number of frames.
+        [ndarray] Rows [frame, x, y, intensity, background, snr, saturated, frame of the measurement, x and y of
+            the measurement, number of frames of the measurement], one per frame. The last four columns are those
+            of the measurement whose frames contain the frame (NaN for a frame of none, e.g. photometry beyond the
+            measured part), see measurementRows. Without phot, the signal-to-noise ratio of a frame is the one of
+            its measurement divided by the square root of its number of frames.
     """
 
     # The velocities at the two ends of the track, from the two first and the two last measurements, for the
@@ -3933,12 +3939,22 @@ def perFrameRows(cent, max_frames, phot=None):
 
     # With the photometry of every frame: a row for every frame, with the background interpolated between the
     #   measurements and the signal-to-noise ratio of the intensity of the frame
+    # The measurement whose frames contain a frame (the n frames of a measurement are centred on its frame), None
+    #   if none does
+    half = (np.round(cent[:, 7]) - 1)/2.0
+
+    def measurementOf(f):
+        k = int(np.argmin(np.abs(t - f)))
+        if abs(f - t[k]) <= half[k] + 1e-6:
+            return [t[k], x[k], y[k], round(cent[k, 7])]
+        return [np.nan]*4
+
     if phot is not None:
         frames, sums, n_sat, noise = phot
         rows = []
         for f, s, ns, nz in zip(frames, sums, n_sat, noise):
             xf, yf = position(f)
-            rows.append([f, xf, yf, s, np.interp(f, t, cent[:, 4]), s/max(nz, 1e-6), ns])
+            rows.append([f, xf, yf, s, np.interp(f, t, cent[:, 4]), s/max(nz, 1e-6), ns] + measurementOf(f))
         return np.array(rows)
 
     # Without it: a row for every frame of every measurement, with the intensity of the frame stored with the
@@ -3955,9 +3971,80 @@ def perFrameRows(cent, max_frames, phot=None):
                 xf, yf = x[-1] + vx_hi*(f - t[-1]), y[-1] + vy_hi*(f - t[-1])
             else:
                 xf, yf = np.interp(f, t, x), np.interp(f, t, y)
-            rows.append([f, xf, yf, row[8 + k], row[4], row[5]/math.sqrt(n), row[8 + max_frames + k]])
+            rows.append([f, xf, yf, row[8 + k], row[4], row[5]/math.sqrt(n), row[8 + max_frames + k],
+                         row[0], row[1], row[2], n])
 
     return np.array(rows)
+
+
+def measurementRows(cent):
+    """ One row per measurement from the rows of every frame of a detection (see perFrameRows): the position of
+        the measurement as measured, at the middle of its frames, with the mean intensity and background of its
+        frames which are left in the detection. A measurement keeps its row if at least half of its frames are
+        left (frames are removed e.g. on clouded sky and at the faint ends of a track); the frames of no
+        measurement (photometry beyond the measured part of a track) are left out.
+
+    Arguments:
+        cent: [ndarray] Rows of every frame, [frame, x, y, intensity, background, snr, saturated, frame of the
+            measurement, x and y of the measurement, number of frames of the measurement], sorted by frame.
+
+    Return:
+        [ndarray] Rows [frame, x, y, intensity, background, snr, saturated], one per measurement, sorted by frame.
+    """
+
+    rows = []
+    known = np.isfinite(cent[:, 7])
+    for mf in np.unique(cent[known, 7]):
+        group = cent[known & (cent[:, 7] == mf)]
+        n = int(round(group[0, 10]))
+        if 2*len(group) < n:
+            continue
+
+        # The noise of the mean intensity from the noise of the frames (the intensity over the signal-to-noise
+        #   ratio of a frame); a measurement of one frame keeps its own
+        intensity = float(np.mean(group[:, 3]))
+        snr = group[:, 5]
+        noise = np.where(snr > 0, np.abs(group[:, 3])/np.maximum(snr, 1e-6), np.nan)
+        if len(group) == 1:
+            snr_mean = float(snr[0])
+        elif np.all(np.isfinite(noise)) and (np.sum(noise**2) > 0):
+            snr_mean = intensity/(np.sqrt(np.sum(noise**2))/len(group))
+        else:
+            snr_mean = float(np.mean(snr))*math.sqrt(len(group))
+
+        rows.append([mf, group[0, 8], group[0, 9], intensity, float(np.mean(group[:, 4])), snr_mean,
+                     float(np.max(group[:, 6]))])
+
+    return np.array(rows).reshape(-1, 7)
+
+
+def outputRows(detections, per_frame_rows):
+    """ The rows of the detections as reported: one per measurement (see measurementRows), or one per frame with
+        per_frame_rows (see perFrameRows). Detections left with fewer than 2 rows are dropped.
+
+    Arguments:
+        detections: [list] Detections as [rho, theta, centroids], the centroids with the columns of the
+            measurements (see perFrameRows).
+        per_frame_rows: [bool] One row per frame instead of one per measurement.
+
+    Return:
+        [list] Detections as [rho, theta, centroids], centroids rows [frame, x, y, intensity, background, snr,
+            saturated].
+    """
+
+    out = []
+    for rho, theta, cent in detections:
+        cent = np.asarray(cent, dtype=np.float64)
+
+        # Rows without the columns of the measurements are already in their final form
+        if cent.shape[1] <= 7:
+            out.append([rho, theta, cent])
+            continue
+        rows = cent[:, :7].copy() if per_frame_rows else measurementRows(cent)
+        if len(rows) >= 2:
+            out.append([rho, theta, rows])
+
+    return out
 
 
 def curvatureSignificant(t, x, y, f_min=CURVATURE_MIN_F):
@@ -5039,7 +5126,9 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
 
     Return:
         [list] Detections as [rho, theta, centroids], or (detections, detector) with return_detector. The
-            detector is None for FF files.
+            detector is None for FF files. The rows of the centroids are one per measurement (one per frame with
+            mf_per_frame_rows), see outputRows; with frame_range (a segment of an input) they are left with the
+            columns of the measurements, to be made final with the other segments.
     """
 
     # FF files keep only the maximum and the average of their frames, the frames themselves are needed
@@ -5082,9 +5171,11 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
                                            persistence_prior_frames=persistence_prior_frames,
                                            track_deviation=track_deviation, update_sky=(frame_range is None))
 
-    # The times of the detections of the whole input are corrected for a rolling shutter (the detections of the
-    #   segments of an input are corrected together, see detectMatchedFilterSegments)
+    # The rows as reported (one per measurement, or one per frame), and the times of the detections of the whole
+    #   input corrected for a rolling shutter (the detections of the segments of an input are made final together,
+    #   see detectMatchedFilterSegments)
     if frame_range is None:
+        detections = outputRows(detections, config.mf_per_frame_rows)
         detections = correctRollingShutter(detections, img_handle, config)
 
     return (detections, detector) if return_detector else detections
@@ -6162,7 +6253,9 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
     run = SegmentedRun(img_handle, ranges, detectors, cuts, sky_map, buffer, timing, removed_rows=removed_rows,
                        removed_first=removed_first, deviation_rejected=len(deviating))
 
-    # The times of the detections of the whole input are corrected for a rolling shutter
+    # The rows as reported (one per measurement, or one per frame), and the times of the detections of the whole
+    #   input corrected for a rolling shutter
+    detections = outputRows(detections, config.mf_per_frame_rows)
     detections = correctRollingShutter(detections, img_handle, config)
 
     return star_list, detections, run, buffer

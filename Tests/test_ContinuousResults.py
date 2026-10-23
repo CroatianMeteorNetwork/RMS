@@ -164,6 +164,30 @@ def test_detections_across_the_boundary_are_joined_where_they_begin(tmp_path, co
         assert {m['home'] for m in json.load(f)['moved']} == {prev}
 
 
+def test_detections_with_rows_at_other_times_are_joined(tmp_path, config):
+    """ An object measured on several frames together has a row per measurement, and the measurements of the two
+        files are at different times (the files begin at different frames): it is still joined, by its position
+        interpolated between the rows of the other detection. """
+
+    boundary_s = 30.0
+    boundary = (T0 + datetime.timedelta(seconds=boundary_s)).replace(tzinfo=datetime.timezone.utc).timestamp()
+
+    # A row every 4 frames (0.4 s at 10 fps): the earlier file's at 20.0, 20.4, ... and the later file's at 17.4,
+    #   17.8, ... 20.2, 20.6, ..., 2 frames between them
+    earlier = _det(20.0, 29.6)
+    later = _det(17.4, 40.2)
+    for det in (earlier, later):
+        keep = np.arange(0, len(det['times']), 4)
+        det['times'], det['rows'] = det['times'][keep], det['rows'][keep]
+
+    prev = _results(tmp_path, 'prev', [earlier], config)
+    cur = _results(tmp_path, 'cur', [later], config)
+    result = cont.joinResults(prev, cur, boundary, 12.8, config)
+
+    assert result['n_joined'] == 1
+    assert len(cont.readDetections(prev)) == 1 and len(cont.readDetections(cur)) == 0
+
+
 def test_pending_joins_in_order_after_the_files_are_processed(tmp_path, config):
     """ The joins are done once both files are processed, a file's join after the join of the file before it, and
         an object crossing two boundaries is one detection where it begins. """
