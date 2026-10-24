@@ -49,6 +49,34 @@ MIN_BACKGROUND_PIXELS = 100       # need at least this many background pixels to
 TRANSIENT_RATIO = 2.0             # (maxpixel - avepixel) must exceed this * avepixel excess over background
 
 
+def _uint8OrderStats(values, ranks):
+    """ Exact order statistics of uint8 values via a 256-bin histogram, which is much faster
+        than sorting or partitioning a full frame.
+
+    Arguments:
+        values: [ndarray] uint8 values.
+        ranks: [list] 0-based ranks into the sorted values.
+
+    Return:
+        [list] the values at the given ranks.
+    """
+
+    if values.dtype != np.uint8:
+        srt = np.sort(values, axis=None)
+        return [srt[r] for r in ranks]
+
+    cum = np.cumsum(np.bincount(values.ravel(), minlength=256))
+    return [int(np.searchsorted(cum, r, side='right')) for r in ranks]
+
+
+def _uint8Median(values):
+    """ Exact median of uint8 values (same result as np.median). """
+
+    n = values.size
+    lo, hi = _uint8OrderStats(values, [(n - 1)//2, n//2])
+    return (lo + hi)/2.0
+
+
 def decontaminateStdpixel(compressed, mask_img=None):
     """ Replace stdpixel at fireball-contaminated pixels with the background median.
 
@@ -65,8 +93,8 @@ def decontaminateStdpixel(compressed, mask_img=None):
     stdpixel, which preserves the threshold that keeps them out of the point cloud.
 
     Pure numpy, no Cython, Python 2/Pi compatible. The 4-plane compressed array is copied
-    only when contamination is actually present, so the common (no-fireball) path is
-    zero-copy.
+    only when contamination is present; on ordinary nights that is still a sizeable share
+    of FF files (moving cloud, aircraft, satellites), so the copy is not a rare path.
 
     Arguments:
         compressed: [ndarray] (4, H, W) FTP-compressed frames
@@ -103,9 +131,8 @@ def decontaminateStdpixel(compressed, mask_img=None):
     if maxpix_valid.size == 0:
         return compressed
 
-    # O(n) partition instead of an O(n log n) full sort for the percentile
     n_bright = max(1, (maxpix_valid.size*(100 - BRIGHT_PERCENTILE))//100)
-    bright_threshold = np.partition(maxpix_valid, -n_bright)[-n_bright]
+    bright_threshold = _uint8OrderStats(maxpix_valid, [maxpix_valid.size - n_bright])[0]
 
     bright_mask = maxpix >= bright_threshold
     bg_mask = ~bright_mask
@@ -120,26 +147,31 @@ def decontaminateStdpixel(compressed, mask_img=None):
         ref_sel = mask_valid
     else:
         ref_sel = np.ones_like(bright_mask)
-    std_ref = float(np.median(stdpix[ref_sel]))
-    ave_ref = float(np.median(avepix[ref_sel]))
+    std_ref = _uint8Median(stdpix[ref_sel])
+    ave_ref = _uint8Median(avepix[ref_sel])
+
+    # Candidates: bright pixels with inflated stdpixel. The transient test then runs only on
+    # these (int16 to avoid uint8 wrap-around), not on full-frame arrays.
+    candidate = bright_mask & (stdpix > CONTAMINATION_STD_FACTOR*max(std_ref, 1))
+    if mask_valid is not None:
+        candidate &= mask_valid
+    idx = np.flatnonzero(candidate)
+    if idx.size == 0:
+        return compressed
 
     # Transient test: the brightening above avepixel must dominate the avepixel excess
-    # over the background (int16 to avoid uint8 wrap-around)
-    max_minus_ave = maxpix.astype(np.int16) - avepix.astype(np.int16)
-    ave_excess = np.maximum(avepix.astype(np.int16) - int(round(ave_ref)), 1)
-    transient = max_minus_ave > TRANSIENT_RATIO*ave_excess
-
-    contaminated = bright_mask & transient & (stdpix > CONTAMINATION_STD_FACTOR*max(std_ref, 1))
-    if mask_valid is not None:
-        contaminated &= mask_valid
-
-    if not np.any(contaminated):
+    # over the background
+    max_c = maxpix.ravel()[idx].astype(np.int16)
+    ave_c = avepix.ravel()[idx].astype(np.int16)
+    ave_excess = np.maximum(ave_c - int(round(ave_ref)), 1)
+    idx = idx[(max_c - ave_c) > TRANSIENT_RATIO*ave_excess]
+    if idx.size == 0:
         return compressed
 
     # np.array() deep-copies all 4 planes; only plane 3 (stdpixel) is then modified.
     compressed = np.array(compressed)
     replacement = max(1, int(round(min(std_ref, 255))))
-    compressed[3][contaminated] = np.uint8(replacement)
+    compressed[3].flat[idx] = np.uint8(replacement)
 
     return compressed
 
