@@ -92,9 +92,12 @@ def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols, ch
             # where intensity=IntensSum (integrated), amplitude=Ampltd (peak)
             for y, x, intensity, amplitude, fwhm, background, snr, saturated_count in list(star_data):
 
-                # Split the intensity into the legacy integer and the sub-unit residual
-                intens_sum = int(round(intensity))
-                intens_resid = int(round(256*intensity)) - 256*intens_sum
+                # Split the 8.8 fixed-point intensity into the legacy integer and the sub-unit
+                #   residual the same way as the FF avepixel planes, so the residual stays in
+                #   [-128, 127] and a read-write round trip reproduces both columns exactly
+                intens_q = int(round(256*intensity))
+                intens_sum = (intens_q + 128) >> 8
+                intens_resid = intens_q - 256*intens_sum
 
                 # Limit the saturation count to 999999
                 if saturated_count > 999999:
