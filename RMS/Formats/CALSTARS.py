@@ -55,7 +55,7 @@ def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols, ch
         star_file.write("==========================================================================\n")
         star_file.write("RMS star extractor" + "\n")
         star_file.write("Cal time = FF header time plus 255/(2*framerate_Hz) seconds" + "\n")
-        star_file.write("      Y       X IntensSum Ampltd  FWHM  BgLvl   SNR NSatPx" + "\n")
+        star_file.write("      Y       X IntensSum Ampltd  FWHM  BgLvl   SNR NSatPx IResid" + "\n")
         star_file.write("==========================================================================\n")
         star_file.write("FF folder = " + ff_directory + "\n")
         star_file.write("Cam #   = " + str(cam_code) + "\n")
@@ -83,9 +83,18 @@ def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols, ch
 
             # Write every star to file
             # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
+            #   IResid(8)
+            # IntensSum stays the intensity rounded to an integer so older readers still parse the
+            #   file, and IResid carries the signed residual in 1/256 units (like the AVERESID plane of
+            #   the FF files), so the 8.8 fixed-point intensity is 256*IntensSum + IResid. Rounding to an
+            #   integer alone quantizes faint stars, whose sums are only ~10-30, into 0.05-0.1 mag steps
             # Input star_data: (y, x, intensity, amplitude, fwhm, background, snr, saturated_count)
             # where intensity=IntensSum (integrated), amplitude=Ampltd (peak)
             for y, x, intensity, amplitude, fwhm, background, snr, saturated_count in list(star_data):
+
+                # Split the intensity into the legacy integer and the sub-unit residual
+                intens_sum = int(round(intensity))
+                intens_resid = int(round(256*intensity)) - 256*intens_sum
 
                 # Limit the saturation count to 999999
                 if saturated_count > 999999:
@@ -95,10 +104,10 @@ def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols, ch
                 if snr > 99.99:
                     snr = 99.99
 
-                star_file.write("{:7.2f} {:7.2f} {:9d} {:6d} {:5.2f} {:6d} {:5.2f} {:6d}".format(
+                star_file.write("{:7.2f} {:7.2f} {:9d} {:6d} {:5.2f} {:6d} {:5.2f} {:6d} {:6d}".format(
                     round(y, 2), round(x, 2),
-                    int(round(intensity)), int(round(amplitude)), fwhm, int(round(background)),
-                    snr, int(saturated_count)) + "\n")
+                    intens_sum, int(round(amplitude)), fwhm, int(round(background)),
+                    snr, int(saturated_count), intens_resid) + "\n")
 
         # Write the end separator
         star_file.write("##########################################################################\n")
@@ -234,6 +243,14 @@ def readCALSTARS(file_path, file_name, chunk_frames=256):
                 saturated_count = int(line[7])
             else:
                 saturated_count = -1
+
+            # Add the sub-unit intensity residual if given (newer files append it after NSatPx, in
+            #   1/256 units)
+            if len(line) >= 9:
+                try:
+                    level = level + int(line[8])/256.0
+                except ValueError:
+                    pass
 
             # Save star data
             star_data.append([y, x, level, amplitude, fwhm, background, snr, saturated_count])
