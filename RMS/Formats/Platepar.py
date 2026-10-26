@@ -2435,6 +2435,48 @@ class Platepar(object):
 
         return fmt
 
+    def rescaled(self, width, height):
+        """The platepar for frames of another size of the same field, e.g. binned more or less by the camera.
+
+        The image scale (px/deg) changes by the ratio of the sizes and the vignetting coefficient (rad/px) by its
+        inverse. The radial distortion models (and their decentering correction) are normalized to the size of the
+        image, so their coefficients stay. The polynomial models are in pixels, and are not rescaled. The pointing
+        and the photometric offset are kept, the recalibration on the stars refines them (also the shift of the
+        centres of the binned pixels by a fraction of a pixel, e.g. a quarter of a pixel of frames binned twice as
+        much, which the image centre of the platepar doesn't follow).
+
+        Arguments:
+            width: [int] Width of the frames (px).
+            height: [int] Height of the frames (px).
+
+        Return:
+            [Platepar] A rescaled copy, or None if the size differs by different factors along the axes, or the
+                distortion model is not normalized to the image size.
+        """
+
+        # The factor of the size, the same along both axes (within the rounding of an odd size by the binning)
+        factor = width/float(self.X_res)
+        if abs(height - factor*self.Y_res) > 1.0:
+            return None
+
+        # Only the radial models are independent of the image size
+        if not self.distortion_type.startswith("radial"):
+            return None
+
+        pp = copy.deepcopy(self)
+        pp.X_res, pp.Y_res = int(width), int(height)
+        pp.F_scale = self.F_scale*factor
+        if self.vignetting_coeff is not None:
+            pp.vignetting_coeff = self.vignetting_coeff/factor
+
+        # The stars of the fit, in the pixels of the new size: a pixel k of the frames binned by the factor b (=1/f)
+        #   covers the old pixels b*k to b*(k + 1), so its centre is at b*(k + 0.5) - 0.5 of the old pixels
+        if self.star_list:
+            pp.star_list = [[entry[0], (entry[1] + 0.5)*factor - 0.5, (entry[2] + 0.5)*factor - 0.5]
+                            + list(entry[3:]) for entry in self.star_list]
+
+        return pp
+
     def updateRefAltAz(self):
         """Update the reference apparent azimuth and altitude from the reference RA and Dec."""
 

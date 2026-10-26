@@ -41,6 +41,7 @@ from RMS.Astrometry.Conversions import jd2Date
 from RMS.Astrometry.CyFunctions import subsetCatalog
 from RMS.Formats.Platepar import getCatalogStarsImagePositions
 from RMS.Logger import getLogger
+from RMS.Routines.ReferenceScale import referenceEnabled
 
 
 log = getLogger("logger")
@@ -1311,6 +1312,34 @@ def readState(output_dir):
     return state
 
 
+def _stateForSize(output_dir, state, size):
+    """ The state of the automatic calibration for frames of the given size: the state as it is if it is of frames
+        of that size (or of an unknown size), else a new state, and the old one is kept renamed with its size
+        (auto_calibration_state_<W>x<H>.json).
+
+    Arguments:
+        output_dir: [str] Output directory of the camera.
+        state: [dict] The state (see readState).
+        size: [tuple] (width, height) of the frames (px).
+
+    Return:
+        [dict] The state, with the size of the frames.
+    """
+
+    size = [int(size[0]), int(size[1])]
+    old_size = state.get('frame_size')
+    if (old_size is not None) and (list(old_size) != size):
+        old_path = os.path.join(output_dir, 'auto_calibration_state_{:d}x{:d}.json'.format(*old_size))
+        os.replace(statePath(output_dir), old_path)
+        log.warning("Automatic calibration: the state was of {:d}x{:d} px frames, it is kept as {:s} and the camera "
+                    "starts over".format(old_size[0], old_size[1], old_path))
+        state = readState(output_dir)
+
+    state['frame_size'] = size
+
+    return state
+
+
 def writeState(output_dir, state):
     """ Write the state of the automatic calibration atomically.
 
@@ -1384,12 +1413,17 @@ def readChunks(results_dir, config):
     return sorted(chunks, key=lambda chunk: chunk[1]), ff_frames
 
 
-def _platepar(path, use_flat):
+def _platepar(path, use_flat, size=None):
     """ Read a platepar.
 
     Arguments:
         path: [str] Path of the platepar, None if there is none.
         use_flat: [bool] Whether the images are flat fielded.
+
+    Keyword arguments:
+        size: [tuple] (width, height) of the frames (px). A platepar fitted on frames of another size of the same
+            field (e.g. before the camera was binned differently) is rescaled to them (see Platepar.rescaled), and
+            is none if it can't be. None by default (the platepar is used as it is).
 
     Return:
         [Platepar] The platepar, None if there is none or it can't be read.
@@ -1409,6 +1443,13 @@ def _platepar(path, use_flat):
     except Exception as e:
         log.warning("Automatic calibration: the platepar {:s} can't be read: {:s}".format(path, repr(e)))
         return None
+
+    # A platepar of frames of another size is rescaled to the frames
+    if (size is not None) and ((platepar.X_res, platepar.Y_res) != tuple(size)):
+        platepar = platepar.rescaled(*size)
+        if platepar is None:
+            log.warning("Automatic calibration: the platepar {:s} is for frames of another size and can't be "
+                        "rescaled to {:d}x{:d} px".format(path, size[0], size[1]))
 
     return platepar
 
@@ -1496,9 +1537,20 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
     width, height = int(config.width), int(config.height)
     mask_img = getattr(mask, 'img', None)
 
+    # With a reference camera in the config, the size of the frames is that of the file (see
+    #   RMS.Routines.ReferenceScale), and the platepars and the state of frames of another size are rescaled or
+    #   started again. Otherwise they are used as they are
+    size = (width, height) if referenceEnabled(config) else None
+
     with _StateLock(output_dir):
 
         state = readState(output_dir)
+
+        # The state of frames of another size (e.g. before the camera was binned differently) is kept renamed with
+        #   its size, and the camera starts over: the numbers of stars of the clear sky and the clear chunks of the
+        #   files depend on the pixels. A state written without a size is used
+        if size is not None:
+            state = _stateForSize(output_dir, state, size)
 
         # The reference of the clear sky: the clearest chunks seen by the camera
         state['star_counts'] = (state['star_counts'] + [len(stars) for _, _, stars in chunks])[-MAX_STAR_COUNTS:]
@@ -1553,7 +1605,7 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
         result['judged_platepar'] = platepar_path
 
         # Judge the current platepar
-        current = _platepar(platepar_path, use_flat)
+        current = _platepar(platepar_path, use_flat, size=size)
         current_score = None
         if current is not None:
             current_score = scorePlatepar(current, held_out, catalog_stars, config,
@@ -1584,7 +1636,7 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
 
             # The platepar on trial and the previous one are scored on the same later chunks
             confirm_chunks = spreadChunks(later, MAX_HELD_OUT)
-            previous = _platepar(trial['previous'], use_flat)
+            previous = _platepar(trial['previous'], use_flat, size=size)
             trial_score = scorePlatepar(current, confirm_chunks, catalog_stars, config,
                                         ff_frames=ff_frames, mask=mask_img)
             trial_ok, trial_reasons = judgeScore(trial_score)
@@ -1642,7 +1694,7 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
 
             # Both platepars are scored on the same later chunks
             confirm_chunks = spreadChunks(later, MAX_HELD_OUT)
-            candidate = _platepar(pending['path'], use_flat)
+            candidate = _platepar(pending['path'], use_flat, size=size)
             candidate_score = scorePlatepar(candidate, confirm_chunks, catalog_stars, config,
                                             ff_frames=ff_frames, mask=mask_img)
             current_confirm_score = scorePlatepar(current, confirm_chunks, catalog_stars, config,

@@ -167,7 +167,7 @@ class SkyReference(object):
     MAX_VISITS = 10
     MAX_ZERO_POINTS = 1000
 
-    def __init__(self, dir_path, station_id):
+    def __init__(self, dir_path, station_id, frame_size=None):
         """ Clear-sky reference of a camera, kept across its inputs in its output directory:
             - sky_reference_<station>.npz: for every star (by its key, see starKeys) the clear-sky residual relative
               to the zero point of the input and the fraction of the chunks in which it was seen, of each of its
@@ -180,13 +180,23 @@ class SkyReference(object):
         The inputs can be processed in any order and by several processes: the files are updated under a lock, and
         the reference is replaced atomically.
 
+        The reference is kept with the size of the frames: the zero points and the residuals of the stars depend
+        on the pixels (e.g. a camera which bins more sums the light of more pixels), so a reference of frames of
+        another size is not used. It is kept renamed with its size (sky_reference_<station>_<W>x<H>.npz), and a
+        new reference is started.
+
         Arguments:
             dir_path: [str] Output directory of the camera.
             station_id: [str] Station code.
+
+        Keyword arguments:
+            frame_size: [tuple] (width, height) of the frames (px). None by default (the reference is used whatever
+                the size of its frames, and it is written without a size).
         """
 
         self.dir_path = dir_path
         self.station_id = station_id
+        self.frame_size = tuple(int(v) for v in frame_size) if frame_size is not None else None
 
         # The file of the reference of the stars, and the lock file of the updates (see update)
         self.stars_path = os.path.join(dir_path, 'sky_reference_{:s}.npz'.format(station_id))
@@ -208,14 +218,24 @@ class SkyReference(object):
         self.zp_times = np.zeros(0)
         self.zp_values = np.zeros(0)
 
+        # The size of the frames of the reference on disk if it differs from frame_size, then it is not used
+        self.stale_size = None
+
         # A reference which can't be read (e.g. damaged by a full disk) is started again: it is rebuilt from the
         #   following inputs
         if os.path.isfile(self.stars_path):
             try:
                 with np.load(self.stars_path) as data:
-                    self.keys, self.times = data['keys'], data['times']
-                    self.values, self.rates = data['values'], data['rates']
-                    self.zp_times, self.zp_values = data['zp_times'], data['zp_values']
+
+                    # A reference of frames of another size is not used (see __init__). A reference written
+                    #   without a size (before the sizes were kept) is used, and gets the size when it is written
+                    size = tuple(int(v) for v in data['frame_size']) if 'frame_size' in data.files else None
+                    if (self.frame_size is not None) and (size is not None) and (size != self.frame_size):
+                        self.stale_size = size
+                    else:
+                        self.keys, self.times = data['keys'], data['times']
+                        self.values, self.rates = data['values'], data['rates']
+                        self.zp_times, self.zp_values = data['zp_times'], data['zp_values']
             except Exception as e:
                 log.warning('Sky quality: the reference {:s} can\'t be read ({:s}), it is started again'.format(
                     self.stars_path, str(e)))
@@ -340,8 +360,18 @@ class SkyReference(object):
             # Write the reference to a temporary file and replace the old one with it, so a process reading it never
             #   sees a partly written file
             tmp_path = self.stars_path + '.tmp.npz'
+            extra = {'frame_size': np.array(self.frame_size)} if self.frame_size is not None else {}
             np.savez_compressed(tmp_path, keys=keys_all, times=times, values=vals, rates=rts, zp_times=zp_times,
-                                zp_values=zp_values)
+                                zp_values=zp_values, **extra)
+
+            # A reference of frames of another size is kept renamed with its size, the new one replaces it
+            if (self.stale_size is not None) and os.path.isfile(self.stars_path):
+                old_path = os.path.join(self.dir_path, 'sky_reference_{:s}_{:d}x{:d}.npz'.format(
+                    self.station_id, *self.stale_size))
+                os.replace(self.stars_path, old_path)
+                log.warning('Sky quality: the reference was of {:d}x{:d} px frames, it is kept as {:s} and a new '
+                            'reference is started'.format(self.stale_size[0], self.stale_size[1], old_path))
+                self.stale_size = None
             os.replace(tmp_path, self.stars_path)
 
             # The reference in memory is the one written
