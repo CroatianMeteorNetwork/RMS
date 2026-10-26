@@ -55,9 +55,10 @@ def referenceEnabled(config):
 
 
 def roundHalfUp(value):
-    """ The nearest integer, halves rounded up (round() rounds them to the even integer). """
+    """ The nearest integer, halves rounded up (round() rounds them to the even integer). A half which is a little
+        below because of the floating point (e.g. 15*(32.8/65.6) computed from a field of view) is a half too. """
 
-    return int(math.floor(value + 0.5))
+    return int(math.floor(value + 0.5 + 1e-9))
 
 
 def scaleFrames(n, factor):

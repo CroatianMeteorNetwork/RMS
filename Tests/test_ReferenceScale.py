@@ -199,6 +199,52 @@ def test_chunks_divide_the_blocks(fps):
     assert abs(chunk - rs.DEFAULT_CHUNK_FRAMES*fps/REF_FPS) <= 0.25*rs.DEFAULT_CHUNK_FRAMES*fps/REF_FPS
 
 
+def test_standalone_matched_filter_extracts_stars_with_the_scaled_config(tmp_path, monkeypatch):
+    """ The standalone processing of a file by the matched filter scales the config before the stars are extracted,
+        so the stars, the detection and the results use the same settings (as in the monitor). """
+
+    class Handle(object):
+        input_type = 'fblk'
+        dir_path = str(tmp_path)
+        byteswap = False
+        fps = INPUT_FPS
+        ncols, nrows = 960, 540
+        chunk_frames = 320
+
+        class ff(object):
+            dtype = np.uint16
+
+    used = {}
+
+    def extract(img_handle, config, **kwargs):
+        used['stars'] = (config.border, config.neighborhood_size, config.segment_radius)
+        return []
+
+    def detect(img_handle, config, **kwargs):
+        used['detection'] = (config.border, config.mf_run_frames)
+        return [], None
+
+    def save(detections, star_list, img_handle, config, output_dir, **kwargs):
+        used['results'] = config.mf_run_frames
+        return str(tmp_path/'FTPdetectinfo_mf.txt')
+
+    monkeypatch.setattr(mfd, 'detectInputType', lambda *a, **k: Handle())
+    monkeypatch.setattr(mfd, 'loadImageCalibration', lambda *a, **k: (None, None, None))
+    monkeypatch.setattr(mfd, 'extractStarsFrameInterface', extract)
+    monkeypatch.setattr(mfd, 'detectMatchedFilter', detect)
+    monkeypatch.setattr(mfd, 'saveMatchedFilterResults', save)
+    monkeypatch.setattr(mfd, 'saveSummary', lambda *a, **k: {})
+
+    # The field of view of the frames at 65.6 arcsec/px
+    config = referenceConfig()
+    config.fov_w, config.fov_h = 960*INPUT_SCALE/3600, 540*INPUT_SCALE/3600
+    mfd.processFile(str(tmp_path/'input.fblk'), config, str(tmp_path))
+
+    assert used['stars'] == (8, 10, 5)
+    assert used['detection'] == (8, [20, 40])
+    assert used['results'] == [20, 40]
+
+
 def test_recalibration_thresholds():
     """ The star residual thresholds keep their angular sizes at the pixel scale of the platepar. """
 

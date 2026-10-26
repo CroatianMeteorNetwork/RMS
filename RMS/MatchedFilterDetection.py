@@ -79,7 +79,8 @@ from RMS.Routines import Image
 from RMS.Routines import MaskImage
 from RMS.Routines import RollingShutterCorrection
 from RMS.Routines.DynamicFTPCompressionCy import sampleMedianMAD
-from RMS.Routines.ReferenceScale import inputScale, scaleFrames, scalePowerOfTwo, scaleSize, scaleToReference
+from RMS.Routines.ReferenceScale import (inputScale, referenceEnabled, scaleFrames, scalePowerOfTwo, scaleSize,
+                                         scaleToReference)
 from RMS.Routines.SkyQuality import CalibrationError, SkyQualityMap, SkyReference, chunkFirstFrames
 from RMS.Routines.MatchedFilterKernels import (DeviceFrames, VelocityStacker, fitMovingPSF, forcedTrackSignal,
                                                streakAperture, CUDA_AVAILABLE)
@@ -6491,10 +6492,38 @@ def processFile(file_path, config, output_dir, platepar_path=None, dark_path=Non
     if mask_path:
         config.mask_file = os.path.abspath(mask_path)
 
-    # Open the input and load the calibration images (the dark, flat and mask)
+    # Open the input
     img_handle = detectInputType(file_path, config, detection=True, preload_video=True)
     if img_handle.input_type == 'ff':
         raise ValueError('FF files have no frames to search: {:s}'.format(file_path))
+
+    # The platepar, for the clouded sky
+    platepar = None
+    if platepar_path:
+        platepar = Platepar()
+        if platepar.read(platepar_path) is False:
+            log.warning('Matched filter: the platepar can\'t be read: {:s}'.format(platepar_path))
+            platepar = None
+
+    # With a reference camera in the config, a platepar of frames of another size is rescaled to the frames (it is
+    #   saved with the results for their recalibration), and the settings tuned on the reference camera are scaled
+    #   to this input before anything is done with it, so the stars, the detection and the results use the same
+    #   settings, as in the monitor (see RMS.Routines.ReferenceScale)
+    if referenceEnabled(config):
+        width = img_handle.ncols*config.detection_binning_factor
+        height = img_handle.nrows*config.detection_binning_factor
+        if (platepar is not None) and ((platepar.X_res, platepar.Y_res) != (width, height)):
+            rescaled = platepar.rescaled(width, height)
+            if rescaled is None:
+                log.warning('Matched filter: the platepar is for {:d}x{:d} px frames and can\'t be rescaled to the '
+                            '{:d}x{:d} px frames'.format(platepar.X_res, platepar.Y_res, width, height))
+            else:
+                os.makedirs(output_dir, exist_ok=True)
+                platepar = rescaled
+                platepar_path = os.path.join(output_dir, 'rescaled_' + os.path.basename(platepar_path))
+                platepar.write(platepar_path)
+        config = referenceConfig(img_handle, config, platepar=platepar)
+
     # The calibration images are in the directory of the input (for a directory of FITS frames, in the directory
     #   itself), as for the monitor
     mask, dark, flat_struct = loadImageCalibration(img_handle.dir_path, config, dtype=img_handle.ff.dtype,
@@ -6505,14 +6534,6 @@ def processFile(file_path, config, output_dir, platepar_path=None, dark_path=Non
     if extract_stars:
         star_list = extractStarsFrameInterface(img_handle, config, flat_struct=flat_struct, dark=dark, mask=mask,
                                                save_calstars=False)
-
-    # The platepar, for the clouded sky
-    platepar = None
-    if platepar_path:
-        platepar = Platepar()
-        if platepar.read(platepar_path) is False:
-            log.warning('Matched filter: the platepar can\'t be read: {:s}'.format(platepar_path))
-            platepar = None
 
     # Detect, save the detections and recalibrate them
     detections, detector = detectMatchedFilter(img_handle, config, mask=mask, dark=dark, flat_struct=flat_struct,
