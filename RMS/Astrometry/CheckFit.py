@@ -25,6 +25,7 @@ from RMS.Astrometry.NNalign import alignPlatepar
 from RMS.Formats import CALSTARS, FFfile, Platepar, StarCatalog
 from RMS.Math import angularSeparation
 from RMS.Logger import LoggingManager, getLogger
+from RMS.Routines.ReferenceScale import recalibrationThresholds
 
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 from RMS.Astrometry.CyFunctions import subsetCatalog
@@ -87,13 +88,16 @@ def buildNelderMeadSimplex(p0, dec_d, mode="floor", angular_step=2.0, min_step_d
 def computeMinimizationTolerances(config, platepar, star_dict_len):
     """ Compute tolerances for minimization. """
 
+    # The threshold of the star residuals in the pixels of the platepar (see recalibrationThresholds)
+    dist_threshold, _ = recalibrationThresholds(config, platepar)
+
     # Calculate the function tolerance, so the desired precision can be reached (the number is calculated
     # in the same regard as the cost function)
-    fatol = (config.dist_check_threshold**2)/np.sqrt(star_dict_len*config.min_matched_stars + 1)
+    fatol = (dist_threshold**2)/np.sqrt(star_dict_len*config.min_matched_stars + 1)
 
     # Parameter estimation tolerance for angular values
     fov_w = platepar.X_res/platepar.F_scale
-    xatol_ang = config.dist_check_threshold*fov_w/platepar.X_res
+    xatol_ang = dist_threshold*fov_w/platepar.X_res
 
     return fatol, xatol_ang
 
@@ -373,8 +377,9 @@ def checkFitGoodness(config, platepar, catalog_stars, star_dict, match_radius, v
     # ###
 
 
-    # Check that the average distance is within the threshold
-    if avg_dist <= config.dist_check_threshold:
+    # Check that the average distance is within the threshold (in the pixels of the platepar, see
+    #   recalibrationThresholds)
+    if avg_dist <= recalibrationThresholds(config, platepar)[0]:
 
         if verbose:
             log.info("")
@@ -625,8 +630,9 @@ def autoCheckFit(config, platepar, calstars_data, _nn_refinement=False):
 
     if n_matched >= config.calstars_files_N:
 
-        # Check if the average distance with the tightest radius is close
-        if avg_dist < config.dist_check_quick_threshold:
+        # Check if the average distance with the tightest radius is close (in the pixels of the platepar, see
+        #   recalibrationThresholds)
+        if avg_dist < recalibrationThresholds(config, platepar)[1]:
 
             log.info("Using quick fit with smaller radii...")
 

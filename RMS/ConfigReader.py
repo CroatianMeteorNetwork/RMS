@@ -1042,6 +1042,15 @@ class Config:
         self.mf_tier_speed = 2.0
         self.mf_max_bin = 8
 
+        # The camera the settings were tuned for: its frame rate (fps) and pixel scale (arcsec/px). With them, the
+        #   settings in frames (the runs, blocks, durations and gaps of the matched filter) keep their durations at
+        #   the frame rate of the input, and the settings in pixels (margins, the largest position error, the star
+        #   extraction window and the recalibration thresholds) their angular sizes at its pixel scale, so a camera
+        #   recording at another frame rate or binned differently needs no other change (see
+        #   RMS.Routines.ReferenceScale). 0 turns the scaling off
+        self.mf_reference_fps = 0.0
+        self.mf_reference_scale = 0.0
+
         # A fast object is a streak in every frame: sum the whole streak of every frame (several samples per frame
         #   along the motion, see velocitySamples), instead of only its middle. More sensitive to fast objects, at
         #   the cost of more search time
@@ -2508,7 +2517,7 @@ def parseMatchedFilter(config, parser):
                  "mf_min_sample_snr", "mf_star_threshold", "mf_persistence", "mf_clip", "mf_trail_level", "mf_min_displacement",
                  "mf_sigma_scale", "mf_track_significance", "mf_tier_speed", "mf_cloud_max_offset",
                  "mf_buffer_memory", "mf_cache_memory", "mf_line_concentration", "mf_track_deviation_fwhm",
-                 "mf_track_deviation_length", "mf_faint_threshold"):
+                 "mf_track_deviation_length", "mf_faint_threshold", "mf_reference_fps", "mf_reference_scale"):
         if parser.has_option(section, name):
             setattr(config, name, parser.getfloat(section, name))
 

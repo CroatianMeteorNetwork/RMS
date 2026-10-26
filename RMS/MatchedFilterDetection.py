@@ -79,6 +79,7 @@ from RMS.Routines import Image
 from RMS.Routines import MaskImage
 from RMS.Routines import RollingShutterCorrection
 from RMS.Routines.DynamicFTPCompressionCy import sampleMedianMAD
+from RMS.Routines.ReferenceScale import inputScale, scaleFrames, scalePowerOfTwo, scaleSize, scaleToReference
 from RMS.Routines.SkyQuality import CalibrationError, SkyQualityMap, SkyReference, chunkFirstFrames
 from RMS.Routines.MatchedFilterKernels import (DeviceFrames, VelocityStacker, fitMovingPSF, forcedTrackSignal,
                                                streakAperture, CUDA_AVAILABLE)
@@ -297,6 +298,33 @@ TRAIL_KEEP = 6
 Hit = collections.namedtuple('Hit', ['frame', 'x', 'y', 'vx', 'vy', 'z', 'run', 'bin'], defaults=(2,))
 
 
+def referenceConfig(img_handle, config, platepar=None):
+    """ The config with the settings tuned on a reference camera scaled to the frame rate and the pixel scale of
+        the input (see RMS.Routines.ReferenceScale). The config is returned as it is without a reference, or if it
+        was scaled already (e.g. by the monitor).
+
+    Arguments:
+        img_handle: [FrameInterface] Frame-based input.
+        config: [Config] Configuration object.
+
+    Keyword arguments:
+        platepar: [Platepar] Platepar of the input, for its pixel scale. None by default (the field of view in the
+            config over the size of the frames).
+
+    Return:
+        [Config] Configuration object.
+    """
+
+    # The frame rate measured from the frame times of the input when it has one, and the size of the unbinned
+    #   frames
+    fps = img_handle.fps if getattr(img_handle, 'fps', None) else config.fps
+    det_bin = config.detection_binning_factor if img_handle.input_type != 'ff' else 1
+    width, height = img_handle.ncols*det_bin, img_handle.nrows*det_bin
+
+    return scaleToReference(config, fps, inputScale(config, width, height, platepar=platepar),
+                            size=(width, height), logger=log)
+
+
 def matchedFilterBlockFrames(config):
     """ The length of the blocks of frames of the matched filter. The runs of frames don't straddle the blocks, so
         a block holds a whole number of the longest runs and of the measurements: the block length is
@@ -493,6 +521,30 @@ class MatchedFilterOptions(object):
             log.warning('Matched filter: mf_block_frames {:d} is not a multiple of the runs and the measurements, '
                         '{:d} used'.format(self.block_frames, fixed))
             self.block_frames = fixed
+
+        # The constants of the module which are in frames or pixels, scaled like the settings when the config was
+        #   scaled to a reference camera (see RMS.Routines.ReferenceScale): the frame counts keep their durations,
+        #   the distances of the light around an object their angular sizes, and the speeds (px per frame) both.
+        #   The velocity error of a hit (FAINT_SEED_SPREAD) is a part of the step of the velocity grid, which is
+        #   finer for the longer runs. Without a reference the factors are 1 and the constants are used as they are.
+        #   Not scaled: the shape test of the detections (EXTENT_RADIUS, EXTENT_RING) compares the light of the core
+        #   with a ring around it, which follows the PSF in pixels and not the field (a ring at the same angle comes
+        #   closer to an undersampled PSF and takes in its wings), and the times between the seed hits of the faint
+        #   chains (FAINT_SEED_FRAMES), which found a faint object only as they are in the tests of a camera at 2.5
+        #   times the frame rate
+        frame_factor = getattr(config, 'mf_frame_factor', 1.0)
+        pixel_factor = getattr(config, 'mf_pixel_factor', 1.0)
+        speed_factor = pixel_factor/frame_factor
+        self.slow_speed = SLOW_SPEED*speed_factor
+        self.slow_max_speed = SLOW_MAX_SPEED*speed_factor
+        self.slow_min_relative_speed = SLOW_MIN_RELATIVE_SPEED*speed_factor
+        self.faint_seed_spread = FAINT_SEED_SPREAD/frame_factor
+        self.faint_min_span = scaleFrames(FAINT_MIN_SPAN, frame_factor)
+        self.faint_max_measure_frames = scalePowerOfTwo(FAINT_MAX_MEASURE_FRAMES, frame_factor)
+        self.extent_step = scaleFrames(EXTENT_STEP, frame_factor)
+        self.shadow_radius = SHADOW_RADIUS*pixel_factor
+        self.spill_radius = SPILL_RADIUS*pixel_factor
+        self.min_star_template_px = scaleSize(MIN_STAR_TEMPLATE_PX, pixel_factor**2)
 
         # The GPU is used when requested (or automatically) and numba can reach it
         self.use_gpu = (self.gpu in ('on', 'auto')) and CUDA_AVAILABLE
@@ -694,6 +746,9 @@ class MatchedFilterDetector(object):
             frame_range: [tuple] (first frame, end frame) of the frames to search, e.g. a segment of the input (see
                 RMS.Formats.FrameBuffer), numbered as in the whole input. None by default (all frames).
         """
+
+        # The settings tuned on a reference camera, scaled to this input if the caller didn't (see referenceConfig)
+        config = referenceConfig(img_handle, config)
 
         self.img_handle = img_handle
         self.config = config
@@ -1013,7 +1068,7 @@ class MatchedFilterDetector(object):
 
         # The star template at its pixels, if there are enough of them for a stable fit of its scale (see
         #   normalizeFrames)
-        use_template = (bg.star_idx is not None) and (len(bg.star_idx) >= MIN_STAR_TEMPLATE_PX)
+        use_template = (bg.star_idx is not None) and (len(bg.star_idx) >= self.opts.min_star_template_px)
         template = bg.stars.ravel()[bg.star_idx] if use_template else None
 
         # The frames are normalized in parallel threads, in slices of frames (numpy releases the GIL in the
@@ -1870,12 +1925,12 @@ class MatchedFilterDetector(object):
         ### Linking of the candidates of consecutive blocks ###
 
         # A candidate is linked to the nearest candidate in the next (or previous) block. The first link can reach
-        #   SLOW_MAX_SPEED px per frame over the block (plus the PSF), later links are predicted from the line
-        #   fitted through the chain and have to be within 2 PSF sigmas plus a pixel of the prediction. The
-        #   chains start from the strongest candidates
+        #   SLOW_MAX_SPEED px per frame (scaled with a reference camera, see MatchedFilterOptions) over the block
+        #   (plus the PSF), later links are predicted from the line fitted through the chain and have to be within
+        #   2 PSF sigmas plus a pixel of the prediction. The chains start from the strongest candidates
         cands = np.array(cands)
         block_len = float(self.opts.block_frames)
-        reach = SLOW_MAX_SPEED*block_len + 2*sigma
+        reach = self.opts.slow_max_speed*block_len + 2*sigma
         used = np.zeros(len(cands), dtype=bool)
         tracks = []
         for i in np.argsort(-cands[:, 3]):
@@ -1927,7 +1982,7 @@ class MatchedFilterDetector(object):
             vy = np.polyfit(pts[:, 0], pts[:, 2], 1)[0]
 
             # Moving with the stars: a residual of a star
-            if math.hypot(vx - drift[0], vy - drift[1]) < SLOW_MIN_RELATIVE_SPEED:
+            if math.hypot(vx - drift[0], vy - drift[1]) < self.opts.slow_min_relative_speed:
                 continue
 
             # The chain as a track of hits (rows [frame, x, y, z, vx, vy, run, bin]), with half a block as the
@@ -2475,7 +2530,7 @@ class MatchedFilterDetector(object):
                 # A shadow stays close to the stronger track and moves with it: the difference of the velocities
                 #   is within 20% of the speed (plus twice the slowest speed of the search, for slow objects)
                 speed = math.hypot(*vel[j])
-                if (np.median(dist) <= SHADOW_RADIUS) and \
+                if (np.median(dist) <= self.opts.shadow_radius) and \
                         (math.hypot(*(vel[i] - vel[j])) <= 0.2*speed + 2*self.opts.speed_min):
                     shadow = True
                     break
@@ -2572,11 +2627,12 @@ class MatchedFilterDetector(object):
             y[after] = tr[-1, 2] + tr[-1, 5]*(t[after] - tr[-1, 0])
 
             # The hits near the track are left out
-            keep[idx[np.hypot(pool[idx, 1] - x, pool[idx, 2] - y) <= SHADOW_RADIUS]] = False
+            keep[idx[np.hypot(pool[idx, 1] - x, pool[idx, 2] - y) <= self.opts.shadow_radius]] = False
 
         # The chains in the speed range which move far enough (as the tracks, see acceptTrack)
         t1 = time()
-        chains = [ch for ch in linkFaintHits(pool[keep]) if self.acceptTrack(ch)]
+        chains = [ch for ch in linkFaintHits(pool[keep], seed_spread=self.opts.faint_seed_spread,
+                                             min_span=self.opts.faint_min_span) if self.acceptTrack(ch)]
         self.timing['faint_link'] += time() - t1
 
         # The chains whose signal along their line is significant, the most significant ones
@@ -2597,7 +2653,7 @@ class MatchedFilterDetector(object):
             #   measurements don't straddle them)
             frame_snr = significance[i]/math.sqrt(np.ptp(ch[:, 0]) + 1)
             n = 1
-            while (2*n <= FAINT_MAX_MEASURE_FRAMES) and (self.opts.block_frames % (2*n) == 0) \
+            while (2*n <= self.opts.faint_max_measure_frames) and (self.opts.block_frames % (2*n) == 0) \
                     and (frame_snr*math.sqrt(n) < FAINT_SAMPLE_SNR):
                 n *= 2
             faint.append((ch, n))
@@ -3155,7 +3211,7 @@ class MatchedFilterDetector(object):
         #   predicted from its hits over the reach of the chain (they are sparse), and it is measured as far as that
         #   reach beyond its hits (the object is often visible beyond the runs where the noise added to it)
         faint_opts = copy.copy(self.opts)
-        faint_opts.max_measure_frames = max(self.opts.max_measure_frames, FAINT_MAX_MEASURE_FRAMES)
+        faint_opts.max_measure_frames = max(self.opts.max_measure_frames, self.opts.faint_max_measure_frames)
         items = [(tr, None) for tr in tracks] + list(faint)
 
         def state(i):
@@ -3177,7 +3233,7 @@ class MatchedFilterDetector(object):
         # A slow object stays on the same pixels for a good part of the frames from which the background is
         #   estimated, so the background contains part of it: the background is estimated again without the
         #   pixels of the slow objects, and they are measured again
-        slow = [i for i, cent in enumerate(cents) if (cent is not None) and (trackSpeed(cent) < SLOW_SPEED)]
+        slow = [i for i, cent in enumerate(cents) if (cent is not None) and (trackSpeed(cent) < self.opts.slow_speed)]
         if slow:
             t1 = time()
             self.maskObjects([cents[i] for i in slow])
@@ -3517,7 +3573,7 @@ class MatchedFilterDetector(object):
                     # The sum within 3 PSF sigmas of the segment, and the number of saturated pixels
                     radius_phot = 3.0*self.psf_sigma
                     sums, n_sat = framePhotometry(z, saturated, fr - first, noise, x, y, vx, vy,
-                                                  radius_phot)
+                                                  radius_phot, spill_radius=self.opts.spill_radius)
                     c['phot'][sel] = sums
                     c['phot_sat'][sel] = n_sat
 
@@ -3528,9 +3584,11 @@ class MatchedFilterDetector(object):
                     c['phot_noise'][sel] = noise[yi, xi]*math.sqrt(math.pi)*radius_phot
 
                     # The frames stacked along the track, for the shape of the object (see extentConcentration).
-                    #   Every EXTENT_STEP-th frame is enough; getRectSubPix shifts the patch by the subpixel
-                    #   position with bilinear interpolation, so the object is at the centre of the stack
-                    for f, xf, yf in zip(fr[::EXTENT_STEP], x[::EXTENT_STEP], y[::EXTENT_STEP]):
+                    #   Every EXTENT_STEP-th frame is enough (scaled with the frame rate, see MatchedFilterOptions);
+                    #   getRectSubPix shifts the patch by the subpixel position with bilinear interpolation, so the
+                    #   object is at the centre of the stack
+                    step = self.opts.extent_step
+                    for f, xf, yf in zip(fr[::step], x[::step], y[::step]):
                         r = EXTENT_RADIUS
                         if (r <= xf < z.shape[2] - r - 1) and (r <= yf < z.shape[1] - r - 1):
                             if (clouded is not None) and clouded[int(round(yf)), int(round(xf))]:
@@ -3855,7 +3913,7 @@ def extentLine(stack, psf_sigma, n_frames, motion=None):
     return float((core - axis_mean)/core), float(significance)
 
 
-def framePhotometry(frames, saturated, frame_idx, noise, xs, ys, vx, vy, radius):
+def framePhotometry(frames, saturated, frame_idx, noise, xs, ys, vx, vy, radius, spill_radius=SPILL_RADIUS):
     """ Photometry of a moving object in a few frames: the sum within radius of the segment it moved along in
         every frame, and its saturated pixels. A very bright object spills its charge along its row and column
         before its pixels saturate: in a frame where the sum within SPILL_RADIUS is more than SPILL_RATIO times
@@ -3869,6 +3927,9 @@ def framePhotometry(frames, saturated, frame_idx, noise, xs, ys, vx, vy, radius)
         xs, ys: [ndarray] Positions of the object in the middle of the frames.
         vx, vy: [float] Velocity (px per frame).
         radius: [float] Radius of the aperture (px).
+
+    Keyword arguments:
+        spill_radius: [float] Radius of the wide aperture of the spilled charge (px). SPILL_RADIUS by default.
 
     Return:
         (sums, n_saturated): [tuple of ndarrays] Intensity (ADU) and saturated pixel count per frame.
@@ -3886,7 +3947,7 @@ def framePhotometry(frames, saturated, frame_idx, noise, xs, ys, vx, vy, radius)
     # The spilled charge is only looked for in the frames of very bright objects (the wide aperture adds a lot of
     #   noise to faint ones)
     if np.max(sums) > SPILL_MIN_SNR*core_noise:
-        wide, wide_sat = streakAperture(frames, saturated, frame_idx, noise, xs, ys, vx, vy, SPILL_RADIUS)
+        wide, wide_sat = streakAperture(frames, saturated, frame_idx, noise, xs, ys, vx, vy, spill_radius)
         spill = (sums > SPILL_MIN_SNR*core_noise) & (wide > SPILL_RATIO*sums)
         sums = np.where(spill, wide, sums)
         n_sat = np.where(spill, np.maximum(wide_sat, 1), n_sat)
@@ -4857,7 +4918,8 @@ class TrackMeasurement(object):
             sat = saturated[f0 - first:f0 - first + n] if saturated is not None \
                 else np.zeros((n,) + z.shape[1:], dtype=np.uint8)
             sums, n_sat = framePhotometry(z[f0 - first:f0 - first + n], sat, np.arange(n), bg.noise,
-                                          res[0] + vx*dt, res[1] + vy*dt, vx, vy, 3.0*self.psf_sigma)
+                                          res[0] + vx*dt, res[1] + vy*dt, vx, vy, 3.0*self.psf_sigma,
+                                          spill_radius=self.opts.spill_radius)
 
             # The photometry of every frame is kept (padded to the largest number of frames per measurement)
             pad = self.opts.max_measure_frames - n
@@ -5001,7 +5063,10 @@ def skyQuality(img_handle, config, star_list, platepar, reference_dir=None, inpu
 
         # The clear-sky reference of the camera, and the sky quality of this input with the chunks at their frames
         #   (by the frame times of the input)
-        reference = SkyReference(reference_dir, config.stationID) if reference_dir else None
+        det_bin = config.detection_binning_factor
+        reference = SkyReference(reference_dir, config.stationID,
+                                 frame_size=(img_handle.ncols*det_bin, img_handle.nrows*det_bin)) \
+            if reference_dir else None
         first_frame, end_frame = frame_range if (frame_range is not None) else (0, img_handle.total_frames)
 
         # The frames borrowed from the previous input (continuous detection, see RMS.Formats.FrameChain) are not
@@ -5135,6 +5200,9 @@ def detectMatchedFilter(img_handle, config, mask=None, dark=None, flat_struct=No
     if img_handle.input_type == 'ff':
         log.warning('Matched filter: FF files have no frames to search, skipped')
         return ([], None) if return_detector else []
+
+    # The settings tuned on a reference camera, scaled to this input (see referenceConfig)
+    config = referenceConfig(img_handle, config, platepar=platepar)
 
     # The calibration is binned in place, and the caller's objects may already be binned for the normal
     #   detection, so copies are binned
@@ -6080,6 +6148,10 @@ def detectMatchedFilterSegments(img_handle, config, segment_frames, mask=None, d
         (star_list, detections, run, buffer): [tuple] The stars of all chunks, the detections, the run of the
             segments (SegmentedRun, with the summary) and the buffer with the frames of the last segment.
     """
+
+    # The settings tuned on a reference camera, scaled to this input (see referenceConfig), before the segments
+    #   are planned from the lengths of the blocks
+    config = referenceConfig(img_handle, config, platepar=platepar)
 
     t0 = time()
     chunk_frames = img_handle.chunk_frames

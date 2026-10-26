@@ -42,6 +42,7 @@ from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile, validDefaultFTPdete
 from RMS.Math import angularSeparation
 from RMS.Logger import LoggingManager, getLogger
 from RMS.Misc import RmsDateTime
+from RMS.Routines.ReferenceScale import recalibrationThresholds
 
 # Neighbourhood size around individual FFs with detections which will be takes for recalibration
 #   A size of e.g. 3 means that an FF before, the FF with the detection, an an FF after will be taken
@@ -289,6 +290,10 @@ def recalibrateFF(
 
     working_platepar = copy.deepcopy(working_platepar)
 
+    # The largest mean star residuals of an accepted fit and of the quick fit, in the pixels of the platepar (scaled
+    #   to its pixel scale with a reference camera in the config, see RMS.Routines.ReferenceScale)
+    dist_threshold, quick_threshold = recalibrationThresholds(config, working_platepar)
+
     # Resolve the coverage gate threshold from the config unless explicitly given
     if min_match_fraction is None:
         min_match_fraction = config.recalibration_min_match_fraction
@@ -354,7 +359,7 @@ def recalibrateFF(
 
     # If at least half the stars are matched with the smallest radius
     # Check if the average distance with the tightest radius is close
-    if (n_matched >= 0.5*len(star_dict_ff[jd])) and (avg_dist < config.dist_check_quick_threshold):
+    if (n_matched >= 0.5*len(star_dict_ff[jd])) and (avg_dist < quick_threshold):
         # Use a reduced set of initial radius values
         radius_list = [1.5, min_radius]
 
@@ -476,14 +481,14 @@ def recalibrateFF(
         if (
             (not res.success)
             or (n_matched < config.min_matched_stars)
-            or (not ignore_distance_threshold and (dist > config.dist_check_threshold))
+            or (not ignore_distance_threshold and (dist > dist_threshold))
         ):
 
             if not res.success:
                 log.info('Astrometry fit failed!')
-            elif (dist > config.dist_check_threshold) and (not ignore_distance_threshold):
+            elif (dist > dist_threshold) and (not ignore_distance_threshold):
                 log.info(
-                    'Average star match does not satisfy the threshold: {:.2f} > {:.2f} px'.format(dist, config.dist_check_threshold)
+                    'Average star match does not satisfy the threshold: {:.2f} > {:.2f} px'.format(dist, dist_threshold)
                 )
 
             else:
@@ -624,7 +629,7 @@ def recalibrateFF(
 
         log.info(
             "Platepar minimum error of {:.2f} with radius {:.1f} px PASSED!".format(
-                config.dist_check_threshold, goodness_check_radius
+                dist_threshold, goodness_check_radius
             )
         )
 
@@ -649,9 +654,7 @@ def recalibrateFF(
 
     # Otherwise, indicate that the refinement was not successful
     else:
-        log.info('Rejecting refined platepar, min error {:.2f} px NOT ACHIEVED!'.format(
-            config.dist_check_threshold
-        ))
+        log.info('Rejecting refined platepar, min error {:.2f} px NOT ACHIEVED!'.format(dist_threshold))
         result = None
 
     return result, min_match_radius

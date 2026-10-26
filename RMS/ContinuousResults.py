@@ -29,7 +29,9 @@ import numpy as np
 
 from RMS.Formats import FTPdetectinfo
 from RMS.Formats.FFfile import constructFFName, filenameToDatetime
+from RMS.Formats.Platepar import Platepar
 from RMS.Logger import getLogger
+from RMS.Routines.ReferenceScale import inputScale, referenceFactors
 
 log = getLogger("logger")
 
@@ -217,7 +219,7 @@ def writeDetections(results_dir, dets, config):
 
 
 
-def _sameObject(a, b, t_lo, t_hi, fps):
+def _sameObject(a, b, t_lo, t_hi, fps, max_interp_frames=MAX_INTERP_FRAMES, max_distance=MAX_COMMON_DISTANCE):
     """ Whether two detections are the same object: their rows within [t_lo, t_hi) at a median distance of at most
         MAX_COMMON_DISTANCE px from the other detection at the same times. The position of the other detection at
         the time of a row is its row at that time (within a third of a frame), or else interpolated between its
@@ -226,6 +228,11 @@ def _sameObject(a, b, t_lo, t_hi, fps):
         frames. The rows of both detections are compared with the other one, and MIN_COMMON_FRAMES comparisons
         are needed, or all those of the rows in the range if there are fewer (an object measured on many frames
         has few rows in it), but at least 2.
+
+    Keyword arguments:
+        max_interp_frames: [float] Largest time between the interpolated rows (frames). MAX_INTERP_FRAMES by
+            default.
+        max_distance: [float] Largest median distance (px). MAX_COMMON_DISTANCE by default.
 
     Return:
         [bool]
@@ -248,7 +255,7 @@ def _sameObject(a, b, t_lo, t_hi, fps):
 
             # Otherwise its position interpolated between its rows around that time, if they are close in time
             k = int(np.searchsorted(tq, t))
-            if (0 < k < len(tq)) and (tq[k] - tq[k - 1] <= MAX_INTERP_FRAMES/fps):
+            if (0 < k < len(tq)) and (tq[k] - tq[k - 1] <= max_interp_frames/fps):
                 w = (t - tq[k - 1])/(tq[k] - tq[k - 1])
                 x, y = xq[k - 1] + w*(xq[k] - xq[k - 1]), yq[k - 1] + w*(yq[k] - yq[k - 1])
                 dist.append(np.hypot(p['rows'][i, 1] - x, p['rows'][i, 2] - y))
@@ -262,7 +269,7 @@ def _sameObject(a, b, t_lo, t_hi, fps):
     dist = dist_a + dist_b
     needed = max(2, min(MIN_COMMON_FRAMES, n_a + n_b))
 
-    return (len(dist) >= needed) and (np.median(dist) <= MAX_COMMON_DISTANCE)
+    return (len(dist) >= needed) and (np.median(dist) <= max_distance)
 
 
 
@@ -323,6 +330,15 @@ def joinResults(previous_dir, results_dir, boundary, context_s, config, recalibr
         earlier[home] = readDetections(home)
     later = readDetections(results_dir)
 
+    # The pixel scale of the file, for the distance of the comparison with a reference camera in the config, from
+    #   the platepar of the file if it has one (see RMS.Routines.ReferenceScale)
+    platepar = Platepar()
+    platepar_path = os.path.join(results_dir, config.platepar_name)
+    if (config.mf_reference_scale <= 0) or (not os.path.isfile(platepar_path)) or (not platepar.read(platepar_path)):
+        platepar = None
+    width, height = (platepar.X_res, platepar.Y_res) if platepar is not None else (config.width, config.height)
+    scale = inputScale(config, width, height, platepar=platepar)
+
     # Every detection of the later file which reaches into the borrowed frames is joined or moved
     joined, moved, record = 0, 0, []
     changed = set()
@@ -338,7 +354,11 @@ def joinResults(previous_dir, results_dir, boundary, context_s, config, recalibr
         partner = None
         for home, dets in earlier.items():
             for k, other in enumerate(dets):
-                if _sameObject(det, other, boundary - context_s, boundary, det['fps']):
+                # The limits of the comparison keep their durations and angular sizes with a reference camera
+                frame_factor, pixel_factor = referenceFactors(config, det['fps'], scale)
+                if _sameObject(det, other, boundary - context_s, boundary, det['fps'],
+                               max_interp_frames=MAX_INTERP_FRAMES*frame_factor,
+                               max_distance=MAX_COMMON_DISTANCE*pixel_factor):
                     partner = (home, k)
                     break
             if partner is not None:

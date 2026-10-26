@@ -60,6 +60,8 @@ from RMS.Astrometry.ApplyRecalibrate import applyRecalibrate
 from RMS.Logger import LoggingManager, getLogger
 from RMS.ContinuousResults import JOIN_RECORD, processPendingJoins
 from RMS.Misc import RmsDateTime
+from RMS.Routines.ReferenceScale import (DEFAULT_CHUNK_FRAMES, inputScale, referenceEnabled, scaleChunkFrames,
+                                         scaleToReference)
 
 
 # Get the logger from the main module
@@ -169,6 +171,40 @@ def resolveCameraStartTime(cp, section, cli_start_time=None):
     return None
 
 
+def readInputHeader(file_path, config, chunk_frames):
+    """ Read the time of the beginning of the recording and the frame rate using the frame interface, without
+        loading the whole file.
+
+    Arguments:
+        file_path: [str] Path to the input file or directory.
+        config: [Config instance] Loaded config object.
+        chunk_frames: [int] Number of frames per chunk.
+
+    Return:
+        (beginning_datetime, fps): [tuple] Time of the beginning of the recording and the frame rate (measured
+            from the frame times if the input has them, else the frame rate of the config), (None, None) if the
+            file could not be opened.
+    """
+
+    img_handle = detectInputType(file_path, config, detection=True, preload_video=False,
+        chunk_frames=chunk_frames)
+
+    if img_handle is None:
+        return None, None
+
+    beginning_datetime = img_handle.beginning_datetime
+    fps = img_handle.fps if getattr(img_handle, 'fps', None) else config.fps
+
+    # Release the open file handles
+    if getattr(img_handle, 'cap', None) is not None:
+        img_handle.cap.release()
+
+    if getattr(img_handle, 'vid_file', None) is not None:
+        img_handle.vid_file.close()
+
+    return beginning_datetime, fps
+
+
 def readBeginningDatetime(file_path, config, chunk_frames):
     """ Read the time of the beginning of the recording using the frame interface, without loading the
         whole file.
@@ -182,22 +218,7 @@ def readBeginningDatetime(file_path, config, chunk_frames):
         [datetime] Time of the beginning of the recording, None if the file could not be opened.
     """
 
-    img_handle = detectInputType(file_path, config, detection=True, preload_video=False,
-        chunk_frames=chunk_frames)
-
-    if img_handle is None:
-        return None
-
-    beginning_datetime = img_handle.beginning_datetime
-
-    # Release the open file handles
-    if getattr(img_handle, 'cap', None) is not None:
-        img_handle.cap.release()
-
-    if getattr(img_handle, 'vid_file', None) is not None:
-        img_handle.vid_file.close()
-
-    return beginning_datetime
+    return readInputHeader(file_path, config, chunk_frames)[0]
 
 
 def resultsDirPath(output_dir, beginning_datetime, file_base):
@@ -1243,6 +1264,12 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
 
         processing_path = stageInputFile(file_path, config.monitor_staging_dir)
 
+        # With a reference frame rate, the chunks of the star extraction at their default length keep the duration
+        #   they have at the reference frame rate (see RMS.Routines.ReferenceScale), so the frame rate is read first
+        if config.mf_reference_fps > 0:
+            _, input_fps = readInputHeader(processing_path, copy.deepcopy(config), chunk_frames)
+            chunk_frames = scaleChunkFrames(chunk_frames, config, input_fps)
+
         # Open the file as an image handle first to get the timestamp
         img_handle = detectInputType(
             processing_path, config, detection=True, preload_video=True, chunk_frames=chunk_frames
@@ -1311,6 +1338,37 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
         # The version of the platepar the file is processed with, from its copy (the automatic calibration may
         #   replace the platepar at the same path meanwhile)
         platepar_mtime = plateparTime(results_platepar_path)
+
+        # With a reference camera in the config, the settings tuned on it are scaled to the frame rate and the pixel
+        #   scale of this input (see RMS.Routines.ReferenceScale). A platepar fitted on frames of another size of the
+        #   same field (e.g. the camera bins more or less than when it was fitted) is first rescaled to the frames
+        #   in the results directory (see Platepar.rescaled), and the recalibration on the stars refines it; the
+        #   copy keeps the time of the platepar, its version. Without a reference nothing changes
+        if referenceEnabled(config):
+
+            # The size of the unbinned frames
+            det_bin = config.detection_binning_factor if img_handle.input_type != 'ff' else 1
+            frame_width, frame_height = img_handle.ncols*det_bin, img_handle.nrows*det_bin
+
+            platepar = readPlatepar(results_platepar_path)
+            if (platepar is not None) and ((platepar.X_res, platepar.Y_res) != (frame_width, frame_height)):
+                rescaled = platepar.rescaled(frame_width, frame_height)
+                if rescaled is None:
+                    proc_log.warning("The platepar is for {:d}x{:d} px frames and can't be rescaled to the "
+                                     "{:d}x{:d} px frames".format(platepar.X_res, platepar.Y_res, frame_width,
+                                                                 frame_height))
+                else:
+                    proc_log.warning("The platepar is for {:d}x{:d} px frames, rescaled to the {:d}x{:d} px "
+                                     "frames; the recalibration refines it".format(platepar.X_res, platepar.Y_res,
+                                                                                   frame_width, frame_height))
+                    stat = os.stat(results_platepar_path)
+                    rescaled.write(results_platepar_path)
+                    os.utime(results_platepar_path, (stat.st_atime, stat.st_mtime))
+                    platepar = rescaled
+
+            config = scaleToReference(config, img_handle.fps if getattr(img_handle, 'fps', None) else config.fps,
+                                      inputScale(config, frame_width, frame_height, platepar=platepar),
+                                      size=(frame_width, frame_height), logger=proc_log)
 
         # Copy the config file into the results directory
         results_config_path = os.path.join(results_dir, os.path.basename(config_path))
@@ -2201,7 +2259,7 @@ def statusState(workers, queued, settling, failed_files, space_guard, reporter, 
 
 
 def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_dir, nproc=2,
-                     chunk_frames=128, poll_interval=2, force=False, recursive=False, flat_path=None,
+                     chunk_frames=DEFAULT_CHUNK_FRAMES, poll_interval=2, force=False, recursive=False, flat_path=None,
                      dark_path=None, fail_wait_time=300, start_time=None, report_mode=None,
                      worker_timeout=WORKER_TIMEOUT, retry_failed=False, mask_path=None):
     """ Monitor a directory for new files of the given type and process them.
@@ -2600,7 +2658,7 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
         recursive = True
 
         # Number of frames to process per chunk for star extraction
-        chunk_frames = 128
+        chunk_frames = DEFAULT_CHUNK_FRAMES
 
         # Time in seconds to wait before rescanning directories for new files
         poll_interval = 2
@@ -2655,7 +2713,7 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
     nproc = cp.getint('Global', 'nproc', fallback=2)
     file_type = cp.get('Global', 'file_type', fallback='mkv')
     recursive = cp.getboolean('Global', 'recursive', fallback=False)
-    chunk_frames = cp.getint('Global', 'chunk_frames', fallback=128)
+    chunk_frames = cp.getint('Global', 'chunk_frames', fallback=DEFAULT_CHUNK_FRAMES)
     poll_interval = cp.getfloat('Global', 'poll_interval', fallback=2.0)
     force = cp.getboolean('Global', 'force', fallback=False)
     fail_wait_time = cp.getfloat('Global', 'fail_wait_time', fallback=300.0)
@@ -3349,7 +3407,7 @@ Examples:
         help="Number of parallel worker processes. Default: 2."
     )
 
-    arg_parser.add_argument('--chunk_frames', type=int, default=128,
+    arg_parser.add_argument('--chunk_frames', type=int, default=DEFAULT_CHUNK_FRAMES,
         help="Number of frames per chunk for star extraction. Default: 128."
     )
 
