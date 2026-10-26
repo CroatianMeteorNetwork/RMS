@@ -329,7 +329,7 @@ class _QuietLogger(object):
     """ A logger which logs nothing, for the scaling of the settings whose values are logged elsewhere. """
 
     def info(self, *args, **kwargs):
-        pass
+        return None
 
 
 _QUIET = _QuietLogger()
