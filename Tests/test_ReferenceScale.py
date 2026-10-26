@@ -186,6 +186,19 @@ def test_chunk_frames():
     assert rs.scaleChunkFrames(rs.DEFAULT_CHUNK_FRAMES, config, None) == rs.DEFAULT_CHUNK_FRAMES
 
 
+@pytest.mark.parametrize('fps', [7.0, 13.0, 15.0, 20.0, 23.0, 24.0, 25.0, 29.97, 30.0, 50.0])
+def test_chunks_divide_the_blocks(fps):
+    """ The default chunks of the star extraction divide the blocks of the matched filter, as at the reference (2
+        chunks per block), so the segments of an input read once (see RMS.Formats.FrameBuffer.segmentUnit, the least
+        common multiple of both) stay short, and they keep their duration within the rounding to a divisor. """
+
+    config = referenceConfig()
+    chunk = rs.scaleChunkFrames(rs.DEFAULT_CHUNK_FRAMES, config, fps)
+    block = mfd.matchedFilterBlockFrames(rs.scaleToReference(config, fps, REF_SCALE, size=(1920, 1080)))
+    assert block % chunk == 0
+    assert abs(chunk - rs.DEFAULT_CHUNK_FRAMES*fps/REF_FPS) <= 0.25*rs.DEFAULT_CHUNK_FRAMES*fps/REF_FPS
+
+
 def test_recalibration_thresholds():
     """ The star residual thresholds keep their angular sizes at the pixel scale of the platepar. """
 

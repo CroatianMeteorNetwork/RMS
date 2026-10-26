@@ -289,8 +289,12 @@ def recalibrationThresholds(config, platepar):
 
 def scaleChunkFrames(chunk_frames, config, fps):
     """ The frames per chunk of the star extraction of the monitor: at its default (DEFAULT_CHUNK_FRAMES), with a
-        reference frame rate, the chunks keep the duration they have at the reference frame rate, so the stars of
-        a chunk are as deep as at the reference. A chunk length which is given is used as it is.
+        reference frame rate, the chunks keep about the duration they have at the reference frame rate, so the
+        stars of a chunk are as deep as at the reference. The chunks divide the blocks of the matched filter (as
+        the default chunks divide the default blocks), so an input read once in segments, which hold whole blocks
+        and whole chunks (see RMS.Formats.FrameBuffer.segmentUnit), is not cut into segments of tens of thousands
+        of frames: the chunk is the whole fraction of the scaled block nearest to the scaled chunk. A chunk length
+        which is given is used as it is.
 
     Arguments:
         chunk_frames: [int] Frames per chunk given to the monitor.
@@ -305,5 +309,26 @@ def scaleChunkFrames(chunk_frames, config, fps):
         return chunk_frames
 
     frame_factor, _ = referenceFactors(config, fps, None)
+    target = chunk_frames*frame_factor
 
-    return scaleFrames(chunk_frames, frame_factor)
+    # The block of the matched filter with the scaled frame counts (only the frames are needed, the pixel scale is
+    #   not known yet). The matched filter is imported here, in the worker which processes the file, and not at the
+    #   top of the module, which the main process of the monitor imports (see RMS.MonitorProcessFrameInterface)
+    from RMS.MatchedFilterDetection import matchedFilterBlockFrames
+    block = matchedFilterBlockFrames(scaleToReference(config, fps, None, logger=_QUIET))
+
+    # The divisor of the block which gives the chunk nearest to the scaled length
+    divisors = [n for n in range(1, block + 1) if block % n == 0]
+    n = min(divisors, key=lambda d: abs(block/float(d) - target))
+
+    return block//n
+
+
+class _QuietLogger(object):
+    """ A logger which logs nothing, for the scaling of the settings whose values are logged elsewhere. """
+
+    def info(self, *args, **kwargs):
+        pass
+
+
+_QUIET = _QuietLogger()
