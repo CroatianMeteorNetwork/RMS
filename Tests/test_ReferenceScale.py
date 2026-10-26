@@ -245,6 +245,60 @@ def test_standalone_matched_filter_extracts_stars_with_the_scaled_config(tmp_pat
     assert used['results'] == [20, 40]
 
 
+def test_frame_size_of_ff_inputs():
+    """ The handle of an FF file takes its size from the config, the size of the frames is that of the FF file. """
+
+    import RMS.MonitorProcessFrameInterface as mon
+
+    class FF(object):
+        ncols, nrows = 960, 540
+
+    class Handle(object):
+        input_type = 'ff'
+        ncols, nrows = 1920, 1080
+        ff = FF()
+
+    config = referenceConfig()
+    assert mon.inputFrameSize(Handle(), config) == (960, 540)
+
+    # Other inputs: the size of their (binned) frames, unbinned
+    Handle.input_type = 'fblk'
+    config.detection_binning_factor = 2
+    assert mon.inputFrameSize(Handle(), config) == (3840, 2160)
+
+
+def test_recalibration_rescales_a_new_platepar_to_the_frames_of_the_file(tmp_path, monkeypatch):
+    """ A platepar installed at another frame size (e.g. after the camera was binned differently) is rescaled to the
+        frames of every file it recalibrates, also the earlier files of the night (the backfill), whose frame size
+        is in their done flag. Without a reference it is copied as it is. """
+
+    import RMS.MonitorProcessFrameInterface as mon
+    from RMS.MonitorNightReport import writeDoneFlag
+
+    monkeypatch.setattr(mon, 'applyRecalibrate', lambda *a, **k: None)
+
+    # A platepar of 960x540 frames, and the results of a file of 1920x1080 frames
+    new_path = str(tmp_path/'new.cal')
+    makePlatepar().rescaled(960, 540).write(new_path)
+    results_dir = tmp_path/'results'
+    results_dir.mkdir()
+    (results_dir/'FTPdetectinfo_XX0001_20261026_000000_000000.txt').write_text('')
+    writeDoneFlag(str(results_dir), {'night': 'n', 'frame_size': [1920, 1080]})
+
+    config = referenceConfig()
+    mon.recalibrateResults(str(results_dir), config, platepar_path=new_path)
+    copied = Platepar()
+    copied.read(str(results_dir/config.platepar_name))
+    assert (copied.X_res, copied.Y_res) == (1920, 1080)
+    assert os.path.getmtime(str(results_dir/config.platepar_name)) == pytest.approx(os.path.getmtime(new_path))
+
+    # Without a reference the platepar is copied as it is
+    plain = cr.Config()
+    mon.recalibrateResults(str(results_dir), plain, platepar_path=new_path)
+    copied.read(str(results_dir/plain.platepar_name))
+    assert (copied.X_res, copied.Y_res) == (960, 540)
+
+
 def test_recalibration_thresholds():
     """ The star residual thresholds keep their angular sizes at the pixel scale of the platepar. """
 

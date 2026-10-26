@@ -800,6 +800,95 @@ def hasResults(results_dir):
     return not readDoneFlag(results_dir).get('skipped')
 
 
+def inputFrameSize(img_handle, config):
+    """ The size of the unbinned frames of an input. The handles of FF files take their size from the config, so
+        the size of an FF file is that of the FF file itself.
+
+    Arguments:
+        img_handle: [FrameInterface] The input.
+        config: [Config] Configuration object.
+
+    Return:
+        (width, height): [tuple] Size of the frames (px).
+    """
+
+    # An FF file: the size of the loaded FF, or of its images
+    if img_handle.input_type == 'ff':
+        ff = getattr(img_handle, 'ff', None)
+        if (ff is not None) and getattr(ff, 'ncols', 0) and getattr(ff, 'nrows', 0):
+            return int(ff.ncols), int(ff.nrows)
+        maxpixel = getattr(ff, 'maxpixel', None)
+        if maxpixel is not None:
+            return int(maxpixel.shape[1]), int(maxpixel.shape[0])
+        return int(config.width), int(config.height)
+
+    # Other inputs: their frames are binned by the detection binning
+    det_bin = config.detection_binning_factor
+    return int(img_handle.ncols*det_bin), int(img_handle.nrows*det_bin)
+
+
+def installRescaledPlatepar(platepar, path, width, height, source_path=None, proc_log=None):
+    """ Write a platepar for frames of the given size: rescaled to them if it is of another size (see
+        Platepar.rescaled), as it is otherwise or if it can't be rescaled. The written file keeps the time of the
+        source platepar, its version (see plateparTime).
+
+    Arguments:
+        platepar: [Platepar] The platepar.
+        path: [str] Path of the written platepar.
+        width, height: [int] Size of the frames (px).
+
+    Keyword arguments:
+        source_path: [str] Path of the platepar file, for its time. None by default (the time of path is kept if it
+            exists).
+        proc_log: [Logger] Logger, the module logger if None.
+
+    Return:
+        [Platepar] The written platepar.
+    """
+
+    proc_log = log if proc_log is None else proc_log
+
+    if (platepar.X_res, platepar.Y_res) == (width, height):
+        return platepar
+
+    rescaled = platepar.rescaled(width, height)
+    if rescaled is None:
+        proc_log.warning("The platepar is for {:d}x{:d} px frames and can't be rescaled to the {:d}x{:d} px "
+                         "frames".format(platepar.X_res, platepar.Y_res, width, height))
+        return platepar
+
+    proc_log.warning("The platepar is for {:d}x{:d} px frames, rescaled to the {:d}x{:d} px frames; the "
+                     "recalibration refines it".format(platepar.X_res, platepar.Y_res, width, height))
+    stat = os.stat(source_path if source_path is not None else path)
+    rescaled.write(path)
+    os.utime(path, (stat.st_atime, stat.st_mtime))
+
+    return rescaled
+
+
+def resultsFrameSize(results_dir, config):
+    """ The size of the frames of a processed file, from its done flag (written with a reference camera in the
+        config), or else from the platepar in its results directory (rescaled to its frames when it was processed).
+
+    Arguments:
+        results_dir: [str] Results directory of the file.
+        config: [Config] Configuration object.
+
+    Return:
+        (width, height): [tuple] Size of the frames (px), None if not known.
+    """
+
+    size = readDoneFlag(results_dir).get('frame_size')
+    if size:
+        return int(size[0]), int(size[1])
+
+    platepar = readPlatepar(os.path.join(results_dir, config.platepar_name))
+    if platepar is not None:
+        return int(platepar.X_res), int(platepar.Y_res)
+
+    return None
+
+
 def readPlatepar(platepar_path):
     """ Read a platepar.
 
@@ -849,8 +938,18 @@ def recalibrateResults(results_dir, config, platepar_path=None, proc_log=None, m
 
     proc_log = log if proc_log is None else proc_log
 
+    # With a reference camera in the config, a platepar of frames of another size (e.g. installed after the camera
+    #   was binned differently, which also recalibrates the earlier files of the night) is rescaled to the frames of
+    #   the file (see installRescaledPlatepar). Otherwise, or if the size of the frames of the file is not known,
+    #   the platepar is copied as it is
     if platepar_path is not None:
-        shutil.copy2(platepar_path, os.path.join(results_dir, config.platepar_name))
+        results_platepar_path = os.path.join(results_dir, config.platepar_name)
+        size = resultsFrameSize(results_dir, config) if referenceEnabled(config) else None
+        platepar = readPlatepar(platepar_path) if size is not None else None
+        shutil.copy2(platepar_path, results_platepar_path)
+        if platepar is not None:
+            installRescaledPlatepar(platepar, results_platepar_path, size[0], size[1], source_path=platepar_path,
+                                    proc_log=proc_log)
 
     # The detections of the file (not the backups which earlier recalibrations left)
     from RMS.Formats.FTPdetectinfo import validDefaultFTPdetectinfo
@@ -1346,25 +1445,13 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
         #   copy keeps the time of the platepar, its version. Without a reference nothing changes
         if referenceEnabled(config):
 
-            # The size of the unbinned frames
-            det_bin = config.detection_binning_factor if img_handle.input_type != 'ff' else 1
-            frame_width, frame_height = img_handle.ncols*det_bin, img_handle.nrows*det_bin
+            # The size of the unbinned frames (of an FF file, the size of the file, see inputFrameSize)
+            frame_width, frame_height = inputFrameSize(img_handle, config)
 
             platepar = readPlatepar(results_platepar_path)
-            if (platepar is not None) and ((platepar.X_res, platepar.Y_res) != (frame_width, frame_height)):
-                rescaled = platepar.rescaled(frame_width, frame_height)
-                if rescaled is None:
-                    proc_log.warning("The platepar is for {:d}x{:d} px frames and can't be rescaled to the "
-                                     "{:d}x{:d} px frames".format(platepar.X_res, platepar.Y_res, frame_width,
-                                                                 frame_height))
-                else:
-                    proc_log.warning("The platepar is for {:d}x{:d} px frames, rescaled to the {:d}x{:d} px "
-                                     "frames; the recalibration refines it".format(platepar.X_res, platepar.Y_res,
-                                                                                   frame_width, frame_height))
-                    stat = os.stat(results_platepar_path)
-                    rescaled.write(results_platepar_path)
-                    os.utime(results_platepar_path, (stat.st_atime, stat.st_mtime))
-                    platepar = rescaled
+            if platepar is not None:
+                platepar = installRescaledPlatepar(platepar, results_platepar_path, frame_width, frame_height,
+                                                   proc_log=proc_log)
 
             config = scaleToReference(config, img_handle.fps if getattr(img_handle, 'fps', None) else config.fps,
                                       inputScale(config, frame_width, frame_height, platepar=platepar),
@@ -1618,8 +1705,9 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
                              "processed again".format(file_name))
             sys.exit(CHANGED_EXIT_CODE)
 
-        # Create the done.flag file, with the info needed for the night report
-        writeDoneFlag(results_dir, {
+        # Create the done.flag file, with the info needed for the night report. With a reference camera in the
+        #   config, the size of the frames too, for the platepars installed later (see recalibrateResults)
+        done_info = {
             'night': night_name,
             'input_file': os.path.abspath(file_path),
             'mask_path': mask_path,
@@ -1627,7 +1715,10 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
             'flat_applied': flat_struct is not None,
             'calibrated': calibrated,
             'platepar_mtime': platepar_mtime,
-        })
+        }
+        if referenceEnabled(config):
+            done_info['frame_size'] = [int(config.width), int(config.height)]
+        writeDoneFlag(results_dir, done_info)
 
         proc_log.info("Done processing: {} -> {}".format(file_name, results_dir))
         return True
