@@ -7695,9 +7695,15 @@ class PlateTool(QtWidgets.QMainWindow):
         # Fit the photometric offset (disable vignetting fit if a flat is used)
         # The fit is going to be weighted by the signal to noise ratio to reduce the influence of
         #  faint stars with large errors
+        # Build correction params from platepar if calibrated
+        vignetting_poly = getattr(self.platepar, 'vignetting_poly', None)
+        sat_slope = getattr(self.platepar, 'saturation_slope', 0.0)
+        sat_break = getattr(self.platepar, 'saturation_mag_break', 5.0)
+        sat_params = (sat_slope, sat_break, catalog_mags) if sat_slope != 0 else None
         photom_params, self.photom_fit_stddev, self.photom_fit_resids = photometryFit(
             px_intens_list, radius_list, catalog_mags, fixed_vignetting=fixed_vignetting,
-            weights=weights, exclude_list=exclude_list)
+            weights=weights, exclude_list=exclude_list, vignetting_poly=vignetting_poly,
+            saturation_params=sat_params)
 
         photom_offset, vignetting_coeff = photom_params
 
