@@ -128,6 +128,22 @@ def test_reference_scales_the_settings():
     assert mfd.matchedFilterBlockFrames(scaled) == 640
 
 
+@pytest.mark.parametrize('fps', [7.0, 13.0, 15.0, 20.0, 23.0, 24.0, 25.0, 29.97, 30.0, 50.0])
+def test_runs_stay_compatible(fps):
+    """ The runs are scaled together, so the block (a whole number of all runs and of the measurements, see
+        matchedFilterBlockFrames) stays close to the scaled block length at any frame rate, as at the reference. """
+
+    config = referenceConfig()
+    scaled = rs.scaleToReference(config, fps, REF_SCALE, size=(1920, 1080))
+    requested = rs.scaleFrames(config.mf_block_frames, fps/REF_FPS)
+    block = mfd.matchedFilterBlockFrames(scaled)
+    assert abs(block - requested) <= 0.15*requested
+
+    # The runs keep the ratios of the reference runs
+    runs = scaled.mf_run_frames + [scaled.mf_slow_run_frames]
+    assert [r/runs[0] for r in runs] == [1, 2, 4]
+
+
 def test_reference_scales_the_constants_of_the_matched_filter():
     """ The constants of the matched filter in frames and pixels follow the factors of the scaled config (except
         those which follow the PSF or the runs, see MatchedFilterOptions). """

@@ -25,8 +25,9 @@ log = logging.getLogger("logger")
 # Frames per chunk of the star extraction of the monitor (--chunk_frames) at the reference frame rate, by default
 DEFAULT_CHUNK_FRAMES = 128
 
-# Settings counted in frames, which keep their durations (0 turns some of them off and stays 0)
-FRAME_OPTIONS = ('mf_slow_run_frames', 'mf_block_frames', 'mf_min_frames', 'mf_link_max_gap', 'mf_segment_overlap')
+# Settings counted in frames, which keep their durations (0 turns some of them off and stays 0). The runs of the
+#   matched filter are scaled together (see scaleRuns)
+FRAME_OPTIONS = ('mf_block_frames', 'mf_min_frames', 'mf_link_max_gap', 'mf_segment_overlap')
 
 # Sizes in whole pixels, which keep their angular sizes: the margins from the image edge of the matched filter and
 #   of the detection, and the geometry of the star extraction
@@ -74,6 +75,34 @@ def scaleFrames(n, factor):
         return n
 
     return max(roundHalfUp(n*factor), 1)
+
+
+def scaleRuns(runs, factor):
+    """ The lengths of the runs of the matched filter scaled by the ratio of the frame rates, together: the runs are
+        whole multiples of their common unit (the greatest common divisor), and the unit is scaled, so the runs keep
+        their ratios. A block of frames holds a whole number of every run (see
+        RMS.MatchedFilterDetection.matchedFilterBlockFrames), and runs rounded each on its own (e.g. 19, 38 and 77
+        frames for 8, 16 and 32 at 2.4 times the frame rate) would need a block of tens of thousands of frames.
+
+    Arguments:
+        runs: [list] Lengths of the runs at the reference frame rate (frames). 0 (a run which is off) stays 0.
+        factor: [float] Frame rate of the input over the reference frame rate.
+
+    Return:
+        [list] Lengths of the runs at the frame rate of the input (frames).
+    """
+
+    lengths = [int(n) for n in runs if n > 0]
+    if (not lengths) or (factor == 1.0):
+        return list(runs)
+
+    # The common unit of the runs, scaled to at least 1 frame, and every run as the same multiple of it
+    unit = 0
+    for n in lengths:
+        unit = math.gcd(unit, n)
+    scaled_unit = max(roundHalfUp(unit*factor), 1)
+
+    return [(int(n)//unit)*scaled_unit if n > 0 else n for n in runs]
 
 
 def scalePowerOfTwo(n, factor):
@@ -202,10 +231,12 @@ def scaleToReference(config, fps, scale, size=None, logger=None):
     if size is not None:
         config.width, config.height = int(size[0]), int(size[1])
 
-    # The frame counts keep their durations. The runs are searched together, so all of them are scaled; the
-    #   frames of a measurement double until the position error is small enough (see the matched filter), so
-    #   their largest number stays a power of two
-    config.mf_run_frames = [scaleFrames(n, frame_factor) for n in config.mf_run_frames]
+    # The frame counts keep their durations. The runs (also the run of the slow objects) are scaled together, so
+    #   they keep their ratios and a block holds a whole number of all of them (see scaleRuns); the frames of a
+    #   measurement double until the position error is small enough (see the matched filter), so their largest
+    #   number stays a power of two
+    runs = scaleRuns(list(config.mf_run_frames) + [config.mf_slow_run_frames], frame_factor)
+    config.mf_run_frames, config.mf_slow_run_frames = runs[:-1], runs[-1]
     for name in FRAME_OPTIONS:
         setattr(config, name, scaleFrames(getattr(config, name), frame_factor))
     config.mf_max_measure_frames = scalePowerOfTwo(config.mf_max_measure_frames, frame_factor)
