@@ -58,6 +58,10 @@ BACKGROUND_FRAMES = 40
 MIN_BACKGROUND_PAD = 3.0
 MIN_DURATION = 0.5
 
+# Fewest frames averaged for a measurement (fewer, e.g. a track along the edge of the frame, show the shape of the
+#   object in single frames, not along the track)
+MIN_STACK_FRAMES = 3
+
 # Half width of the strip through the centre over which the profiles are averaged (px)
 STRIP_HALF = 2
 
@@ -428,7 +432,8 @@ def measureTrackShape(source, t, x, y, psf_sigma, window_half=WINDOW_HALF, max_t
         [dict] sigma_cross, sigma_along (Gaussian sigma across and along the motion, px), spread (sigma_cross
             divided by psf_sigma), snr (amplitude of the profile across the motion relative to the noise of the
             averaged window), n_frames (frames of the track), n_stack (frames averaged), ok (the widths were
-            measured), flag ('ok', or why not: 'few points', 'no frames', 'edge', 'fit failed').
+            measured on at least MIN_STACK_FRAMES frames), flag ('ok', or why not: 'few points', 'no frames',
+            'edge', 'few frames', 'fit failed').
     """
 
     result = dict(sigma_cross=float('nan'), sigma_along=float('nan'), spread=float('nan'), snr=float('nan'),
@@ -519,9 +524,11 @@ def measureTrackShape(source, t, x, y, psf_sigma, window_half=WINDOW_HALF, max_t
 
     result.update(sigma_cross=sigma_cross, sigma_along=sigma_along, spread=sigma_cross/psf_sigma,
                   snr=amp_cross/max(noise, 1e-6))
-    result['ok'] = bool(np.isfinite(sigma_cross))
-    if not result['ok']:
+    result['ok'] = bool(np.isfinite(sigma_cross)) and (n_stack >= MIN_STACK_FRAMES)
+    if not np.isfinite(sigma_cross):
         result['flag'] = 'fit failed'
+    elif n_stack < MIN_STACK_FRAMES:
+        result['flag'] = 'few frames'
 
     return result
 

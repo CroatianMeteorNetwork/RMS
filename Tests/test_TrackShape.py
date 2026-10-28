@@ -220,6 +220,11 @@ def test_frame_numbers_and_missing_frames():
     res = ts.measureTrackShape(source, [times[50]], [30], [40], psf_sigma=1.0)
     assert (not res['ok']) and (res['flag'] == 'few points')
 
+    # A track which leaves the frame after its first frames: too few frames averaged
+    t = np.linspace(TRACK_T[0], TRACK_T[1], 10)
+    res = ts.measureTrackShape(source, t, np.linspace(25, -200, 10), np.full(10, 40.0), psf_sigma=1.0)
+    assert (not res['ok']) and (res['flag'] == 'few frames') and (0 < res['n_stack'] < ts.MIN_STACK_FRAMES)
+
     # A track along the edge of the frame
     t = np.linspace(TRACK_T[0], TRACK_T[1], 10)
     res = ts.measureTrackShape(source, t, np.linspace(30, 90, 10), np.full(10, 2.0), psf_sigma=1.0)
