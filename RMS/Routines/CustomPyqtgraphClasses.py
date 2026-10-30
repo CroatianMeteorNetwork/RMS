@@ -3714,6 +3714,7 @@ class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
     sigClearBrushStrokes = QtCore.pyqtSignal()
     sigBrushSizeChanged = QtCore.pyqtSignal(int)
     sigUndoBrushStroke = QtCore.pyqtSignal()
+    sigPhotometryOnlyToggled = QtCore.pyqtSignal(bool)
 
     def __init__(self, gui):
         QtWidgets.QWidget.__init__(self)
@@ -3839,6 +3840,21 @@ class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
         file_layout.addWidget(self.save_button)
 
         layout.addLayout(file_layout)
+
+        layout.addSpacing(self.scaledSpacing(0.6))
+
+        # ── Star exclusion ────────────────────────────────────────────────────
+
+        self.photometry_only = QtWidgets.QCheckBox('Exclude from photometry only')
+        self.photometry_only.setToolTip(
+            'Checked: stars behind the mask are still detected and paired for the astrometric fit,\n'
+            'but are left out of the photometric fit.\n'
+            'Unchecked: stars behind the mask are excluded entirely.\n\n'
+            'The CALSTARS stars were detected with the station mask applied: re-detect the stars\n'
+            '(Star Detection tab) to pick up the ones behind the mask.')
+        self.photometry_only.setChecked(self.gui.mask_photometry_only)
+        self.photometry_only.toggled.connect(self.sigPhotometryOnlyToggled.emit)
+        layout.addWidget(self.photometry_only)
 
         layout.addSpacing(self.scaledSpacing(0.6))
 
