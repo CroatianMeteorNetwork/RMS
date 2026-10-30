@@ -2577,6 +2577,9 @@ class PlateTool(QtWidgets.QMainWindow):
         self.override_roundness_threshold = 0.5
         self._original_config_gamma = None  # Store original config gamma for restoration
 
+        # Whether the mask excludes stars from photometry only, keeping them for astrometry
+        self.mask_photometry_only = False
+
         # Mask drawing state
         self.mask_draw_mode = False
         self.mask_current_polygon = []  # Points being drawn
@@ -3521,6 +3524,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.mask.sigUseFlatToggled.connect(self.toggleMaskFlatBackground)
         self.tab.mask.sigUnsavedChanged.connect(self.updateFileManagerButton)
         self.tab.mask.sigInvertMask.connect(self.invertMaskPolygons)
+        self.tab.mask.sigPhotometryOnlyToggled.connect(self.toggleMaskPhotometryOnly)
         self.tab.mask.sigBrushModeToggled.connect(self.toggleMaskBrushMode)
         self.tab.mask.sigClearBrushStrokes.connect(self.clearBrushStrokes)
         self.tab.mask.sigBrushSizeChanged.connect(self.setBrushSize)
@@ -3580,11 +3584,11 @@ class PlateTool(QtWidgets.QMainWindow):
         if self.hasData():
             self.updateLeftLabels()
             self.updateImageNavigationDisplay()
+            self.initMaskFromFile()
             self.updateStars()
             self.updateDistortion()
             self.tab.param_manager.updatePlatepar()
             self.initStarDetectionOverrides()
-            self.initMaskFromFile()
             self.updateFindBestFrameButton()
             self.changeMode(self.mode)
 
@@ -4325,7 +4329,7 @@ class PlateTool(QtWidgets.QMainWindow):
             common_names_unmasked = None
 
 
-        if (self.mask is None) or (not hasattr(self.mask, 'img')):
+        if (self.astrometryMask() is None) or (not hasattr(self.mask, 'img')):
             cat_stars_xy, self.catalog_stars_filtered = [], []
             self.catalog_stars_spectral_type_filtered = []
             self.catalog_stars_preferred_names_filtered = []
@@ -4376,8 +4380,7 @@ class PlateTool(QtWidgets.QMainWindow):
             for orig_idx, star_xy, star_radec, star_spec, star_name, common_name in iterator:
 
                 # Make sure that the dimensions of the mask match the image dimensions
-                if (self.mask.img.shape[0] == self.img.data.shape[0]) or \
-                   (self.mask.img.shape[1] == self.img.data.shape[1]):
+                if self.mask.checkResolution(self.platepar.X_res, self.platepar.Y_res):
 
                     # Check if the star is inside the mask
                     if self.mask.img[int(star_xy[1]), int(star_xy[0])] != 0:
@@ -4976,6 +4979,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Ensure unsaved mask polygons are applied to the detection
         self.mask = MaskStructure(self.generateMaskImage())
+        self.updateStars(only_update_catalog=True)
 
         # Call extractStarsFF with override parameters
         try:
@@ -5005,7 +5009,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     config=self.config,
                     flat_struct=self.flat_struct if hasattr(self, 'flat_struct') else None,
                     dark=self.dark if hasattr(self, 'dark') else None,
-                    mask=self.mask if hasattr(self, 'mask') else None,
+                    mask=self.astrometryMask(),
                     extra_info=extra_info
                 )
             finally:
@@ -5062,6 +5066,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Ensure unsaved mask polygons are applied to the detection
         self.mask = MaskStructure(self.generateMaskImage())
+        self.updateStars(only_update_catalog=True)
 
         # Get list of all FF files that exist on disk, excluding placeholders
         ff_files = [f for f in self.calstars.keys()
@@ -5116,7 +5121,7 @@ class PlateTool(QtWidgets.QMainWindow):
                         config=self.config,
                         flat_struct=self.flat_struct if hasattr(self, 'flat_struct') else None,
                         dark=self.dark if hasattr(self, 'dark') else None,
-                        mask=self.mask if hasattr(self, 'mask') else None,
+                        mask=self.astrometryMask(),
                         extra_info=extra_info
                     )
 
@@ -5255,13 +5260,7 @@ class PlateTool(QtWidgets.QMainWindow):
                        (catalog_y >= 0) & (catalog_y < self.platepar.Y_res))
 
             # Apply mask filtering if mask exists
-            if self.mask is not None and self.mask.img is not None:
-                if (self.mask.img.shape[0] == self.platepar.Y_res and
-                    self.mask.img.shape[1] == self.platepar.X_res):
-                    x_int = np.clip(catalog_x.astype(int), 0, self.mask.img.shape[1] - 1)
-                    y_int = np.clip(catalog_y.astype(int), 0, self.mask.img.shape[0] - 1)
-                    not_masked = self.mask.img[y_int, x_int] != 0
-                    in_image = in_image & not_masked
+            in_image = in_image & self.filterCatalogStarsByMask(catalog_x, catalog_y)
 
             # Get visible catalog star positions
             visible_cat_x = catalog_x[in_image]
@@ -5494,13 +5493,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     catalog_in_fov, jd, self.platepar)
                 in_image = ((new_cat_x >= 0) & (new_cat_x < self.platepar.X_res) &
                            (new_cat_y >= 0) & (new_cat_y < self.platepar.Y_res))
-                if self.mask is not None and self.mask.img is not None:
-                    if (self.mask.img.shape[0] == self.platepar.Y_res and
-                        self.mask.img.shape[1] == self.platepar.X_res):
-                        x_int = np.clip(new_cat_x.astype(int), 0, self.mask.img.shape[1] - 1)
-                        y_int = np.clip(new_cat_y.astype(int), 0, self.mask.img.shape[0] - 1)
-                        not_masked = self.mask.img[y_int, x_int] != 0
-                        in_image = in_image & not_masked
+                in_image = in_image & self.filterCatalogStarsByMask(new_cat_x, new_cat_y)
                 n_catalog_final = np.sum(in_image)
             else:
                 n_catalog_final = 0
@@ -5599,7 +5592,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Run star detection
             star_list = extractStarsFF(
                 self.dir_path, ff_name, config=self.config,
-                flat_struct=self.flat_struct, dark=self.dark, mask=self.mask,
+                flat_struct=self.flat_struct, dark=self.dark, mask=self.astrometryMask(),
                 extra_info=extra_info
             )
 
@@ -5668,7 +5661,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 config=self.config,
                 flat_struct=self.flat_struct if hasattr(self, 'flat_struct') else None,
                 dark=self.dark if hasattr(self, 'dark') else None,
-                mask=self.mask if hasattr(self, 'mask') else None,
+                mask=self.astrometryMask(),
                 extra_info=extra_info
             )
 
@@ -5714,7 +5707,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 return []
 
             # Get mask
-            mask = self.mask if hasattr(self, 'mask') else None
+            mask = self.astrometryMask()
 
             # Run star extraction directly on the image
             status = extractStars(
@@ -6016,12 +6009,7 @@ class PlateTool(QtWidgets.QMainWindow):
                         (cat_y >= 0) & (cat_y < pp.Y_res))
 
             # Apply mask if available
-            if self.mask is not None and self.mask.img is not None:
-                if (self.mask.img.shape[0] == pp.Y_res and
-                        self.mask.img.shape[1] == pp.X_res):
-                    x_int = np.clip(cat_x.astype(int), 0, self.mask.img.shape[1] - 1)
-                    y_int = np.clip(cat_y.astype(int), 0, self.mask.img.shape[0] - 1)
-                    in_image = in_image & (self.mask.img[y_int, x_int] != 0)
+            in_image = in_image & self.filterCatalogStarsByMask(cat_x, cat_y)
 
             return int(np.sum(in_image))
 
@@ -6096,13 +6084,7 @@ class PlateTool(QtWidgets.QMainWindow):
             in_image = ((cat_x >= 0) & (cat_x < self.platepar.X_res) &
                        (cat_y >= 0) & (cat_y < self.platepar.Y_res))
 
-            if self.mask is not None and self.mask.img is not None:
-                if (self.mask.img.shape[0] == self.platepar.Y_res and
-                    self.mask.img.shape[1] == self.platepar.X_res):
-                    x_int = np.clip(cat_x.astype(int), 0, self.mask.img.shape[1] - 1)
-                    y_int = np.clip(cat_y.astype(int), 0, self.mask.img.shape[0] - 1)
-                    not_masked = self.mask.img[y_int, x_int] != 0
-                    in_image = in_image & not_masked
+            in_image = in_image & self.filterCatalogStarsByMask(cat_x, cat_y)
 
             visible_cat_x = cat_x[in_image]
             visible_cat_y = cat_y[in_image]
@@ -6924,6 +6906,15 @@ class PlateTool(QtWidgets.QMainWindow):
             # Hide completed vertex markers
             self.mask_completed_vertex_markers.hide()
 
+    def toggleMaskPhotometryOnly(self, photometry_only):
+        """Set whether the mask excludes stars from photometry only or entirely, and refilter the
+        catalog stars with it.
+
+        The photometric fit is redone on leaving the Mask tab.
+        """
+        self.mask_photometry_only = photometry_only
+        self.updateStars(only_update_catalog=True)
+
     def loadFlatImage(self):
         """Load flat.bmp from data directory if it exists."""
         flat_path = os.path.join(self.dir_path, "flat.bmp")
@@ -7138,6 +7129,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Update self.mask so star detection uses the new mask
             self.mask = MaskStructure(mask_img)
+            self.updateStars(only_update_catalog=True)
             print("Mask updated for star detection")
 
             # Mark as saved
@@ -7156,6 +7148,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Remember the directory for next time
             self.last_mask_dir = os.path.dirname(file_path)
             self.loadMaskFromFile(file_path)
+            self.updateStars(only_update_catalog=True)
 
     def loadMaskFromFile(self, mask_path):
         """Load mask.bmp and convert masked regions to editable polygons.
@@ -7641,8 +7634,12 @@ class PlateTool(QtWidgets.QMainWindow):
             elevation_list.append(alt)
 
 
-        # Skip the photometry if there are no stars
-        if len(star_coords) == 0:
+        # Stars behind the mask never enter the fit
+        masked_list = self.pointsBehindMask([x for x, _ in star_coords], [y for _, y in star_coords],
+                                            photometry=True)
+
+        # Skip the photometry if there are no stars outside the mask
+        if len(star_coords) == 0 or np.all(masked_list):
             
             self.photom_fit_stddev = None
             self.photom_fit_resids = []
@@ -7673,24 +7670,21 @@ class PlateTool(QtWidgets.QMainWindow):
         weights = np.clip(snr_list, 0, 10)/10.0
 
         # We need at least 3 stars for a robust photometry fit.
-        # Preferably, saturated and highly variable stars are excluded from the fit.
-        # First, let's compute the total number of stars and how many remain if we exclude both.
-        total_stars = len(saturation_list)
-        exclude_both = [sat or var for sat, var in zip(saturation_list, variable_star_list)]
-        good_stars_count = total_stars - sum(exclude_both)
-        
-        if good_stars_count >= 3:
+        # Preferably, saturated and highly variable stars are excluded from the fit. Stars behind the
+        # mask are always excluded, as the mask marks their photometry as unusable.
+        # First, let's compute how many stars remain if we exclude both.
+        exclude_saturated = masked_list | np.array(saturation_list, dtype=bool)
+        exclude_both = exclude_saturated | np.array(variable_star_list, dtype=bool)
+
+        if np.count_nonzero(~exclude_both) >= 3:
             # We have enough stars, exclude both saturated and variable stars
             exclude_list = exclude_both
+        elif np.count_nonzero(~exclude_saturated) >= 3:
+            # Include variable stars in the fit, but still exclude saturated stars
+            exclude_list = exclude_saturated
         else:
-            # Not enough stars. Check if we have enough by only excluding saturated stars
-            non_saturated_count = total_stars - sum(saturation_list)
-            if non_saturated_count >= 3:
-                # Include variable stars in the fit, but still exclude saturated stars
-                exclude_list = saturation_list
-            else:
-                # Still not enough. We have to include all stars to ensure the fit works
-                exclude_list = [False] * total_stars
+            # Still not enough. We have to include all stars outside the mask to ensure the fit works
+            exclude_list = masked_list
 
         # Fit the photometric offset (disable vignetting fit if a flat is used)
         # The fit is going to be weighted by the signal to noise ratio to reduce the influence of
@@ -7713,7 +7707,7 @@ class PlateTool(QtWidgets.QMainWindow):
         predicted_mags = np.array(catalog_mags) - np.array(self.photom_fit_resids)
         self.limiting_mag_info = limitingMagnitude(
             predicted_mags, np.array(snr_list), snr_targets=(5, 10),
-            exclude_mask=np.array(saturation_list))
+            exclude_mask=exclude_saturated)
 
         # Update the values in the platepar tab in the GUI
         self.tab.param_manager.updatePlatepar()
@@ -7725,10 +7719,10 @@ class PlateTool(QtWidgets.QMainWindow):
             star_coords_x, star_coords_y = star_coords.T
 
             std = np.std(self.photom_fit_resids)
-            for star_x, star_y, fit_diff, star_mag, snr in zip(star_coords_x, star_coords_y,
-                                                            self.photom_fit_resids, catalog_mags,
-                                                            self.paired_stars.snr()
-                                                            ):
+            for star_x, star_y, fit_diff, star_mag, snr, masked in zip(star_coords_x, star_coords_y,
+                                                                    self.photom_fit_resids, catalog_mags,
+                                                                    self.paired_stars.snr(), masked_list
+                                                                    ):
 
                 photom_resid_txt = "{:.2f}".format(fit_diff)
 
@@ -7758,7 +7752,12 @@ class PlateTool(QtWidgets.QMainWindow):
                     text_resid = TextItem(photom_resid_txt, anchor=(0.5, -0.5), interaction=False)
                     text_resid.setPos(star_x, star_y)
                     text_resid.setFont(QtGui.QFont('Arial', photom_resid_size))
-                    text_resid.setColor(QtGui.QColor(255, 255, 255))
+
+                    # Grey marks the stars left out of the fit by the mask
+                    if masked:
+                        text_resid.setColor(QtGui.QColor(128, 128, 128))
+                    else:
+                        text_resid.setColor(QtGui.QColor(255, 255, 255))
                     text_resid.setAlign(QtCore.Qt.AlignmentFlag.AlignCenter)
                     self.residual_text.addTextItem(text_resid)
 
@@ -7862,6 +7861,12 @@ class PlateTool(QtWidgets.QMainWindow):
 
                     ax_p.scatter(-2.5*lsp, cat_mag, s=30, zorder=3, edgecolor='r',
                                     facecolor='none', label=saturation_label)
+
+            # Box the stars behind the mask, which are not in the fit
+            if np.any(masked_list):
+                ax_p.scatter(-2.5*lsp_arr[masked_list], np.array(catalog_mags)[masked_list], s=40,
+                                marker='s', zorder=3, edgecolor='k', facecolor='none',
+                                label="Behind mask (not fitted)")
 
             # Plot catalog magnitude vs. raw logsum of pixel intensities (only when no flat is used)
             if self.flat_struct is None:
@@ -8136,6 +8141,7 @@ class PlateTool(QtWidgets.QMainWindow):
         )
 
         # Collect paired star data with individual G/BP/RP magnitudes
+        star_coords = []
         radius_list = []
         px_intens_list = []
         catalog_ra = []
@@ -8199,6 +8205,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             cur_idx = len(radius_list)
 
+            star_coords.append((star_x, star_y))
             radius_list.append(np.hypot(star_x - self.platepar.X_res/2,
                                         star_y - self.platepar.Y_res/2))
             px_intens_list.append(px_intens)
@@ -8248,7 +8255,10 @@ class PlateTool(QtWidgets.QMainWindow):
             fixed_vignetting = self.platepar.vignetting_coeff
 
         weights = np.clip(snr_list, 0, 10) / 10.0
-        exclude_list = [sat or var for sat, var in zip(saturation_list, variable_star_list)]
+        masked_list = self.pointsBehindMask([x for x, _ in star_coords], [y for _, y in star_coords],
+                                            photometry=True)
+        exclude_list = [sat or var or masked for sat, var, masked
+                        in zip(saturation_list, variable_star_list, masked_list)]
 
         jd = date2JD(*self.img_handle.currentTime())
 
@@ -8732,6 +8742,11 @@ class PlateTool(QtWidgets.QMainWindow):
         if len(self.paired_stars) < 10:
             return 0
 
+        # Stars behind the mask are not in the photometric fit, so they are never removed as outliers
+        behind_mask = self.pointsBehindMask([pair[0] for pair in self.paired_stars.paired_stars],
+                                            [pair[1] for pair in self.paired_stars.paired_stars],
+                                            photometry=True)
+
         # Collect magnitude residuals for non-saturated stars
         residuals = []
         valid_indices = []
@@ -8741,8 +8756,8 @@ class PlateTool(QtWidgets.QMainWindow):
         for i, (x, y, fwhm, intens_acc, obj, snr, saturated) in enumerate(
                 self.paired_stars.paired_stars):
 
-            # Skip saturated stars
-            if saturated:
+            # Skip saturated stars and those behind the mask
+            if saturated or behind_mask[i]:
                 continue
 
             # Skip geo points (only process catalog stars)
@@ -9711,6 +9726,9 @@ class PlateTool(QtWidgets.QMainWindow):
         # Add the mask
         if not hasattr(self, "mask"):
             self.mask = mask
+
+        if not hasattr(self, "mask_photometry_only"):
+            self.mask_photometry_only = False
 
 
         # If the previous beginning time is None and the new one is not, update the beginning time
@@ -12563,6 +12581,49 @@ class PlateTool(QtWidgets.QMainWindow):
         return ra_centre, dec_centre
 
 
+    def astrometryMask(self):
+        """ Mask applied to star detection and catalog star selection.
+
+        None when the mask excludes stars from photometry only, so the stars behind it are still
+        detected and paired for the astrometric fit.
+        """
+
+        if self.mask_photometry_only:
+            return None
+
+        return self.mask
+
+
+    def pointsBehindMask(self, x, y, photometry=False):
+        """ Flag the image points that fall behind the mask.
+
+        Stars behind the mask are always left out of the photometric fit; they are also left out of
+        the catalog matching unless the mask applies to photometry only (see astrometryMask).
+
+        Arguments:
+            x: [ndarray] X image coordinates (px).
+            y: [ndarray] Y image coordinates (px).
+
+        Keyword arguments:
+            photometry: [bool] Flag the points for the photometric fit instead of for astrometry.
+
+        Return:
+            [ndarray of bool] True where the point is behind the mask. All False if there is no mask,
+                its resolution doesn't match the image, or (for astrometry) it applies to photometry only.
+        """
+
+        mask = self.mask if photometry else self.astrometryMask()
+
+        if (mask is None) or (not mask.checkResolution(self.platepar.X_res, self.platepar.Y_res)):
+            return np.zeros(len(x), dtype=bool)
+
+        # Vectorized mask check - clip coordinates to valid range
+        x_int = np.clip(np.asarray(x).astype(int), 0, mask.img.shape[1] - 1)
+        y_int = np.clip(np.asarray(y).astype(int), 0, mask.img.shape[0] - 1)
+
+        return mask.img[y_int, x_int] == 0
+
+
     def filterCatalogStarsByMask(self, catalog_x, catalog_y, catalog_stars=None):
         """Filter out catalog stars that fall behind the mask.
 
@@ -12579,25 +12640,8 @@ class PlateTool(QtWidgets.QMainWindow):
             If catalog_stars is None:
                 not_masked: [ndarray] Boolean mask of stars not behind the mask.
         """
-        # If no mask, return all stars
-        if self.mask is None or not hasattr(self.mask, 'img'):
-            not_masked = np.ones(len(catalog_x), dtype=bool)
-            if catalog_stars is not None:
-                return catalog_stars, not_masked
-            return not_masked
 
-        # Check mask dimensions match image dimensions
-        if self.mask.img.shape[0] != self.platepar.Y_res or \
-           self.mask.img.shape[1] != self.platepar.X_res:
-            not_masked = np.ones(len(catalog_x), dtype=bool)
-            if catalog_stars is not None:
-                return catalog_stars, not_masked
-            return not_masked
-
-        # Vectorized mask check - clip coordinates to valid range
-        x_int = np.clip(catalog_x.astype(int), 0, self.mask.img.shape[1] - 1)
-        y_int = np.clip(catalog_y.astype(int), 0, self.mask.img.shape[0] - 1)
-        not_masked = self.mask.img[y_int, x_int] != 0
+        not_masked = ~self.pointsBehindMask(catalog_x, catalog_y)
 
         if catalog_stars is not None:
             return catalog_stars[not_masked], not_masked
@@ -13376,6 +13420,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Find and load a mask file if there is one
         mask = getMaskFile(self.dir_path, self.config)
+
+        # Keep the stars behind the mask for astrometry if it applies to photometry only
+        if self.mask_photometry_only:
+            mask = None
 
         # Compute JD for astrometry.net matching
         jd = date2JD(*self.img_handle.currentTime())
