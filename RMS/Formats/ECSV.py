@@ -9,11 +9,33 @@ from __future__ import print_function, division, absolute_import
 
 import os
 
+import functools
+
 import numpy as np
 
 
 # Datetime format used in the data rows (microsecond precision). ASTRA's reader parses this exact format.
 ECSV_DATETIME_FORMAT = "%Y-%m-%dT%H:%M:%S.%f"
+
+
+@functools.lru_cache(maxsize=16)
+def stationHeightWGS84(lat, lon, elev):
+    """ Height of a station above the WGS84 ellipsoid from its height above sea level (EGM96), computed once
+        per station position (the conversion reads the geoid grid every time).
+
+    Arguments:
+        lat: [float] Latitude +N (deg).
+        lon: [float] Longitude +E (deg).
+        elev: [float] Height above sea level (m).
+
+    Return:
+        [float] Height above the WGS84 ellipsoid (m).
+    """
+
+    import RMS.ConfigReader as cr
+    from RMS.GeoidHeightEGM96 import mslToWGS84Height
+
+    return float(mslToWGS84Height(np.radians(lat), np.radians(lon), elev, cr.Config()))
 
 
 def writeECSV(dir_path, file_name, station_id, platepar, picks, mag_band_string='V', n_stars=0,
@@ -63,6 +85,7 @@ def writeECSV(dir_path, file_name, station_id, platepar, picks, mag_band_string=
         'obs_latitude': platepar.lat,                  # Decimal signed latitude (-90 S to +90 N)
         'obs_longitude': platepar.lon,                 # Decimal signed longitude (-180 W to +180 E)
         'obs_elevation': platepar.elev,                # Altitude in metres above MSL. Note not WGS84
+        'obs_height_wgs84': stationHeightWGS84(platepar.lat, platepar.lon, platepar.elev),  # Height in metres above the WGS84 ellipsoid (obs_elevation + EGM96 geoid height)
         'origin': 'RMS',                               # The software which produced the data file
         'camera_id': station_id,                       # The code name of the camera
         'cx': platepar.X_res,                          # Horizontal camera resolution in pixels
