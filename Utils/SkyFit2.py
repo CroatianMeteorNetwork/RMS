@@ -4776,18 +4776,33 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.param_manager.updatePairedStars(min_fit_stars=self.getMinFitStars())
 
 
+    def getDetectedStars(self):
+        """ Return the stars detected on the current image, in the CALSTARS column order
+            Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7).
+
+        The stars re-detected in the Star Detection tab take precedence over CALSTARS while the override is
+        enabled. Every consumer reads the detections through this method, so they all see the same list.
+
+        Return:
+            star_data: [ndarray] The detected stars, or None if neither source has an entry for the image.
+        """
+
+        # FR files are looked up under the name of their FF file
+        ff_name = convertFRNameToFF(self.img_handle.name())
+
+        if self.star_detection_override_enabled and (ff_name in self.star_detection_override_data):
+            return np.array(self.star_detection_override_data[ff_name])
+
+        if ff_name in self.calstars:
+            return np.array(self.calstars[ff_name])
+
+        return None
+
+
     def updateCalstars(self):
         """ Draw extracted stars on the current image. """
 
-        # Handle using FR files
-        ff_name_c = convertFRNameToFF(self.img_handle.name())
-
-        # Choose data source: override detections or original CALSTARS
-        star_data = None
-        if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
-            star_data = np.array(self.star_detection_override_data[ff_name_c])
-        elif ff_name_c in self.calstars:
-            star_data = np.array(self.calstars[ff_name_c])
+        star_data = self.getDetectedStars()
 
         if star_data is not None and len(star_data) > 0:
             # Get star coordinates
@@ -8908,15 +8923,9 @@ class PlateTool(QtWidgets.QMainWindow):
         Returns:
             bool: True if balancing was performed, False otherwise.
         """
-        # Get current FF file name
-        ff_name_c = convertFRNameToFF(self.img_handle.name())
-
         # Get detected stars count
-        n_detected = 0
-        if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
-            n_detected = len(self.star_detection_override_data[ff_name_c])
-        elif ff_name_c in self.calstars:
-            n_detected = len(self.calstars[ff_name_c])
+        star_data = self.getDetectedStars()
+        n_detected = 0 if star_data is None else len(star_data)
 
         if n_detected < 10:
             return False
@@ -10089,15 +10098,7 @@ class PlateTool(QtWidgets.QMainWindow):
                         calstars_centroid = False
                         if self.img_handle is not None:
 
-                            # Handle using FR files too
-                            ff_name_c = convertFRNameToFF(self.img_handle.name())
-
-                            # Use override data if enabled, otherwise CALSTARS
-                            star_data = None
-                            if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
-                                star_data = np.array(self.star_detection_override_data[ff_name_c])
-                            elif ff_name_c in self.calstars:
-                                star_data = np.array(self.calstars[ff_name_c])
+                            star_data = self.getDetectedStars()
 
                             if star_data is not None:
 
@@ -12673,19 +12674,11 @@ class PlateTool(QtWidgets.QMainWindow):
         self.status_bar.showMessage("Trying quick alignment...")
         QtWidgets.QApplication.processEvents()
 
-        # Get current FF file name
-        ff_name_c = convertFRNameToFF(self.img_handle.name())
-
-        # Use override data if enabled and available, otherwise use original CALSTARS
-        if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
-            detected_stars = np.array(self.star_detection_override_data[ff_name_c])
-        elif ff_name_c in self.calstars:
-            detected_stars = np.array(self.calstars[ff_name_c])
-        else:
+        detected_stars = self.getDetectedStars()
+        if detected_stars is None:
             print("  No detected stars available - falling back to astrometry.net")
             return False
 
-        detected_stars = np.array(detected_stars)
         if len(detected_stars) < 10:
             print("  Less than 10 detected stars - falling back to astrometry.net")
             return False
@@ -13012,14 +13005,7 @@ class PlateTool(QtWidgets.QMainWindow):
         print("  BEFORE: RA={:.4f} Dec={:.4f} Rot={:.4f}".format(orig_ra, orig_dec, orig_rot), flush=True)
 
         # Get detected stars from current image (same as tryQuickAlignment)
-        ff_name_c = self.img_handle.current_ff_file if hasattr(self.img_handle, 'current_ff_file') else None
-
-        # Use override data if enabled and available, otherwise use original CALSTARS
-        detected_stars = None
-        if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
-            detected_stars = np.array(self.star_detection_override_data[ff_name_c])
-        elif ff_name_c is not None and ff_name_c in self.calstars:
-            detected_stars = np.array(self.calstars[ff_name_c])
+        detected_stars = self.getDetectedStars()
 
         if detected_stars is None or len(detected_stars) < 5:
             print("  Not enough detected stars ({})".format(
@@ -13371,26 +13357,15 @@ class PlateTool(QtWidgets.QMainWindow):
             # Tight search range based on config (0.75x to 1.5x)
             fov_w_range = [0.75*self.config.fov_w, 1.5*self.config.fov_w]
 
-        # Handle using FR files too
-        ff_name_c = convertFRNameToFF(self.img_handle.name())
-
         # Find and load a mask file if there is one
         mask = getMaskFile(self.dir_path, self.config)
 
         # Compute JD for astrometry.net matching
         jd = date2JD(*self.img_handle.currentTime())
 
-        # Use override data if enabled and available, otherwise use original CALSTARS
-        has_star_data = False
-        star_data = None
-        if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
-            star_data = np.array(self.star_detection_override_data[ff_name_c])
-            has_star_data = True
-        elif ff_name_c in self.calstars:
-            star_data = np.array(self.calstars[ff_name_c])
-            has_star_data = True
+        star_data = self.getDetectedStars()
 
-        if has_star_data and (not upload_image):
+        if (star_data is not None) and (not upload_image):
 
             # Make sure that there are at least 10 stars
             if len(star_data) < 10:
@@ -13658,9 +13633,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.status_bar.showMessage("Astrometry.net solution found, processing...")
         QtWidgets.QApplication.processEvents()
 
-        # Compute JD and FF name (needed for post-solve steps)
+        # Compute JD (needed for post-solve steps)
         jd = date2JD(*self.img_handle.currentTime())
-        ff_name_c = convertFRNameToFF(self.img_handle.name())
 
         # Save user's settings for the final fit
         user_distortion_type = self.platepar.distortion_type
@@ -13808,13 +13782,9 @@ class PlateTool(QtWidgets.QMainWindow):
             catalog_x_fov, catalog_y_fov, catalog_stars)
         print("  Catalog stars after mask filter: {:d}".format(len(catalog_stars)))
 
-        # Get detected stars - use override data if enabled, otherwise CALSTARS
+        # Get detected stars
         # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
-        detected_stars = None
-        if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
-            detected_stars = np.array(self.star_detection_override_data[ff_name_c])
-        elif ff_name_c in self.calstars:
-            detected_stars = np.array(self.calstars[ff_name_c])
+        detected_stars = self.getDetectedStars()
 
         if detected_stars is not None and len(detected_stars) > 0:
             det_y = detected_stars[:, 0]
