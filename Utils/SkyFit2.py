@@ -3627,6 +3627,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
         if new_mode == 'skyfit':
 
+            # Measure the photometry of the current frame before the avepixel replaces it
+            if not first_time:
+                self.computeIntensitySum()
+
             self.mode = 'skyfit'
             self.skyfit_button.setDisabled(True)
             self.manualreduction_button.setDisabled(False)
@@ -12169,6 +12173,9 @@ class PlateTool(QtWidgets.QMainWindow):
         if self.img.img_handle.input_type == 'dfn':
             return
 
+        # Measure the photometry of the current frame before the maxpixel replaces it
+        self.computeIntensitySum()
+
         if self.img_type_flag == 'maxpixel':
             self.img_type_flag = 'avepixel'
         else:
@@ -16094,6 +16101,11 @@ class PlateTool(QtWidgets.QMainWindow):
                     where star_mask_coeff x stddev > average.
         """
 
+        # The picks are measured on their frame, not on the avepixel (SkyFit mode) or the maxpixel shown
+        #   instead of it
+        if (self.mode == 'skyfit') or (self.img.img_showing == 'maxpixel'):
+            return None
+
         # Find the pick done on the current frame
         pick = self.getCurrentPick()
 
@@ -17435,7 +17447,10 @@ class PlateTool(QtWidgets.QMainWindow):
             
             # Read the SNR and make sure it is not None
             snr = pick['snr']
-            if snr is None:
+
+            # Without signal above the background (SNR of 0) the random error is not defined, it is handled
+            #   as an unknown SNR
+            if (snr is None) or (snr <= 0):
 
                 # If SNR is None, then set it to 0
                 snr = 0.0
