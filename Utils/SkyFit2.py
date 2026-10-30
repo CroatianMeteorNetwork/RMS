@@ -3580,11 +3580,11 @@ class PlateTool(QtWidgets.QMainWindow):
         if self.hasData():
             self.updateLeftLabels()
             self.updateImageNavigationDisplay()
+            self.initMaskFromFile()
             self.updateStars()
             self.updateDistortion()
             self.tab.param_manager.updatePlatepar()
             self.initStarDetectionOverrides()
-            self.initMaskFromFile()
             self.updateFindBestFrameButton()
             self.changeMode(self.mode)
 
@@ -4376,8 +4376,7 @@ class PlateTool(QtWidgets.QMainWindow):
             for orig_idx, star_xy, star_radec, star_spec, star_name, common_name in iterator:
 
                 # Make sure that the dimensions of the mask match the image dimensions
-                if (self.mask.img.shape[0] == self.img.data.shape[0]) or \
-                   (self.mask.img.shape[1] == self.img.data.shape[1]):
+                if self.mask.checkResolution(self.platepar.X_res, self.platepar.Y_res):
 
                     # Check if the star is inside the mask
                     if self.mask.img[int(star_xy[1]), int(star_xy[0])] != 0:
@@ -4976,6 +4975,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Ensure unsaved mask polygons are applied to the detection
         self.mask = MaskStructure(self.generateMaskImage())
+        self.updateStars(only_update_catalog=True)
 
         # Call extractStarsFF with override parameters
         try:
@@ -5062,6 +5062,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Ensure unsaved mask polygons are applied to the detection
         self.mask = MaskStructure(self.generateMaskImage())
+        self.updateStars(only_update_catalog=True)
 
         # Get list of all FF files that exist on disk, excluding placeholders
         ff_files = [f for f in self.calstars.keys()
@@ -7138,6 +7139,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Update self.mask so star detection uses the new mask
             self.mask = MaskStructure(mask_img)
+            self.updateStars(only_update_catalog=True)
             print("Mask updated for star detection")
 
             # Mark as saved
@@ -7156,6 +7158,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Remember the directory for next time
             self.last_mask_dir = os.path.dirname(file_path)
             self.loadMaskFromFile(file_path)
+            self.updateStars(only_update_catalog=True)
 
     def loadMaskFromFile(self, mask_path):
         """Load mask.bmp and convert masked regions to editable polygons.
