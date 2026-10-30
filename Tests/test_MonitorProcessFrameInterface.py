@@ -626,6 +626,40 @@ def test_hidden_inputs_skipped(tmp_path):
     assert [os.path.basename(p) for p, _, _ in found] == ['20261014_022345']
 
 
+def test_png_dirs_inputs(tmp_path):
+    """ Directories of PNG frames (pngdirs) are inputs like the directories of FITS frames: a directory with PNG
+        frames is one input, recursively or not; a directory of the other kind of frames is not; the state of the
+        input is the newest time and the total size of its frames.
+    """
+
+    config = cr.Config()
+    for block, frame in [('night/20260720_024819', 'dump_00000.png'), ('night/fits_block', 'a.fits'),
+                         ('night/empty', None)]:
+        (tmp_path/'in'/block).mkdir(parents=True)
+        if frame:
+            (tmp_path/'in'/block/frame).write_bytes(b'x'*10)
+    (tmp_path/'in'/'night/20260720_024819'/'dump_00001.png').write_bytes(b'x'*5)
+    (tmp_path/'loose.png').write_bytes(b'')
+
+    found = mon.scanInputs(str(tmp_path/'in'), str(tmp_path/'out'), config, 'pngdirs', True)
+    assert [os.path.basename(p) for p, _, _ in found] == ['20260720_024819']
+    assert found[0][2] is None
+
+    found = mon.scanInputs(str(tmp_path/'in'/'night'), str(tmp_path/'out'), config, 'pngdirs', False)
+    assert [os.path.basename(p) for p, _, _ in found] == ['20260720_024819']
+
+    found = mon.scanInputs(str(tmp_path/'in'), str(tmp_path/'out'), config, 'fitsdirs', True)
+    assert [os.path.basename(p) for p, _, _ in found] == ['fits_block']
+
+    block = str(tmp_path/'in'/'night'/'20260720_024819')
+    frames = [os.path.join(block, f) for f in ('dump_00000.png', 'dump_00001.png')]
+    assert mon.inputState(block, 'pngdirs') == (max(os.path.getmtime(f) for f in frames), 15)
+    assert mon.isInputPath(block, 'pngdirs') and not mon.isInputPath(block, 'fitsdirs')
+    assert not mon.isInputPath(str(tmp_path/'loose.png'), 'pngdirs')
+    assert mon.inputExtension('pngdirs') is None
+    assert mon.isDirInputType('PNGDIRS') and not mon.isDirInputType('vid')
+
+
 def test_processFileWorker_vanished_input(monkeypatch, tmp_path):
     """ An input which disappears while it is processed (the processing fails, also with an error before
         processFile handles its errors) ends the worker with VANISHED_EXIT_CODE, so it is not retried; a failure

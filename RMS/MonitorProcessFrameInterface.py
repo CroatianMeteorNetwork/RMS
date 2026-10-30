@@ -77,7 +77,29 @@ FILE_TYPE_MAP = {
     'mov': ['.mov'],
     'wmv': ['.wmv'],
     'fitsdirs': None,
+    'pngdirs': None,
 }
+
+# Input types which are directories of frames (one frame per file), with the extensions of their frames: FITS frames,
+#   and PNG frames (e.g. the UWO frame dumps, whose frame times are in the frames)
+DIR_INPUT_TYPES = {
+    'fitsdirs': ('.fits',),
+    'pngdirs': ('.png',),
+}
+
+
+def isDirInputType(file_type):
+    """ Whether the inputs of the given type are directories of frames (see DIR_INPUT_TYPES). """
+
+    return file_type.lower() in DIR_INPUT_TYPES
+
+
+def frameFiles(dir_path, file_type):
+    """ The names of the frames in a directory input of the given type (see DIR_INPUT_TYPES). """
+
+    extensions = DIR_INPUT_TYPES[file_type.lower()]
+
+    return [f for f in os.listdir(dir_path) if f.lower().endswith(extensions) and not isHidden(f)]
 
 # Exit code of a worker process which skipped a file because it begins before the start time, or because the
 #   processing of its night was cut off (monitor_night_cutoff_hours)
@@ -299,7 +321,7 @@ def logReadable(dir_path, readable, log_prefix=''):
 
 def inputExtension(file_type):
     """ Return the extension of the input files of the given type, None if they don't have a single one
-        (FF files, FITS directories). Types which are not in FILE_TYPE_MAP are the extension itself, as in
+        (FF files, directories of frames). Types which are not in FILE_TYPE_MAP are the extension itself, as in
         matchesFileType.
     """
 
@@ -351,8 +373,8 @@ def matchesFileType(file_name, file_type):
     if file_type == 'ff':
         return validFFName(file_name)
 
-    # Special handling for fitsdirs (matches everything, checked in monitorDirectory)
-    if file_type == 'fitsdirs':
+    # Directories of frames match by any name (checked in isInputPath)
+    if isDirInputType(file_type):
         return True
 
     # Check by extension
@@ -368,12 +390,12 @@ def matchesFileType(file_name, file_type):
 
 
 def isInputPath(file_path, file_type):
-    """ Check if a path is an input of the monitor: a file of the given type, or for FITS directories a directory
-        with FITS frames.
+    """ Check if a path is an input of the monitor: a file of the given type, or for the directories of frames
+        (FITS, PNG) a directory with such frames.
 
     Arguments:
         file_path: [str] Path to check.
-        file_type: [str] File type identifier (e.g. 'vid', 'ff', 'mkv', 'fitsdirs').
+        file_type: [str] File type identifier (e.g. 'vid', 'ff', 'mkv', 'fitsdirs', 'pngdirs').
 
     Return:
         [bool] True if it is an input.
@@ -382,10 +404,10 @@ def isInputPath(file_path, file_type):
     if not matchesFileType(os.path.basename(file_path), file_type):
         return False
 
-    # A FITS directory is a directory with FITS frames, any other input is a file
-    if file_type == 'fitsdirs':
+    # A directory of frames is a directory with frames of its type, any other input is a file
+    if isDirInputType(file_type):
         try:
-            return os.path.isdir(file_path) and any(f.lower().endswith('.fits') for f in os.listdir(file_path))
+            return os.path.isdir(file_path) and len(frameFiles(file_path, file_type)) > 0
         except OSError:
             return False
 
@@ -394,7 +416,7 @@ def isInputPath(file_path, file_type):
 
 def inputState(file_path, file_type):
     """ The time of the last change and the size of an input, which tell whether it is still being written. A
-        FITS directory changes with its frames, so it has the newest time and the total size of its frames.
+        directory of frames changes with its frames, so it has the newest time and the total size of its frames.
 
     Arguments:
         file_path: [str] Path of the input (see isInputPath).
@@ -407,12 +429,12 @@ def inputState(file_path, file_type):
 
     try:
 
-        # A FITS directory: the newest of its frames and their total size
-        if file_type == 'fitsdirs':
-            fits_paths = [os.path.join(file_path, f) for f in os.listdir(file_path) if f.lower().endswith('.fits')]
-            if not fits_paths:
+        # A directory of frames: the newest of its frames and their total size
+        if isDirInputType(file_type):
+            frame_paths = [os.path.join(file_path, f) for f in frameFiles(file_path, file_type)]
+            if not frame_paths:
                 return None
-            return max(os.path.getmtime(f) for f in fits_paths), sum(os.path.getsize(f) for f in fits_paths)
+            return max(os.path.getmtime(f) for f in frame_paths), sum(os.path.getsize(f) for f in frame_paths)
 
         # A file: its own time and size
         return os.path.getmtime(file_path), os.path.getsize(file_path)
@@ -422,7 +444,8 @@ def inputState(file_path, file_type):
 
 
 def inputSize(file_path, file_type):
-    """ The size of an input (bytes, the total of the frames of a FITS directory), None if it can't be read. """
+    """ The size of an input (bytes, the total of the frames of a directory of frames), None if it can't be
+        read. """
 
     input_state = inputState(file_path, file_type)
 
@@ -431,8 +454,8 @@ def inputSize(file_path, file_type):
 
 def scanInputs(input_dir, output_dir, config, file_type, recursive):
     """ The inputs in the input directory with the time of their last change and their size, for the status of
-        the monitor (MonitorStatus). The inputs are found as by the monitor. For FITS directories only the time
-        of the directory is read (it changes when frames are added), as reading all frames would take long.
+        the monitor (MonitorStatus). The inputs are found as by the monitor. For directories of frames only the
+        time of the directory is read (it changes when frames are added), as reading all frames would take long.
 
     Arguments:
         input_dir: [str] Input directory.
@@ -442,7 +465,7 @@ def scanInputs(input_dir, output_dir, config, file_type, recursive):
         recursive: [bool] The inputs are also in the subdirectories.
 
     Return:
-        [list] (path, mtime, size) of every input, size None for FITS directories. Raises OSError if the input
+        [list] (path, mtime, size) of every input, size None for directories of frames. Raises OSError if the input
             directory can't be read.
     """
 
@@ -450,7 +473,7 @@ def scanInputs(input_dir, output_dir, config, file_type, recursive):
     if recursive:
         paths = []
         for root, dirs, files in walkInput(input_dir, output_dir, config):
-            paths += [os.path.join(root, name) for name in (dirs if file_type == 'fitsdirs' else files)
+            paths += [os.path.join(root, name) for name in (dirs if isDirInputType(file_type) else files)
                       if not isHidden(name)]
     else:
         paths = [os.path.join(input_dir, name) for name in os.listdir(input_dir) if not isHidden(name)]
@@ -464,7 +487,7 @@ def scanInputs(input_dir, output_dir, config, file_type, recursive):
             st = os.stat(path)
         except OSError:
             continue
-        inputs.append((path, st.st_mtime, None if file_type == 'fitsdirs' else st.st_size))
+        inputs.append((path, st.st_mtime, None if isDirInputType(file_type) else st.st_size))
 
     return inputs
 
@@ -639,7 +662,7 @@ STAGING_FREE_MARGIN = 1024**3
 def stageInputFile(file_path, staging_dir):
     """ Copy an input file into the local staging directory (monitor_staging_dir), so it is read only once
         over the network: the processing reads every file twice. The copy is in a directory of the worker
-        and keeps the file name. FF files and directories (FITS directories) are processed where they are, as
+        and keeps the file name. FF files and directories (of FITS or PNG frames) are processed where they are, as
         are files for which there is not enough space or which can't be copied.
 
     Arguments:
@@ -2403,7 +2426,7 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
             try:
                 if recursive:
                     for root, dirs, files in walkInput(input_dir, output_dir, reporter.config):
-                        if file_type == 'fitsdirs':
+                        if isDirInputType(file_type):
                             for d in dirs:
                                 candidate_paths.append(os.path.join(root, d))
                         else:
@@ -2455,7 +2478,7 @@ def monitorDirectory(input_dir, file_type, config_path, platepar_path, output_di
                 else:
                     if file_path not in stability_tracker:
                         log.info("New {} detected: {} - waiting for write completion...".format(
-                            "directory" if file_type == 'fitsdirs' else "file", file_rel_path))
+                            "directory" if isDirInputType(file_type) else "file", file_rel_path))
                         stability_tracker[file_path] = {'mtime': curr_mtime, 'size': curr_size, 'since': time.time()}
                         stable = False
                     else:
@@ -3009,7 +3032,7 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
                     if recursive:
                         for root, dirs, files in walkInput(cam['input_dir'], cam['output_dir'],
                                                          reporters[cam['id']].config):
-                            if file_type == 'fitsdirs':
+                            if isDirInputType(file_type):
                                 for d in dirs:
                                     candidate_paths.append(os.path.join(root, d))
                             else:
@@ -3075,7 +3098,7 @@ def monitorMultipleCameras(multicam_ini_path, start_time=None, report_mode=None,
                         if file_path not in cam_trk:
                             # Start tracking a new file
                             log.info("[{}] New {} detected: {} - waiting...".format(
-                                cam_id, "directory" if file_type == 'fitsdirs' else "file", file_rel_path))
+                                cam_id, "directory" if isDirInputType(file_type) else "file", file_rel_path))
                             cam_trk[file_path] = {'mtime': curr_mtime, 'size': curr_size, 'since': time.time()}
                             stable = False
 
@@ -3324,8 +3347,8 @@ Examples:
     )
 
     arg_parser.add_argument('file_type', type=str, nargs='?', default=None,
-        help="File type to monitor for. Supported: vid, ff, mkv, mp4, avi, mov, wmv, and fitsdirs "
-             "(directories of FITS frames). Any other value will be treated as a file extension. See "
+        help="File type to monitor for. Supported: vid, ff, mkv, mp4, avi, mov, wmv, fitsdirs (directories "
+             "of FITS frames) and pngdirs (directories of PNG frames, e.g. UWO frame dumps). Any other value will be treated as a file extension. See "
              "Guides/MonitorProcessing.md."
     )
 

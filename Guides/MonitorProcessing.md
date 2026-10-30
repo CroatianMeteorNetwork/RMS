@@ -37,6 +37,7 @@ generates the night report in a separate process, while it keeps processing new 
 | `mkv`, `mp4`, `avi`, `mov`, `wmv` | video files, decoded with GStreamer (or OpenCV as a fallback) | from the file name |
 | `ff` | RMS FF files (`.fits`, `.bin`), see the note below | from the file name |
 | `fitsdirs` | directories of FITS frames, one directory per recording | from the FITS headers |
+| `pngdirs` | directories of PNG frames, one directory per recording (e.g. UWO frame dumps `dump_NNNNN.png`) | from the frames (UWO PNG) |
 | any other value | treated as a file extension, opened as a video file | from the file name |
 
 Video file names have to contain the time of the first frame, in UTC, either as the whole name
