@@ -2313,7 +2313,8 @@ class GeoPoints(object):
 class PlateTool(QtWidgets.QMainWindow):
     def __init__(self, input_path=None, config=None, beginning_time=None, fps=None, gamma=None,
         use_fr_files=False, geo_points_input=None, startUI=True, mask=None, nobg=False, peribg=False,
-        flipud=False, flatbiassub=False, exposure_ratio=1.0, show_sattracks=False, tle_file=None):
+        flipud=False, flatbiassub=False, exposure_ratio=1.0, show_sattracks=False, tle_file=None,
+        save_photometry_pixels=False):
         """ SkyFit interactive window.
 
         Arguments:
@@ -2342,6 +2343,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 automatically applied for DFN images. 1.0 by default.
             show_sattracks: [bool] Show satellite tracks. False by default.
             tle_file: [str] Path to a TLE file for satellite tracks.
+            save_photometry_pixels: [bool] Save the pixels used for the photometry of every pick to a CSV
+                file next to the ECSV file. False by default.
         """
 
         super(PlateTool, self).__init__()
@@ -2397,6 +2400,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Store the exposure ratio
         self.exposure_ratio = exposure_ratio
+
+        # Save the per-pixel photometry of every pick next to the ECSV file
+        self.save_photometry_pixels = save_photometry_pixels
 
         # Extract the directory path if a file was given
         if os.path.isfile(self.dir_path):
@@ -3551,6 +3557,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.settings.sigInvertToggled.connect(self.toggleInvertColours)
         self.tab.settings.sigAutoPanToggled.connect(self.toggleAutoPan)
         self.tab.settings.sigSingleClickPhotometryToggled.connect(self.toggleSingleClickPhotometry)
+        self.tab.settings.sigSavePhotometryPixelsToggled.connect(self.toggleSavePhotometryPixels)
         self.tab.settings.sigSatTracksToggled.connect(self.toggleShowSatTracks)
         self.tab.settings.sigAutoComputeSatTracksToggled.connect(self.toggleAutoComputeSatTracks)
         self.tab.settings.sigLoadTLEPressed.connect(self.loadTLEFileDialog)
@@ -9771,6 +9778,10 @@ class PlateTool(QtWidgets.QMainWindow):
         if not hasattr(self, "exposure_ratio"):
             self.exposure_ratio = 1.0
 
+        # Update the possibly missing flag for saving the per-pixel photometry
+        if not hasattr(self, "save_photometry_pixels"):
+            self.save_photometry_pixels = False
+
 
         # Add the possibily missing variables for ASTRA
         if not hasattr(self, "astra_dialog"):
@@ -12541,6 +12552,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def toggleSingleClickPhotometry(self):
         self.single_click_photometry = not self.single_click_photometry
+
+    def toggleSavePhotometryPixels(self):
+        self.save_photometry_pixels = not self.save_photometry_pixels
 
 
     def updateMeasurementRefractionCorrection(self):
@@ -16110,6 +16124,11 @@ class PlateTool(QtWidgets.QMainWindow):
         pick = self.getCurrentPick()
 
         if pick:
+
+            # Drop the pixel values of the previous computation, so the saved ones always belong to the
+            #   current intensity sum
+            pick.pop('photometry_pixel_values', None)
+
             photom_pixels_raw = pick.get('photometry_pixels')
 
             # If there are no photometry pixels, set the intensity to 0
@@ -16239,6 +16258,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # If the background level is set to zero, simply sum up the intensity of the colored pixels
             if background_lvl == 0:
+                crop_img_nobg = crop_img
+                crop_bg_px = 0
                 intensity_sum = np.ma.sum(crop_img)
 
             # Use the peripheral background subtraction method if forced or on static images
@@ -16250,6 +16271,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 # pixels
                 # (do as a float to avoid artificially pumping up the magnitude)
                 crop_img_nobg = crop_img.astype(float) - background_lvl
+                crop_bg_px = background_lvl
                 intensity_sum = np.ma.sum(crop_img_nobg)
                 intensity_sum = np.abs(intensity_sum)
 
@@ -16323,6 +16345,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 # Subtract the avepixel crop from the data crop
                 crop_img_nobg = crop_img.astype(float) - avepixel_crop
+                crop_bg_px = np.ma.filled(avepixel_crop, np.nan)
                 intensity_sum = np.ma.sum(crop_img_nobg)
                 intensity_sum = np.abs(intensity_sum)
 
@@ -16341,6 +16364,17 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Set the intensity sum to the pick
             pick['intensity_sum'] = intensity_sum
+
+            # Keep the per-pixel values behind the intensity sum, the frame is not available at saving.
+            # Pixels left out of the sum (on the star mask) are NaN
+            if self.save_photometry_pixels:
+                pick['photometry_pixel_values'] = {
+                    'x': x_arr_global,
+                    'y': y_arr_global,
+                    'intensity_raw': self.img.data[x_arr_global, y_arr_global].astype(np.float64),
+                    'background': np.broadcast_to(crop_bg_px, crop_img.shape)[x_arr, y_arr].astype(np.float64),
+                    'intensity_nobg': np.ma.filled(crop_img_nobg[x_arr, y_arr].astype(np.float64), np.nan),
+                    }
 
             ### Measure the SNR of the pick ###
 
@@ -17339,6 +17373,10 @@ class PlateTool(QtWidgets.QMainWindow):
     def saveECSV(self):
         """ Save the picks into the GDEF ECSV standard. """
 
+        # Compute the intensity sum done on the current frame (the ECSV is saved before the FTPdetectinfo,
+        #   so it would otherwise be written without the photometry colored on the frame being shown)
+        self.computeIntensitySum()
+
         # If no picks, save nothing and send no-picks to FTPDetectionInfo save
         if [key for key, val in self.pick_list.items() if (val['x_centroid'] is not None)] == []:
             return False
@@ -17433,6 +17471,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
         out_str += "# schema: astropy-2.0\n"
         out_str += "datetime,ra,dec,azimuth,altitude,x_image,y_image,integrated_pixel_value,background_pixel_value,saturated_pixels,mag_data,err_minus_mag,err_plus_mag,snr\n"
+
+        # Lines of the photometry pixels file, and the frames whose pixels were never measured
+        photometry_pixel_lines = []
+        frames_without_pixel_values = []
 
         # Add the data (sort by frame)
         for frame, pick in sorted(self.pick_list.items(), key=lambda x: x[0]):
@@ -17536,6 +17578,17 @@ class PlateTool(QtWidgets.QMainWindow):
 
             out_str += ",".join(entry) + "\n"
 
+            if self.save_photometry_pixels:
+
+                pixel_values = pick.get('photometry_pixel_values')
+
+                if pixel_values is not None:
+                    photometry_pixel_lines += self.photometryPixelLines(pixel_values, frame, entry[0], jd,
+                                                                        pp_tmp)
+
+                elif (pick['photometry_pixels'] is not None) and (len(pick['photometry_pixels']) > 0):
+                    frames_without_pixel_values.append(frame)
+
 
 
         ecsv_file_path = os.path.join(self.dir_path, ecsv_file_name)
@@ -17547,7 +17600,123 @@ class PlateTool(QtWidgets.QMainWindow):
 
         print("ESCV file saved to:", ecsv_file_path)
 
+        if self.save_photometry_pixels:
+            self.savePhotometryPixels(ecsv_file_name, meta_dict, photometry_pixel_lines,
+                                      frames_without_pixel_values)
+
         return True
+
+
+    def photometryPixelLines(self, pixel_values, frame, datetime_str, jd, platepar):
+        """ Format the photometry pixels of a pick as lines of the photometry pixels file. The sky
+            coordinates of the pixel centres are computed with the time and the platepar of the pick.
+
+        Arguments:
+            pixel_values: [dict] Pixel values of the pick, stored by computeIntensitySum.
+            frame: [int] Frame of the pick.
+            datetime_str: [str] Time of the pick, as written in the ECSV file.
+            jd: [float] Julian date of the pick astrometry.
+            platepar: [Platepar] Platepar used for the pick astrometry.
+
+        Return:
+            [list of str] One line per pixel.
+        """
+
+        x_px = pixel_values['x']
+        y_px = pixel_values['y']
+        n_px = len(x_px)
+
+        # One pointing correction for all pixels (same time), 20x faster. It is computed at the mean of the
+        #   times, which can be 1 ULP of the JD off (1.7e-7 deg in RA), below the written 1e-6 deg
+        _, ra_px, dec_px, _ = xyToRaDecPP(np.full(n_px, jd), x_px, y_px, np.ones(n_px), platepar,
+            extinction_correction=False, measurement=True, jd_time=True, precompute_pointing_corr=True)
+
+        azim_px, alt_px = trueRaDec2ApparentAltAz(ra_px, dec_px, jd, platepar.lat, platepar.lon,
+                                                  refraction=False)
+
+        lines = []
+        for i in range(n_px):
+            lines.append(",".join([
+                datetime_str, "{:d}".format(frame),
+                "{:d}".format(x_px[i]), "{:d}".format(y_px[i]),
+                "{:10.6f}".format(ra_px[i]), "{:+10.6f}".format(dec_px[i]),
+                "{:10.6f}".format(azim_px[i]), "{:+10.6f}".format(alt_px[i]),
+                "{:.3f}".format(pixel_values['intensity_raw'][i]),
+                "{:.3f}".format(pixel_values['background'][i]),
+                "{:.3f}".format(pixel_values['intensity_nobg'][i]),
+                ]))
+
+        return lines
+
+
+    def savePhotometryPixels(self, ecsv_file_name, meta_dict, lines, frames_without_pixel_values):
+        """ Save the pixels used for the photometry of every pick next to the ECSV file. One row per pixel,
+            joined to the ECSV rows by the datetime.
+
+        Arguments:
+            ecsv_file_name: [str] Name of the ECSV file of the picks.
+            meta_dict: [dict] Meta information of the ECSV file.
+            lines: [list of str] Lines of the pixels, from photometryPixelLines.
+            frames_without_pixel_values: [list of int] Frames of the picks whose photometry was not computed
+                with the option on, reported to the user.
+        """
+
+        # Not .ecsv: tools which load every .ecsv file in a folder as picks (e.g. ASTRA) would load this one
+        file_name = os.path.splitext(ecsv_file_name)[0] + "_photometry_pixels.csv"
+
+        out_str = """# %ECSV 0.9
+# ---
+# datatype:
+# - {name: datetime, datatype: string}
+# - {name: frame, datatype: int64}
+# - {name: x_image, unit: pix, datatype: int64, description: 'Pixel centre, same coordinates as x_image of the picks'}
+# - {name: y_image, unit: pix, datatype: int64, description: 'Pixel centre, same coordinates as y_image of the picks'}
+# - {name: ra, unit: deg, datatype: float64}
+# - {name: dec, unit: deg, datatype: float64}
+# - {name: azimuth, unit: deg, datatype: float64}
+# - {name: altitude, unit: deg, datatype: float64}
+# - {name: intensity_raw, datatype: float64, description: 'Pixel value of the frame (dark and flat applied if loaded)'}
+# - {name: background, datatype: float64, description: 'Background subtracted from the pixel, gamma corrected, NaN if the pixel is left out of integrated_pixel_value of the pick'}
+# - {name: intensity_nobg, datatype: float64, description: 'Gamma corrected pixel value minus the background, NaN if the pixel is left out of integrated_pixel_value of the pick'}
+# delimiter: ','
+# meta: !!omap
+"""
+
+        pixels_meta = {
+            'ecsv_file': ecsv_file_name,
+            'camera_id': meta_dict['camera_id'],
+            'image_file': meta_dict['image_file'],
+            'isodate_start_obs': meta_dict['isodate_start_obs'],
+            'gamma': self.config.gamma,
+            'bit_depth': self.config.bit_depth,
+            }
+
+        for key, value in pixels_meta.items():
+
+            if isinstance(value, str):
+                value_str = "'{:s}'".format(value)
+            else:
+                value_str = str(value)
+
+            out_str += "# - {" + "{:s}: {:s}".format(key, value_str) + "}\n"
+
+        out_str += "# schema: astropy-2.0\n"
+        out_str += "datetime,frame,x_image,y_image,ra,dec,azimuth,altitude,intensity_raw,background,intensity_nobg\n"
+
+        for line in lines:
+            out_str += line + "\n"
+
+        file_path = os.path.join(self.dir_path, file_name)
+
+        with open(file_path, 'w') as f:
+            f.write(out_str)
+
+        print("Photometry pixels saved to:", file_path)
+
+        if frames_without_pixel_values:
+            print("WARNING: The photometry pixels of frames {:s} were not saved, as their photometry was not "
+                  "computed with the 'Save Photometry Pixels' option on. Revisit these frames and save again."
+                  .format(", ".join(str(frame) for frame in frames_without_pixel_values)))
 
 
 
@@ -17855,6 +18024,11 @@ if __name__ == '__main__':
                             "up by a shutter. For example, a 30 s exposure with meteor segments at 20 FPS "
                             "results in a exposure ratio of 600.")
 
+    arg_parser.add_argument('--photpixels', action="store_true", \
+                            help="Save the pixels used for the photometry of every pick (pixel position, "
+                            "RA/Dec, Alt/Az, raw and background-subtracted intensity) to a CSV file next to the "
+                            "ECSV file. Can also be turned on in the GUI (Save Photometry Pixels).")
+
 
 
     # Parse the command line arguments
@@ -17917,6 +18091,11 @@ if __name__ == '__main__':
 
         plate_tool.loadState(dir_path, state_name, beginning_time=beginning_time, mask=mask)
 
+        # Turn on saving the photometry pixels if asked, otherwise keep the choice stored in the state
+        if cml_args.photpixels:
+            plate_tool.save_photometry_pixels = True
+            plate_tool.tab.settings.updateSavePhotometryPixels()
+
         # Initialize satellite track related attributes for loaded state
         plate_tool.show_sattracks = cml_args.sattracks
         plate_tool.auto_compute_sattracks = cml_args.sattracks  # Auto-compute if --sattracks flag used
@@ -17967,7 +18146,7 @@ if __name__ == '__main__':
             gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints, \
             mask=mask, nobg=cml_args.nobg, peribg=cml_args.peribg, flipud=cml_args.flipud, \
             flatbiassub=cml_args.flatbiassub, exposure_ratio=cml_args.expratio, show_sattracks=cml_args.sattracks, \
-            tle_file=cml_args.tle_file)
+            tle_file=cml_args.tle_file, save_photometry_pixels=cml_args.photpixels)
 
     else:
 
@@ -17976,7 +18155,8 @@ if __name__ == '__main__':
             gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints,
             nobg=cml_args.nobg, peribg=cml_args.peribg, flipud=cml_args.flipud,
             flatbiassub=cml_args.flatbiassub, exposure_ratio=cml_args.expratio,
-            show_sattracks=cml_args.sattracks, tle_file=cml_args.tle_file)
+            show_sattracks=cml_args.sattracks, tle_file=cml_args.tle_file,
+            save_photometry_pixels=cml_args.photpixels)
 
 
 
