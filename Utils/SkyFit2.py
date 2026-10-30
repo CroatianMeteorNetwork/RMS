@@ -2568,6 +2568,9 @@ class PlateTool(QtWidgets.QMainWindow):
         # Star detection override parameters
         self.star_detection_override_enabled = False  # Use override parameters instead of CALSTARS
         self.star_detection_override_data = {}  # Store re-detected stars per FF file
+        self.star_detection_marked = {}  # Stars marked by the user per FF file, in the CALSTARS columns
+        self.star_detection_removed = {}  # Positions (x, y) of the detections removed by the user per FF file
+        self.star_marking_mode = False  # Clicks mark and remove stars (Star Detection tab)
         self.override_intensity_threshold = 18
         self.override_neighborhood_size = 10
         self.override_max_stars = 200
@@ -3501,6 +3504,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.star_detection.sigRedetectStars.connect(self.redetectStars)
         self.tab.star_detection.sigRedetectAllImages.connect(self.redetectAllImages)
         self.tab.star_detection.sigUseOverrideToggled.connect(self.toggleStarDetectionOverride)
+        self.tab.star_detection.sigMarkStarsToggled.connect(self.toggleStarMarking)
+        self.tab.star_detection.sigClearMarks.connect(self.clearStarMarks)
         self.tab.star_detection.sigIntensityThresholdChanged.connect(self.updateIntensityThreshold)
         self.tab.star_detection.sigNeighborhoodSizeChanged.connect(self.updateNeighborhoodSize)
         self.tab.star_detection.sigMaxStarsChanged.connect(self.updateMaxStars)
@@ -4781,22 +4786,42 @@ class PlateTool(QtWidgets.QMainWindow):
             Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7).
 
         The stars re-detected in the Star Detection tab take precedence over CALSTARS while the override is
-        enabled. Every consumer reads the detections through this method, so they all see the same list.
+        enabled. The detections removed by the user are left out and the stars they marked are added at the
+        end, with or without the override. Every consumer reads the detections through this method, so they
+        all see the same list.
 
         Return:
-            star_data: [ndarray] The detected stars, or None if neither source has an entry for the image.
+            star_data: [ndarray] The detected stars, or None if neither source has an entry for the image and
+                no star is marked on it.
         """
 
         # FR files are looked up under the name of their FF file
         ff_name = convertFRNameToFF(self.img_handle.name())
 
+        star_data = None
         if self.star_detection_override_enabled and (ff_name in self.star_detection_override_data):
-            return np.array(self.star_detection_override_data[ff_name])
+            star_data = np.array(self.star_detection_override_data[ff_name])
 
-        if ff_name in self.calstars:
-            return np.array(self.calstars[ff_name])
+        elif ff_name in self.calstars:
+            star_data = np.array(self.calstars[ff_name])
 
-        return None
+        # Leave out the detections within 2 px of one removed by the user, so it stays removed after the stars
+        #   are re-detected
+        removed = self.star_detection_removed.get(ff_name, [])
+        if (star_data is not None) and len(star_data) and len(removed):
+            removed_x, removed_y = np.array(removed).T
+            dist = np.hypot(star_data[:, 1, None] - removed_x, star_data[:, 0, None] - removed_y)
+            star_data = star_data[np.all(dist > 2.0, axis=1)]
+
+        # Add the stars marked by the user, with as many columns as the detections
+        marked = self.star_detection_marked.get(ff_name, [])
+        if len(marked):
+            if (star_data is None) or (len(star_data) == 0):
+                star_data = np.array(marked)
+            else:
+                star_data = np.vstack([star_data, np.array(marked)[:, :star_data.shape[1]]])
+
+        return star_data
 
 
     def updateCalstars(self):
@@ -4809,9 +4834,14 @@ class PlateTool(QtWidgets.QMainWindow):
             y = star_data[:, 0]
             x = star_data[:, 1]
 
+            # The stars marked by the user are the last ones, their inner ring is magenta
+            n_marked = len(self.star_detection_marked.get(convertFRNameToFF(self.img_handle.name()), []))
+            is_marked = np.arange(len(x)) >= (len(x) - n_marked)
+
             # Set both the inner and outer rings
-            self.calstar_markers.setData(x=x + 0.5, y=y + 0.5)
-            self.calstar_markers2.setData(x=x + 0.5, y=y + 0.5)
+            for markers in (self.calstar_markers, self.calstar_markers2):
+                pens = [pg.mkPen((255, 0, 255), width=1.1) if m else markers.opts['pen'] for m in is_marked]
+                markers.setData(x=x + 0.5, y=y + 0.5, pen=pens)
             self.calstar_markers_outer.setData(x=x + 0.5, y=y + 0.5)
             self.calstar_markers_outer2.setData(x=x + 0.5, y=y + 0.5)
 
@@ -4821,6 +4851,76 @@ class PlateTool(QtWidgets.QMainWindow):
             self.calstar_markers2.setData(pos=[])
             self.calstar_markers_outer.setData(pos=[])
             self.calstar_markers_outer2.setData(pos=[])
+
+
+    def toggleStarMarking(self, marking):
+        """ Turn on or off marking the stars missed by the detection and removing false detections with
+            clicks on the image.
+        """
+
+        self.star_marking_mode = marking
+
+
+    def markStar(self):
+        """ Add the star under the cursor to the detections of the current image, measured like a picked
+            star, unless a detection is already within the aperture.
+        """
+
+        star_data = self.getDetectedStars()
+        if (star_data is not None) and len(star_data):
+            dist = np.hypot(star_data[:, 1] - (self.mouse_x - 0.5), star_data[:, 0] - (self.mouse_y - 0.5))
+            if np.min(dist) <= self.star_aperture_radius:
+                return
+
+        x_centroid, y_centroid, fwhm, intensity, snr, saturated = self.centroid()
+        if x_centroid is None:
+            return
+
+        # CALSTARS columns Y X IntensSum Ampltd FWHM BgLvl SNR NSatPx. The amplitude and the background level
+        #   are not measured, no consumer reads them
+        ff_name = convertFRNameToFF(self.img_handle.name())
+        self.star_detection_marked.setdefault(ff_name, []).append(
+            [y_centroid, x_centroid, intensity, 0, fwhm, 0, snr, int(saturated)])
+
+        self.updateCalstars()
+
+
+    def unmarkStar(self):
+        """ Remove the star marked by the user, or else the detection, nearest to the cursor within the
+            aperture.
+        """
+
+        ff_name = convertFRNameToFF(self.img_handle.name())
+        mouse_x, mouse_y = self.mouse_x - 0.5, self.mouse_y - 0.5
+
+        # A star marked by the user is taken out of the marked stars
+        marked = self.star_detection_marked.get(ff_name, [])
+        if len(marked):
+            dist = np.hypot(np.array(marked)[:, 1] - mouse_x, np.array(marked)[:, 0] - mouse_y)
+            if np.min(dist) <= self.star_aperture_radius:
+                del marked[int(np.argmin(dist))]
+                self.updateCalstars()
+                return
+
+        # A detection is remembered by its position, so it stays removed after the stars are re-detected
+        star_data = self.getDetectedStars()
+        if (star_data is not None) and len(star_data):
+            dist = np.hypot(star_data[:, 1] - mouse_x, star_data[:, 0] - mouse_y)
+            nearest = int(np.argmin(dist))
+            if dist[nearest] <= self.star_aperture_radius:
+                self.star_detection_removed.setdefault(ff_name, []).append(
+                    (float(star_data[nearest, 1]), float(star_data[nearest, 0])))
+                self.updateCalstars()
+
+
+    def clearStarMarks(self):
+        """ Undo the stars marked and the detections removed by the user on the current image. """
+
+        ff_name = convertFRNameToFF(self.img_handle.name())
+        self.star_detection_marked.pop(ff_name, None)
+        self.star_detection_removed.pop(ff_name, None)
+
+        self.updateCalstars()
 
 
     def initStarDetectionOverrides(self):
@@ -7017,6 +7117,10 @@ class PlateTool(QtWidgets.QMainWindow):
         # features that were toggled since it was last shown.
         if new_index == self.tab.indexOf(self.tab.help):
             self.tab.help.updateHelp()
+
+        # Leave the star marking mode with the Star Detection tab
+        if old_index == self.tab.indexOf(self.tab.star_detection):
+            self.tab.star_detection.mark_stars_checkbox.setChecked(False)
 
         # Mask tab is at index 4 (Levels=0, Fit Parameters=1, Station=2, Star Detection=3, Mask=4)
         mask_tab_index = self.tab.indexOf(self.tab.mask)
@@ -9881,6 +9985,13 @@ class PlateTool(QtWidgets.QMainWindow):
         if not hasattr(self, "mask_brush_max_undo"):
             self.mask_brush_max_undo = 50
 
+        # Add the possibly missing user corrections of the star detection, and leave the marking mode
+        if not hasattr(self, "star_detection_marked"):
+            self.star_detection_marked = {}
+        if not hasattr(self, "star_detection_removed"):
+            self.star_detection_removed = {}
+        self.star_marking_mode = False
+
         # If setupUI hasn't already been called, call it
         if not hasattr(self, 'central'):
 
@@ -10029,8 +10140,21 @@ class PlateTool(QtWidgets.QMainWindow):
             self.clicked = 0
             return
 
+        # On a click (not a drag) in the star marking mode, mark a star or remove a detection
+        if (self.press_scene_x is not None) and self.star_marking_mode and (self.mode == 'skyfit'):
+            if np.hypot(scene_x - self.press_scene_x, scene_y - self.press_scene_y) < 5.0:
+                scene_pos = QtCore.QPointF(self.press_scene_x, self.press_scene_y)
+                view_pos = self.img_frame.mapSceneToView(scene_pos)
+                self.mouse_x = view_pos.x()
+                self.mouse_y = view_pos.y()
+
+                if self.press_button == QtCore.Qt.MouseButton.LeftButton:
+                    self.markStar()
+                elif self.press_button == QtCore.Qt.MouseButton.RightButton:
+                    self.unmarkStar()
+
         # Check if this was a click (not a drag) for star picking
-        if self.press_scene_x is not None and self.star_pick_mode:
+        elif self.press_scene_x is not None and self.star_pick_mode:
             # Check if mouse moved more than threshold in screen pixels
             drag_distance = np.hypot(scene_x - self.press_scene_x, scene_y - self.press_scene_y)
             click_threshold = 5.0  # screen pixels

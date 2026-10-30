@@ -3408,6 +3408,8 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
     sigSaveToConfig = QtCore.pyqtSignal()
     sigCatalogLMChanged = QtCore.pyqtSignal(float)
     sigUseOverrideToggled = QtCore.pyqtSignal()
+    sigMarkStarsToggled = QtCore.pyqtSignal(bool)
+    sigClearMarks = QtCore.pyqtSignal()
     sigIntensityThresholdChanged = QtCore.pyqtSignal(int)
     sigNeighborhoodSizeChanged = QtCore.pyqtSignal(int)
     sigMaxStarsChanged = QtCore.pyqtSignal(int)
@@ -3561,6 +3563,20 @@ class StarDetectionWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.use_override_checkbox = QtWidgets.QCheckBox('Use Override Detections')
         self.use_override_checkbox.released.connect(self.sigUseOverrideToggled.emit)
         layout.addWidget(self.use_override_checkbox)
+
+        # Mark the stars missed by the detection and remove false detections by hand
+        mark_layout = QtWidgets.QHBoxLayout()
+        self.mark_stars_checkbox = QtWidgets.QCheckBox('Mark Stars')
+        self.mark_stars_checkbox.setToolTip('Left click a star the detection missed to add it, right click a '
+            'detection to remove it. Used by the fit and Auto Fit, with or without the override.')
+        self.mark_stars_checkbox.toggled.connect(self.sigMarkStarsToggled.emit)
+        mark_layout.addWidget(self.mark_stars_checkbox)
+        self.clear_marks_button = QtWidgets.QPushButton('Clear Marks')
+        self.clear_marks_button.setToolTip('Undo the stars marked and the detections removed on the current '
+            'image')
+        self.clear_marks_button.clicked.connect(self.sigClearMarks.emit)
+        mark_layout.addWidget(self.clear_marks_button)
+        layout.addLayout(mark_layout)
 
         layout.addSpacing(self.scaledSpacing(0.3))
 
