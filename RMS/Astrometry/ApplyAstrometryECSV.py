@@ -7,9 +7,11 @@ import datetime
 import numpy as np
 from astropy.table import QTable
 
+import RMS.ConfigReader as cr
 import RMS.Formats.Platepar
 from RMS.Astrometry.Conversions import trueRaDec2ApparentAltAz
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, computeFOVSize, rotationWrtHorizon
+from RMS.GeoidHeightEGM96 import mslToWGS84Height
 
 
 ECSV_DATETIME_FORMAT = "%Y-%m-%dT%H:%M:%S.%f"
@@ -75,6 +77,8 @@ def applyAstrometryECSV(dir_path, ecsv_file, platepar_file, platepar=None, time_
     data.meta['obs_latitude'] = platepar.lat                        # Decimal signed latitude (-90 S to +90 N)
     data.meta['obs_longitude'] = platepar.lon                       # Decimal signed longitude (-180 W to +180 E)
     data.meta['obs_elevation'] = platepar.elev                      # Altitude in metres above MSL. Note not WGS84
+    data.meta['obs_height_wgs84'] = mslToWGS84Height(np.radians(platepar.lat), np.radians(platepar.lon),
+        platepar.elev, cr.Config())                                 # Height in metres above the WGS84 ellipsoid (obs_elevation + EGM96 geoid height)
     data.meta['camera_id'] = platepar.station_code                  # The code name of the camera, likely to be network-specific
     data.meta['cx'] = platepar.X_res                               # Horizontal camera resolution in pixels
     data.meta['cy'] = platepar.Y_res                               # Vertical camera resolution in pixels

@@ -178,6 +178,7 @@ from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, \
     extinctionCorrectionTrueToApparent, applyAstrometryFTPdetectinfo, getFOVSelectionRadius, \
     limitingMagnitude, screenNudgeToAzAltDelta, fovCentreZenithDirection
 from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
+from RMS.GeoidHeightEGM96 import mslToWGS84Height
 from RMS.Astrometry.StarClasses import CatalogStar, GeoPoint, PlanetPoint, PairedStars
 from RMS.Astrometry.StarFilters import filterPhotometricOutliers, filterBlendedStars
 from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, trueRaDec2ApparentAltAz, \
@@ -17367,6 +17368,8 @@ class PlateTool(QtWidgets.QMainWindow):
             'obs_latitude': self.platepar.lat,                        # Decimal signed latitude (-90 S to +90 N)
             'obs_longitude': self.platepar.lon,                       # Decimal signed longitude (-180 W to +180 E)
             'obs_elevation': self.platepar.elev,                      # Altitude in metres above MSL. Note not WGS84
+            'obs_height_wgs84': mslToWGS84Height(np.radians(self.platepar.lat), np.radians(self.platepar.lon),
+                self.platepar.elev, self.config),                     # Height in metres above the WGS84 ellipsoid (obs_elevation + EGM96 geoid height)
             'origin': 'SkyFit2',                                      # The software which produced the data file
             'camera_id': self.config.stationID,                       # The code name of the camera, likely to be network-specific
             'cx' : self.platepar.X_res,                               # Horizontal camera resolution in pixels

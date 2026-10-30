@@ -20,6 +20,7 @@ from RMS import ConfigReader
 from RMS.Astrometry.ApplyAstrometry import computeFOVSize, xyToRaDecPP, rotationWrtHorizon
 from RMS.Astrometry.Conversions import trueRaDec2ApparentAltAz
 from RMS.Formats.Platepar import Platepar
+from RMS.GeoidHeightEGM96 import mslToWGS84Height
 from RMS.Formats.FrameInterface import detectInputTypeFolder, detectInputTypeFile
 from RMS.Routines.Image import signalToNoise
 from RMS.Routines import Image
@@ -2737,6 +2738,8 @@ class ASTRA:
             'obs_latitude': self.platepar.lat,
             'obs_longitude': self.platepar.lon,
             'obs_elevation': self.platepar.elev,
+            'obs_height_wgs84': mslToWGS84Height(np.radians(self.platepar.lat), np.radians(self.platepar.lon),
+                self.platepar.elev, self.config),
             'origin': 'ASTRA',
             'camera_id': self.config.stationID,
             'cx' : self.platepar.X_res,
