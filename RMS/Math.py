@@ -722,7 +722,19 @@ def testPointInsideConvexPolygonSphere():
 
     plt.show()
 
-def testVectShort(n_tests=10000, log_to_console=True):
+def testVectShort(n_tests=10000, log_to_console=False):
+
+    """ Test code for vectShort
+
+    Arguments:
+
+    Keyword arguments:
+        n_tests: [int] optional, default: 10000, number of tests to carry out
+        log_to_console: [bool] optional, default: False, if true log to console
+
+    Returns
+        [bool] : True if tests are passed
+    """
 
     for i in range(n_tests):
 
