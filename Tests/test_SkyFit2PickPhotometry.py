@@ -276,10 +276,11 @@ def test_saved_pixels_match_the_ecsv_picks(tmp_path, capsys):
     _, picks = readTable(os.path.join(str(tmp_path), ecsv_name))
     names, pixels = readTable(os.path.join(str(tmp_path), pixels_name))
 
-    assert names == ['datetime', 'frame', 'x_image', 'y_image', 'ra', 'dec', 'azimuth', 'altitude',
+    assert names == ['datetime', 'frame', 'fragment', 'x_image', 'y_image', 'ra', 'dec', 'azimuth', 'altitude',
                      'intensity_raw', 'background', 'intensity_nobg']
     assert len(pixels) == len(PIXELS)
     assert {row['frame'] for row in pixels} == {'10'}
+    assert {row['fragment'] for row in pixels} == {'0'}
     assert {row['datetime'] for row in pixels} == {picks[1]['datetime']}
 
     at_pick = [row for row in pixels if (row['x_image'], row['y_image']) == ('902', '502')][0]
@@ -310,6 +311,7 @@ def test_pixels_file_is_read_by_astropy(tmp_path):
 
     assert len(table) == len(PIXELS)
     assert table['x_image'].dtype.kind == 'i'
+    assert table['fragment'].dtype.kind == 'i'
     assert str(table['ra'].unit) == 'deg'
     assert np.isnan(table['intensity_nobg']).sum() == 1
     assert table.meta['ecsv_file'].endswith('.ecsv')

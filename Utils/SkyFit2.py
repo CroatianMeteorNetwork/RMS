@@ -17607,7 +17607,7 @@ class PlateTool(QtWidgets.QMainWindow):
         return True
 
 
-    def photometryPixelLines(self, pixel_values, frame, datetime_str, jd, platepar):
+    def photometryPixelLines(self, pixel_values, frame, datetime_str, jd, platepar, fragment=0):
         """ Format the photometry pixels of a pick as lines of the photometry pixels file. The sky
             coordinates of the pixel centres are computed with the time and the platepar of the pick.
 
@@ -17617,6 +17617,9 @@ class PlateTool(QtWidgets.QMainWindow):
             datetime_str: [str] Time of the pick, as written in the ECSV file.
             jd: [float] Julian date of the pick astrometry.
             platepar: [Platepar] Platepar used for the pick astrometry.
+
+        Keyword arguments:
+            fragment: [int] Fragment of the pick, 0 for the main one as in the GFE standard. 0 by default.
 
         Return:
             [list of str] One line per pixel.
@@ -17637,7 +17640,7 @@ class PlateTool(QtWidgets.QMainWindow):
         lines = []
         for i in range(n_px):
             lines.append(",".join([
-                datetime_str, "{:d}".format(frame),
+                datetime_str, "{:d}".format(frame), "{:d}".format(fragment),
                 "{:d}".format(x_px[i]), "{:d}".format(y_px[i]),
                 "{:10.6f}".format(ra_px[i]), "{:+10.6f}".format(dec_px[i]),
                 "{:10.6f}".format(azim_px[i]), "{:+10.6f}".format(alt_px[i]),
@@ -17669,6 +17672,7 @@ class PlateTool(QtWidgets.QMainWindow):
 # datatype:
 # - {name: datetime, datatype: string}
 # - {name: frame, datatype: int64}
+# - {name: fragment, datatype: int64, description: 'Fragment of the pick, 0 for the main one as in the GFE standard'}
 # - {name: x_image, unit: pix, datatype: int64, description: 'Pixel centre, same coordinates as x_image of the picks'}
 # - {name: y_image, unit: pix, datatype: int64, description: 'Pixel centre, same coordinates as y_image of the picks'}
 # - {name: ra, unit: deg, datatype: float64}
@@ -17701,7 +17705,8 @@ class PlateTool(QtWidgets.QMainWindow):
             out_str += "# - {" + "{:s}: {:s}".format(key, value_str) + "}\n"
 
         out_str += "# schema: astropy-2.0\n"
-        out_str += "datetime,frame,x_image,y_image,ra,dec,azimuth,altitude,intensity_raw,background,intensity_nobg\n"
+        out_str += "datetime,frame,fragment,x_image,y_image,ra,dec,azimuth,altitude,intensity_raw,background," \
+            "intensity_nobg\n"
 
         for line in lines:
             out_str += line + "\n"
