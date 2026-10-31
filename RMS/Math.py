@@ -718,62 +718,40 @@ def testPointInsideConvexPolygonSphere():
 
     plt.show()
 
-def testVectShort(n_tests=10000, log_to_console=False):
+def testVectShort(n_tests=10000, log_to_console=True):
 
     for i in range(n_tests):
 
-        dims = np.random.randint(2, 6)
-
-        p1 = np.random.uniform(-10, 10, dims)
-        p2 = np.random.uniform(-10, 10, dims)
-
-        trim = np.random.uniform(0.1, 5.0)
-
+        # Generate test vectors
+        dims = np.random.randint(2, 16)
+        p1, p2 = np.random.uniform(-10, 10, dims), np.random.uniform(-10, 10, dims)
         original_length = np.linalg.norm(p2 - p1)
 
-        p1_new, p2_new = vectShort(
-            p1,
-            p2,
-            trim
-        )
+        # Generate test trim amounts
+        trim = np.random.uniform(0.1, 5.0)
 
-        p1_new = np.array(p1_new)
-        p2_new = np.array(p2_new)
-        new_length = np.linalg.norm(
-            p2_new - p1_new
-        )
+        # Compute new vector using vectShort (the test object)
+        p1_, p2_ = vectShort(p1, p2, trim)
 
-        actual_shortening = (
-                original_length - new_length
-        )
+        # Convert to numpy arrays
+        p1_, p2_ = np.array(p1_), np.array(p2_)
+
+        new_length = np.linalg.norm(p2_ - p1_)
+
+        actual_shortening = original_length - new_length
 
         if original_length < 2 * trim:
-
-            expected_trim = original_length * 0.05
-            expected_shortening = 2 * expected_trim
-
+            expected_trim, expected_shortening  = original_length * 0.05, 2 * expected_trim
             mode = "fallback"
-
         else:
-
             expected_shortening = 2 * trim
-
             mode = "normal"
 
-        error = (
-                actual_shortening
-                - expected_shortening
-        )
+        error = actual_shortening - expected_shortening
 
         if log_to_console:
-            print(
-                f"{mode:8s} "
-                f"dims={dims:2d} "
-                f"length={original_length:8.4f} "
-                f"shortened={actual_shortening:8.4f} "
-                f"expected={expected_shortening:8.4f} "
-                f"error={error:+.2e}"
-            )
+            print(f"{mode:8s} dims={dims:2d} length={original_length:8.4f} shortened by={actual_shortening:8.4f} "
+                  f"expected={expected_shortening:8.4f} error={error:+.2e}")
 
         # Check for error
         if error > 1e-8 * new_length :
