@@ -1,7 +1,6 @@
 """ Common math functions. """
 
 import numpy as np
-from numpy.distutils.fcompiler import failed_fcompilers
 
 from RMS.Routines.SphericalPolygonCheck import sphericalPolygonCheck
 
@@ -149,10 +148,13 @@ def vectShort(p1, p2, trim):
     v = p2 - p1
     length = np.linalg.norm(v)
 
+    # Handle edge case of vector shorter than twice the trim
     trim = trim if length >= 2 * trim else length * 0.05
 
-    v /= length
+    # Make into a unit vector
+    v = vectNorm(v)
 
+    #
     p1_, p2_ = (p1 + trim * v).astype(float), (p2 - trim * v).astype(float)
 
     return tuple(p1_), tuple(p2_)
@@ -716,7 +718,7 @@ def testPointInsideConvexPolygonSphere():
 
     plt.show()
 
-def testVectShort(n_tests=100):
+def testVectShort(n_tests=10000, log_to_console=False):
 
     for i in range(n_tests):
 
@@ -763,14 +765,15 @@ def testVectShort(n_tests=100):
                 - expected_shortening
         )
 
-        print(
-            f"{mode:8s} "
-            f"dims={dims:2d} "
-            f"length={original_length:8.4f} "
-            f"shortened={actual_shortening:8.4f} "
-            f"expected={expected_shortening:8.4f} "
-            f"error={error:+.2e}"
-        )
+        if log_to_console:
+            print(
+                f"{mode:8s} "
+                f"dims={dims:2d} "
+                f"length={original_length:8.4f} "
+                f"shortened={actual_shortening:8.4f} "
+                f"expected={expected_shortening:8.4f} "
+                f"error={error:+.2e}"
+            )
 
         # Check for error
         if error > 1e-8 * new_length :
