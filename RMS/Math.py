@@ -140,8 +140,8 @@ def vectShort(p1, p2, trim):
         trim: [float] length of vector to be trimmed from each end.
 
     Returns
-        p1: [float] (x,y, ...) moved start coordinates.
-        p2: [float] (x,y, ...) moved end coordinates.
+        p1: [tuple float] (x,y, ...) moved start coordinates.
+        p2: [tuple float] (x,y, ...) moved end coordinates.
     """
 
     # Create a vector and measure length
@@ -159,7 +159,7 @@ def vectShort(p1, p2, trim):
     trim_vec = trim * v
 
     # Add trim_vec to p1 and subtract from p2
-    p1_, p2_ = (p1 + trim_vec).astype(float), (p2 - trim_vec).astype(float)
+    p1_, p2_ = p1 + trim_vec, p2 - trim_vec
 
     return tuple(p1_), tuple(p2_)
 
