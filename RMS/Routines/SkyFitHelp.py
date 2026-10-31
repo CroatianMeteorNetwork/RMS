@@ -1043,6 +1043,10 @@ def _topic_mr_annotations(gui):
         "on each frame and right click removes it; the main picks are not changed. Select 0 again to "
         "pick the main fragment. Each fragment has its own colour, and other fragments are drawn "
         "with smaller markers.</li>"
+        "<li><b>Photometry of a fragment</b> &ndash; with fragment 1-8 selected, " + _key("SHIFT") + " + click "
+        "colours the photometry of that fragment's point on the frame (pick it first). The coloured "
+        "pixels of the other fragments on the frame are shown in their colours, those of the selected "
+        "fragment brighter; the main fragment is green.</li>"
         "<li><b>Flare</b> &ndash; marks the main fragment pick on this frame as a flare.</li>"
         "<li><b>Use in main trajectory</b> &ndash; untick to keep a main fragment pick (e.g. a "
         "saturated flare) but flag it to be left out of the trajectory solution. Such picks are also "
@@ -1065,6 +1069,9 @@ def _topic_mr_annotations(gui):
              "Time and position of fragment 1, and so on for the others (the main fragment, 0, uses the "
              "columns without a suffix). Empty on the frames where the fragment was not picked. The fragments are observational labels, not a physical fragmentation model "
              "(e.g. MetSim)."),
+            ("integrated_pixel_value1, ..., snr1",
+             "Photometry of fragment 1, and so on, with the same columns as the main fragment. Written only "
+             "if the photometry of a fragment was coloured."),
         ])
         + _callout("FTPdetectinfo files only contain the main fragment picks, without annotations.",
                    kind="note")

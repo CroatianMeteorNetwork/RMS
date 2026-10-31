@@ -6,7 +6,9 @@
 
 import datetime
 import os
+from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 pytest.importorskip("pyqtgraph")
@@ -276,6 +278,123 @@ def test_valid_ecsv(tmp_path):
     assert list(table['x_image1']) == pytest.approx([110.0, 111.0])
 
 
+# Two blobs on frame 10, 50 above a flat background of 20: the main fragment and fragment 1
+BACKGROUND = 20.0
+SIGNAL = 50.0
+MAIN_PIXELS = [(x, y) for x in range(500, 505) for y in range(300, 305)]
+FRAGMENT_PIXELS = [(x, y) for x in range(540, 543) for y in range(320, 323)]
+
+
+class Photometry(Reduction):
+    """ Stand-in for PlateTool with what the photometry of the picks and its colouring use. """
+
+    computeIntensitySum = PlateTool.computeIntensitySum
+    changePhotometry = PlateTool.changePhotometry
+    getCurrentPick = PlateTool.getCurrentPick
+    drawPhotometryColoring = PlateTool.drawPhotometryColoring
+
+    def __init__(self, dir_path):
+
+        Reduction.__init__(self, dir_path)
+
+        avepixel = np.full((1280, 720), BACKGROUND)
+        data = avepixel.copy()
+        for x, y in MAIN_PIXELS + FRAGMENT_PIXELS:
+            data[x, y] += SIGNAL
+
+        self.frame = 10
+        self.selected_fragment = 0
+        self.img = SimpleNamespace(data=data, getFrame=lambda: self.frame)
+        self.img_handle = ImageHandle()
+        self.img_handle.use_fr_files = False
+        self.img_handle.ff = SimpleNamespace(avepixel=avepixel.T)
+        self.config.gamma = 1.0
+        self.config.bit_depth = 8
+        self.dark = None
+        self.flat_struct = None
+        self.no_background_subtraction = False
+        self.peripheral_background_subtraction = False
+        self.saturation_threshold = 250
+        self.tab = SimpleNamespace(annotations=SimpleNamespace(fragment=SimpleNamespace(
+            currentIndex=lambda: self.selected_fragment)))
+
+        # The colouring masks drawn
+        self.drawn = []
+        self.region = SimpleNamespace(setImage=lambda image, levels: self.drawn.append(image))
+
+    def hasData(self):
+        return True
+
+
+def colouredFragments(tmp_path):
+    """ The main fragment and fragment 1 picked on frame 10, each with its blob coloured. """
+
+    session = Photometry(tmp_path)
+    session.addPick(10, 502.0, 302.0)
+    session.addFragmentPoint(10, 1, 541.0, 321.0)
+
+    session.selected_fragment = 1
+    session.changePhotometry(10, FRAGMENT_PIXELS, True)
+    session.selected_fragment = 0
+    session.changePhotometry(10, MAIN_PIXELS, True)
+
+    return session
+
+
+def test_fragment_photometry_is_measured_separately(tmp_path):
+    """ With a fragment selected, the coloured pixels go to its point on the frame, and every pick on the frame
+        is measured on its own pixels. A fragment not picked on the frame gets no pixels. """
+
+    session = colouredFragments(tmp_path)
+
+    session.selected_fragment = 2
+    session.changePhotometry(10, MAIN_PIXELS, True)
+    assert list(session.fragment_picks[10]) == [1]
+
+    session.computeIntensitySum()
+
+    assert session.pick_list[10]['intensity_sum'] == len(MAIN_PIXELS)*SIGNAL
+    assert session.fragment_picks[10][1]['intensity_sum'] == len(FRAGMENT_PIXELS)*SIGNAL
+
+
+def test_fragment_photometry_columns(tmp_path):
+    """ Once the photometry of a fragment is coloured, the additional fragments get the photometry columns of the
+        main fragment, with their suffix. """
+
+    session = colouredFragments(tmp_path)
+    session.computeIntensitySum()
+
+    _, _, columns, rows = saveAndRead(session)
+
+    fragment_columns = ['datetime', 'ra', 'dec', 'azimuth', 'altitude', 'x_image', 'y_image',
+                        'integrated_pixel_value', 'background_pixel_value', 'saturated_pixels', 'mag_data',
+                        'err_minus_mag', 'err_plus_mag', 'snr']
+    assert columns == LEGACY_COLUMNS + ['frame_number', 'flare', 'trajectory_use'] \
+        + [name + '1' for name in fragment_columns]
+
+    assert column(columns, rows, 'integrated_pixel_value') == [str(int(len(MAIN_PIXELS)*SIGNAL))]
+    assert column(columns, rows, 'integrated_pixel_value1') == [str(int(len(FRAGMENT_PIXELS)*SIGNAL))]
+    assert float(column(columns, rows, 'mag_data1')[0]) > float(column(columns, rows, 'mag_data')[0])
+
+
+def test_colouring_shows_every_fragment(tmp_path):
+    """ The coloured pixels of every pick on the frame are drawn with the colour index of their fragment, 1 + k,
+        and those of the selected fragment brighter, 11 + k. """
+
+    session = colouredFragments(tmp_path)
+
+    session.selected_fragment = 1
+    session.drawPhotometryColoring()
+    assert session.drawn[-1][MAIN_PIXELS[0]] == 1
+    assert session.drawn[-1][FRAGMENT_PIXELS[0]] == 12
+
+    session.selected_fragment = 0
+    session.drawPhotometryColoring()
+    assert session.drawn[-1][MAIN_PIXELS[0]] == 11
+    assert session.drawn[-1][FRAGMENT_PIXELS[0]] == 2
+    assert np.count_nonzero(session.drawn[-1]) == len(MAIN_PIXELS) + len(FRAGMENT_PIXELS)
+
+
 class Gui(object):
     """ Stand-in for PlateTool with what the Annotations tab uses. """
 
@@ -295,6 +414,9 @@ class Gui(object):
         self.refits += 1
 
     def updateLeftLabels(self):
+        pass
+
+    def drawPhotometryColoring(self):
         pass
 
 

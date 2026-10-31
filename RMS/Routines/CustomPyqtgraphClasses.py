@@ -2066,10 +2066,13 @@ class AnnotationsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.trajectory_use.setChecked(main and ((pick is None) or pick.get('trajectory_use', True)))
 
     def onFragmentChanged(self):
-        """ Show the annotations of the selected fragment, and the fragment in the image info panel. """
+        """ Show the annotations of the selected fragment, the fragment in the image info panel, and its
+            photometry pixels brighter than those of the other fragments.
+        """
 
         self.updateAnnotations()
         self.gui.updateLeftLabels()
+        self.gui.drawPhotometryColoring()
 
     def onAnnotationChanged(self):
         """ Store the checkbox states in the main fragment pick on the current frame. """

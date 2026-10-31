@@ -3422,7 +3422,14 @@ class PlateTool(QtWidgets.QMainWindow):
         self.img_zoom = ImageItem(img_handle=self.img_handle, gamma=gamma, invert=invert)
         self.zoom_window.addItem(self.img_zoom)
 
-        lut = np.array([[0, 0, 0, 0], [0, 255, 0, 76]], dtype=np.ubyte)
+        # Colours of the photometry pixels, indexed by the values of the colouring mask (see
+        #   drawPhotometryColoring): 1 + k for fragment k, and 11 + k for the selected fragment, drawn brighter.
+        #   The main fragment is green, the others are in the colour of their markers
+        lut = np.zeros((256, 4), dtype=np.ubyte)
+        for fragment_id, color in enumerate([(0, 255, 0)] + list(FRAGMENT_COLORS[1:])):
+            lut[1 + fragment_id] = color + (40,)
+            lut[11 + fragment_id] = color + (76,)
+
         self.region = pg.ImageItem(lut=lut)
         self.region.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_SourceOver)
         self.region.setZValue(10)
@@ -10361,6 +10368,13 @@ class PlateTool(QtWidgets.QMainWindow):
                         self.addFragmentPoint(self.img.getFrame(), fragment_id, self.x_centroid, self.y_centroid,
                                               snr=self.snr_centroid, saturated=self.saturated_centroid)
                         self.updatePicks()
+
+                        # Add photometry coloring if single-click photometry is turned on
+                        if self.single_click_photometry:
+                            self.changePhotometry(self.img.getFrame(), self.photometryColoring(),
+                                                  add_photometry=True)
+                            self.drawPhotometryColoring()
+
                         return
 
                     self.addCentroid(self.img.getFrame(), self.x_centroid, self.y_centroid, mode=mode,
@@ -16303,16 +16317,24 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.fig_astrometry.canvas.draw_idle()
 
 
-    def computeIntensitySum(self, star_mask_coeff=3):
+    def computeIntensitySum(self, star_mask_coeff=3, pick=None):
         """ Compute the background subtracted sum of intensity of colored pixels. The background is estimated
             as the median of near pixels that are not colored.
             args:
                 star_mask_coeff (float): Mask out parts of the image with stars by masking out a region 
                     where star_mask_coeff x stddev > average.
+                pick (dict): The pick to measure. None by default, which measures the main pick and the picks
+                    of the additional fragments on the current frame.
         """
 
-        # Find the pick done on the current frame
-        pick = self.getCurrentPick()
+        if pick is None:
+
+            # Measure the picks of the additional fragments on the current frame
+            for fragment_pick in self.fragment_picks.get(self.img.getFrame(), {}).values():
+                self.computeIntensitySum(star_mask_coeff=star_mask_coeff, pick=fragment_pick)
+
+            # Find the pick done on the current frame
+            pick = self.getCurrentPick()
 
         if pick:
             photom_pixels_raw = pick.get('photometry_pixels')
@@ -16752,8 +16774,18 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def changePhotometry(self, frame, photometry_pixels, add_photometry):
-        """ Add/remove photometry pixels of the pick. """
-        pick = self.getCurrentPick()
+        """ Add/remove photometry pixels of the pick of the selected fragment. """
+
+        # The pixels of an additional fragment go to its point on the frame, which has to be picked first
+        fragment_id = self.tab.annotations.fragment.currentIndex()
+        if fragment_id > 0:
+            pick = self.fragment_picks.get(frame, {}).get(fragment_id)
+            if pick is None:
+                print("Pick fragment {:d} on this frame before colouring its photometry".format(fragment_id))
+                return
+
+        else:
+            pick = self.getCurrentPick()
 
         if pick:
             if pick['photometry_pixels'] is None:
@@ -16858,65 +16890,76 @@ class PlateTool(QtWidgets.QMainWindow):
         return pixel_list
 
     def drawPhotometryColoring(self):
-        """ Updates image to have the colouring in the current frame """
+        """ Updates image to have the colouring in the current frame. The pixels of every pick on the frame
+            are in the colour of its fragment, those of the selected fragment brighter.
+        """
 
         if not self.hasData():
             return
 
         def set_region_image(image):
-            self.region.setImage(image)
+            # The values of the image index the colours of the region (see setupUI)
+            self.region.setImage(image, levels=(0, 255))
             if hasattr(self, "region_zoom"):
-                self.region_zoom.setImage(image)
+                self.region_zoom.setImage(image, levels=(0, 255))
 
-        blank_mask = np.array([[0]], dtype=np.uint8)
-        pick = self.getCurrentPick()
+        def valid_pixels(pick):
+            """ The photometry pixels of the pick inside the image, or None. """
 
-        if not pick:
-            set_region_image(blank_mask)
-            return
+            if not pick:
+                return None
 
-        photom_pixels = pick.get('photometry_pixels')
-        if photom_pixels is None:
-            set_region_image(blank_mask)
-            return
+            photom_pixels = pick.get('photometry_pixels')
+            if photom_pixels is None:
+                return None
 
-        photom_pixels = np.asarray(photom_pixels)
-        if photom_pixels.size == 0:
-            set_region_image(blank_mask)
-            return
+            photom_pixels = np.asarray(photom_pixels)
+            if photom_pixels.size == 0:
+                return None
 
-        if photom_pixels.ndim != 2 or photom_pixels.shape[1] != 2:
-            try:
-                photom_pixels = np.reshape(photom_pixels, (-1, 2))
-            except ValueError:
-                set_region_image(blank_mask)
-                return
+            if photom_pixels.ndim != 2 or photom_pixels.shape[1] != 2:
+                try:
+                    photom_pixels = np.reshape(photom_pixels, (-1, 2))
+                except ValueError:
+                    return None
 
-        if photom_pixels.shape[0] == 0:
-            set_region_image(blank_mask)
-            return
+            if photom_pixels.shape[0] == 0:
+                return None
 
-        photom_pixels = photom_pixels.astype(int, copy=False)
+            photom_pixels = photom_pixels.astype(int, copy=False)
 
-        # Clip any out-of-bounds pixels to the image extent to avoid indexing errors when drawing
-        height, width = self.img.data.shape[:2]
-        valid_mask = (
-            (photom_pixels[:, 0] >= 0) & (photom_pixels[:, 0] < height) &
-            (photom_pixels[:, 1] >= 0) & (photom_pixels[:, 1] < width)
-        )
+            # Clip any out-of-bounds pixels to the image extent to avoid indexing errors when drawing
+            height, width = self.img.data.shape[:2]
+            valid_mask = (
+                (photom_pixels[:, 0] >= 0) & (photom_pixels[:, 0] < height) &
+                (photom_pixels[:, 1] >= 0) & (photom_pixels[:, 1] < width)
+            )
 
-        if not np.any(valid_mask):
-            set_region_image(blank_mask)
-            return
+            if not np.any(valid_mask):
+                return None
 
-        photom_pixels = photom_pixels[valid_mask]
+            return photom_pixels[valid_mask]
 
-        # Create a coloring mask
-        mask_img = np.zeros(self.img.data.shape, dtype=np.uint8)
-        x_mask, y_mask = photom_pixels.T
-        mask_img[x_mask, y_mask] = 255
+        # The picks of the additional fragments and the main pick on the current frame
+        picks = dict(self.fragment_picks.get(self.img.getFrame(), {}))
+        picks[0] = self.getCurrentPick()
+        selected = self.tab.annotations.fragment.currentIndex()
 
-        set_region_image(mask_img)
+        # Create a coloring mask with the colour index of every pixel, the selected fragment drawn last
+        mask_img = None
+        for fragment_id, pick in sorted(picks.items(), key=lambda item: item[0] == selected):
+
+            photom_pixels = valid_pixels(pick)
+            if photom_pixels is None:
+                continue
+
+            if mask_img is None:
+                mask_img = np.zeros(self.img.data.shape, dtype=np.uint8)
+
+            x_mask, y_mask = photom_pixels.T
+            mask_img[x_mask, y_mask] = (11 if fragment_id == selected else 1) + fragment_id
+
+        set_region_image(np.array([[0]], dtype=np.uint8) if mask_img is None else mask_img)
 
 
     def saveFTPdetectinfo(self, ECSV_saved=True):
@@ -17639,11 +17682,21 @@ class PlateTool(QtWidgets.QMainWindow):
         if annotated:
             extra_columns += [('frame_number', '', 'int64'), ('flare', '', 'bool'), ('trajectory_use', '', 'bool')]
 
+        # The photometry of the additional fragments is written if any of their pixels were coloured
+        fragment_photometry = any(pick.get('photometry_pixels') for _, fragment_id, pick in observations
+                                  if fragment_id > 0)
+
         for fragment_id in fragment_ids:
             extra_columns += [(name + str(fragment_id), unit, datatype) for name, unit, datatype in [
                 ('datetime', '', 'string'), ('ra', 'deg', 'float64'), ('dec', 'deg', 'float64'),
                 ('azimuth', '', 'float64'), ('altitude', '', 'float64'), ('x_image', 'pix', 'float64'),
                 ('y_image', 'pix', 'float64')]]
+
+            if fragment_photometry:
+                extra_columns += [(name + str(fragment_id), '', datatype) for name, datatype in [
+                    ('integrated_pixel_value', 'int64'), ('background_pixel_value', 'int64'),
+                    ('saturated_pixels', 'bool'), ('mag_data', 'float64'), ('err_minus_mag', 'float64'),
+                    ('err_plus_mag', 'float64'), ('snr', 'float64')]]
 
         for name, unit, datatype in extra_columns:
             out_str += "# - {name: " + name + (", unit: " + unit if unit else "") + ", datatype: " + datatype + "}\n"
@@ -17762,16 +17815,23 @@ class PlateTool(QtWidgets.QMainWindow):
                 "{:9.3f}".format(pick['x_centroid']), "{:9.3f}".format(pick['y_centroid'])
                 ]
 
+            # The photometry, of the main fragment and of the others if theirs was measured
+            photometry = [
+                "{:10d}".format(int(pick['intensity_sum'])),
+                "{:10d}".format(int(pick['background_intensity'])),
+                "{:5s}".format(str(pick['saturated'])),
+                "{:+7.2f}".format(mag), "{:+6.2f}".format(-mag_err_total), "{:+6.2f}".format(mag_err_total),
+                "{:10.2f}".format(snr)
+                ]
+
             if fragment_id == 0:
-                entry += [
-                    "{:10d}".format(int(pick['intensity_sum'])),
-                    "{:10d}".format(int(pick['background_intensity'])),
-                    "{:5s}".format(str(pick['saturated'])),
-                    "{:+7.2f}".format(mag), "{:+6.2f}".format(-mag_err_total), "{:+6.2f}".format(mag_err_total),
-                    "{:10.2f}".format(snr),
+                entry += photometry + [
                     "{:5s}".format(str(pick.get('flare', False))),
                     "{:5s}".format(str(pick.get('trajectory_use', True)))
                     ]
+
+            elif fragment_photometry:
+                entry += photometry
 
             rows.setdefault(frame, {})[fragment_id] = entry
 
@@ -17786,7 +17846,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 entry += ["{:6d}".format(frame)] + main_entry[14:]
 
             for fragment_id in fragment_ids:
-                entry += entries.get(fragment_id, [''] * 7)
+                entry += entries.get(fragment_id, [''] * (14 if fragment_photometry else 7))
 
             out_str += ",".join(entry) + "\n"
 
