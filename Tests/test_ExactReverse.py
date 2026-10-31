@@ -5,8 +5,9 @@ radial models, decentering), a platepar with a few pixels of distortion takes a 
 back. Without refraction the round trip has to close to 1e-9 px. With refraction it can only close if the
 sky -> image refraction is the exact inverse of the image -> sky one; where it is not, that test is skipped.
 
-Also tested: a sky point the forward distortion cannot reach comes back as NaN, and fitAstrometry with the option
-returns the platepar that generated noise-free stars, through its forward mapping.
+Also tested: a sky point the forward distortion cannot reach comes back as NaN, such a point does not throw the
+pointing fit off, and fitAstrometry with the option returns the platepar that generated noise-free stars, through its
+forward mapping.
 
 Run with pytest:
     python -m pytest Tests/test_ExactReverse.py -v
@@ -19,6 +20,7 @@ import itertools
 
 import numpy as np
 import pytest
+from scipy.spatial import Delaunay
 
 import RMS.Astrometry.ApplyAstrometry as astrometry
 from RMS.Astrometry.Conversions import JD2HourAngle, JD2LST
@@ -161,14 +163,44 @@ def test_a_point_beyond_the_reach_of_the_distortion_is_nan():
     assert np.isnan(x[1]) and np.isnan(y[1])
 
 
+def test_a_star_without_image_does_not_throw_off_the_pointing_fit():
+    """ A catalog star beyond the reach of the distortion has no image (NaN). Paired with an image star, it must
+        not make the pointing fit NaN: the other stars still give the pointing. """
+
+    true_pp = _platepar("radial3-odd", refraction=False)
+    true_pp.x_poly_fwd[-1] = -0.3
+
+    gx, gy = (v.ravel() for v in np.meshgrid(np.linspace(200, true_pp.X_res - 200, 6),
+        np.linspace(150, true_pp.Y_res - 150, 4)))
+    _, ra, dec, _ = astrometry.xyToRaDecPP(np.full(gx.size, JD), gx, gy, np.ones(gx.size), true_pp,
+        extinction_correction=False, jd_time=True)
+
+    # One more pair, whose catalog star is far outside the field, beyond the reach of the distortion
+    img_stars = np.column_stack([np.append(gx, true_pp.X_res/2.0), np.append(gy, true_pp.Y_res/2.0),
+        np.ones(gx.size + 1)])
+    catalog_stars = np.column_stack([np.append(ra, ra[0]), np.append(dec, dec[0] - 55.0), np.ones(gx.size + 1)])
+
+    pp = copy.deepcopy(true_pp)
+    pp.RA_d += 0.3
+    pp.dec_d -= 0.2
+    pp.pos_angle_ref += 0.5
+    pp.fitPointing(JD, img_stars, catalog_stars, fixed_scale=True)
+
+    assert abs(pp.RA_d - true_pp.RA_d) < 1e-4
+    assert abs(pp.dec_d - true_pp.dec_d) < 1e-4
+    assert abs(pp.pos_angle_ref - true_pp.pos_angle_ref) < 1e-4
+
+
 @pytest.mark.parametrize("dist_type", ["radial5-odd", "radial7-odd", "poly3+radial3"])
 def test_fitting_returns_the_forward_mapping_that_made_the_stars(dist_type):
     """ Noise-free stars made through the forward mapping, refitted with exact_reverse from a perturbed platepar.
 
-    The fit stops a few thousandths of a pixel from the truth (0.005 px for radial5-odd, 0.009 px for radial7-odd,
-    0.027 px for poly3+radial3, against 0.05, 0.012 and 0.037 px through the reverse polynomial): the pointing and
-    the distortion centre, or the linear terms of the polynomial, trade off along a nearly flat valley, and
-    scaling the parameters does not change it. Far below any centroiding noise.
+    Compared where the stars constrain the fit, inside their convex hull, the fit stops within 0.01 px of the
+    truth (below 0.001 px for radial5-odd and radial7-odd with scipy 1.16, 0.004-0.006 px with scipy 1.14, and
+    0.010 px for poly3+radial3 with both). The pointing and the distortion centre, or the linear terms of the
+    polynomial, trade off along a nearly flat valley, so where the fit stops depends on the scipy version, and
+    beyond the stars, at the corners of the frame, poly3+radial3 is off by 0.03 to 0.09 px. Far below any
+    centroiding noise.
     """
 
     true_pp = _platepar(dist_type, refraction=False)
@@ -189,8 +221,10 @@ def test_fitting_returns_the_forward_mapping_that_made_the_stars(dist_type):
     pp.y_poly_fwd = pp.y_poly_fwd*0.9
     pp.fitAstrometry(JD, img_stars, catalog_stars)
 
-    # Compared through the forward mapping, on a grid over the frame
+    # Compared through the forward mapping, on the points of a grid over the frame inside the stars
     gx, gy = (v.ravel() for v in np.meshgrid(np.linspace(40, pp.X_res - 40, 12), np.linspace(40, pp.Y_res - 40, 8)))
+    inside = Delaunay(np.column_stack([img_x, img_y])).find_simplex(np.column_stack([gx, gy])) >= 0
+    gx, gy = gx[inside], gy[inside]
     _, ra_true, dec_true, _ = astrometry.xyToRaDecPP(np.full(gx.size, JD), gx, gy, np.ones(gx.size), true_pp,
         extinction_correction=False, jd_time=True)
     x, y = astrometry.raDecToXYPP(np.array(ra_true), np.array(dec_true), JD, pp)

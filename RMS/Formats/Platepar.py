@@ -553,8 +553,12 @@ class Platepar(object):
             # Get image coordinates of catalog stars
             catalog_x, catalog_y, catalog_mag = getCatalogStarsImagePositions(catalog_stars, jd, pp_copy)
 
-            # Calculate the sum of squared distances between image stars and catalog stars
-            dist_sum = np.sum((catalog_x - img_x) ** 2 + (catalog_y - img_y) ** 2)
+            # Calculate the sum of squared distances between image stars and catalog stars. A catalog star
+            #   which has no image (beyond the reach of the exact inverse of the distortion) counts as off by
+            #   the image diagonal, so the sum stays finite and the fit is not drawn to lose stars
+            dist_sq = (catalog_x - img_x) ** 2 + (catalog_y - img_y) ** 2
+            dist_sq[~np.isfinite(dist_sq)] = platepar.X_res ** 2 + platepar.Y_res ** 2
+            dist_sum = np.sum(dist_sq)
 
             return dist_sum
 
