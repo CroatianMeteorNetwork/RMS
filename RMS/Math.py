@@ -1,6 +1,7 @@
 """ Common math functions. """
 
 import numpy as np
+from numpy.distutils.fcompiler import failed_fcompilers
 
 from RMS.Routines.SphericalPolygonCheck import sphericalPolygonCheck
 
@@ -125,6 +126,36 @@ def vectMag(vect):
     """ Calculate the magnitude of the given vector. """
 
     return np.linalg.norm(vect)
+
+
+
+def vectShort(p1, p2, trim):
+    """ Symmetrically shorten a vector in an arbitrary number of dimensions.
+
+    If the vector is shorter than twice the length to be trimmed then a vector
+    of 90% of the original length is returned by trimming 5% from each end.
+
+    Arguments:
+        p1: [float] (x,y, ...) tuple of start coordinates.
+        p2: [float] (x,y, ...) tuple of end coordinates.
+        trim: [float] length of vector to be trimmed from each end.
+
+    Returns
+        p1: [float] (x,y, ...) shortened start coordinates.
+        p2: [float] (x,y, ...) shortened end coordinates.
+    """
+
+    p1, p2 = np.asarray(p1, dtype=float), np.asarray(p2, dtype=float)
+    v = p2 - p1
+    length = np.linalg.norm(v)
+
+    trim = trim if length >= 2 * trim else length * 0.05
+
+    v /= length
+
+    p1_, p2_ = (p1 + trim * v).astype(float), (p2 - trim * v).astype(float)
+
+    return tuple(p1_), tuple(p2_)
 
 
 ##############################################################################################################
@@ -685,14 +716,80 @@ def testPointInsideConvexPolygonSphere():
 
     plt.show()
 
+def testVectShort(n_tests=100):
+
+    for i in range(n_tests):
+
+        dims = np.random.randint(2, 6)
+
+        p1 = np.random.uniform(-10, 10, dims)
+        p2 = np.random.uniform(-10, 10, dims)
+
+        trim = np.random.uniform(0.1, 5.0)
+
+        original_length = np.linalg.norm(p2 - p1)
+
+        p1_new, p2_new = vectShort(
+            p1,
+            p2,
+            trim
+        )
+
+        p1_new = np.array(p1_new)
+        p2_new = np.array(p2_new)
+        new_length = np.linalg.norm(
+            p2_new - p1_new
+        )
+
+        actual_shortening = (
+                original_length - new_length
+        )
+
+        if original_length < 2 * trim:
+
+            expected_trim = original_length * 0.05
+            expected_shortening = 2 * expected_trim
+
+            mode = "fallback"
+
+        else:
+
+            expected_shortening = 2 * trim
+
+            mode = "normal"
+
+        error = (
+                actual_shortening
+                - expected_shortening
+        )
+
+        print(
+            f"{mode:8s} "
+            f"dims={dims:2d} "
+            f"length={original_length:8.4f} "
+            f"shortened={actual_shortening:8.4f} "
+            f"expected={expected_shortening:8.4f} "
+            f"error={error:+.2e}"
+        )
+
+        # Check for error
+        if error > 1e-8 * new_length :
+            return False
+
+    return True
+
+
+
 
 def tests():
 
     function_to_test = [["dimHypot", testDimHypot()],
                          ["angSeparationDeg", testAngSeparationDeg()],
-                         ["pointInsideConvexPolygonSphere", testPointInsideConvexPolygonSphere()]]
+                         ["pointInsideConvexPolygonSphere", testPointInsideConvexPolygonSphere()],
+                         ["vectShort", testVectShort()]]
 
     for func_name, func in function_to_test:
+        print(f"Starting test of {func_name}")
         if func:
             print("Test of {} successful".format(func_name))
         else:
