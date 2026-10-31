@@ -140,22 +140,26 @@ def vectShort(p1, p2, trim):
         trim: [float] length of vector to be trimmed from each end.
 
     Returns
-        p1: [float] (x,y, ...) shortened start coordinates.
-        p2: [float] (x,y, ...) shortened end coordinates.
+        p1: [float] (x,y, ...) moved start coordinates.
+        p2: [float] (x,y, ...) moved end coordinates.
     """
 
+    # Create a vector and measure length
     p1, p2 = np.asarray(p1, dtype=float), np.asarray(p2, dtype=float)
     v = p2 - p1
     length = np.linalg.norm(v)
 
+    # Create corresponding unit length vector
+    v = vectNorm(v)
+
     # Handle edge case of vector shorter than twice the trim
     trim = trim if length >= 2 * trim else length * 0.05
 
-    # Make into a unit vector
-    v = vectNorm(v)
+    # Create the vector to move p1 and p2
+    trim_vec = trim * v
 
-    #
-    p1_, p2_ = (p1 + trim * v).astype(float), (p2 - trim * v).astype(float)
+    # Add trim_vec to p1 and subtract from p2
+    p1_, p2_ = (p1 + trim_vec).astype(float), (p2 - trim_vec).astype(float)
 
     return tuple(p1_), tuple(p2_)
 
