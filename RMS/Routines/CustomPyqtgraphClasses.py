@@ -4047,6 +4047,7 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
     sigGreatCircleToggled = QtCore.pyqtSignal()
     sigRegionToggled = QtCore.pyqtSignal()
     sigSingleClickPhotometryToggled = QtCore.pyqtSignal()
+    sigSavePhotometryPixelsToggled = QtCore.pyqtSignal()
     sigSatTracksToggled = QtCore.pyqtSignal()
     sigAutoComputeSatTracksToggled = QtCore.pyqtSignal()
     sigLoadTLEPressed = QtCore.pyqtSignal()
@@ -4164,6 +4165,15 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.single_click_photometry.released.connect(self.sigSingleClickPhotometryToggled.emit)
         self.updateSingleClickPhotometry()
         vbox.addWidget(self.single_click_photometry)
+
+        self.save_photometry_pixels = QtWidgets.QCheckBox('Save Photometry Pixels')
+        self.save_photometry_pixels.setToolTip("Save the pixels used for the photometry of every pick "
+            "(position, RA/Dec, Alt/Az, raw and background-subtracted intensity) to a CSV file next to "
+            "the ECSV file")
+        self.save_photometry_pixels.released.connect(self.sigSavePhotometryPixelsToggled.emit)
+        self.updateSavePhotometryPixels()
+        self.save_photometry_pixels.hide()
+        vbox.addWidget(self.save_photometry_pixels)
 
         self.distortion = QtWidgets.QCheckBox('Show Distortion')
         self.distortion.released.connect(self.sigDistortionToggled.emit)
@@ -4349,6 +4359,9 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
     def updateSingleClickPhotometry(self):
         self.single_click_photometry.setChecked(self.gui.single_click_photometry)
 
+    def updateSavePhotometryPixels(self):
+        self.save_photometry_pixels.setChecked(self.gui.save_photometry_pixels)
+
     def updateShowSatTracks(self):
         self.sat_tracks.setChecked(self.gui.show_sattracks)
         # Enable/disable auto-compute checkbox based on satellite tracks visibility
@@ -4472,6 +4485,7 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.great_circle.hide()
         self.region.hide()
         self.single_click_photometry.hide()
+        self.save_photometry_pixels.hide()
         self.meas_ground_points.hide()
 
         # Always show satellite options in SkyFit mode
@@ -4502,6 +4516,7 @@ class SettingsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.great_circle.show()
         self.region.show()
         self.single_click_photometry.show()
+        self.save_photometry_pixels.show()
 
         self.meas_ground_points.show()
 
