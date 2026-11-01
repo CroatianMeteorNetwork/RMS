@@ -615,13 +615,9 @@ def computeConstellationCentres(constellation_boundaries):
 def extractTarBz2(path):
     """Extract a .tar.bz2 archive into a directory alongside the archive.
 
-    For example:
+    For example: /tmp/test_data.tar.bz2
 
-        /tmp/test_data.tar.bz2
-
-    is extracted into:
-
-        /tmp/test_data/
+    is extracted into: /tmp/test_data/
 
     Arguments:
         path: [str] Path to the .tar.bz2 archive.
@@ -637,10 +633,7 @@ def extractTarBz2(path):
     if not filename.endswith(".tar.bz2"):
         raise ValueError(f"Not a .tar.bz2 file: {path}")
 
-    extract_dir = os.path.join(
-        os.path.dirname(path),
-        filename[:-8]  # strip ".tar.bz2"
-    )
+    extract_dir = os.path.join(os.path.dirname(path), filename[:-8])
 
     os.makedirs(extract_dir, exist_ok=True)
 
@@ -651,25 +644,30 @@ def extractTarBz2(path):
 
 
 def renderStarsSimple(x_array, y_array, shape):
-    """
-    Render stars as single bright pixels.
+    """Render stars as single bright pixels.
 
-    x_array, y_array : pixel coordinates
-    shape            : (height, width)
+    Star coordinates are rounded to the nearest pixel and clipped to the
+    image bounds before rendering.
+
+    Arguments:
+        x_array: [array] X image coordinates (pixels).
+        y_array: [array] Y image coordinates (pixels).
+        shape: [tuple] Image shape as (height, width).
+
+    Return:
+        img: [ndarray] Rendered image containing the input stars.
+
     """
 
     H, W = shape
 
     img = np.zeros((H, W), dtype=np.uint8)
 
-    x = np.round(x_array).astype(int)
-    y = np.round(y_array).astype(int)
+    x,y = np.round(x_array).astype(int), np.round(y_array).astype(int)
+
 
     # Keep only stars inside image bounds
-    mask = (
-        (x >= 0) & (x < W) &
-        (y >= 0) & (y < H)
-    )
+    mask = ((x >= 0) & (x < W) & (y >= 0) & (y < H))
 
     img[y[mask], x[mask]] = 255
 
@@ -679,19 +677,10 @@ def renderStarsSimple(x_array, y_array, shape):
 
 
 
-def renderStarsGaussian(
-        x_array,
-        y_array,
-        mag_array,
-        names_array,
-        shape,
-        sigma=1.5,
-        min_brightness=0,
-        max_brightness=400,
-        sensor_saturation=255,
-        add_noise=True,
-        noise_sigma=1,
-        sky_background=75, agc_max=40):
+def renderStarsGaussian(x_array, y_array, mag_array, names_array, shape, sigma=1.5,
+                            min_brightness=0, max_brightness=400, sensor_saturation=255, add_noise=True,
+                            noise_sigma=1, sky_background=75, agc_max=40):
+
     """
     Render a synthetic star field.
 
@@ -724,48 +713,23 @@ def renderStarsGaussian(
 
 
     H, W = shape
+    image = np.zeros((H, W), dtype=np.float32)
 
-    image = np.zeros(
-        (H, W),
-        dtype=np.float32
-    )
-
-    #
     # Pixel coordinates
-    #
-    x = np.round(x_array).astype(int)
-    y = np.round(y_array).astype(int)
+    x, y = np.round(x_array).astype(int), np.round(y_array).astype(int)
 
-
-
-    #
     # Clip to image bounds
-    #
-    mask = (
-        (x >= 10) & (x < W - 10) &
-        (y >= 10) & (y < H - 10)
-    )
+    mask = ((x >= 10) & (x < W - 10) & (y >= 10) & (y < H - 10))
 
-    #
     # Convert magnitude -> brightness
-    #
-    # Bright stars have SMALL magnitudes,
-    # so invert the scale.
-    #
 
     range_min, range_max = mag_array[mask].min(), mag_array[mask].max()
-    flux = np.interp(mag_array,(range_min,range_max),(max_brightness, min_brightness)
-    )
+    flux = np.interp(mag_array,(range_min,range_max),(max_brightness, min_brightness))
 
-    #
     # Render delta-function stars
-    #
     image[y[mask], x[mask]] += flux[mask]
 
-
-    #
     # Apply common stellar PSF
-    #
     image = scipy.ndimage.gaussian_filter(
         image,
         sigma=sigma
@@ -1331,10 +1295,23 @@ def generateComparisonImages(cat):
 if __name__ == "__main__":
 
 
-    # Extract the directory of test data in the RMS repo
 
+    ### COMMAND LINE ARGUMENTS
 
-    config = loadConfigFromDirectory(".config", ".")
+    # Init the command line arguments parser
+    arg_parser = argparse.ArgumentParser(description="Generates a thumbnail image of all FF files in the given directory.")
+
+    arg_parser.add_argument('-c', '--config', nargs=1, metavar='CONFIG_PATH', type=str, \
+        help="Path to a config file which will be used instead of the default one.")
+
+    # Parse the command line arguments
+    cml_args = arg_parser.parse_args()
+
+    #########################
+
+    # Load the config file
+    config = cr.loadConfigFromDirectory(cml_args.config, cml_args.dir_path)
+
     cat = Catalog(config)
 
     generateComparisonImages(cat)
