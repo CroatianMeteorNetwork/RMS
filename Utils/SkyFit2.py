@@ -11849,7 +11849,7 @@ class PlateTool(QtWidgets.QMainWindow):
                         # Populate arrays
                         cx, cy = float(line[x_ind]), float(line[y_ind])
                         background = float(line[background_ind]) if background_ind is not None else 0
-                        saturated = bool(line[sat_ind]) if sat_ind is not None else False
+                        saturated = (line[sat_ind].lower() == 'true') if sat_ind is not None else False
                         snr = float(line[snr_ind]) if snr_ind is not None else 1
                         pick_frame_times.append(datetime.datetime.strptime(line[pick_frame_times_idx], 
                                                                            '%Y-%m-%dT%H:%M:%S.%f'))
