@@ -20,9 +20,10 @@ from __future__ import print_function, absolute_import
 
 import numpy as np
 import cv2
-import os
 import scipy
-
+import FFfits
+import os
+import tarfile
 
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
@@ -34,9 +35,10 @@ from scipy.spatial import cKDTree
 from RMS.Astrometry.ApplyAstrometry import raDecToXYPP, xyToRaDecPP
 from RMS.Astrometry.AstrometryNet import astrometryNetSolveLocal
 from RMS.ConfigReader import loadConfigFromDirectory
+from RMS.Formats.FFfile import getMiddleTimeFF
 from RMS.Formats.Platepar import Platepar
 from RMS.Formats.StarCatalog import readStarCatalog
-from RMS.Astrometry.Conversions import datetime2JD, raDec2AltAz, altAz2RADec
+from RMS.Astrometry.Conversions import date2JD, datetime2JD, raDec2AltAz, vector2RaDec
 from RMS.Math import angularSeparationDeg, vectShort
 
 J2000 = datetime(2000, 1, 1, 12, 0, 0).replace(tzinfo=timezone.utc)
@@ -76,26 +78,47 @@ def getPlateparSkyParameters(pp, jd):
 
     return ra_c, dec_c, max_separation, ra_array, dec_array
 
-def repointPlatepar(pp, jd, az, el):
+def vecsInsideConvexPolygon(vecs, normals):
 
-    """Given a platepar and a jd rotate the field of view along the local up axis.
+    """Determine which vectors lie inside a convex spherical polygon.
+
+    The polygon is represented by a set of inward-pointing unit normals,
+    one for each edge plane. A vector is considered inside the polygon if
+    it lies on the inward side of every edge plane.
+
+    Arguments:
+        vecs: [ndarray] Array of Cartesian unit vectors with shape (N, 3).
+        normals: [ndarray] Array of inward-pointing unit normals, one for each edge.
+
+    Return:
+        polygon_mask: [ndarray] Boolean array with one entry for each input
+            vector. True indicates that the vector lies inside the polygon.
+    """
+
+    polygon_mask = np.ones(len(vecs), dtype=bool)
+
+    for n in normals:
+        polygon_mask &= ((vecs @ n) >= 0)
+
+    return polygon_mask
+
+
+def repointPlatepar(pp, az_new, el_new):
+
+    """Given a platepar, new azimuth and new elevation, repoint the field of
+    view to the new azimuth and elevation preserving rotation with respect to
+    the local horizon.
 
     Arguments:
         pp: [Platepar] RMS platepar object.
-        jd: [Float] Julian date (don't yet understand how this can only be used once, I think it should be
-        the platepars sky coordinates pointing date.
-        az: [Float] Azimuth angle (degrees).
-        el: [Float]
-
-
-
+        az_new: [Float] Azimuth angle (degrees).
+        el_new: [Float] Elevation angle (degrees)
     """
 
-    pp.az_centre, pp.alt_centre = az, el
-    # I changed this from the jd which was passed in
-    ra_centre, dec_centre = altAz2RADec(pp.az_centre, pp.alt_centre, pp.jd, pp.lat, pp.lon)
-    pp.RA_d, pp.dec_d = ra_centre, dec_centre
+    # Update the azimuth and elevation
+    pp.az_centre, pp.alt_centre = az_new, el_new
 
+    # Update platepar internal sky and horizontal coordinate references
     pp.updateRefRADec(skip_rot_update=False, preserve_rotation=True)
     pp.updateRefAltAz()
 
@@ -155,10 +178,9 @@ def radecToUnitVectors(ra_deg, dec_deg):
         dec_deg: [array] Declination (degrees)
 
     Return:
-        [array] unit vector pointing to the sky coordinates.
+        [ndarray] Cartesian unit vectors with shape (N, 3).
 
     """
-
 
     ra = np.radians(np.atleast_1d(ra_deg))
     dec = np.radians(np.atleast_1d(dec_deg))
@@ -309,48 +331,78 @@ class Catalog:
             thetas = angularSeparationDeg(ra0, dec0, ras, decs).astype(float)
 
             # Build a list of stars to return
-            matched = []
+            matched_stars = []
 
             for i in range(len(names)):
                 star = [names[i], ras[i], decs[i], mags[i], thetas[i], b[i], v[i], r[i]]
-                matched.append(star)
+                matched_stars.append(star)
 
             # Append the stars returned by this query to the list of the results of all queries
-            results.append(matched)
+            results.append(matched_stars)
 
         return results
 
     def queryPlateparSimple(self, pp, jd, n_brightest=1000, az=None, el=None):
 
+        """Query a platepar for the brightest stars visible within its field of
+        view at a specified Julian date.
+
+
+        Stars are initially selected using a circular sky search centred on the
+        platepar optical axis. They are then projected into image coordinates
+        and filtered to those whose image coordinates lie within the image
+        bounds.
+
+        The platepar may optionally be repointed before the query. Any repointing
+        operation is applied to a copy of the platepar, leaving the original
+        object unchanged.
+
+
+        Arguments:
+            pp: [Platepar] RMS platepar object.
+            jd: [float] Julian date.
+
+        Keyword Arguments:
+            n_brightest: [int] Optional, default 1000. Number of brightest stars to return.
+            az: [float] Optional azimuth (degrees) used to repoint the platepar.
+            el: [float] Optional elevation (degrees) used to repoint the platepar.
+
+        Return:
+            p: [Platepar] Platepar used for the query.
+            ra_array: [array] Right ascension coordinates (degrees).
+            dec_array: [array] Declination coordinates (degrees).
+            x_array: [array] X image coordinates (pixels).
+            y_array: [array] Y image coordinates (pixels).
+            mag_array: [array] Stellar magnitudes.
+            names_array: [array] Star names.
+        """
+
+        # Create a copy, so that the original object is unchanged
         p = deepcopy(pp)
 
-        if az is None or el is None:
-            pass
-        else:
+        if az is not None and  el is not None:
             # Repoint the platepar
-            p = repointPlatepar(p, jd, az, el)
+            p = repointPlatepar(p, az, el)
 
-        # Find the corners
-        cx_array, cy_array = np.array([0, p.X_res, p.X_res, 0]), np.array([0, 0, p.Y_res, p.Y_res])
-        jd_array, mag_array = np.full_like(cy_array, jd, dtype=float), np.full_like(cy_array, 1, dtype=float)
-        _, ra_array, dec_array, _ = xyToRaDecPP(jd_array, cx_array, cy_array, mag_array, p, jd_time=True)
-
-        # Get the optical centre in sky coordinates
-        x_c, y_c = p.getDistortionCentre()
-        _, ra_c, dec_c, _ = xyToRaDecPP([jd], [x_c], [y_c], [1], p, jd_time=True)
-
-        # Compute the maximum angular radius from the centre to the furthest corner.
-        max_separation = max(angularSeparationDeg(ra_c, dec_c, ra_array, dec_array))
+        # Get the platepar sky parameters at jd
+        ra_c, dec_c, max_separation, _, _ = getPlateparSkyParameters(p, jd)
 
         # Query for stars and map to arrays
-        stars_list = cat.queryRaDec(ra_c, dec_c, max_separation, n_brightest=n_brightest * 4)[0]
+        stars_list = self.queryRaDec(ra_c, dec_c, max_separation, n_brightest=n_brightest * 4)[0]
+
+        # If nothing returned, then exit the function returning empty arrays
+        if not stars_list:
+            return p, np.array([]), np.array([]), np.array([]), np.array([]), np.array([]), np.array([])
+
         names_array, ra_array, dec_array, mag_array, theta_array, b_array, v_array, r_array = map(np.array, zip(*stars_list))
 
         # Compute image coordinates.
         x_array, y_array = raDecToXYPP(ra_array, dec_array, jd, p)
 
-        # Cut any stars which are outside the image
+        # Create a mask to cut any stars which are outside the image
         mask = ((x_array >= 0) & (x_array < p.X_res) & (y_array >= 0) & (y_array < p.Y_res))
+
+        # Return only those within the image and cut to the number of brightest stars
         ra_array, dec_array = ra_array[mask][:n_brightest], dec_array[mask][:n_brightest]
         x_array, y_array = x_array[mask][:n_brightest], y_array[mask][:n_brightest]
         mag_array, names_array = mag_array[mask][:n_brightest], names_array[mask][:n_brightest]
@@ -359,58 +411,89 @@ class Catalog:
 
 
 
+
     def queryPlatepar(self, pp, jd, n_brightest=1000, az=None, el=None):
+
+        """Query a platepar for the brightest stars visible within its field of
+        view at a specified Julian date.
+
+        Stars are initially selected using a circular sky search centred on the
+        platepar optical axis. The platepar field of view is then represented
+        as a convex spherical polygon and candidate stars outside this polygon
+        are rejected. The remaining stars are projected into image coordinates
+        and filtered to those whose image coordinates lie within the image
+        bounds.
+
+        The platepar may optionally be repointed before the query. Any repointing
+        operation is applied to a copy of the platepar, leaving the original
+        object unchanged.
+
+        Arguments:
+            pp: [Platepar] RMS platepar object.
+            jd: [float] Julian date.
+
+        Keyword Arguments:
+            n_brightest: [int] Optional, default 1000. Number of brightest stars
+                to return.
+            az: [float] Optional azimuth (degrees) used to repoint the platepar.
+            el: [float] Optional elevation (degrees) used to repoint the platepar.
+
+        Return:
+            p: [Platepar] Platepar used for the query.
+            ra_array: [array] Right ascension coordinates (degrees).
+            dec_array: [array] Declination coordinates (degrees).
+            x_array: [array] X image coordinates (pixels).
+            y_array: [array] Y image coordinates (pixels).
+            mag_array: [array] Stellar magnitudes.
+            names_array: [array] Star names.
+
+        Notes:
+            Candidate stars are first selected using a circular sky query whose
+            radius is determined from the platepar footprint. A convex spherical
+            polygon test is then used to reject stars outside the true field of
+            view before projection into image coordinates.
+        """
 
         p = deepcopy(pp)
 
-        if az is None or el is None:
-            pass
-        else:
-            # Repoint the platepar
-            p = repointPlatepar(p, jd, az, el)
+        if az is not None and el is not None:
+            p = repointPlatepar(p, az, el)
 
-        # Find the corners
-        cx_array, cy_array = np.array([0, p.X_res, p.X_res, 0]), np.array([0, 0, p.Y_res, p.Y_res])
-        jd_array, mag_array = np.full_like(cy_array, jd, dtype=float), np.full_like(cy_array, 1, dtype=float)
-        _, corner_ra_array, corner_dec_array, _ = xyToRaDecPP(jd_array, cx_array, cy_array, mag_array, p, jd_time=True)
 
-        # Get the optical centre in sky coordinates
-        x_c, y_c = p.getDistortionCentre()
-        _, ra_c, dec_c, _ = xyToRaDecPP([jd], [x_c], [y_c], [1], p, jd_time=True)
-
-        # Compute the maximum angular radius from the centre to the furthest corner.
-        max_separation = max(angularSeparationDeg(ra_c, dec_c, corner_ra_array, corner_dec_array))
-
-        # Query for stars
-        stars_list = cat.queryRaDec(ra_c, dec_c, max_separation, n_brightest=n_brightest * 4)[0]
+        # Get the platepar sky parameters
+        ra_c, dec_c, max_separation, corner_ra_array, corner_dec_array = getPlateparSkyParameters(p, jd)
 
         # Compute the Euclidean vectors in sky coordinates of the platepar corners and centre
         corner_vecs = radecToUnitVectors(corner_ra_array, corner_dec_array)
-        centre_vec = radecToUnitVectors(np.array([ra_c]), np.array([dec_c]))[0]
+        centre_vec = radecToUnitVectors(ra_c, dec_c)[0]
 
-        # Compute normals to vertices, pointing towards region of interest
+        # Compute inward-pointing normals to the polygon edge planes
         normals = computePolygonNormals(corner_vecs, centre_vec)
 
-        # Extract into arrays
-        names_array, ra_array, dec_array, mag_array, theta_array, b_array, v_array, r_array = map(np.array, zip(*stars_list))
+        # Query for stars
+        stars_list = self.queryRaDec(ra_c, dec_c, max_separation, n_brightest=n_brightest * 4)[0]
 
+        # If nothing returned, then exit the function returning empty arrays
+        if not stars_list:
+            return p, np.array([]), np.array([]), np.array([]), np.array([]), np.array([]), np.array([])
+
+        # Extract into arrays and convert to vectors
+        names_array, ra_array, dec_array, mag_array, theta_array, b_array, v_array, r_array = map(np.array, zip(*stars_list))
         star_vecs = radecToUnitVectors(ra_array, dec_array)
 
-        inside = np.ones(len(star_vecs),dtype=bool)
-
-        for n in normals:
-            inside &= ((star_vecs @ n) >= 0)
+        # Create the polygon mask
+        polygon_mask = vecsInsideConvexPolygon(star_vecs, normals)
 
         # Extract into arrays and mask
-        names_array = names_array[inside]
-        ra_array, dec_array, mag_array = ra_array[inside], dec_array[inside], mag_array[inside]
-        theta_array, b_array, v_array, r_array = theta_array[inside], b_array[inside], v_array[inside], r_array[inside]
+        names_array = names_array[polygon_mask]
+        ra_array, dec_array, mag_array = ra_array[polygon_mask], dec_array[polygon_mask], mag_array[polygon_mask]
+        theta_array = theta_array[polygon_mask]
+        b_array, v_array, r_array = b_array[polygon_mask], v_array[polygon_mask], r_array[polygon_mask]
 
-
-        # Compute image coordinates.
+        # Compute image coordinates for remaining selection
         x_array, y_array = raDecToXYPP(ra_array, dec_array, jd, p)
 
-        # Make a mask for stars which are outside the image
+        # Identify stars which are outside the image
         image_mask = ((x_array >= 0) & (x_array < p.X_res) & (y_array >= 0) & (y_array < p.Y_res))
 
         # Apply mask
@@ -422,13 +505,149 @@ class Catalog:
         return p, ra_array, dec_array, x_array, y_array, mag_array, names_array
 
 
-    pass
-
-    pass
-
 
 
 ### TEST CODE START ###
+
+def loadConstellationBoundaries(config, path=None):
+    """Load IAU constellation boundary vertices.
+
+    The boundary file is expected to contain rows consisting of right
+    ascension (hours), declination (degrees), constellation abbreviation,
+    and an edge flag. Boundary vertices are grouped by constellation.
+
+    Arguments:
+        config: [Config] RMS configuration object.
+
+    Keyword Arguments:
+        path: [str] Optional path to the constellation boundary file.
+            If None, the default RMS boundary file is used.
+
+    Return:
+        constellation_boundaries: [dict] Dictionary keyed by constellation
+            abbreviation. Each entry contains:
+
+            {
+                "ra_deg": [...],
+                "dec_deg": [...],
+                "flags": [...]
+            }
+
+
+    """
+
+    constellation_boundaries = {}
+
+    if path is None:
+        path = os.path.join(config.rms_root_dir, "share/constellation_boundaries_J2000.dat")
+
+
+    with open(path) as f:
+
+        for line in f:
+
+            line = line.strip()
+
+            if not line:
+                continue
+
+            ra_hours, dec_deg, name, flag = line.split()
+
+            if name not in constellation_boundaries:
+                constellation_boundaries[name] = {
+                    "ra_deg": [],
+                    "dec_deg": [],
+                    "flags": []
+                }
+
+            constellation_boundaries[name]["ra_deg"].append(
+                float(ra_hours) * 15.0
+            )
+
+            constellation_boundaries[name]["dec_deg"].append(
+                float(dec_deg)
+            )
+
+            constellation_boundaries[name]["flags"].append(
+                flag
+            )
+
+    return constellation_boundaries
+
+def computeConstellationCentres(constellation_boundaries):
+    """Compute representative RA/Dec coordinates for constellation labels.
+
+    The centre of each constellation is computed by converting all
+    boundary vertices to Cartesian unit vectors, averaging those
+    vectors, then converting the resulting unit vector back to sky
+    coordinates.
+
+    Arguments:
+        constellation_boundaries: [dict] Constellation boundary
+            dictionary returned by loadConstellationBoundaries().
+
+    Return:
+        constellation_centres: [dict] Dictionary keyed by constellation
+            abbreviation. Each entry contains:
+
+            {
+                "ra_deg": float,
+                "dec_deg": float
+            }
+
+    """
+
+    constellation_centres = {}
+
+    for name, boundary in constellation_boundaries.items():
+
+        vecs = radecToUnitVectors(boundary["ra_deg"], boundary["dec_deg"])
+
+        centre_vec = vecs.mean(axis=0)
+        centre_vec /= np.linalg.norm(centre_vec)
+
+        ra_deg, dec_deg = vector2RaDec(centre_vec)
+
+        constellation_centres[name] = {"ra_deg": ra_deg, "dec_deg": dec_deg}
+
+    return constellation_centres
+
+def extractTarBz2(path):
+    """Extract a .tar.bz2 archive into a directory alongside the archive.
+
+    For example:
+
+        /tmp/test_data.tar.bz2
+
+    is extracted into:
+
+        /tmp/test_data/
+
+    Arguments:
+        path: [str] Path to the .tar.bz2 archive.
+
+    Return:
+        extract_dir: [str] Path to the extracted directory.
+    """
+
+    path = os.path.abspath(path)
+
+    filename = os.path.basename(path)
+
+    if not filename.endswith(".tar.bz2"):
+        raise ValueError(f"Not a .tar.bz2 file: {path}")
+
+    extract_dir = os.path.join(
+        os.path.dirname(path),
+        filename[:-8]  # strip ".tar.bz2"
+    )
+
+    os.makedirs(extract_dir, exist_ok=True)
+
+    with tarfile.open(path, "r:bz2") as tar:
+        tar.extractall(extract_dir)
+
+    return extract_dir
 
 
 def renderStarsSimple(x_array, y_array, shape):
@@ -749,7 +968,155 @@ def renderIAUNames(iau_csn_coordinates, iau_extras, ra_array, dec_array, x_array
     return label_img
 
 
-def drawConstellations(pp, frame_time, intensity=150, roll_back=20, constellation_data=None):
+
+def renderConstellationLabels(config, pp, frame_time, intensity=150, constellation_centres=None, three_letter_names=False):
+
+    """Render constellation labels onto an image.
+
+    Arguments:
+        config: [Config] RMS configuration object.
+        pp: [Platepar] RMS platepar object.
+        frame_time: [datetime] Frame time.
+
+    Keyword Arguments:
+        intensity: [int] Optional label intensity.
+        constellation_centres: [dict] Optional constellation centre
+            dictionary returned by computeConstellationCentres().
+
+    Return:
+        img: [ndarray] Rendered label image.
+    """
+
+    CONSTELLATION_NAMES = {
+        "AND": "Andromeda",
+        "ANT": "Antlia",
+        "APS": "Apus",
+        "AQL": "Aquila",
+        "AQR": "Aquarius",
+        "ARA": "Ara",
+        "ARI": "Aries",
+        "AUR": "Auriga",
+        "BOO": "Boötes",
+        "CAE": "Caelum",
+        "CAM": "Camelopardalis",
+        "CAP": "Capricornus",
+        "CAR": "Carina",
+        "CAS": "Cassiopeia",
+        "CEN": "Centaurus",
+        "CEP": "Cepheus",
+        "CET": "Cetus",
+        "CHA": "Chamaeleon",
+        "CIR": "Circinus",
+        "CMA": "Canis Major",
+        "CMI": "Canis Minor",
+        "CNC": "Cancer",
+        "COL": "Columba",
+        "COM": "Coma Berenices",
+        "CRA": "Corona Australis",
+        "CRB": "Corona Borealis",
+        "CRT": "Crater",
+        "CRU": "Crux",
+        "CRV": "Corvus",
+        "CVN": "Canes Venatici",
+        "CYG": "Cygnus",
+        "DEL": "Delphinus",
+        "DOR": "Dorado",
+        "DRA": "Draco",
+        "EQU": "Equuleus",
+        "ERI": "Eridanus",
+        "FOR": "Fornax",
+        "GEM": "Gemini",
+        "GRU": "Grus",
+        "HER": "Hercules",
+        "HOR": "Horologium",
+        "HYA": "Hydra",
+        "HYI": "Hydrus",
+        "IND": "Indus",
+        "LAC": "Lacerta",
+        "LEO": "Leo",
+        "LEP": "Lepus",
+        "LIB": "Libra",
+        "LMI": "Leo Minor",
+        "LUP": "Lupus",
+        "LYN": "Lynx",
+        "LYR": "Lyra",
+        "MEN": "Mensa",
+        "MIC": "Microscopium",
+        "MON": "Monoceros",
+        "MUS": "Musca",
+        "NOR": "Norma",
+        "OCT": "Octans",
+        "OPH": "Ophiuchus",
+        "ORI": "Orion",
+        "PAV": "Pavo",
+        "PEG": "Pegasus",
+        "PER": "Perseus",
+        "PHE": "Phoenix",
+        "PIC": "Pictor",
+        "PSA": "Piscis Austrinus",
+        "PSC": "Pisces",
+        "PUP": "Puppis",
+        "PYX": "Pyxis",
+        "RET": "Reticulum",
+        "SCL": "Sculptor",
+        "SCO": "Scorpius",
+        "SCT": "Scutum",
+        "SER": "Serpens",
+        "SEX": "Sextans",
+        "SGE": "Sagitta",
+        "SGR": "Sagittarius",
+        "TAU": "Taurus",
+        "TEL": "Telescopium",
+        "TRA": "Triangulum Australe",
+        "TRI": "Triangulum",
+        "TUC": "Tucana",
+        "UMA": "Ursa Major",
+        "UMI": "Ursa Minor",
+        "VEL": "Vela",
+        "VIR": "Virgo",
+        "VOL": "Volans",
+        "VUL": "Vulpecula",
+    }
+
+
+    if constellation_centres is None:
+        constellation_centres = computeConstellationCentres(
+            loadConstellationBoundaries(config)
+        )
+
+    # Get the frame time in JD
+    jd = datetime2JD(frame_time)
+
+    # Get the platepar sky parameters
+    ra_c, dec_c, max_separation, _, _ = getPlateparSkyParameters(pp, jd)
+
+    # Create image
+    img = np.zeros((pp.Y_res, pp.X_res), dtype=np.uint8)
+
+    for name, centre in constellation_centres.items():
+
+        ra_deg = centre["ra_deg"]
+        dec_deg = centre["dec_deg"]
+
+        # Only process labels near the field of view
+        if angularSeparationDeg(ra_deg, dec_deg, ra_c, dec_c) > max_separation:
+            continue
+
+        x, y = raDecToXYPP(np.array([ra_deg]), np.array([dec_deg]), jd, pp)
+        x, y = x[0], y[0]
+
+        # Skip labels outside the image
+        if x < 0 or x >= pp.X_res or y < 0 or y >= pp.Y_res:
+            continue
+
+        if not three_letter_names:
+            name =  CONSTELLATION_NAMES.get(name, name)
+        cv2.putText(img, name, (int(round(x)), int(round(y))), cv2.FONT_HERSHEY_SIMPLEX, 0.4, intensity, 1, cv2.LINE_AA)
+
+    return img
+
+
+def renderConstellations(config, pp, frame_time, intensity=150, roll_back=40, constellation_data=None, constellation_centres=None):
 
     if constellation_data is None:
         constellations_path = os.path.expanduser("~/source/RMS/share/constellation_lines.csv")
@@ -757,10 +1124,13 @@ def drawConstellations(pp, frame_time, intensity=150, roll_back=20, constellatio
     else:
         lines = constellation_data
 
+
+
+
     # Get the time of the frame in jd
     jd = datetime2JD(frame_time)
 
-    ra_c, dec_c, max_separation = getPlateparSkyParameters(pp, jd)
+    ra_c, dec_c, max_separation, _, _ = getPlateparSkyParameters(pp, jd)
 
     from_ra, from_dec = lines[:, 0], lines[:, 1]
     to_ra, to_dec = lines[:, 2], lines[:, 3]
@@ -782,7 +1152,9 @@ def drawConstellations(pp, frame_time, intensity=150, roll_back=20, constellatio
             ok, p1, p2 = cv2.clipLine((0, 0, pp.X_res, pp.Y_res),(int(round(from_x[i])), int(round(from_y[i]))), (int(round(to_x[i])), int(round(to_y[i]))))
             try:
                 p1, p2 = vectShort(p1, p2, roll_back)
-                cv2.line(img, p1, p2, color=150, thickness=1)
+                x1, y1 = p1[0], p1[1]
+                x2, y2 = p2[0], p2[1]
+                cv2.line(img, (int(x1), int(y1)), (int(x2), int(y2)), color=150, thickness=1)
             except:
                 continue
 
@@ -817,7 +1189,7 @@ def renderVideo(start_time, end_time, seconds_per_frame, fps, pp):
         jd_frame = datetime2JD(frame_time)
         pp, ra_array, dec_array, x_array, y_array, mag_array, names_array = cat.queryPlatepar(pp, jd_frame, n_brightest=200)
         stars = renderStarsGaussian(x_array, y_array, mag_array, names_array,(pp.Y_res, pp.X_res))
-        cons = drawConstellations(pp, frame_time)
+        cons = renderConstellations(config, pp, frame_time)
         iau_names = renderIAUNames(iau_csn_coordinates, iau_extras, ra_array, dec_array, x_array, y_array, pp)
         timestamp = frame_time.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -838,34 +1210,68 @@ def renderVideo(start_time, end_time, seconds_per_frame, fps, pp):
     video.release()
 
 
-if __name__ == "__main__":
+
+def annotateRadec(img, jd):
+
+    solve_result = astrometryNetSolveLocal(img=img)
+
+    ra, dec = solve_result[0], solve_result[1]
+
+    text = f"RA: {ra:.4f}  Dec: {dec:.4f}"
+    cv2.putText(
+        img,
+        text,
+        (20, 40),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.8,
+        0,
+        4,
+        cv2.LINE_AA
+    )
+
+    cv2.putText(
+        img,
+        text,
+        (20, 40),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.8,
+        255,
+        2,
+        cv2.LINE_AA
+    )
+
+    return img
 
 
-    config = loadConfigFromDirectory(".config", ".")
+def testGenerateSynthetic(cat, az=None, el=None, n_brightest=100):
+
+
+    print("Generate synthetic images now and use plate solver to test accuracy")
+
     datetime_now = datetime.now(UTC)
     jd_now = datetime2JD(datetime_now)
-
-    cat = Catalog(config)
-
     pp = Platepar()
     pp.read(os.path.join(config.rms_root_dir, config.platepar_name))
 
+    pp, ra_array, dec_array, x_array, y_array, mag_array, names_array = cat.queryPlatepar(pp, jd_now, az=az, el=el, n_brightest=n_brightest)
 
+    # Create images with the default platepar pointing
 
-    pp, ra_array, dec_array, x_array, y_array, mag_array, names_array = cat.queryPlatepar(pp, jd_now)
-    constellation_image = drawConstellations(pp, datetime_now, roll_back=20)
-
+    constellation_image = renderConstellations(config, pp, datetime_now, roll_back=20)
+    constellation_label_image = renderConstellationLabels(config, pp, datetime_now)
     img = renderStarsSimple(x_array, y_array, (pp.Y_res, pp.X_res))
+    img = np.maximum.reduce([img, constellation_image])
     writePNG(img, os.path.join(os.path.expanduser("~/simple_output.png")))
+    stars = renderStarsGaussian(x_array, y_array, mag_array, names_array,(pp.Y_res, pp.X_res))
+    iau_csn_coordinates, iau_mag_band, iau_mag_band_ratios, iau_extras = loadIAUCSN(additional_fields=['Name/ASCII'])
 
-    img = renderStarsGaussian(x_array, y_array, mag_array, names_array,(pp.Y_res, pp.X_res))
+    names = renderIAUNames(iau_csn_coordinates, iau_extras, ra_array, dec_array, x_array, y_array, pp)
+    img = np.maximum.reduce([stars, constellation_image, names, constellation_label_image])
     writePNG(img, os.path.join(os.path.expanduser("~/gaussian_output.png")))
-
 
     solve_result = astrometryNetSolveLocal(img=img)
     ra_centre_solve = solve_result[0]
     dec_centre_solve = solve_result[1]
-
     print(f"Found a starfield at ra:{ra_centre_solve:.2f}, dec:{dec_centre_solve:.2f} jd:{jd_now}")
 
 
@@ -873,16 +1279,76 @@ if __name__ == "__main__":
     az, el = raDec2AltAz(ra_centre_solve, dec_centre_solve, jd_now, pp.lat, pp.lon)
     print(f"Measured as local azimuth and elevation of {az:.2f},{el:.2f}")
     print(f"Station az and el is {pp.az_centre:.2f},{pp.alt_centre:.2f}")
-
     az_el_angle_error = angularSeparationDeg(az, el, pp.az_centre, pp.alt_centre)
-
     print(f"Computed azimuth elevation angle error of {az_el_angle_error:.2f}")
+
+
+def generateComparisonImages(cat):
+
+    path_to_test_dir = os.path.join(config.rms_root_dir, "Tests/ExampleStationData/stations.tar.bz2")
+    extractTarBz2(path_to_test_dir)
+    path_to_stations =Path(os.path.join(config.rms_root_dir, "Tests/ExampleStationData/stations/Stations"))
+
+    # Get the paths to each of the stations
+    station_path_list = []
+    for station_dir in path_to_stations.iterdir():
+        if not station_dir.is_dir():
+            continue
+        station_path_list.append(station_dir)
+
+    station_path_list.sort()
+    # Iterate over each of the station paths
+
+
+
+    for station_path in station_path_list:
+
+        # Load the config for this station
+        test_config = loadConfigFromDirectory(".config", str(station_path))
+
+        # Load the platepar for this station
+        test_pp = Platepar()
+        test_pp.read(os.path.join(station_path, config.platepar_name))
+
+        # Get the fits file
+        fits_file = next(station_path.glob("*.fits"))
+
+
+        # Get the jd of the test image
+        test_jd = date2JD(*getMiddleTimeFF(fits_file.name, test_config.fps))
+
+        # Query for stars in the platepar
+        pp, ra_array, dec_array, x_array, y_array, mag_array, names_array = cat.queryPlatepar(test_pp, test_jd, n_brightest=100)
+        synthetic_img = renderStarsGaussian(x_array, y_array, mag_array, names_array, (pp.Y_res, pp.X_res))
+
+        max_pixel = FFfits.read(str(station_path),fits_file.name).maxpixel
+        comparison_img = np.hstack((max_pixel, synthetic_img))
+        output_file = fits_file.with_name(f"{fits_file.stem}_comparison.png")
+        writePNG(comparison_img, output_file)
+        print(f"Written comparison image to {output_file}")
+
+
+if __name__ == "__main__":
+
+
+    # Extract the directory of test data in the RMS repo
+
+
+    config = loadConfigFromDirectory(".config", ".")
+    cat = Catalog(config)
+
+    generateComparisonImages(cat)
+    testGenerateSynthetic(cat)
+    testGenerateSynthetic(cat, az=237 , el=-39, n_brightest=100)
 
 
 
 
     start_time = datetime(year=2026, month=10, day=29, hour=11, minute=18, second=57)
     end_time = datetime(year=2026, month=10, day=29, hour=20, minute=38, second=55)
+
+    pp = Platepar()
+    pp.read(os.path.join(config.rms_root_dir, config.platepar_name))
     renderVideo(start_time, end_time, 256/25, 30, pp)
 
     pass

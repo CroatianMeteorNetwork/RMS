@@ -127,6 +127,43 @@ def vectMag(vect):
     return np.linalg.norm(vect)
 
 
+
+def vectShort(p1, p2, trim):
+    """ Symmetrically shorten a vector in an arbitrary number of dimensions.
+
+    If the vector is shorter than twice the length to be trimmed then a vector
+    of 90% of the original length is returned by trimming 5% from each end.
+
+    Arguments:
+        p1: [float] (x,y, ...) tuple of start coordinates.
+        p2: [float] (x,y, ...) tuple of end coordinates.
+        trim: [float] length of vector to be trimmed from each end.
+
+    Returns
+        p1: [tuple float] (x,y, ...) moved start coordinates.
+        p2: [tuple float] (x,y, ...) moved end coordinates.
+    """
+
+    # Create a vector and measure length
+    p1, p2 = np.asarray(p1, dtype=float), np.asarray(p2, dtype=float)
+    v = p2 - p1
+    length = np.linalg.norm(v)
+
+    # Create corresponding unit length vector
+    v = vectNorm(v)
+
+    # Handle edge case of vector shorter than twice the trim
+    trim = trim if length >= 2 * trim else length * 0.05
+
+    # Create the vector to move p1 and p2
+    trim_vec = trim * v
+
+    # Add trim_vec to p1 and subtract from p2
+    p1_, p2_ = p1 + trim_vec, p2 - trim_vec
+
+    return tuple(p1_), tuple(p2_)
+
+
 ##############################################################################################################
 
 
@@ -685,14 +722,71 @@ def testPointInsideConvexPolygonSphere():
 
     plt.show()
 
+def testVectShort(n_tests=10000, log_to_console=False):
+
+    """ Test code for vectShort
+
+    Arguments:
+
+    Keyword arguments:
+        n_tests: [int] optional, default: 10000, number of tests to carry out
+        log_to_console: [bool] optional, default: False, if true log to console
+
+    Returns
+        [bool] : True if tests are passed
+    """
+
+    for i in range(n_tests):
+
+        # Generate test vectors
+        dims = np.random.randint(2, 16)
+        p1, p2 = np.random.uniform(-10, 10, dims), np.random.uniform(-10, 10, dims)
+        original_length = np.linalg.norm(p2 - p1)
+
+        # Generate test trim amounts
+        trim = np.random.uniform(0.1, 5.0)
+
+        # Compute new vector using vectShort (the test object)
+        p1_, p2_ = vectShort(p1, p2, trim)
+
+        # Convert to numpy arrays
+        p1_, p2_ = np.array(p1_), np.array(p2_)
+
+        new_length = np.linalg.norm(p2_ - p1_)
+
+        actual_shortening = original_length - new_length
+
+        if original_length < 2 * trim:
+            expected_trim, expected_shortening  = original_length * 0.05, 2 * expected_trim
+            mode = "fallback"
+        else:
+            expected_shortening = 2 * trim
+            mode = "normal"
+
+        error = actual_shortening - expected_shortening
+
+        if log_to_console:
+            print(f"{mode:8s} dims={dims:2d} length={original_length:8.4f} shortened by={actual_shortening:8.4f} "
+                  f"expected={expected_shortening:8.4f} error={error:+.2e}")
+
+        # Check for error
+        if error > 1e-8 * new_length :
+            return False
+
+    return True
+
+
+
 
 def tests():
 
     function_to_test = [["dimHypot", testDimHypot()],
                          ["angSeparationDeg", testAngSeparationDeg()],
-                         ["pointInsideConvexPolygonSphere", testPointInsideConvexPolygonSphere()]]
+                         ["pointInsideConvexPolygonSphere", testPointInsideConvexPolygonSphere()],
+                         ["vectShort", testVectShort()]]
 
     for func_name, func in function_to_test:
+        print(f"Starting test of {func_name}")
         if func:
             print("Test of {} successful".format(func_name))
         else:
