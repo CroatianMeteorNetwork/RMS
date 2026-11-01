@@ -24,6 +24,8 @@ import scipy
 import FFfits
 import os
 import tarfile
+import argparse
+import RMS.ConfigReader as cr
 
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
@@ -509,6 +511,53 @@ class Catalog:
 
 ### TEST CODE START ###
 
+import csv
+
+
+def writeCSV(filename, column_names, columns):
+    """Write columnar data to a CSV file.
+
+    Arguments:
+        filename: [str] Output CSV filename.
+        column_names: [list] List of column names.
+        columns: [list] List of column arrays. All columns must have
+            the same length.
+
+    Return:
+        filename: [str] Output CSV filename.
+
+    """
+
+    if len(column_names) != len(columns):
+        raise ValueError(
+            "Number of column names must match number of columns."
+        )
+
+    if len(columns) == 0:
+        raise ValueError(
+            "At least one column must be provided."
+        )
+
+    n_rows = len(columns[0])
+
+    if not all(len(col) == n_rows for col in columns):
+        raise ValueError(
+            "All columns must have the same length."
+        )
+
+    with open(filename, "w", newline="", encoding="utf-8") as f:
+
+        writer = csv.writer(f)
+
+        writer.writerow(column_names)
+
+        for row in zip(*columns):
+            writer.writerow(row)
+
+    return filename
+
+
+
 def loadConstellationBoundaries(config, path=None):
     """Load IAU constellation boundary vertices.
 
@@ -677,40 +726,53 @@ def renderStarsSimple(x_array, y_array, shape):
 
 
 
-def renderStarsGaussian(x_array, y_array, mag_array, names_array, shape, sigma=1.5,
-                            min_brightness=0, max_brightness=400, sensor_saturation=255, add_noise=True,
-                            noise_sigma=1, sky_background=75, agc_max=40):
+def renderStarsGaussian(x_array, y_array, mag_array, shape, sigma=1.5,
+                        min_brightness=0, max_brightness=400, sensor_saturation=255, add_noise=True,
+                        noise_sigma=1, sky_background=75, agc_level=40):
+
+    """Render a synthetic star field using a common Gaussian point spread
+    function, intended to act as a diagnostic tool for catalog queries and
+    platepar calculations.
+
+    Star magnitudes are converted to pixel brightness values, rendered as
+    delta-function sources, then convolved with a Gaussian point spread
+    function. A uniform sky background may be added, along with optional
+    Gaussian sensor noise. The image is normalized using a simple automatic
+    gain control model and clipped to the specified sensor saturation level.
+
+    Arguments:
+        x_array: [array] X image coordinates (pixels).
+        y_array: [array] Y image coordinates (pixels).
+        mag_array: [array] Stellar magnitudes.
+        shape: [tuple] Image shape as (height, width).
+
+    Keyword Arguments:
+        sigma: [float] Optional, default 1.5. Gaussian point spread
+            function width (pixels).
+        min_brightness: [float] Optional, default 0. Brightness assigned
+            to the faintest rendered star.
+        max_brightness: [float] Optional, default 400. Brightness assigned
+            to the brightest rendered star.
+        sensor_saturation: [float] Optional, default 255. Maximum pixel
+            value allowed before clipping.
+        add_noise: [bool] Optional, default True. Add Gaussian sensor
+            noise to the image.
+        noise_sigma: [float] Optional, default 1. Standard deviation of
+            the Gaussian sensor noise.
+        sky_background: [float] Optional, default 75. Uniform sky
+            background level added to the image.
+        agc_level: [float] Optional, default 40. Automatic gain control
+            state carried between successive rendered frames. The updated
+            value is returned and should be supplied when rendering the
+            next frame.
+
+    Return:
+        image: [ndarray] Rendered synthetic star field as an 8-bit
+            grayscale image.
+        agc_level: [float] Updated automatic gain control state to be
+            supplied when rendering the next frame.
 
     """
-    Render a synthetic star field.
-
-    Parameters
-    ----------
-    x_array, y_array : ndarray
-        Star pixel coordinates.
-
-    mag_array : ndarray
-        Stellar magnitudes (smaller = brighter).
-
-    shape : tuple
-        (height, width)
-
-    sigma : float
-        Gaussian PSF width in pixels.
-
-    min_brightness : float
-        Brightness assigned to faintest star.
-
-    max_brightness : float
-        Brightness assigned to brightest star.
-
-    add_noise : bool
-        Add Gaussian image noise.
-
-    noise_sigma : float
-        Noise standard deviation.
-    """
-
 
     H, W = shape
     image = np.zeros((H, W), dtype=np.float32)
@@ -718,73 +780,64 @@ def renderStarsGaussian(x_array, y_array, mag_array, names_array, shape, sigma=1
     # Pixel coordinates
     x, y = np.round(x_array).astype(int), np.round(y_array).astype(int)
 
-    # Clip to image bounds
+    # Exclude stars near to the image edge
     mask = ((x >= 10) & (x < W - 10) & (y >= 10) & (y < H - 10))
 
-    # Convert magnitude -> brightness
+    # If nothing to show, then return to avoid processing an empty frame
+    if not np.any(mask):
+        return (np.full(shape, sky_background, dtype=np.uint8), agc_level)
 
-    range_min, range_max = mag_array[mask].min(), mag_array[mask].max()
-    flux = np.interp(mag_array,(range_min,range_max),(max_brightness, min_brightness))
+    # Convert magnitude to brightness to match visual performance of typical sensors
+    mag_min, mag_max = mag_array[mask].min(), mag_array[mask].max()
+
+    # Guard interpolation against divide by 0
+    if mag_min == mag_max:
+        flux = np.full_like(mag_array, max_brightness, dtype=float)
+    else:
+        flux = np.interp(mag_array,(mag_min, mag_max),(max_brightness, min_brightness))
 
     # Render delta-function stars
     image[y[mask], x[mask]] += flux[mask]
 
     # Apply common stellar PSF
-    image = scipy.ndimage.gaussian_filter(
-        image,
-        sigma=sigma
-    )
+    image = scipy.ndimage.gaussian_filter(image, sigma=sigma)
 
+    # Apply AGC
     image_max = np.max(image)
-    agc_max = agc_max + (image_max - agc_max) / 50
+    agc_level = agc_level + (image_max - agc_level) / 50
 
+    # Apply lagged AGC level
+    if image_max > 0 and agc_level != 0:
+        image *= max_brightness / agc_level
 
-    # image -= image.min()
-    if image_max > 0:
-        image *= max_brightness / agc_max
-
+    # Add sky background to the image
     image += sky_background
 
-    #
     # Optional sensor noise
-    #
     if add_noise:
-        image += np.random.normal(
-            0,
-            noise_sigma,
-            image.shape
-        )
+        image += np.random.normal(0, noise_sigma, image.shape)
 
-
-
-    #
     # Clip to display range
-    #
-    image = np.clip(
-        image,
-        0,
-        sensor_saturation
-    )
+    image = np.clip(image,0, sensor_saturation)
 
-
-
-
-
-    return image.astype(np.uint8)
+    return image.astype(np.uint8), agc_level
 
 
 
 def writePNG(image, filename):
-    """
-    Save a numpy image array to a PNG.
+    """Write an image array to a PNG file.
 
-    Parameters
-    ----------
-    image : ndarray
-        Image data. Can be uint8, uint16, float32, etc.
+    Floating-point images are normalized to the range 0-255 before
+    saving. Constant-valued floating-point images are written as a
+    black image. Integer image types are written without modification.
 
-    filename : str or Path
-        Output filename.
+    Arguments:
+        image: [ndarray] Image data.
+        filename: [str] Output PNG filename.
+
+    Return:
+        filename: [str] Output PNG filename.
+
     """
 
     image = np.asarray(image)
@@ -799,6 +852,8 @@ def writePNG(image, filename):
             image = np.zeros_like(image, dtype=np.uint8)
 
     Image.fromarray(image).save(filename)
+
+    return filename
 
 
 
@@ -842,6 +897,8 @@ def inferColumnPositions(line):
     if in_field:
         positions.append((start, len(line)))
     return names, positions
+
+
 
 
 def loadIAUCSN(catalog_path=os.path.expanduser("~/source/RMS/Catalogs/"), catalog_name="IAU-CSN.txt", additional_fields = []):
@@ -907,6 +964,8 @@ def loadIAUCSN(catalog_path=os.path.expanduser("~/source/RMS/Catalogs/"), catalo
 
 
     return star_data, mag_band, mag_band_ratios, extra_values_dict
+
+
 
 def renderIAUNames(iau_csn_coordinates, iau_extras, ra_array, dec_array, x_array, y_array, pp, max_sep_deg=0.05):
 
@@ -1141,6 +1200,10 @@ def renderVideo(start_time, end_time, seconds_per_frame, fps, pp):
     iau_csn_coordinates, iau_mag_band, iau_mag_band_ratios, iau_extras = loadIAUCSN(additional_fields=['Name/ASCII'])
 
     render_start_time = datetime.now(UTC)
+
+    # Initialise the AGC control loop for the frame rendering
+    agc_level = 40
+
     for frame_number in range(number_of_frames_to_render):
         if frame_number % 100 == 0 and frame_number > 1:
             time_now = datetime.now(UTC)
@@ -1152,7 +1215,7 @@ def renderVideo(start_time, end_time, seconds_per_frame, fps, pp):
         frame_time = start_time + timedelta(seconds=seconds_advanced)
         jd_frame = datetime2JD(frame_time)
         pp, ra_array, dec_array, x_array, y_array, mag_array, names_array = cat.queryPlatepar(pp, jd_frame, n_brightest=200)
-        stars = renderStarsGaussian(x_array, y_array, mag_array, names_array,(pp.Y_res, pp.X_res))
+        stars, agc_level = renderStarsGaussian(x_array, y_array, mag_array,(pp.Y_res, pp.X_res), agc_level=agc_level)
         cons = renderConstellations(config, pp, frame_time)
         iau_names = renderIAUNames(iau_csn_coordinates, iau_extras, ra_array, dec_array, x_array, y_array, pp)
         timestamp = frame_time.strftime("%Y-%m-%d %H:%M:%S")
@@ -1207,6 +1270,7 @@ def annotateRadec(img, jd):
     return img
 
 
+
 def testGenerateSynthetic(cat, az=None, el=None, n_brightest=100):
 
 
@@ -1226,8 +1290,13 @@ def testGenerateSynthetic(cat, az=None, el=None, n_brightest=100):
     img = renderStarsSimple(x_array, y_array, (pp.Y_res, pp.X_res))
     img = np.maximum.reduce([img, constellation_image])
     writePNG(img, os.path.join(os.path.expanduser("~/simple_output.png")))
-    stars = renderStarsGaussian(x_array, y_array, mag_array, names_array,(pp.Y_res, pp.X_res))
+    stars, _ = renderStarsGaussian(x_array, y_array, mag_array, (pp.Y_res, pp.X_res))
     iau_csn_coordinates, iau_mag_band, iau_mag_band_ratios, iau_extras = loadIAUCSN(additional_fields=['Name/ASCII'])
+    names = iau_extras['Name/ASCII']
+    ra_array, dec_array, mags = zip(*iau_csn_coordinates)
+    writeCSV("/home/david/IAU_CSN.csv",
+             ["Names", "Ra degrees", "Dec degrees", "Mags"],
+             [names, ra_array, dec_array, mags])
 
     names = renderIAUNames(iau_csn_coordinates, iau_extras, ra_array, dec_array, x_array, y_array, pp)
     img = np.maximum.reduce([stars, constellation_image, names, constellation_label_image])
@@ -1283,7 +1352,7 @@ def generateComparisonImages(cat):
 
         # Query for stars in the platepar
         pp, ra_array, dec_array, x_array, y_array, mag_array, names_array = cat.queryPlatepar(test_pp, test_jd, n_brightest=100)
-        synthetic_img = renderStarsGaussian(x_array, y_array, mag_array, names_array, (pp.Y_res, pp.X_res))
+        synthetic_img, _ = renderStarsGaussian(x_array, y_array, mag_array, (pp.Y_res, pp.X_res))
 
         max_pixel = FFfits.read(str(station_path),fits_file.name).maxpixel
         comparison_img = np.hstack((max_pixel, synthetic_img))
@@ -1310,7 +1379,7 @@ if __name__ == "__main__":
     #########################
 
     # Load the config file
-    config = cr.loadConfigFromDirectory(cml_args.config, cml_args.dir_path)
+    config = cr.loadConfigFromDirectory(cml_args.config, os.path.abspath('.'))
 
     cat = Catalog(config)
 
