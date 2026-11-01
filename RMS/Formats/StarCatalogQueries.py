@@ -76,6 +76,34 @@ def getPlateparSkyParameters(pp, jd):
 
     return ra_c, dec_c, max_separation, ra_array, dec_array
 
+def repointPlatepar(pp, jd, az, el):
+
+    """Given a platepar and a jd rotate the field of view along the local up axis.
+
+    Arguments:
+        pp: [Platepar] RMS platepar object.
+        jd: [Float] Julian date (don't yet understand how this can only be used once, I think it should be
+        the platepars sky coordinates pointing date.
+        az: [Float] Azimuth angle (degrees).
+        el: [Float]
+
+
+
+    """
+
+    pp.az_centre, pp.alt_centre = az, el
+    # I changed this from the jd which was passed in
+    ra_centre, dec_centre = altAz2RADec(pp.az_centre, pp.alt_centre, pp.jd, pp.lat, pp.lon)
+    pp.RA_d, pp.dec_d = ra_centre, dec_centre
+
+    pp.updateRefRADec(skip_rot_update=False, preserve_rotation=True)
+    pp.updateRefAltAz()
+
+    return pp
+
+
+
+
 def computePolygonNormals(corner_vecs, inside_vec):
 
     """ Given vectors to the corners of a convex spherical polygon and a
@@ -207,64 +235,90 @@ class Catalog:
         self.tree = cKDTree(self.unit_vecs)
 
     def queryRaDec(self, ra_deg, dec_deg, radius_deg=0.1, n_brightest=1):
-        """
-        KD-tree search for RA/Dec coordinates.
+
+        """Search for stars within the radii of given arrays of coordinates.
+
+        Return a list with one entry for each set of coordinates. Each entry contains a list of stars
+        within the radius, ordered by increasing magnitude (brightest first). The return format is
+        always the same, even for a single set of coordinates return a single star.
+
+        Arguments:
+            ra_deg: [array] Right ascension (degrees).
+            dec_deg: [array] Declination (degrees).
+
+        Keyword Arguments:
+            radius_deg: [float] Optional default 0.1, radius (degrees).
+            n_brightest: [int] Optional default 1, n_brightest (degrees).
+
+        Return: [list]
+            One entry per query coordinate.
+            Each entry is a list of:
+
+            [name, ra, dec, mag, theta, B, V, R]
+
+            Where theta is the angular separation between that star and the search coordinates.
+
+            If no star is found to match the criteria, an empty list is returned for that query.
 
 
 
-        Always returns a list of length N (one per detection):
-            None  -> no match
-            [ [name, ra, dec, mag, theta], ... ]  -> matches
         """
 
         # Normalize inputs to arrays of radians
         ra_deg, dec_deg = np.atleast_1d(ra_deg), np.atleast_1d(dec_deg)
-        ra, dec = np.radians(ra_deg), np.radians(dec_deg)
 
-        # Build query vectors
-        query_vectors = np.column_stack((
-            np.cos(dec) * np.cos(ra),
-            np.cos(dec) * np.sin(ra),
-            np.sin(dec)
-        ))
+        # Build query vectors array
+        query_vectors = radecToUnitVectors(ra_deg, dec_deg)
 
         # Euclidean chord distance for spherical radius
         ecd = 2 * np.sin(np.radians(radius_deg) / 2)
 
+        # Initialise list for results
         results = []
 
+        # Iterate over the array of queries
         for qvec, ra0, dec0 in zip(query_vectors, ra_deg, dec_deg):
 
+            # Perform a single query and return array of catalogue indices
             idx = np.array(self.tree.query_ball_point(qvec, ecd), dtype=int)
 
+            # If nothing returned by the query append an empty list
             if len(idx) == 0:
-                results.append(None)
+                results.append([])
                 continue
 
-            mags = self.cat[idx, self.mag_col]
-            chosen = idx[np.argsort(mags)[:n_brightest]]
+            # Extract the query results
+            query_result_mags = self.cat[idx, self.mag_col]
 
-            names = [x.decode("utf-8", errors="replace").strip() for x in self.names[chosen]]
-            ras = [float(x) for x in self.cat[chosen, self.ra_col]]
-            decs = [float(x) for x in self.cat[chosen, self.dec_col]]
-            mags = [float(x) for x in self.cat[chosen, self.mag_col]]
-            b, v, r = [float(x) for x in self.b[chosen]], [float(x) for x in self.v[chosen]], [float(x) for x in self.r[chosen]]
+            # Sort the query result indices by magnitude increasing (brightest stars first)
+            brightness_order = np.argsort(query_result_mags)
 
+            # Truncate to the number of brightest stars and retrun catalog indices
+            selected_catalog_indices = idx[brightness_order[:n_brightest]]
 
-            thetas = angularSeparationDeg(ra0, dec0, ras, decs)
-            thetas = [float(t) for t in thetas]
+            # Extract the data from the catalog
+            names = [x.decode("utf-8", errors="replace").strip() for x in self.names[selected_catalog_indices]]
+            ras = self.cat[selected_catalog_indices, self.ra_col].astype(float)
+            decs = self.cat[selected_catalog_indices, self.dec_col].astype(float)
+            mags = self.cat[selected_catalog_indices, self.mag_col].astype(float)
+            b = self.b[selected_catalog_indices].astype(float)
+            v = self.v[selected_catalog_indices].astype(float)
+            r = self.r[selected_catalog_indices].astype(float)
 
-            matched = [
-                [names[i], ras[i], decs[i], mags[i], thetas[i], b[i], v[i], r[i]]
-                for i in range(len(names))
-            ]
+            # Compute the angular separation as a query return, not used for star selection
+            thetas = angularSeparationDeg(ra0, dec0, ras, decs).astype(float)
 
+            # Build a list of stars to return
+            matched = []
+
+            for i in range(len(names)):
+                star = [names[i], ras[i], decs[i], mags[i], thetas[i], b[i], v[i], r[i]]
+                matched.append(star)
+
+            # Append the stars returned by this query to the list of the results of all queries
             results.append(matched)
 
         return results
-
-
-
 
     def queryPlateparSimple(self, pp, jd, n_brightest=1000, az=None, el=None):
 
@@ -366,6 +420,16 @@ class Catalog:
         theta_array, b_array, v_array, r_array = theta_array[image_mask], b_array[image_mask], v_array[image_mask], r_array[image_mask]
 
         return p, ra_array, dec_array, x_array, y_array, mag_array, names_array
+
+
+    pass
+
+    pass
+
+
+
+### TEST CODE START ###
+
 
 def renderStarsSimple(x_array, y_array, shape):
     """
@@ -554,26 +618,7 @@ def writePNG(image, filename):
     Image.fromarray(image).save(filename)
 
 
-def repointPlatepar(pp, jd, az, alt):
 
-
-    pp.az_centre, pp.alt_centre = az, alt
-    ra_centre, dec_centre = altAz2RADec(pp.az_centre, pp.alt_centre, jd, pp.lat, pp.lon)
-    pp.RA_d, pp.dec_d = ra_centre, dec_centre
-
-    pp.updateRefRADec(skip_rot_update=False, preserve_rotation=True)
-    pp.updateRefAltAz()
-
-    return pp
-
-
-    pass
-
-    pass
-
-
-
-### TEST CODE START ###
 
 def inferColumnPositions(line):
     """
