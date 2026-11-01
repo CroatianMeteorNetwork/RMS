@@ -132,7 +132,7 @@ def vectShort(p1, p2, trim):
     """ Symmetrically shorten a vector in an arbitrary number of dimensions.
 
     If the vector is shorter than twice the length to be trimmed then a vector
-    of 90% of the original length is returned by trimming 5% from each end.
+    of unit length is returned.
 
     Arguments:
         p1: [float] (x,y, ...) tuple of start coordinates.
@@ -153,7 +153,7 @@ def vectShort(p1, p2, trim):
     v = vectNorm(v)
 
     # Handle edge case of vector shorter than twice the trim
-    trim = trim if length >= 2 * trim else length * 0.05
+    trim = trim if length >= 2 * trim else (length / 2) - 0.5
 
     # Create the vector to move p1 and p2
     trim_vec = trim * v
@@ -757,7 +757,7 @@ def testVectShort(n_tests=10000, log_to_console=False):
         actual_shortening = original_length - new_length
 
         if original_length < 2 * trim:
-            expected_trim, expected_shortening  = original_length * 0.05, 2 * expected_trim
+            expected_shortening  = original_length - 1
             mode = "fallback"
         else:
             expected_shortening = 2 * trim
