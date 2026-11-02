@@ -1103,7 +1103,7 @@ def loadIAUCSN(config, source_file_location=None, additional_fields = []):
                     additional_field_column = names.index(additional_field)
                     value = line[positions[additional_field_column][0]:positions[additional_field_column][1]].strip()
                     if "name" in additional_field.lower():
-                        extra_values_dict[additional_field].append(value.encode('utf-8'))
+                        extra_values_dict[additional_field].append(value)
                     else:
                         extra_values_dict[additional_field].append(value)
             except:
