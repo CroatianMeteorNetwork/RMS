@@ -1531,6 +1531,7 @@ def renderVideo(config, start_time, end_time, seconds_per_frame, fps, pp, output
         iau_names = renderIAUNames(iau_csn_coordinates, iau_csn_names, ra_array, dec_array, x_array, y_array, pp)
         layers.append(iau_names)
 
+        # Render the timestamp
         timestamp = renderTimestamp(frame_time, pp)
         layers.append(timestamp)
 
