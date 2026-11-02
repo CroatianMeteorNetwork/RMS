@@ -1108,7 +1108,7 @@ def loadIAUCSN(config, source_file_location=None, additional_fields = []):
                         extra_values_dict[additional_field].append(value)
             except:
                 print("Error loading IAU-CSN line {}".format(line))
-                pass
+
 
         star_data = np.array(star_data)
 
@@ -1734,5 +1734,3 @@ if __name__ == "__main__":
     print(f"{pp.station_code}")
     output_file = renderVideo(config, start_time, end_time, 256/25, 30, pp)
     print(f"Video saved at {output_file}")
-
-    pass
