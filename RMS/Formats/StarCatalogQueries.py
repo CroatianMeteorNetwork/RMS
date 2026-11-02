@@ -272,7 +272,7 @@ class Catalog:
 
         Keyword Arguments:
             radius_deg: [float] Optional default 0.1, radius (degrees).
-            n_brightest: [int] Optional default 1, n_brightest (degrees).
+            n_brightest: [int] Optional default 1. Number of brightest stars to return.
 
         Return: [list]
             One entry per query coordinate.
@@ -514,7 +514,7 @@ class Catalog:
 import csv
 
 
-def writeCSV(filename, column_names, columns, header_lines=[], tail_lines=[]):
+def writeCSV(filename, column_names, columns):
     """Write columnar data to a CSV file.
 
     Arguments:
@@ -522,10 +522,6 @@ def writeCSV(filename, column_names, columns, header_lines=[], tail_lines=[]):
         column_names: [list] List of column names.
         columns: [list] List of column arrays. All columns must have
             the same length.
-
-    Keyword Arguments:
-        header_lines: [list] List of header lines, optional, default [].
-        tail_lines: [list] List of tail lines, optional, default [].
 
     Return:
         filename: [str] Output CSV filename.
@@ -995,9 +991,6 @@ def downloadTextFile(url, filename, timeout=30):
 
         return None
 
-import csv
-import numpy as np
-
 
 def loadIAUCSNCSV(filename):
     """Load a CSV version of the IAU Common Star Names catalogue.
@@ -1074,13 +1067,13 @@ def loadIAUCSN(config, source_file_location=None, additional_fields = []):
     with open(source_file_location, 'r') as catalog_file:
 
         for line in catalog_file:
-            line_counter = 0
             if line.startswith('#') or line.startswith('$') or line == '\n':
                 pass
             else:
                 break
             header_line = line
         names, positions = inferColumnPositions(header_line)
+
 
         for line in catalog_file:
             if line.startswith('#') or line.startswith('$'):
@@ -1093,7 +1086,7 @@ def loadIAUCSN(config, source_file_location=None, additional_fields = []):
             try:
                 try:
                     r, d, m, mb = float(f[12]), float(f[13]), float(f[8]), f[9]
-                except:
+                except Exception:
                     r, d, m, mb = float(f[12]), float(f[13]), 10, f[9]
 
                 star_data.append(np.array([float(r), float(d), float(m)]))
@@ -1102,11 +1095,9 @@ def loadIAUCSN(config, source_file_location=None, additional_fields = []):
                 for additional_field in additional_fields:
                     additional_field_column = names.index(additional_field)
                     value = line[positions[additional_field_column][0]:positions[additional_field_column][1]].strip()
-                    if "name" in additional_field.lower():
-                        extra_values_dict[additional_field].append(value)
-                    else:
-                        extra_values_dict[additional_field].append(value)
-            except:
+                    extra_values_dict[additional_field].append(value)
+
+            except Exception:
                 print("Error loading IAU-CSN line {}".format(line))
 
 
@@ -1153,6 +1144,9 @@ def renderIAUNames(iau_csn_coordinates, iau_names, ra_array, dec_array, x_array,
 
     labels = []
 
+    # Create blank image
+    label_img = np.zeros((pp.Y_res, pp.X_res), dtype=np.uint8)
+
     for ra, dec, x, y in zip(ra_array, dec_array, x_array, y_array):
 
         sep = angularSeparationDeg(ra, dec, iau_ra, iau_dec)
@@ -1162,7 +1156,6 @@ def renderIAUNames(iau_csn_coordinates, iau_names, ra_array, dec_array, x_array,
         if sep[idx] < max_sep_deg:
             labels.append((iau_names[idx], x, y))
 
-        label_img = np.zeros((pp.Y_res, pp.X_res), dtype=np.uint8)
 
     for name, x, y in labels:
         cv2.putText(label_img, name, (int(x) + 5, int(y) - 5), cv2.FONT_HERSHEY_SIMPLEX,
@@ -1604,7 +1597,7 @@ def testSyntheticPlateSolve(cat, az=None, el=None, n_brightest=100):
     names = renderIAUNames(iau_csn_coordinates, iau_names, ra_array, dec_array, x_array, y_array, pp)
     layers.append(names)
 
-    # Composit the layers
+    # Combine the layers
     img = np.maximum.reduce(layers)
 
     # Export the image
