@@ -30,6 +30,12 @@ if [[ $dircount -gt 0 ]]; then
         TERMINAL=gnome-terminal
     fi
 
+    # Each station runs with its own .config, so arguments for a single
+    # capture do not apply
+    if [[ $# -gt 0 ]]; then
+        echo " Ignoring the arguments '$*', they only apply to the single-camera data structure"
+    fi
+
     echo " Starting all configured stations..."
 
     loop=0

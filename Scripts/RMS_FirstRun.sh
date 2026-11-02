@@ -118,7 +118,9 @@ read -p ""
 
 echo ""
 echo "This is a brief overview of this guide:"
-echo "  0. Expand the file system (checked automatically)."
+if command -v raspi-config >/dev/null 2>&1; then
+  echo "  0. Expand the file system (checked automatically)."
+fi
 echo "  1. Connect your Pi to the Internet. "
 echo "  2. Change the default password for security reasons."
 echo "  3. Generate a new SSH key."
@@ -162,8 +164,7 @@ fi
 # large cards get flagged as unexpanded forever
 slack_gb=$(( part_gb / 20 + 2 ))
 
-# clear the input buffer
-while read -t 0.01; do :; done
+flushInput
 
 if (( dev_gb - part_gb >= 2 )); then
 
@@ -279,7 +280,9 @@ if [[ "$key" = "" ]]; then
     echo ""
     echo "Generating a new SSH key..."
 
-    # Generate an SSH key without a passphrase
+    # Generate an SSH key without a passphrase (ssh-keygen does not create
+    # a missing ~/.ssh)
+    [[ -d ~/.ssh ]] || mkdir -m 700 ~/.ssh
     ssh-keygen -t rsa -m PEM -N "" -f ~/.ssh/id_rsa >/dev/null
   fi
 
@@ -307,7 +310,9 @@ echo ""
 echo "
 If you need to change any other setting in the future, you can find a
 shortcut to the configuration file on desktop (RMS_config), or open it
-directly in $RMSCONFIG.
+directly in $RMSCONFIG. After the conversion offered in step 5, the
+camera uses its own copy in ~/source/Stations/<camera_ID>/.config instead,
+which the Edit_configs shortcut on desktop opens.
 "
 
 while true; do
@@ -322,8 +327,8 @@ while true; do
     fi
     echo "  A station code has 2 country letters followed by 4 characters, e.g. US01AB."
     # Only offer to keep a nonstandard entry when it is still safe to use
-    # as a directory name and a .config value
-    if [[ "$statID" =~ ^[A-Z0-9_-]+$ ]]; then
+    # as a directory name and a .config value, and not the placeholder ID
+    if [[ "$statID" =~ ^[A-Z0-9_-]+$ && "$statID" != "XX0001" ]]; then
       read -n1 -r -p "  Use '$statID' anyway? Press Y to accept it, any other key to retype... " key
       echo ""
       if [[ "$key" = "y" || "$key" = "Y" ]]; then
@@ -382,8 +387,8 @@ sed -i "s/^elevation:.*$/elevation: $elev/" $RMSCONFIG
 echo "Configuration saved to $RMSCONFIG"
 
 # Offer the conversion to the multi-camera data structure, unless the
-# system already uses it
-if [[ ! -d ~/source/Stations ]]; then
+# system already uses it (an empty ~/source/Stations does not count)
+if [[ $(find ~/source/Stations -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l) -eq 0 ]]; then
 
 echo "
 5) Converting the data structure
@@ -394,13 +399,13 @@ both single and multiple camera systems.
 
 The important files (.config, mask.bmp and platepar_cmn2010.cal) will be
 copied to ~/source/Stations/<camera_ID>, and captured data will be stored
-in ~/RMS_data/<camera_ID>, where <camera_ID> is the unique station code
-you were given by GMN. Nothing in ~/source/RMS is modified.
+in a <camera_ID> folder in the data directory (~/RMS_data by default),
+where <camera_ID> is the unique station code you were given by GMN.
+Nothing in ~/source/RMS is modified.
 "
 sleep 1
 
-# clear the input buffer
-while read -t 0.01; do :; done
+flushInput
 
 read -n1 -r -p 'Press ENTER to convert to the new data structure, or any other key to stay with the legacy structure... ' key
 if [[ "$key" != "" ]]; then

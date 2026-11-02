@@ -18,7 +18,7 @@
 # This script will take an Ubuntu LTS or Debian-11/12 release and install all the components
 # required to run an RMS meteor station.
 # If you wish to run multiple stations on this host, after running this script execute:
-# ~/source/RMS/Scripts/MultiCamlinux/add_GStation.sh
+# ~/source/RMS/Scripts/add_Station.sh
 
 # Create source directory
 mkdir -p ~/source
