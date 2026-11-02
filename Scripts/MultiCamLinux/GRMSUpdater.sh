@@ -527,7 +527,9 @@ fi
 mapfile -t RunList < <(
     pgrep -f "Scripts/MultiCamLinux/StartCapture.sh" | while read -r pid; do
         cmdline=$(ps -p "$pid" -o args= 2>/dev/null || continue)
-        if [[ "$cmdline" =~ Scripts/MultiCamLinux/StartCapture\.sh[[:space:]]+([[:alnum:]]{6}) ]]; then
+        # Station IDs are normally 6 alphanumerics, but add_Station.sh
+        # also accepts underscores/hyphens and other lengths on request
+        if [[ "$cmdline" =~ Scripts/MultiCamLinux/StartCapture\.sh[[:space:]]+([[:alnum:]_-]+) ]]; then
             echo "${BASH_REMATCH[1]}"
         fi
     done | sort -u
