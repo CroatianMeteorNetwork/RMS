@@ -176,8 +176,8 @@ def radecToUnitVectors(ra_deg, dec_deg):
     corresponding Cartesian unit vectors.
 
     Arguments:
-        ra_deg: [array] Right ascension (degrees)
-        dec_deg: [array] Declination (degrees)
+        ra_deg: [array] Right ascension (degrees).
+        dec_deg: [array] Declination (degrees).
 
     Return:
         [ndarray] Cartesian unit vectors with shape (N, 3).
@@ -524,8 +524,8 @@ def writeCSV(filename, column_names, columns, header_lines=[], tail_lines=[]):
             the same length.
 
     Keyword Arguments:
-        header_lines: [list] List of header lines, optional, default []
-        tail_lines: [list] List of tail lines, optional, default []
+        header_lines: [list] List of header lines, optional, default [].
+        tail_lines: [list] List of tail lines, optional, default [].
 
     Return:
         filename: [str] Output CSV filename.
@@ -573,7 +573,7 @@ def convertIAUCSNToCSV(config, source_file_location=None, destination_file_locat
 
 
     Keyword Arguments:
-        source_file_location: [string] Path to the CSV file, optional, default None
+        source_file_location: [string] Path to the CSV file, optional, default None.
 
 
     """
@@ -1047,17 +1047,17 @@ def loadIAUCSN(config, source_file_location=None, additional_fields = []):
 
 
     Arguments:
-        config: [config] RMS config instance
+        config: [config] RMS config instance.
 
     Keyword arguments:
-        source_file_name: [str] path to and name of catalog file
-        additional_fields: [list] names of additional fields to return
+        source_file_name: [str] path to and name of catalog file.
+        additional_fields: [list] names of additional fields to return.
 
     Returns:
-        star_data: [list] of star data [ra, dec. m]
-        mag_band: [list] of mag band data per star
-        mag_band_ratios: [list] each entry zero, not supported for this catalog
-        extra_values_dict:[dict] dictionary indexed of extra values
+        star_data: [list] of star data [ra, dec. m].
+        mag_band: [list] of mag band data per star.
+        mag_band_ratios: [list] each entry zero, not supported for this catalog.
+        extra_values_dict:[dict] dictionary indexed of extra values.
     """
 
     if source_file_location is None:
@@ -1121,10 +1121,37 @@ def loadIAUCSN(config, source_file_location=None, additional_fields = []):
 
 
 def renderIAUNames(iau_csn_coordinates, iau_names, ra_array, dec_array, x_array, y_array, pp, max_sep_deg=0.05):
+    """Render IAU common star name labels.
+
+    Visible stars are matched against the IAU Common Star Names catalogue.
+    Where a catalog star lies within the specified angular separation of a
+    named IAU star, the corresponding name is rendered near the projected
+    star position.
+
+    Arguments:
+        iau_csn_coordinates: [ndarray] IAU star coordinates in the form
+            [ra_deg, dec_deg, mag].
+        iau_names: [list] IAU common star names.
+        ra_array: [array] Star right ascensions (degrees).
+        dec_array: [array] Star declinations (degrees).
+        x_array: [array] Star X image coordinates.
+        y_array: [array] Star Y image coordinates.
+        pp: [Platepar] Platepar containing image dimensions.
+
+    Keyword Arguments:
+        max_sep_deg: [float] Optional, default 0.05. Maximum angular
+            separation for matching a rendered star to an IAU named star.
+
+    Return:
+        label_img: [ndarray] Rendered star-name label image as an 8-bit
+            grayscale array.
+
+    """
+
 
     iau_ra, iau_dec = iau_csn_coordinates[:, 0], iau_csn_coordinates[:, 1]
 
-    results = []
+    labels = []
 
     for ra, dec, x, y in zip(ra_array, dec_array, x_array, y_array):
 
@@ -1133,13 +1160,14 @@ def renderIAUNames(iau_csn_coordinates, iau_names, ra_array, dec_array, x_array,
         idx = np.argmin(sep)
 
         if sep[idx] < max_sep_deg:
-            results.append((iau_names[idx], x, y))
+            labels.append((iau_names[idx], x, y))
 
         label_img = np.zeros((pp.Y_res, pp.X_res), dtype=np.uint8)
 
-        for name, x, y in results:
-            cv2.putText(label_img, name, (int(x) + 5, int(y) - 5), cv2.FONT_HERSHEY_SIMPLEX,
-                0.4,255,1, cv2.LINE_AA)
+    for name, x, y in labels:
+        cv2.putText(label_img, name, (int(x) + 5, int(y) - 5), cv2.FONT_HERSHEY_SIMPLEX,
+            0.4,255,1, cv2.LINE_AA)
+
     return label_img
 
 
