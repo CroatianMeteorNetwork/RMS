@@ -1325,7 +1325,7 @@ def renderConstellations(config, pp, frame_time, intensity=150, roll_back=10, co
 
     """Render constellation line segments for a given platepar view.
 
-    Constellation line segments are loaded from the RMS constellation
+    Constellation line segments are loaded from the constellation
     catalogue, projected into image coordinates using the supplied
     platepar, clipped to the image boundaries, and rendered onto a
     monochrome image. Line segments are shortened slightly before
