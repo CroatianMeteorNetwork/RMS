@@ -514,7 +514,7 @@ class Catalog:
 import csv
 
 
-def writeCSV(filename, column_names, columns):
+def writeCSV(filename, column_names, columns, header_lines=[], tail_lines=[]):
     """Write columnar data to a CSV file.
 
     Arguments:
@@ -522,6 +522,10 @@ def writeCSV(filename, column_names, columns):
         column_names: [list] List of column names.
         columns: [list] List of column arrays. All columns must have
             the same length.
+
+    Keyword Arguments:
+        header_lines: [list] List of header lines, optional, default []
+        tail_lines: [list] List of tail lines, optional, default []
 
     Return:
         filename: [str] Output CSV filename.
@@ -556,6 +560,55 @@ def writeCSV(filename, column_names, columns):
 
     return filename
 
+
+def convertIAUCSNToCSV(config, source_file_location=None, destination_file_location=None,
+                       source_url="https://www.pas.rochester.edu/~emamajek/WGSN/IAU-CSN.txt"):
+
+    """
+
+    This function converts a locally held copy of the data at https://www.pas.rochester.edu/~emamajek/WGSN/IAU-CSN.txt
+    into a CSV file.
+
+    Arguments:
+
+
+    Keyword Arguments:
+        source_file_location: [string] Path to the CSV file, optional, default None
+
+
+    """
+
+    if source_file_location is None:
+        source_file_location = os.path.join(config.rms_root_dir, "Catalogs/IAU-CSN.txt")
+
+
+    if not os.path.exists(source_file_location):
+
+        print(
+            "Source file not found. Attempting download from {}"
+            .format(source_url)
+        )
+
+        result = downloadTextFile(
+            source_url,
+            source_file_location
+        )
+
+        if result is None:
+            raise IOError(
+                "Could not download source catalog from {}"
+                .format(source_url)
+            )
+
+
+    if destination_file_location is None:
+        destination_file_location = os.path.join(config.rms_root_dir, "Catalogs/IAU-CSN.csv")
+
+    iau_csn_coordinates, iau_mag_band, iau_mag_band_ratios, iau_extras = loadIAUCSN(config, additional_fields=['Name/ASCII'], source_file_location=source_file_location)
+    names = iau_extras['Name/ASCII']
+    ra_array, dec_array, mags = zip(*iau_csn_coordinates)
+    writeCSV(destination_file_location,["Names", "Ra degrees", "Dec degrees", "Mags"],
+                                                    [names, ra_array, dec_array, mags])
 
 
 def loadConstellationBoundaries(config, path=None):
@@ -899,14 +952,105 @@ def inferColumnPositions(line):
     return names, positions
 
 
+import urllib.request
 
 
-def loadIAUCSN(catalog_path=os.path.expanduser("~/source/RMS/Catalogs/"), catalog_name="IAU-CSN.txt", additional_fields = []):
-    """
+def downloadTextFile(url, filename, timeout=30):
+    """Download a text file from a URL.
+
+    The file is written only if the download succeeds. Any download
+    errors are reported and the function returns None.
 
     Arguments:
-        catalog_path: [str] path to catalog
-        catalog_name: [str] name of catalog file
+        url: [str] URL of the file to download.
+        filename: [str] Output filename.
+
+    Keyword Arguments:
+        timeout: [int] Optional, default 30. Download timeout in
+            seconds.
+
+    Return:
+        filename: [str] Output filename if successful, else None
+
+    """
+
+    try:
+
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+
+            text = response.read().decode("utf-8")
+
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(text)
+
+        return filename
+
+    except Exception as e:
+
+        print(
+            "Could not download {}: {}".format(
+                url, e
+            )
+        )
+
+        return None
+
+import csv
+import numpy as np
+
+
+def loadIAUCSNCSV(filename):
+    """Load a CSV version of the IAU Common Star Names catalogue.
+
+       Comment lines beginning with '#' are ignored. The catalogue is
+       expected to contain columns:
+
+           name, ra_deg, dec_deg, mag
+
+       Arguments:
+           filename: [str] Path to the CSV catalogue file.
+
+       Return:
+           names: [list] List of star names.
+           coordinates: [ndarray] Array of star data in the form
+               [ra_deg, dec_deg, mag].
+
+       """
+
+    names = []
+    coordinates = []
+
+    with open(filename, encoding="utf-8") as f:
+
+        reader = csv.reader(
+            line for line in f
+            if not line.startswith("#")
+        )
+
+        next(reader)
+
+        for row in reader:
+
+            names.append(row[0])
+
+            coordinates.append([
+                float(row[1]),
+                float(row[2]),
+                float(row[3])
+            ])
+
+    return names, np.array(coordinates)
+
+
+def loadIAUCSN(config, source_file_location=None, additional_fields = []):
+    """
+
+
+    Arguments:
+        config: [config] RMS config instance
+
+    Keyword arguments:
+        source_file_name: [str] path to and name of catalog file
         additional_fields: [list] names of additional fields to return
 
     Returns:
@@ -916,6 +1060,10 @@ def loadIAUCSN(catalog_path=os.path.expanduser("~/source/RMS/Catalogs/"), catalo
         extra_values_dict:[dict] dictionary indexed of extra values
     """
 
+    if source_file_location is None:
+        source_file_location = os.path.join(config.rms_root_dir, "Catalogs/IAU-CSN.txt")
+
+
     extra_values_dict = {}
 
     for field in additional_fields:
@@ -923,7 +1071,7 @@ def loadIAUCSN(catalog_path=os.path.expanduser("~/source/RMS/Catalogs/"), catalo
 
 
     star_data, name_list, mag_band, mag_band_ratios = [], [], [], []
-    with open(os.path.join(os.path.expanduser(catalog_path), catalog_name), 'r') as catalog_file:
+    with open(source_file_location, 'r') as catalog_file:
 
         for line in catalog_file:
             line_counter = 0
@@ -943,7 +1091,11 @@ def loadIAUCSN(catalog_path=os.path.expanduser("~/source/RMS/Catalogs/"), catalo
             for col in range(0,len(positions)):
                 f.append(line[positions[col][0]:positions[col][1]].strip())
             try:
-                r, d, m, mb = float(f[12]), float(f[13]), float(f[8]), f[9]
+                try:
+                    r, d, m, mb = float(f[12]), float(f[13]), float(f[8]), f[9]
+                except:
+                    r, d, m, mb = float(f[12]), float(f[13]), 10, f[9]
+
                 star_data.append(np.array([float(r), float(d), float(m)]))
                 mag_band.append(mb)
                 mag_band_ratios.append(0)
@@ -956,6 +1108,7 @@ def loadIAUCSN(catalog_path=os.path.expanduser("~/source/RMS/Catalogs/"), catalo
                         extra_values_dict[additional_field].append(value)
             except:
                 print("Error loading IAU-CSN line {}".format(line))
+                pass
 
         star_data = np.array(star_data)
 
@@ -967,10 +1120,9 @@ def loadIAUCSN(catalog_path=os.path.expanduser("~/source/RMS/Catalogs/"), catalo
 
 
 
-def renderIAUNames(iau_csn_coordinates, iau_extras, ra_array, dec_array, x_array, y_array, pp, max_sep_deg=0.05):
+def renderIAUNames(iau_csn_coordinates, iau_names, ra_array, dec_array, x_array, y_array, pp, max_sep_deg=0.05):
 
     iau_ra, iau_dec = iau_csn_coordinates[:, 0], iau_csn_coordinates[:, 1]
-    iau_names = iau_extras['Name/ASCII']
 
     results = []
 
@@ -986,9 +1138,11 @@ def renderIAUNames(iau_csn_coordinates, iau_extras, ra_array, dec_array, x_array
         label_img = np.zeros((pp.Y_res, pp.X_res), dtype=np.uint8)
 
         for name, x, y in results:
-            cv2.putText(label_img, name.decode("utf-8"), (int(x) + 5, int(y) - 5), cv2.FONT_HERSHEY_SIMPLEX,
+            cv2.putText(label_img, name, (int(x) + 5, int(y) - 5), cv2.FONT_HERSHEY_SIMPLEX,
                 0.4,255,1, cv2.LINE_AA)
     return label_img
+
+
 
 
 
@@ -1139,140 +1293,259 @@ def renderConstellationLabels(config, pp, frame_time, intensity=150, constellati
     return img
 
 
-def renderConstellations(config, pp, frame_time, intensity=150, roll_back=40, constellation_data=None, constellation_centres=None):
+def renderConstellations(config, pp, frame_time, intensity=150, roll_back=10, constellation_data=None):
 
+    """Render constellation line segments for a given platepar view.
+
+    Constellation line segments are loaded from the RMS constellation
+    catalogue, projected into image coordinates using the supplied
+    platepar, clipped to the image boundaries, and rendered onto a
+    monochrome image. Line segments are shortened slightly before
+    drawing to prevent visual overlap at constellation vertices.
+
+    Arguments:
+        config: [Config] RMS configuration object.
+        pp: [Platepar] Platepar used for sky-to-image projection.
+        frame_time: [datetime] Time corresponding to the rendered frame.
+
+    Keyword Arguments:
+        intensity: [int] Optional, default 150. Line brightness.
+        roll_back: [float] Optional, default 10. Number of pixels to
+            shorten each end of a line segment before rendering.
+        constellation_data: [ndarray] Optional constellation line data.
+            If None, the default RMS constellation catalogue is loaded.
+
+    Return:
+        img: [ndarray] Rendered constellation image as an 8-bit
+            grayscale array.
+
+    """
+
+    # Build a blank image
+    img = np.zeros((pp.Y_res, pp.X_res), dtype=np.uint8)
+
+    # Load constellation data, if not passed in by function call
     if constellation_data is None:
-        constellations_path = os.path.expanduser("~/source/RMS/share/constellation_lines.csv")
+        constellations_path = os.path.expanduser(os.path.join(config.rms_root_dir, "share/constellation_lines.csv"))
         lines = np.loadtxt(constellations_path, delimiter=",")
     else:
         lines = constellation_data
 
-
-
-
-    # Get the time of the frame in jd
+    # Get the time of the frame in jd and the sky parameters
     jd = datetime2JD(frame_time)
-
     ra_c, dec_c, max_separation, _, _ = getPlateparSkyParameters(pp, jd)
 
+    # Get the constellation vertices sky coordinates
     from_ra, from_dec = lines[:, 0], lines[:, 1]
     to_ra, to_dec = lines[:, 2], lines[:, 3]
+
+    # Compute the angular separation and build a mask to eliminate any which are too far from the image centre
     ang_sep_to = angularSeparationDeg(to_ra, to_dec, ra_c, dec_c)
     ang_sep_from = angularSeparationDeg(from_ra, from_dec, ra_c, dec_c)
     line_mask = (ang_sep_to < max_separation) & (ang_sep_from < max_separation)
 
+    # Get the constellation vertices subset for rendering
     from_ra, from_dec = from_ra[line_mask], from_dec[line_mask]
     to_ra, to_dec = to_ra[line_mask], to_dec[line_mask]
 
-
+    # Convert to image coordinates
     from_x, from_y = raDecToXYPP(from_ra, from_dec, jd, pp)
     to_x, to_y = raDecToXYPP(to_ra, to_dec, jd, pp)
 
-    img = np.zeros((pp.Y_res, pp.X_res), dtype=np.uint8)
 
-
+    # Plot on the blank image
     for i in range(len(to_x)):
             ok, p1, p2 = cv2.clipLine((0, 0, pp.X_res, pp.Y_res),(int(round(from_x[i])), int(round(from_y[i]))), (int(round(to_x[i])), int(round(to_y[i]))))
+            if not ok:
+                continue
             try:
                 p1, p2 = vectShort(p1, p2, roll_back)
-                x1, y1 = p1[0], p1[1]
-                x2, y2 = p2[0], p2[1]
-                cv2.line(img, (int(x1), int(y1)), (int(x2), int(y2)), color=150, thickness=1)
-            except:
+                x1, y1, x2, y2 = p1[0], p1[1], p2[0], p2[1]
+                cv2.line(img, (int(x1), int(y1)), (int(x2), int(y2)), color=intensity, thickness=1)
+            except Exception:
                 continue
 
     return img
 
-def renderVideo(start_time, end_time, seconds_per_frame, fps, pp):
+def renderTimestamp(frame_time, pp, extra_text=""):
+    """Render a timestamp overlay image.
+
+        The timestamp is rendered in UTC using the station code from the
+        supplied platepar. Additional text may optionally be appended to
+        the timestamp string.
+
+        Arguments:
+              frame_time: [datetime] Timestamp to render.
+              pp: [Platepar] Platepar containing image dimensions and station
+              information.
+
+          Keyword Arguments:
+              extra_text: [str] Optional text appended to the timestamp.
+
+          Return:
+              img: [ndarray] Rendered timestamp image as an 8-bit grayscale array.
+              """
+
+    # Build a blank image
+    img = np.zeros((pp.Y_res, pp.X_res), dtype=np.uint8)
+
+    timestamp = frame_time.strftime("%Y-%m-%d %H:%M:%S")
+
+    # Draw text to image
+    font = cv2.FONT_HERSHEY_SIMPLEX
+
+    if extra_text:
+        text = f"{pp.station_code} {timestamp} UTC {extra_text}"
+    else:
+        text = f"{pp.station_code} {timestamp} UTC"
+    position = (10, pp.Y_res - 6)
+    font_scale = 0.4
+    thickness = 1
+
+    # Draw outlined text
+    cv2.putText(img, text, position, font, font_scale, 0, thickness + 2, cv2.LINE_AA)
+    cv2.putText(img, text, position, font, font_scale, 255, thickness, cv2.LINE_AA)
+
+    return img
+
+def renderVideo(config, start_time, end_time, seconds_per_frame, fps, pp, output_file=None):
+    """Render a synthetic sky video.
+
+       A synthetic sky is generated for each frame using the supplied
+       platepar and time range. Stars, constellation lines, constellation
+       labels, IAU common star names, and a timestamp overlay are rendered
+       into a monochrome video suitable for validating catalog queries,
+       platepar calculations, and astrometric solving.
+
+       Arguments:
+           config: [config] RMS configuration object.
+           start_time: [datetime] Time of the first rendered frame.
+           end_time: [datetime] Time at which rendering stops.
+           seconds_per_frame: [float] Number of real-time seconds
+               represented by each rendered frame.
+           fps: [float] Output video frame rate.
+           pp: [Platepar] Platepar used for sky projection.
+
+       Keyword Arguments:
+           output_file: [str] Optional output video filename. If None,
+               "~/synthetic_sky.mp4" is used.
+
+       Return:
+           output_file: [str] Path of the rendered video file.
+
+           """
 
     print(f"Rendering video for station {pp.station_code} with az {pp.az_centre:.2f} el {pp.alt_centre:.2f}")
-    video = cv2.VideoWriter(
-        os.path.expanduser("~/tmp/sidebyside/synthetic_sky.mp4"),
-        cv2.VideoWriter_fourcc(*"mp4v"),
-        fps,
-        (pp.X_res, pp.Y_res),
-        isColor=False
-    )
+    # Create a target file if none was passed in
+    if output_file is None:
+        output_file = os.path.expanduser("~/synthetic_sky.mp4")
 
+    # Initialise a video writer
+    video = cv2.VideoWriter(output_file, cv2.VideoWriter_fourcc(*"mp4v"),
+        fps, (pp.X_res, pp.Y_res), isColor=False)
+
+    # Compute the duration of the video and the number of frames
     duration_seconds = (end_time - start_time).total_seconds()
     number_of_frames_to_render = int(np.floor(duration_seconds / seconds_per_frame))
 
-    iau_csn_coordinates, iau_mag_band, iau_mag_band_ratios, iau_extras = loadIAUCSN(additional_fields=['Name/ASCII'])
+    # Load in the constellation shapes and compute the centres for labelling
+    iau_csn_names, iau_csn_coordinates = loadIAUCSNCSV(os.path.join(config.rms_root_dir, "Catalogs/IAU-CSN.csv"))
+    constellation_centres = computeConstellationCentres(loadConstellationBoundaries(config))
 
-    render_start_time = datetime.now(UTC)
+    # Load in the constellation lines
+    constellations_path = os.path.expanduser(os.path.join(config.rms_root_dir, "share/constellation_lines.csv"))
+    constellation_lines = np.loadtxt(constellations_path, delimiter=",")
+
 
     # Initialise the AGC control loop for the frame rendering
     agc_level = 40
 
+
+    # Record the time at which rendering started
+    render_start_time = datetime.now(UTC)
+
+    # Iterate over all the frames
     for frame_number in range(number_of_frames_to_render):
+
+        # Every 100th frame write out progress report
         if frame_number % 100 == 0 and frame_number > 1:
             time_now = datetime.now(UTC)
             elapsed_seconds = (time_now - render_start_time).total_seconds()
-            frames_processed_per_second = elapsed_seconds / frame_number
-            completion_time = time_now + timedelta(seconds=frames_processed_per_second * (number_of_frames_to_render - frame_number))
-            print(f"{frame_number}/{number_of_frames_to_render}/{completion_time}")
+            seconds_per_processed_frame = elapsed_seconds / frame_number
+            completion_time = time_now + timedelta(seconds=seconds_per_processed_frame * (number_of_frames_to_render - frame_number))
+            print(
+                f"{frame_number}/{number_of_frames_to_render} "
+                f"({seconds_per_processed_frame:.3f} s/frame) "
+                f"ETA {completion_time:%H:%M:%S}"
+            )
+
+        # Compute the number of real time seconds since the start of the video
         seconds_advanced = frame_number * seconds_per_frame
+
+        # Compute the time of this frame, and convert to julian date
         frame_time = start_time + timedelta(seconds=seconds_advanced)
         jd_frame = datetime2JD(frame_time)
+
+        # Query the platepar for the stars which should be visible
         pp, ra_array, dec_array, x_array, y_array, mag_array, names_array = cat.queryPlatepar(pp, jd_frame, n_brightest=200)
+
+        # Create a list for the layers for later compositing
+        layers = []
+
+        # Render the stars
         stars, agc_level = renderStarsGaussian(x_array, y_array, mag_array,(pp.Y_res, pp.X_res), agc_level=agc_level)
-        cons = renderConstellations(config, pp, frame_time)
-        iau_names = renderIAUNames(iau_csn_coordinates, iau_extras, ra_array, dec_array, x_array, y_array, pp)
-        timestamp = frame_time.strftime("%Y-%m-%d %H:%M:%S")
+        layers.append(stars)
 
-        # Draw text to image
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        text = pp.station_code + " " + timestamp + " UTC (IMX291 simulation)"
-        position = (10, pp.Y_res - 6)
-        font_scale = 0.4
-        thickness = 1
+        # Render the constellations
+        cons = renderConstellations(config, pp, frame_time, constellation_data=constellation_lines)
+        layers.append(cons)
 
-        img = np.maximum.reduce([stars, cons , iau_names])
-        cv2.putText(img, text, position, font, font_scale, (0, 0, 0), thickness + 2, cv2.LINE_AA)
-        cv2.putText(img, text, position, font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA)
+        # Render the constellation labels
+        cons_labels = renderConstellationLabels(config, pp, frame_time, constellation_centres=constellation_centres)
+        layers.append(cons_labels)
+
+        # Render the IAU common star names
+        iau_names = renderIAUNames(iau_csn_coordinates, iau_csn_names, ra_array, dec_array, x_array, y_array, pp)
+        layers.append(iau_names)
+
+        timestamp = renderTimestamp(frame_time, pp)
+        layers.append(timestamp)
+
+        # Combine
+        img = np.maximum.reduce(layers)
 
         video.write(img)
 
 
     video.release()
 
+    return output_file
 
 
-def annotateRadec(img, jd):
+def testSyntheticPlateSolve(cat, az=None, el=None, n_brightest=100):
+    """Generate synthetic sky images and validate accuracy.
 
-    solve_result = astrometryNetSolveLocal(img=img)
+    A synthetic sky is generated for the current time using the supplied
+    catalog and platepar. Example images are written to disk, including
+    constellation overlays and IAU common star names. The resulting image
+    is then submitted to the local Astrometry.net solver and the solved
+    pointing is compared against the platepar pointing.
 
-    ra, dec = solve_result[0], solve_result[1]
+    Arguments:
+        cat: [Catalog] Catalog object supporting queryPlatepar().
 
-    text = f"RA: {ra:.4f}  Dec: {dec:.4f}"
-    cv2.putText(
-        img,
-        text,
-        (20, 40),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.8,
-        0,
-        4,
-        cv2.LINE_AA
-    )
+    Keyword Arguments:
+        az: [float] Optional azimuth override (degrees).
+        el: [float] Optional elevation override (degrees).
+        n_brightest: [int] Optional, default 100. Number of brightest
+            stars to render.
 
-    cv2.putText(
-        img,
-        text,
-        (20, 40),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.8,
-        255,
-        2,
-        cv2.LINE_AA
-    )
+    Return:
+        az_el_angle_error: [float] Angular separation between the
+        plate-solved pointing and the platepar pointing in local
+        azimuth/elevation coordinates (degrees).
 
-    return img
-
-
-
-def testGenerateSynthetic(cat, az=None, el=None, n_brightest=100):
-
+    """
 
     print("Generate synthetic images now and use plate solver to test accuracy")
 
@@ -1283,30 +1556,37 @@ def testGenerateSynthetic(cat, az=None, el=None, n_brightest=100):
 
     pp, ra_array, dec_array, x_array, y_array, mag_array, names_array = cat.queryPlatepar(pp, jd_now, az=az, el=el, n_brightest=n_brightest)
 
-    # Create images with the default platepar pointing
+    # Create a list to hold the layers for later compositing
+    layers = []
 
-    constellation_image = renderConstellations(config, pp, datetime_now, roll_back=20)
+    # Render the constellation lines
+    constellation_image = renderConstellations(config, pp, datetime_now)
+    layers.append(constellation_image)
+
+    # Render the constellation labels
     constellation_label_image = renderConstellationLabels(config, pp, datetime_now)
-    img = renderStarsSimple(x_array, y_array, (pp.Y_res, pp.X_res))
-    img = np.maximum.reduce([img, constellation_image])
-    writePNG(img, os.path.join(os.path.expanduser("~/simple_output.png")))
-    stars, _ = renderStarsGaussian(x_array, y_array, mag_array, (pp.Y_res, pp.X_res))
-    iau_csn_coordinates, iau_mag_band, iau_mag_band_ratios, iau_extras = loadIAUCSN(additional_fields=['Name/ASCII'])
-    names = iau_extras['Name/ASCII']
-    ra_array, dec_array, mags = zip(*iau_csn_coordinates)
-    writeCSV("/home/david/IAU_CSN.csv",
-             ["Names", "Ra degrees", "Dec degrees", "Mags"],
-             [names, ra_array, dec_array, mags])
+    layers.append(constellation_label_image)
 
-    names = renderIAUNames(iau_csn_coordinates, iau_extras, ra_array, dec_array, x_array, y_array, pp)
-    img = np.maximum.reduce([stars, constellation_image, names, constellation_label_image])
+    # Render the stars
+    stars, _ = renderStarsGaussian(x_array, y_array, mag_array, (pp.Y_res, pp.X_res))
+    layers.append(stars)
+
+    # Render the IAU common star names
+    iau_names, iau_csn_coordinates = loadIAUCSNCSV(os.path.join(config.rms_root_dir, "Catalogs/IAU-CSN.csv"))
+    names = renderIAUNames(iau_csn_coordinates, iau_names, ra_array, dec_array, x_array, y_array, pp)
+    layers.append(names)
+
+    # Composit the layers
+    img = np.maximum.reduce(layers)
+
+    # Export the image
     writePNG(img, os.path.join(os.path.expanduser("~/gaussian_output.png")))
 
-    solve_result = astrometryNetSolveLocal(img=img)
+    # Run a plate solve on the stars only
+    solve_result = astrometryNetSolveLocal(img=stars)
     ra_centre_solve = solve_result[0]
     dec_centre_solve = solve_result[1]
     print(f"Found a starfield at ra:{ra_centre_solve:.2f}, dec:{dec_centre_solve:.2f} jd:{jd_now}")
-
 
     # Compute az and el
     az, el = raDec2AltAz(ra_centre_solve, dec_centre_solve, jd_now, pp.lat, pp.lon)
@@ -1315,8 +1595,24 @@ def testGenerateSynthetic(cat, az=None, el=None, n_brightest=100):
     az_el_angle_error = angularSeparationDeg(az, el, pp.az_centre, pp.alt_centre)
     print(f"Computed azimuth elevation angle error of {az_el_angle_error:.2f}")
 
+    return az_el_angle_error
 
-def generateComparisonImages(cat):
+def generateRealBySyntheticComparisonImages(cat):
+    """Generate side-by-side comparison images for example stations.
+
+    Example station data are extracted and each station's platepar is
+    used to generate a synthetic star field corresponding to the test
+    FITS image. A comparison image containing the observed maximum-pixel
+    frame and the synthetic rendering is written to disk for visual
+    inspection.
+
+    Arguments:
+        cat: [Catalog] Catalog object supporting queryPlatepar().
+
+    Return:
+        comparison_images: [list] List of comparison images.
+
+    """
 
     path_to_test_dir = os.path.join(config.rms_root_dir, "Tests/ExampleStationData/stations.tar.bz2")
     extractTarBz2(path_to_test_dir)
@@ -1332,7 +1628,7 @@ def generateComparisonImages(cat):
     station_path_list.sort()
     # Iterate over each of the station paths
 
-
+    comparison_images = []
 
     for station_path in station_path_list:
 
@@ -1341,25 +1637,27 @@ def generateComparisonImages(cat):
 
         # Load the platepar for this station
         test_pp = Platepar()
-        test_pp.read(os.path.join(station_path, config.platepar_name))
+        test_pp.read(os.path.join(station_path, test_config.platepar_name))
 
         # Get the fits file
         fits_file = next(station_path.glob("*.fits"))
 
 
-        # Get the jd of the test image
+        # Compute the JD of the test image
         test_jd = date2JD(*getMiddleTimeFF(fits_file.name, test_config.fps))
 
         # Query for stars in the platepar
-        pp, ra_array, dec_array, x_array, y_array, mag_array, names_array = cat.queryPlatepar(test_pp, test_jd, n_brightest=100)
-        synthetic_img, _ = renderStarsGaussian(x_array, y_array, mag_array, (pp.Y_res, pp.X_res))
+        test_pp, ra_array, dec_array, x_array, y_array, mag_array, names_array = cat.queryPlatepar(test_pp, test_jd, n_brightest=100)
+        synthetic_img, _ = renderStarsGaussian(x_array, y_array, mag_array, (test_pp.Y_res, test_pp.X_res))
 
         max_pixel = FFfits.read(str(station_path),fits_file.name).maxpixel
         comparison_img = np.hstack((max_pixel, synthetic_img))
         output_file = fits_file.with_name(f"{fits_file.stem}_comparison.png")
         writePNG(comparison_img, output_file)
+        comparison_images.append(comparison_img)
         print(f"Written comparison image to {output_file}")
 
+    return comparison_images
 
 if __name__ == "__main__":
 
@@ -1383,18 +1681,30 @@ if __name__ == "__main__":
 
     cat = Catalog(config)
 
-    generateComparisonImages(cat)
-    testGenerateSynthetic(cat)
-    testGenerateSynthetic(cat, az=237 , el=-39, n_brightest=100)
+    convertIAUCSNToCSV(config)
+
+    # Use the RMS test data set to generate a composite image showing a real sky and a synthetic generation
+    # The purpose of this is to validate the catalog queries
+    generateRealBySyntheticComparisonImages(cat)
+
+    # Generate a synthetic sky and plate solve, to demonstrate pointing accuracy.
+    testSyntheticPlateSolve(cat)
+
+    # Rotate a platepar around the local up axis, generate a synthetic sky and plate solve, to demonstrate the rotation
+    testSyntheticPlateSolve(cat, az=237, el=-39, n_brightest=100)
 
 
-
-
-    start_time = datetime(year=2026, month=10, day=29, hour=11, minute=18, second=57)
-    end_time = datetime(year=2026, month=10, day=29, hour=20, minute=38, second=55)
+    # Render a video intended to be a synthetic representation of the video at
+    # https://globalmeteornetwork.org/weblog//AU/AU000A/AU000A_20241230_115253_405720_detected/AU000A_20241230_115253_405720_timelapse.mp4
+    start_time = datetime(year=2024, month=12, day=30, hour=11, minute=52, second=53)
+    end_time = datetime(year=2024, month=12, day=30, hour=20, minute=46, second=0)
 
     pp = Platepar()
-    pp.read(os.path.join(config.rms_root_dir, config.platepar_name))
-    renderVideo(start_time, end_time, 256/25, 30, pp)
+    test_dir = os.path.join(config.rms_root_dir, "Tests/ExampleStationData/stations/Stations/AU000A/")
+    test_config = cr.parse(os.path.join(test_dir,".config"))
+    pp.read(os.path.join(test_dir, config.platepar_name))
+    print(f"{pp.station_code}")
+    output_file = renderVideo(config, start_time, end_time, 256/25, 30, pp)
+    print(f"Video saved at {output_file}")
 
     pass
