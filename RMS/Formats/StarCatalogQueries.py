@@ -21,11 +21,12 @@ from __future__ import print_function, absolute_import
 import numpy as np
 import cv2
 import scipy
-import FFfits
+
 import os
 import tarfile
 import argparse
 import RMS.ConfigReader as cr
+import RMS.Formats.FFfits as FFfits
 
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
@@ -42,6 +43,7 @@ from RMS.Formats.Platepar import Platepar
 from RMS.Formats.StarCatalog import readStarCatalog
 from RMS.Astrometry.Conversions import date2JD, datetime2JD, raDec2AltAz, vector2RaDec
 from RMS.Math import angularSeparationDeg, vectShort
+
 
 J2000 = datetime(2000, 1, 1, 12, 0, 0).replace(tzinfo=timezone.utc)
 
