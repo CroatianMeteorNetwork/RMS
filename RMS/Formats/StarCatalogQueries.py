@@ -75,7 +75,7 @@ def getPlateparSkyParameters(pp, jd):
     jd_array, mag_array = np.full_like(cy_array, jd, dtype=float), np.full_like(cy_array, 1, dtype=float)
     _, ra_array, dec_array, _ = xyToRaDecPP(jd_array, cx_array, cy_array, mag_array, pp, jd_time=True)
 
-    # Compute the all the angular separations, and take the maximum
+    # Compute the angular separations, and take the maximum
     max_separation = np.max(angularSeparationDeg(ra_c, dec_c, ra_array, dec_array))
 
     return ra_c, dec_c, max_separation, ra_array, dec_array
