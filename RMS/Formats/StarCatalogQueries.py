@@ -1113,7 +1113,7 @@ def loadIAUCSN(config, source_file_location=None, additional_fields = []):
 
 
 
-def renderIAUNames(iau_csn_coordinates, iau_names, ra_array, dec_array, x_array, y_array, pp, max_sep_deg=0.05):
+def renderIAUNames(config, pp, ra_array, dec_array, x_array, y_array, max_sep_deg=0.05, iau_csn=None):
     """Render IAU common star name labels.
 
     Visible stars are matched against the IAU Common Star Names catalogue.
@@ -1122,18 +1122,17 @@ def renderIAUNames(iau_csn_coordinates, iau_names, ra_array, dec_array, x_array,
     star position.
 
     Arguments:
-        iau_csn_coordinates: [ndarray] IAU star coordinates in the form
-            [ra_deg, dec_deg, mag].
-        iau_names: [list] IAU common star names.
+        config: [Config] RMS config instance
+        pp: [Platepar] RMS platepar instance
         ra_array: [array] Star right ascensions (degrees).
         dec_array: [array] Star declinations (degrees).
         x_array: [array] Star X image coordinates.
         y_array: [array] Star Y image coordinates.
-        pp: [Platepar] Platepar containing image dimensions.
 
     Keyword Arguments:
         max_sep_deg: [float] Optional, default 0.05. Maximum angular
             separation for matching a rendered star to an IAU named star.
+        iau_csn: [tuple] Optional result returned by loadIAUCSNCSV().
 
     Return:
         label_img: [ndarray] Rendered star-name label image as an 8-bit
@@ -1141,6 +1140,10 @@ def renderIAUNames(iau_csn_coordinates, iau_names, ra_array, dec_array, x_array,
 
     """
 
+    if iau_csn is None:
+        iau_names, iau_csn_coordinates = loadIAUCSNCSV(os.path.join(config.rms_root_dir, "Catalogs/IAU-CSN.csv"))
+    else:
+        iau_names, iau_csn_coordinates = iau_csn
 
     iau_ra, iau_dec = iau_csn_coordinates[:, 0], iau_csn_coordinates[:, 1]
 
@@ -1471,8 +1474,10 @@ def renderVideo(config, start_time, end_time, seconds_per_frame, fps, pp, output
     duration_seconds = (end_time - start_time).total_seconds()
     number_of_frames_to_render = int(np.floor(duration_seconds / seconds_per_frame))
 
+    # Load in the common star names
+    iau_csn = loadIAUCSNCSV(os.path.join(config.rms_root_dir, "Catalogs/IAU-CSN.csv"))
+
     # Load in the constellation shapes and compute the centres for labelling
-    iau_csn_names, iau_csn_coordinates = loadIAUCSNCSV(os.path.join(config.rms_root_dir, "Catalogs/IAU-CSN.csv"))
     constellation_centres = computeConstellationCentres(loadConstellationBoundaries(config))
 
     # Load in the constellation lines
@@ -1528,7 +1533,7 @@ def renderVideo(config, start_time, end_time, seconds_per_frame, fps, pp, output
         layers.append(cons_labels)
 
         # Render the IAU common star names
-        iau_names = renderIAUNames(iau_csn_coordinates, iau_csn_names, ra_array, dec_array, x_array, y_array, pp)
+        iau_names = renderIAUNames(config, pp, ra_array, dec_array, x_array, y_array, iau_csn=iau_csn)
         layers.append(iau_names)
 
         # Render the timestamp
@@ -1595,9 +1600,8 @@ def testSyntheticPlateSolve(cat, az=None, el=None, n_brightest=100):
     stars, _ = renderStarsGaussian(x_array, y_array, mag_array, (pp.Y_res, pp.X_res))
     layers.append(stars)
 
-    # Render the IAU common star names
-    iau_names, iau_csn_coordinates = loadIAUCSNCSV(os.path.join(config.rms_root_dir, "Catalogs/IAU-CSN.csv"))
-    names = renderIAUNames(iau_csn_coordinates, iau_names, ra_array, dec_array, x_array, y_array, pp)
+    # Render the IAU common star names, using the CSN loader inside renderIAUNames
+    names = renderIAUNames(config, pp, ra_array, dec_array, x_array, y_array)
     layers.append(names)
 
     # Combine the layers
