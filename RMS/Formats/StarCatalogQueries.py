@@ -1319,7 +1319,7 @@ def renderConstellationLabels(config, pp, frame_time, intensity=150, constellati
     return img
 
 
-def renderConstellations(config, pp, frame_time, intensity=150, roll_back=10, constellation_data=None):
+def renderConstellations(config, pp, frame_time, intensity=150, line_shortening=10, constellation_data=None):
 
     """Render constellation line segments for a given platepar view.
 
@@ -1336,7 +1336,7 @@ def renderConstellations(config, pp, frame_time, intensity=150, roll_back=10, co
 
     Keyword Arguments:
         intensity: [int] Optional, default 150. Line brightness.
-        roll_back: [float] Optional, default 10. Number of pixels to
+        line_shortening: [float] Optional, default 10. Number of pixels to
             shorten each end of a line segment before rendering.
         constellation_data: [ndarray] Optional constellation line data.
             If None, the default RMS constellation catalogue is loaded.
@@ -1385,7 +1385,7 @@ def renderConstellations(config, pp, frame_time, intensity=150, roll_back=10, co
             if not ok:
                 continue
             try:
-                p1, p2 = vectShort(p1, p2, roll_back)
+                p1, p2 = vectShort(p1, p2, line_shortening)
                 x1, y1, x2, y2 = p1[0], p1[1], p2[0], p2[1]
                 cv2.line(img, (int(x1), int(y1)), (int(x2), int(y2)), color=intensity, thickness=1)
             except Exception:
