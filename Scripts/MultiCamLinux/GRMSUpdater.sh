@@ -53,6 +53,8 @@
 # NOTE: This script should be run as the capture user, not root. Add to user's crontab:
 #   crontab -e
 #   0 2 * * * /path/to/GRMSUpdater.sh --term gnome-terminal --force
+# On Ubuntu 25.10+ (no gnome-terminal) use --term ptyxis, or omit --term to
+# auto-detect. Wayland sessions are detected from $XDG_RUNTIME_DIR/wayland-*.
 # This eliminates permission issues and follows the principle of least privilege.
 #
 # OPTIONAL gnome-terminal PROFILE: pass --profile <name> to launch restarted
@@ -287,6 +289,16 @@ launch_term() {                            # $1 = title, $2… = cmd+args
             cmd=(gnome-terminal "${profile_args[@]}" --title="$title" \
                  -- bash -lc "export GRMS_AUTO=1; exec $payload")
             ;;
+        ptyxis)
+            # Ubuntu 25.10+ default terminal. The command runs under the
+            # ptyxis service, not as a child of this process, so env vars must
+            # be set inside the bash payload. Profiles are not supported here
+            # (ptyxis selects them by UUID, and only for tabs).
+            local payload
+            payload=$(printf '%q ' "$@")
+            cmd=(ptyxis --new-window --title="$title" \
+                 -- bash -lc "export GRMS_AUTO=1; exec $payload")
+            ;;
         tmux)
             tmux has-session -t "$title" 2>/dev/null || \
                 tmux new -d -s "$title" "export GRMS_AUTO=1; exec $*"
@@ -299,8 +311,8 @@ launch_term() {                            # $1 = title, $2… = cmd+args
     esac
 
     # Check if we need a display for this terminal type
-    if [[ "$PREFERRED_TERM" != "tmux" && -z "$DISPLAY" ]]; then
-        log_message "Error: No DISPLAY available for GUI terminal '$PREFERRED_TERM'"
+    if [[ "$PREFERRED_TERM" != "tmux" && -z "$DISPLAY" && -z "${WAYLAND_DISPLAY:-}" ]]; then
+        log_message "Error: No DISPLAY or WAYLAND_DISPLAY available for GUI terminal '$PREFERRED_TERM'"
         log_message "Try running with --term tmux or from a graphical session"
         return 1
     fi
@@ -368,9 +380,12 @@ restarted; with any positional argument only the previously-running
 stations are restarted.
 
 Options:
-  --term <terminal>   Terminal to launch stations in (default: lxterminal).
-                      One of: lxterminal, kitty, foot, footclient,
-                      gnome-terminal, tmux.
+  --term <terminal>   Terminal to launch stations in. One of: auto,
+                      lxterminal, kitty, foot, footclient, gnome-terminal,
+                      ptyxis, tmux. The default, auto, picks the first
+                      installed of lxterminal, gnome-terminal and ptyxis
+                      (the Ubuntu 25.10+ default), trying gnome-terminal
+                      first in a GNOME session, and falls back to tmux.
   --profile <name>    gnome-terminal profile to launch with. Ignored by
                       other terminals; gnome-terminal falls back to its
                       default profile if <name> does not exist.
@@ -402,7 +417,7 @@ fi
 
 # Parse command line arguments
 FORCE_UPDATE=false
-PREFERRED_TERM="lxterminal"     # default terminal
+PREFERRED_TERM="auto"           # default: detect the terminal (resolved below)
 GTERM_PROFILE=""                # gnome-terminal profile to launch with (empty = terminal's default)
 REBOOT_MODE="none"
 REBOOT_KERNEL_TARGET=""          # kernel that should_reboot() flagged (for the loop-guard stamp)
@@ -477,8 +492,31 @@ if [[ -z "$SHUTDOWN_BIN" ]]; then
 fi
 
 # Export display environment for GUI applications (needed when running from cron)
+
+# XDG_RUNTIME_DIR holds the Wayland socket and the session bus
+if [[ -z "${XDG_RUNTIME_DIR:-}" ]]; then
+    XDG_RUNTIME_DIR="/run/user/$(id -u)"
+    export XDG_RUNTIME_DIR
+    log_message "Set XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
+fi
+
+# Wayland session: 'who' doesn't list a display, so look for the compositor socket
+if [[ -z ${WAYLAND_DISPLAY:-} ]]; then
+    for _sock in "$XDG_RUNTIME_DIR"/wayland-[0-9]*; do
+        if [[ -S "$_sock" ]]; then
+            export WAYLAND_DISPLAY="${_sock##*/}"
+            log_message "Auto-detected WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
+            break
+        fi
+    done
+fi
+
 if [[ -z ${DISPLAY:-} ]]; then
     DISPLAY=$(who | awk '/\(:[0-9]/{print $NF; exit}' | tr -d '()')
+    # Under Wayland, XWayland (for X11-only terminals like lxterminal) is normally :0
+    if [[ -z "$DISPLAY" && -n "${WAYLAND_DISPLAY:-}" && -S /tmp/.X11-unix/X0 ]]; then
+        DISPLAY=":0"
+    fi
     if [[ -n "$DISPLAY" ]]; then
         export DISPLAY
         log_message "Auto-detected DISPLAY=$DISPLAY"
@@ -487,17 +525,20 @@ if [[ -z ${DISPLAY:-} ]]; then
     fi
 fi
 
-if [[ -n "$DISPLAY" ]]; then
-    export XAUTHORITY="$HOME/.Xauthority"
-    log_message "Using DISPLAY=$DISPLAY"
-    
-    # Set XDG_RUNTIME_DIR if not already set (needed for some terminals)
-    if [[ -z "${XDG_RUNTIME_DIR:-}" ]]; then
-        uid=$(id -u)
-        export XDG_RUNTIME_DIR="/run/user/$uid"
-        log_message "Set XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
-    fi
-    
+# X authority: keep the session's own; otherwise use ~/.Xauthority (X11) or the
+# file mutter creates for XWayland
+if [[ -n "$DISPLAY" && -z "${XAUTHORITY:-}" ]]; then
+    for _xauth in "$HOME/.Xauthority" "$XDG_RUNTIME_DIR"/.mutter-Xwaylandauth.*; do
+        if [[ -f "$_xauth" ]]; then
+            export XAUTHORITY="$_xauth"
+            break
+        fi
+    done
+fi
+
+if [[ -n "$DISPLAY" || -n "${WAYLAND_DISPLAY:-}" ]]; then
+    log_message "Using DISPLAY=${DISPLAY:-<none>} WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-<none>}"
+
     # Set up D-Bus for gnome-terminal (when running from cron)
     # Wrap in error handling to prevent crashes
     if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
@@ -512,7 +553,7 @@ if [[ -n "$DISPLAY" ]]; then
         bus_path="/run/user/${uid}/bus"
         if [[ -e "$bus_path" ]] && [[ -S "$bus_path" ]]; then
             export DBUS_SESSION_BUS_ADDRESS="unix:path=$bus_path"
-            log_message "Auto-set DBUS_SESSION_BUS_ADDRESS for gnome-terminal"
+            log_message "Auto-set DBUS_SESSION_BUS_ADDRESS for gnome-terminal/ptyxis"
         else
             log_message "D-Bus session bus not available at $bus_path (normal in cron context)"
         fi
@@ -520,7 +561,28 @@ if [[ -n "$DISPLAY" ]]; then
         log_message "DBUS_SESSION_BUS_ADDRESS already set: $DBUS_SESSION_BUS_ADDRESS"
     fi
 else
-    log_message "No DISPLAY available - GUI terminals will fail, consider using --term tmux"
+    log_message "No DISPLAY or WAYLAND_DISPLAY available - GUI terminals will fail, consider using --term tmux"
+fi
+
+# Resolve --term auto (the default) to the first terminal installed:
+# gnome-terminal in a GNOME session, otherwise lxterminal (the long-standing
+# default), then gnome-terminal (Ubuntu <= 25.04), ptyxis (Ubuntu 25.10+),
+# else tmux. Cron doesn't set XDG_CURRENT_DESKTOP, so the user's running
+# gnome-shell also counts as a GNOME session.
+if [[ "$PREFERRED_TERM" == "auto" ]]; then
+    if [[ "${XDG_CURRENT_DESKTOP:-}" == *GNOME* ]] || pgrep -u "$(id -u)" -x gnome-shell >/dev/null 2>&1; then
+        _terms=(gnome-terminal lxterminal ptyxis)
+    else
+        _terms=(lxterminal gnome-terminal ptyxis)
+    fi
+    PREFERRED_TERM="tmux"
+    for _t in "${_terms[@]}"; do
+        if command -v "$_t" >/dev/null 2>&1; then
+            PREFERRED_TERM="$_t"
+            break
+        fi
+    done
+    log_message "Auto-selected terminal: $PREFERRED_TERM"
 fi
 
 # Find running stations by looking for StartCapture.sh processes
