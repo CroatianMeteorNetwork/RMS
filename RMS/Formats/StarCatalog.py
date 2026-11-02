@@ -2,6 +2,8 @@
 
 from __future__ import print_function, division, absolute_import
 
+import hashlib
+import json
 import os
 import zlib
 import sys
@@ -9,10 +11,10 @@ import tempfile
 
 # Import the requests library for downloading the GMN star catalog
 try:
-    from urllib.request import urlopen  # Python 3
+    from urllib.request import urlopen, Request  # Python 3
     from urllib.error import URLError, HTTPError
 except ImportError:
-    from urllib2 import urlopen  # Python 2
+    from urllib2 import urlopen, Request  # Python 2
     from urllib2 import URLError, HTTPError
 
 import numpy as np
@@ -69,11 +71,189 @@ GMN_CATALOG_DTYPE_V2 = np.dtype([
 ])
 
 
+# Known GMN catalog layouts, keyed by their column count (v1=18, v2=20)
+GMN_CATALOG_DTYPES = {len(dt.names): dt for dt in (GMN_CATALOG_DTYPE_V1, GMN_CATALOG_DTYPE_V2)}
+
+
 def gmnCatalogDtype(num_columns):
-    """ Select the GMN catalog dtype based on the number of columns declared in the header. """
-    if num_columns >= 20:
-        return GMN_CATALOG_DTYPE_V2
-    return GMN_CATALOG_DTYPE_V1
+    """ Select the GMN catalog dtype based on the number of columns declared in the header.
+
+    Raises ValueError (one of CORRUPT_CATALOG_ERRORS) for a column count that matches no known
+    layout, so that a bad download or an unsupported build is repaired instead of misread.
+    """
+    if num_columns not in GMN_CATALOG_DTYPES:
+        raise ValueError("Unknown GMN catalog layout: {} columns (known: {})".format(
+            num_columns, sorted(GMN_CATALOG_DTYPES)))
+    return GMN_CATALOG_DTYPES[num_columns]
+
+
+# Faintest magnitude covered by the bundled GMN catalog. Fainter requests need the full
+# (LM+12.0) catalog, a ~170 MB download that takes ~500 MB of memory once loaded.
+GMN_BUNDLED_LIM_MAG = 9.0
+
+
+# Matched catalog stars reach about this far past the 95th percentile of the calibrated detection
+# magnitudes (USV001, 300 frames: at most +1.1 mag on 95% of frames in G, +1.3 in a BVRI mix). It is
+# also the margin NNalign has always added when inferring the catalog limit from the detections.
+DETECTION_DEPTH_MARGIN = 1.0
+
+
+def detectedStarsLimMag(intensities, mag_lev, mag_lev_stddev):
+    """ Catalog limiting magnitude that the detected stars themselves call for.
+
+    Arguments:
+        intensities: [array] Integrated intensities of the detected stars (e.g. from CALSTARS).
+        mag_lev: [float] Photometric zero point of the platepar.
+        mag_lev_stddev: [float] Scatter of the photometric fit.
+
+    Return:
+        [float or None] The 95th percentile of the detections' catalog magnitudes plus
+            DETECTION_DEPTH_MARGIN, or None if the photometry is not calibrated or nothing was
+            detected.
+    """
+
+    if (mag_lev == 1.0) or not (mag_lev_stddev > 0):
+        return None
+
+    intensities = np.asarray(intensities, dtype=np.float64)
+    intensities = intensities[intensities > 0]
+    if len(intensities) == 0:
+        return None
+
+    return float(np.percentile(-2.5*np.log10(intensities) + mag_lev, 95) + DETECTION_DEPTH_MARGIN)
+
+
+def automaticCatalogLimMag(config, lim_mag, detected_lim_mag=None):
+    """ Gate a catalog limiting magnitude chosen automatically (a margin added to a configured or
+    displayed limit, or the end of a search) at the bundled GMN catalog's depth, unless the
+    station is a deep one.
+
+    A station is deep when its detected stars call for a catalog deeper than the bundled one
+    (see detectedStarsLimMag), or when the catalog_mag_limit set in its config file plus the
+    usual margin is. Deep stations get the requested limit unchanged; the others never pull in
+    the full GMN catalog because of a margin alone. Limits for other catalogs, which need no
+    download, are returned unchanged.
+
+    Arguments:
+        config: [Config instance]
+        lim_mag: [float] Automatically chosen limiting magnitude.
+
+    Keyword arguments:
+        detected_lim_mag: [float or None] Output of detectedStarsLimMag for the data at hand, or
+            None if it is not available.
+
+    Return:
+        [float] The limiting magnitude to use.
+    """
+
+    if "GMN_StarCatalog".lower() not in config.star_catalog_file.lower():
+        return lim_mag
+
+    if lim_mag <= GMN_BUNDLED_LIM_MAG:
+        return lim_mag
+
+    configured_deep = (config.catalog_mag_limit_configured + DETECTION_DEPTH_MARGIN) > GMN_BUNDLED_LIM_MAG
+    detected_deep = (detected_lim_mag is not None) and (detected_lim_mag > GMN_BUNDLED_LIM_MAG)
+
+    if configured_deep or detected_deep:
+        return lim_mag
+
+    return GMN_BUNDLED_LIM_MAG
+
+
+# Marker introducing the JSON identity block in the GMN catalog header. It sits after the
+# column names, inside the padding that every reader skips, so it is invisible to readers
+# that predate it.
+GMN_METADATA_MAGIC = b'GMNSC-META'
+
+
+def gmnCatalogMetadata(file_path):
+    """ Read the identity block from a GMN catalog header.
+
+    Catalogs built from September 2026 on record which build they are, so a stale local copy
+    can be told from a current one. Keys: format_version (the column layout), catalog_version
+    (the data, incremented on every rebuild that changes it), build_date, n_stars, lim_mag,
+    columns and source.
+
+    Arguments:
+        file_path: [str] Path to a GMN catalog binary.
+
+    Return:
+        [dict or None] The metadata, or None for builds made before it was added, for a
+            header that does not contain it, or if the file cannot be read.
+    """
+
+    try:
+        with open(file_path, 'rb') as fid:
+            header_size = int(np.fromfile(fid, dtype=np.uint32, count=1)[0])
+
+            # Guard against a corrupt or absurd header size before allocating
+            if not (12 < header_size <= 1024*1024):
+                return None
+
+            fid.seek(0)
+            header = fid.read(header_size)
+
+    except (IOError, OSError, ValueError, IndexError):
+        return None
+
+    pos = header.find(GMN_METADATA_MAGIC)
+    if pos < 0:
+        return None
+
+    start = pos + len(GMN_METADATA_MAGIC) + 1
+    end = header.find(b'\x00', start)
+    if end < 0:
+        return None
+
+    try:
+        return json.loads(header[start:end].decode('utf-8'))
+
+    except (ValueError, UnicodeDecodeError):
+        return None
+
+
+def gmnCatalogContentValid(file_path):
+    """ Check a GMN catalog's star records against the content_md5 recorded in its header.
+
+    The records are decompressed and hashed in chunks, so memory use stays small even for the full
+    catalog. Builds that predate content_md5 cannot be checked and are accepted.
+
+    Arguments:
+        file_path: [str] Path to a GMN catalog binary.
+
+    Return:
+        [bool] False if the records do not match the recorded checksum or cannot be read.
+    """
+
+    expected = (gmnCatalogMetadata(file_path) or {}).get('content_md5')
+    if expected is None:
+        return True
+
+    try:
+        with open(file_path, 'rb') as fid:
+            header_size, num_rows, num_columns = (int(x) for x in np.fromfile(fid, dtype=np.uint32, count=3))
+            fid.seek(header_size)
+
+            # The checksum covers exactly the declared records
+            remaining = num_rows*gmnCatalogDtype(num_columns).itemsize
+
+            decompressor = zlib.decompressobj()
+            md5 = hashlib.md5()
+
+            while remaining > 0:
+                compressed = fid.read(1024*1024)
+                records = decompressor.decompress(compressed) if compressed else decompressor.flush()
+                if not records:
+                    return False
+
+                md5.update(records[:remaining])
+                remaining -= len(records[:remaining])
+
+    except (CORRUPT_CATALOG_ERRORS + (TypeError,)):
+        return False
+
+    return md5.hexdigest() == expected
 
 
 def removeFileSilently(path):
@@ -128,6 +308,12 @@ def downloadCatalog(url, dir_path, file_name):
             removeFileSilently(tmp_path)
             return False
 
+        # Check the records against the header checksum before they can replace a working catalog
+        if not gmnCatalogContentValid(tmp_path):
+            print("\nDownloaded catalog failed its checksum - discarded.")
+            removeFileSilently(tmp_path)
+            return False
+
         # Atomically move the completed file into place (atomic when on the same filesystem)
         try:
             os.replace(tmp_path, dest_path)
@@ -162,10 +348,151 @@ def downloadCatalog(url, dir_path, file_name):
 CORRUPT_CATALOG_ERRORS = (zlib.error, ValueError, OSError, EOFError, IndexError)
 
 
+# Full catalogs already checked for staleness in this run. The check, and any re-download it
+# triggers, happens at most once per run.
+STALENESS_CHECKED = set()
+
+
+def gmnCatalogVersion(file_path):
+    """ Return the catalog_version recorded in a GMN catalog header, or None if there is none. """
+
+    metadata = gmnCatalogMetadata(file_path)
+    if metadata is None:
+        return None
+
+    try:
+        return int(metadata['catalog_version'])
+
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def catalogServerInfo(url):
+    """ Identify the file currently served at a URL without downloading it.
+
+    Return:
+        (server_id, size): [tuple] An identifier built from the HTTP validators (ETag,
+            Last-Modified, Content-Length) and the size in bytes, or (None, None) if the server
+            cannot be reached.
+    """
+
+    try:
+        request = Request(url)
+        request.get_method = lambda: 'HEAD'
+        headers = urlopen(request, timeout=30).info()
+
+    except Exception:
+        return None, None
+
+    size = headers.get('Content-Length')
+    server_id = "{}|{}|{}".format(headers.get('ETag'), headers.get('Last-Modified'), size)
+
+    return server_id, (int(size) if size else None)
+
+
+def obtainFullCatalog(full_path, full_url, reference_path):
+    """ Download the full catalog if it is missing or an older build than the bundled catalog.
+
+    The bundled LM+9.0 catalog and the downloadable LM+12.0 catalog are built together and share
+    a catalog_version, so the bundled copy defines the expected version. A local full catalog
+    with no version (built before versioning) or a lower version is stale; a higher one is left
+    alone. No version check is made if the bundled catalog itself carries no version.
+
+    The version check, and any download it triggers, is made at most once per run. The download
+    replaces the file atomically, so a failed one keeps the old catalog. If the downloaded file
+    is still stale, the server has not been updated yet: the file is used, and a marker records
+    which server copy was fetched, so that later runs download again only once the server copy
+    changes rather than on every start-up.
+
+    Arguments:
+        full_path: [str] Path to the local full catalog.
+        full_url: [str] URL to download the full catalog from.
+        reference_path: [str] Path to the bundled catalog that defines the expected version.
+    """
+
+    dir_path, full_name = os.path.split(full_path)
+
+    # Download the full catalog if it is not present yet
+    if not os.path.exists(full_path):
+        print("The full catalog ({}) is being downloaded from the GMN server...".format(full_name))
+        server_id, _ = catalogServerInfo(full_url)
+        downloaded = downloadCatalog(full_url, dir_path, full_name)
+
+    elif full_path in STALENESS_CHECKED:
+        return
+
+    else:
+        server_id = None
+        downloaded = False
+
+    STALENESS_CHECKED.add(full_path)
+
+    expected_version = gmnCatalogVersion(reference_path)
+    if (expected_version is None) or (not os.path.exists(full_path)):
+        return
+
+    marker_path = full_path + ".stale"
+
+    def versionStr(version):
+        return "unversioned" if version is None else "version {}".format(version)
+
+    def isCurrent(version):
+        return (version is not None) and (version >= expected_version)
+
+    local_version = gmnCatalogVersion(full_path)
+
+    # Replace an outdated local copy, unless it is what the server still has
+    if (not downloaded) and (not isCurrent(local_version)):
+
+        server_id, server_size = catalogServerInfo(full_url)
+
+        try:
+            with open(marker_path) as f:
+                marker = json.load(f)
+        except (IOError, OSError, ValueError):
+            marker = None
+
+        if isinstance(marker, dict) and (marker.get('expected_version') == expected_version) \
+                and ((server_id is None) or (server_id == marker.get('server_id'))):
+
+            print("Star catalog '{}' is outdated ({}, expected version {}), but the GMN server has "
+                  "not been updated since it was last downloaded - using it.".format(
+                      full_name, versionStr(local_version), expected_version))
+            return
+
+        size_str = "" if server_size is None else " ({:.0f} MB)".format(server_size/1024**2)
+        print("Star catalog '{}' is outdated ({}, expected version {}) - downloading the current "
+              "catalog{} once from the GMN server...".format(
+                  full_name, versionStr(local_version), expected_version, size_str))
+
+        if not downloadCatalog(full_url, dir_path, full_name):
+            print("Could not download the current star catalog - using the outdated one.")
+            return
+
+        local_version = gmnCatalogVersion(full_path)
+        if isCurrent(local_version):
+            print("Star catalog '{}' updated to version {}.".format(full_name, local_version))
+
+    if isCurrent(local_version):
+        removeFileSilently(marker_path)
+        return
+
+    print("WARNING: the star catalog on the GMN server is outdated ({}, expected version {}). "
+          "Using it; it will be downloaded again once the server copy changes.".format(
+              versionStr(local_version), expected_version))
+
+    try:
+        with open(marker_path, 'w') as f:
+            json.dump({'expected_version': expected_version, 'server_id': server_id}, f)
+    except (IOError, OSError):
+        pass
+
+
 def loadGMNCatalog(dir_path, use_full_catalog, full_name, full_url, fallback_name, load_kwargs):
     """ Load the GMN star catalog, lazily downloading and repairing the full catalog as needed.
 
-    The full (LM+12.0) catalog is downloaded only if it is missing. Integrity is checked lazily:
+    The full (LM+12.0) catalog is downloaded if it is missing, or replaced if it is an older build
+    than the bundled LM+9.0 catalog (see obtainFullCatalog). Integrity is checked lazily:
     the file is simply loaded, and only if the load fails (a truncated/corrupt file, e.g. from an
     interrupted download) is it deleted and downloaded once more. This avoids reading and
     decompressing the catalog twice on every start-up, which matters on worn SD cards. If the full
@@ -187,10 +514,8 @@ def loadGMNCatalog(dir_path, use_full_catalog, full_name, full_url, fallback_nam
 
         full_path = os.path.join(dir_path, full_name)
 
-        # Download the full catalog if it is not present yet
-        if not os.path.exists(full_path):
-            print("The full catalog ({}) is being downloaded from the GMN server...".format(full_name))
-            downloadCatalog(full_url, dir_path, full_name)
+        # Download the full catalog if it is missing or an outdated build
+        obtainFullCatalog(full_path, full_url, os.path.join(dir_path, fallback_name))
 
         # Try to load the full catalog; repair it once if the load reveals corruption
         if os.path.exists(full_path):
@@ -613,8 +938,8 @@ def readStarCatalog(dir_path, file_name, years_from_J2000=0, lim_mag=None,
         # URL to the LM+12.0 catalog
         gmn_starcat_lm12_url = "https://globalmeteornetwork.org/projects/gmn_star_catalog/GMN_StarCatalog_LM12.0.bin"
 
-        # The full (LM+12.0) catalog is only needed when stars fainter than mag 9.0 are requested
-        use_full_catalog = (lim_mag is None) or (lim_mag > 9.0)
+        # The full (LM+12.0) catalog is only needed when stars fainter than the bundled one are requested
+        use_full_catalog = (lim_mag is None) or (lim_mag > GMN_BUNDLED_LIM_MAG)
 
         # Lazily load the catalog: the full catalog is downloaded if missing, and re-downloaded
         # only if a load attempt reveals it is corrupt (e.g. an interrupted download), falling
