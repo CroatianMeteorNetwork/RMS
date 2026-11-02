@@ -21,13 +21,24 @@ if [[ $dircount -gt 0 ]]; then
         seconds=70
     fi
 
-    # Detect the terminal emulator
+    # Each station runs in its own terminal window, which needs a desktop
+    # session (GRMSUpdater.sh --term tmux runs the stations without one)
+    if [[ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
+        echo " No display to open the station windows on (e.g. over ssh), no station was started"
+        exit 1
+    fi
+
+    # Detect the terminal emulator (add_Station.sh installs lxterminal on
+    # desktops that have neither)
     if [[ "${XDG_CURRENT_DESKTOP:-}" == *GNOME* ]] && command -v gnome-terminal >/dev/null 2>&1; then
         TERMINAL=gnome-terminal
     elif command -v lxterminal >/dev/null 2>&1; then
         TERMINAL=lxterminal
-    else
+    elif command -v gnome-terminal >/dev/null 2>&1; then
         TERMINAL=gnome-terminal
+    else
+        echo " Neither lxterminal nor gnome-terminal was found, no station was started"
+        exit 1
     fi
 
     # Each station runs with its own .config, so arguments for a single
@@ -42,12 +53,16 @@ if [[ $dircount -gt 0 ]]; then
     for Dir in ~/source/Stations/*/
       do
         Station=$(basename "$Dir")
+        station_cmd="$HOME/source/RMS/Scripts/MultiCamLinux/StartCapture.sh ${Station}"
         echo " Starting camera ${Station}"
-        if [[ "$TERMINAL" == "gnome-terminal" ]]; then
-            gnome-terminal --profile=StartCapture --title=${Station} -- bash -c "$HOME/source/RMS/Scripts/MultiCamLinux/StartCapture.sh ${Station}" &
-        else
-            lxterminal --title=${Station} -e "$HOME/source/RMS/Scripts/MultiCamLinux/StartCapture.sh ${Station}" &
-        fi
+        case "$TERMINAL" in
+            gnome-terminal)
+                gnome-terminal --profile=StartCapture --title="${Station}" -- bash -c "${station_cmd}" &
+                ;;
+            lxterminal)
+                lxterminal --title="${Station}" -e "${station_cmd}" &
+                ;;
+        esac
         echo "  waiting $seconds seconds..."
         sleep ${seconds}
         if [[ $loop = 0 ]] ; then
@@ -62,8 +77,6 @@ else
     # Legacy single-camera data structure
     source ~/vRMS/bin/activate
     cd ~/source/RMS
-
-    mkdir -p ~/RMS_data/logs/
 
     echo ""
     echo ""
