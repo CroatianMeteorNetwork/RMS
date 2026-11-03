@@ -2,7 +2,8 @@
 Tests of the correction of the timestamps of UWO .vid frames from their frame counter: the timestamps are the time of
 the first frame plus the counter times the frame period, and a frame whose seconds field is off by whole seconds
 (the microseconds are right) gets the time given by its counter. A lost frame (a step of a frame period with the
-counter going up by one) is kept as it is, and a file whose counter doesn't follow the timestamps is not changed.
+counter going up by one) is kept as it is, and a file whose counter doesn't follow the timestamps, or whose timestamps
+have a real gap or step (many lost frames), is not changed.
 """
 
 import datetime
@@ -47,14 +48,14 @@ def writeVid(path, times, counters, width=32, height=16):
             f.write(bytes(data))
 
 
-def regular(n, lost=()):
-    """ Timestamps and counters of n frames, with a frame lost after each of the given frames (one more period
-        between the timestamps, the counter going up by one).
+def regular(n, lost=(), n_lost=1):
+    """ Timestamps and counters of n frames, with n_lost frames lost after each of the given frames (n_lost more
+        periods between the timestamps, the counter going up by one).
     """
 
     steps = np.ones(n)
     for k in lost:
-        steps[k + 1] += 1
+        steps[k + 1] += n_lost
     steps[0] = 0
     times = T0 + PERIOD*np.cumsum(steps)
     counters = 636000 + np.arange(n)
@@ -130,3 +131,35 @@ def test_counter_not_following_times(tmp_path):
     handle, read = readTimes(path, range(n))
     assert handle.vid_time_model is None
     assert np.max(np.abs(read - stamped)) < 2e-6
+
+
+@pytest.mark.parametrize('n_lost', [30, 32])
+def test_many_lost_frames_kept(tmp_path, n_lost):
+
+    # Many lost frames: the timestamps after the gap are later by close to a second (30 frames, 0.93 s) or by
+    #   almost exactly one (32 frames), and are right; the repair is off and nothing is changed
+    n = 600
+    times, counters = regular(n, lost=(299,), n_lost=n_lost)
+    path = str(tmp_path/'gap.vid')
+    writeVid(path, times, counters)
+
+    handle, read = readTimes(path, range(n))
+    assert handle.vid_time_model is None
+    assert np.max(np.abs(read - times)) < 2e-6
+    assert not handle.vid_repaired_frames
+
+
+def test_seconds_off_with_lost_frame_corrected(tmp_path):
+
+    # A lost frame and runs of frames with the seconds field 1 s low before and after it: all corrected
+    n = 600
+    times, counters = regular(n, lost=(250,))
+    stamped = times.copy()
+    bad = list(range(120, 127)) + list(range(410, 418))
+    stamped[bad] -= 1.0
+    path = str(tmp_path/'lostglitch.vid')
+    writeVid(path, stamped, counters)
+
+    handle, read = readTimes(path, range(n))
+    assert np.max(np.abs(read - times)) < 2e-6
+    assert len(handle.vid_repaired_frames) == len(bad)

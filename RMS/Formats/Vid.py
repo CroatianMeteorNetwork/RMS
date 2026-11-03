@@ -150,7 +150,7 @@ def readFrame(st, fid, metadata_only=False):
 
 
 
-def frameTimeModel(fid, n_samples=64, tolerance=0.2):
+def frameTimeModel(fid, n_samples=64, tolerance=0.1, max_run=3):
     """ A model of the frame timestamps of a vid file from its frame counter. The timestamps are written as the
         time of the first frame plus the counter times the frame period, so the time of any frame follows from
         its counter. A few frames can have a seconds field off by whole seconds (the microseconds stay right),
@@ -163,7 +163,10 @@ def frameTimeModel(fid, n_samples=64, tolerance=0.2):
     Keyword arguments:
         n_samples: [int] Number of frames sampled. 64 by default.
         tolerance: [float] Largest difference (s) between a sampled timestamp and the model, apart from whole
-            seconds. 0.2 by default.
+            seconds. 0.1 by default (a few lost frames).
+        max_run: [int] Most consecutive sampled frames off the model by whole seconds. Frames with the seconds
+            field off come in short runs, far shorter than the spacing of the samples, so more consecutive
+            samples off the model are a step in the timestamps. 3 by default.
 
     Return:
         [tuple] (counter, seconds, offset, period) of the model: the time of a frame with the counter c is
@@ -213,11 +216,21 @@ def frameTimeModel(fid, n_samples=64, tolerance=0.2):
         return None
     offset = float(np.median(t - period*(seqs - seq0)))
 
-    # The model is used only if it gives the timestamps of most of the sampled frames, apart from whole seconds
+    # The model is used only if it gives the timestamps of all sampled frames apart from whole seconds, and of
+    #   most of them exactly. A sampled frame off by a fraction of a second is a real gap in the timestamps (many
+    #   lost frames), and a long series of samples off by whole seconds a step, which must both be kept as they are
     res = t - offset - period*(seqs - seq0)
-    on = (np.abs(res) < tolerance)
+    whole = np.round(res)
+    if np.any(np.abs(res - whole) >= tolerance):
+        return None
+    on = (whole == 0)
     if np.sum(on) < 0.5*len(res):
         return None
+    run = 0
+    for off in ~on:
+        run = run + 1 if off else 0
+        if run > max_run:
+            return None
 
     # The period and the offset refined by a line fit to the samples on the model
     if np.sum(on) >= 3:
@@ -226,7 +239,7 @@ def frameTimeModel(fid, n_samples=64, tolerance=0.2):
     return seq0, sec0, float(offset), float(period)
 
 
-def repairFrameTime(st, model, tolerance=0.2):
+def repairFrameTime(st, model, tolerance=0.1):
     """ Correct the seconds field of the timestamp of a frame read into the given structure (see readFrame) if
         it differs from the time given by the frame counter by whole seconds.
 
@@ -235,7 +248,7 @@ def repairFrameTime(st, model, tolerance=0.2):
         model: [tuple] The model of the timestamps of the file (see frameTimeModel). Nothing is done if None.
 
     Keyword arguments:
-        tolerance: [float] Largest difference (s) from the model, apart from whole seconds. 0.2 by default.
+        tolerance: [float] Largest difference (s) from the model, apart from whole seconds. 0.1 by default.
 
     Return:
         [int] The whole seconds added to the seconds field, 0 if the timestamp was not changed.
