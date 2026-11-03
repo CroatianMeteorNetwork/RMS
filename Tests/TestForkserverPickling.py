@@ -174,6 +174,33 @@ def test_shared_frame_buffer_is_shared_under_spawn():
     assert parent_view.max() == 7
 
 
+def test_sei_capture_state_pickles_with_a_fresh_lock():
+    """ BufferedCapture holds an SEIBlockAccumulator and an SEITimebase, each with a
+        threading.Lock, so the capture process failed to start under forkserver with
+        "cannot pickle '_thread.lock' object". The lock is recreated on unpickling and the
+        accumulated state is kept.
+    """
+    import pickle
+    from RMS.SEIBlockMeta import SEIBlockAccumulator, SEI_META_FIELDS
+    from RMS.SEITimebase import SEITimebase
+
+    acc = SEIBlockAccumulator()
+    acc.add({'exp_s': 0.04, 'frame_seq': 10})
+    acc2 = pickle.loads(pickle.dumps(acc))
+    assert acc2._lock is not acc._lock
+    acc2.add({'exp_s': 0.04, 'frame_seq': 12})
+    vals = dict(zip(SEI_META_FIELDS, acc2.snapshotAndReset(1)))
+    assert vals['nfrm'] == 2.0       # the frame added before pickling is kept
+    assert vals['seq_lost'] == 1.0   # and so is its frame_seq
+
+    tb = SEITimebase(25)
+    tb.feed(0, 1000.0, 0.04)
+    tb2 = pickle.loads(pickle.dumps(tb))
+    assert tb2._lock is not tb._lock
+    tb2.feed(40000000, 1000.04, 0.04)
+    assert tb2._n_fed == 2
+
+
 def test_getLoggingQueue_reads_root_queuehandler():
     """ getLoggingQueue() must find the queue from the root logger's QueueHandler even when
         the global LoggingManager was never used. StartCapture/Reprocess create their own
