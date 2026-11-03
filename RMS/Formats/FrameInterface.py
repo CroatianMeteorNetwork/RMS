@@ -29,6 +29,8 @@ from RMS.Formats.FFfile import getMiddleTimeFF, selectFFFrames
 from RMS.Formats.FRbin import read as readFR, validFRName
 from RMS.Formats.Vid import readFrame as readVidFrame
 from RMS.Formats.Vid import VidStruct
+from RMS.Formats.Vid import frameTimeModel as vidFrameTimeModel
+from RMS.Formats.Vid import repairFrameTime as repairVidFrameTime
 from RMS.GeoidHeightEGM96 import wgs84toMSLHeight
 from RMS.Routines import Image
 from RMS.Routines.GstreamerCapture import GstVideoFile
@@ -1293,6 +1295,16 @@ class InputTypeUWOVid(InputType):
         """
 
         frame = readVidFrame(self.vid, self.vid_file)
+
+        # A seconds field off by whole seconds is corrected from the frame counter (see Vid.frameTimeModel),
+        #   before frame_time_offset
+        if frame is not None:
+            if repairVidFrameTime(self.vid, self.vid_time_model) != 0:
+                if not self.vid_repaired_frames:
+                    log.info('Frames of {:s} with the seconds field of the timestamp off, corrected from the '
+                             'frame counter (the first at frame counter {:d})'.format(self.file_name, self.vid.seq))
+                self.vid_repaired_frames.add(self.vid.seq)
+
         self.vid.ts, self.vid.tu = self.offsetUnixTime(self.vid.ts, self.vid.tu)
 
         return frame
@@ -1343,6 +1355,13 @@ class InputTypeUWOVid(InputType):
         # Open the vid file
         self.vid = VidStruct()
         self.vid_file = open(self.vid_path, 'rb', buffering=65536)
+
+        # The model of the timestamps from the frame counter, which corrects a seconds field off by whole
+        #   seconds in the frames read (see readNextFrame), and the counters of the corrected frames
+        self.vid_time_model = vidFrameTimeModel(self.vid_file)
+        self.vid_repaired_frames = set()
+        if self.vid_time_model is None:
+            log.info('The timestamps of {:s} are not checked against the frame counter'.format(self.file_name))
 
         # Read one video frame and rewind to beginning
         self.readNextFrame()
