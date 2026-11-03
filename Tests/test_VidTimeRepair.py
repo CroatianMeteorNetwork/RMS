@@ -163,3 +163,34 @@ def test_seconds_off_with_lost_frame_corrected(tmp_path):
     handle, read = readTimes(path, range(n))
     assert np.max(np.abs(read - times)) < 2e-6
     assert len(handle.vid_repaired_frames) == len(bad)
+
+
+@pytest.mark.parametrize('after', [10, 389])
+def test_gap_near_an_end_kept(tmp_path, after):
+
+    # About a second of lost frames (32 frames) near the start or the end of the file, where few sampled frames
+    #   are on one side of the gap: the timestamps are right and nothing is changed
+    n = 400
+    times, counters = regular(n, lost=(after,), n_lost=32)
+    path = str(tmp_path/'endgap.vid')
+    writeVid(path, times, counters)
+
+    handle, read = readTimes(path, range(n))
+    assert np.max(np.abs(read - times)) < 2e-6
+    assert not handle.vid_repaired_frames
+
+
+def test_seconds_off_next_to_lost_frame_corrected(tmp_path):
+
+    # A frame with the seconds field off right before a lost frame (the step of the lost frame between the same
+    #   two sampled frames): corrected
+    n = 600
+    times, counters = regular(n, lost=(250,))
+    stamped = times.copy()
+    stamped[250] -= 1.0
+    path = str(tmp_path/'next.vid')
+    writeVid(path, stamped, counters)
+
+    handle, read = readTimes(path, range(n))
+    assert np.max(np.abs(read - times)) < 2e-6
+    assert len(handle.vid_repaired_frames) == 1
