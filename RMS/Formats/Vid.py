@@ -202,6 +202,30 @@ def frameTimeModel(fid, n_samples=64, tolerance=0.1, max_run=3):
     finally:
         fid.seek(file_pos)
 
+    return fitTimeModel(seqs, secs, usecs, tolerance=tolerance, max_run=max_run)
+
+
+def fitTimeModel(seqs, secs, usecs, tolerance=0.1, max_run=3):
+    """ The model of the frame timestamps from the frame counter, fitted to the headers of sampled frames (see
+        frameTimeModel). Shared by the vid files and the UWO PNG frame dumps, whose headers carry the same fields.
+
+    Arguments:
+        seqs: [list] Frame counters of the sampled frames, in the order of the frames.
+        secs: [list] Seconds fields of their timestamps.
+        usecs: [list] Microseconds fields of their timestamps.
+
+    Keyword arguments:
+        tolerance: [float] Largest difference (s) between a sampled timestamp and the model, apart from whole
+            seconds. 0.1 by default.
+        max_run: [int] Most consecutive sampled frames off the model by whole seconds. 3 by default.
+
+    Return:
+        [tuple] (counter, seconds, offset, period) of the model (see frameTimeModel), or None.
+    """
+
+    if len(seqs) < 8:
+        return None
+
     # The counter has to increase from frame to frame
     seqs = np.array(seqs, dtype=np.int64)
     if np.any(np.diff(seqs) <= 0):
@@ -209,7 +233,7 @@ def frameTimeModel(fid, n_samples=64, tolerance=0.1, max_run=3):
 
     # The period from the median step between the sampled frames (a sample with a seconds field off changes
     #   only its two steps), then the offset of the timestamps from the median
-    sec0, seq0 = secs[0], int(seqs[0])
+    sec0, seq0 = int(secs[0]), int(seqs[0])
     t = (np.array(secs, dtype=np.int64) - sec0) + np.array(usecs)/1e6
     period = float(np.median(np.diff(t)/np.diff(seqs)))
     if not (period > 0):
@@ -239,6 +263,36 @@ def frameTimeModel(fid, n_samples=64, tolerance=0.1, max_run=3):
     return seq0, sec0, float(offset), float(period)
 
 
+def wholeSecondsOff(ts, tu, seq, model, tolerance=0.1):
+    """ The whole seconds by which a timestamp differs from the time its frame counter gives (see fitTimeModel).
+
+    Arguments:
+        ts: [int] Seconds field of the timestamp.
+        tu: [int] Microseconds field.
+        seq: [int] Frame counter.
+        model: [tuple] The model of the timestamps. 0 is returned if None.
+
+    Keyword arguments:
+        tolerance: [float] Largest difference (s) from the model, apart from whole seconds. 0.1 by default.
+
+    Return:
+        [int] The whole seconds the seconds field is off (to be subtracted), 0 if it is not off.
+    """
+
+    if model is None:
+        return 0
+
+    seq0, sec0, offset, period = model
+
+    # The difference of the timestamp from the model, and the whole seconds in it
+    res = (ts - sec0) + tu/1e6 - offset - period*(seq - seq0)
+    n = int(round(res))
+    if (n == 0) or (abs(res - n) >= tolerance):
+        return 0
+
+    return n
+
+
 def repairFrameTime(st, model, tolerance=0.1):
     """ Correct the seconds field of the timestamp of a frame read into the given structure (see readFrame) if
         it differs from the time given by the frame counter by whole seconds.
@@ -254,17 +308,7 @@ def repairFrameTime(st, model, tolerance=0.1):
         [int] The whole seconds added to the seconds field, 0 if the timestamp was not changed.
     """
 
-    if model is None:
-        return 0
-
-    seq0, sec0, offset, period = model
-
-    # The difference of the timestamp from the model, and the whole seconds in it
-    res = (st.ts - sec0) + st.tu/1e6 - offset - period*(st.seq - seq0)
-    n = int(round(res))
-    if (n == 0) or (abs(res - n) >= tolerance):
-        return 0
-
+    n = wholeSecondsOff(st.ts, st.tu, st.seq, model, tolerance=tolerance)
     st.ts -= n
 
     return -n

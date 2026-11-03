@@ -31,6 +31,7 @@ from RMS.Formats.Vid import readFrame as readVidFrame
 from RMS.Formats.Vid import VidStruct
 from RMS.Formats.Vid import frameTimeModel as vidFrameTimeModel
 from RMS.Formats.Vid import repairFrameTime as repairVidFrameTime
+from RMS.Formats.Vid import fitTimeModel, wholeSecondsOff
 from RMS.GeoidHeightEGM96 import wgs84toMSLHeight
 from RMS.Routines import Image
 from RMS.Routines.GstreamerCapture import GstVideoFile
@@ -1985,6 +1986,11 @@ class InputTypeImages(InputType):
 
         self.uwo_png_mode = False
 
+        # The model of the timestamps of UWO PNG frame dumps from their frame counter (see uwoTimeModel), which
+        #   corrects a seconds field off by whole seconds in the frames read, and the counters of the corrected frames
+        self.png_time_model = None
+        self.png_repaired_frames = set()
+
         # Load the first image
         img = self.loadFrame(fr_no=0)
 
@@ -1994,6 +2000,13 @@ class InputTypeImages(InputType):
         if self.uwo_magick_type is not None:
 
             self.uwo_png_mode = True
+
+            # The timestamp model of frame dumps whose headers carry a frame counter, before any time is read
+            if self.uwo_magick_type == "emccd":
+                self.png_time_model = self.uwoTimeModel()
+                if self.png_time_model is None:
+                    log.info('The timestamps of the frames in {:s} are not checked against the frame '
+                             'counter'.format(self.dir_path))
 
             # Get the beginning time
             self.loadFrame(fr_no=0)
@@ -2594,6 +2607,19 @@ class InputTypeImages(InputType):
                     ts = frame[0][6] + (frame[0][7] << 16)
                     tu = frame[0][8] + (frame[0][9] << 16)
 
+                    # A seconds field off by whole seconds is corrected from the frame counter (see
+                    #   uwoTimeModel), before frame_time_offset
+                    if self.png_time_model is not None:
+                        seq = int(frame[0][14]) + (int(frame[0][15]) << 16)
+                        n = wholeSecondsOff(int(ts), int(tu), seq, self.png_time_model)
+                        if n != 0:
+                            if not self.png_repaired_frames:
+                                log.info('Frames in {:s} with the seconds field of the timestamp off, corrected '
+                                         'from the frame counter (the first at frame counter {:d})'.format(
+                                             self.dir_path, seq))
+                            self.png_repaired_frames.add(seq)
+                            ts = int(ts) - n
+
                 else:
 
                     # Read the time from the image for 16 bit images
@@ -2747,6 +2773,33 @@ class InputTypeImages(InputType):
         """
 
         return (self.uwo_png_mode or self.fripon_mode or self.fits_mode) and (not self.cabernet_status)
+
+
+    def uwoTimeModel(self, n_samples=64):
+        """ The model of the timestamps of UWO PNG frame dumps from their frame counter, from the headers of frames
+            spread over the input (see Vid.fitTimeModel: the header of every frame carries its timestamp and a
+            frame counter, and a few frames can have a seconds field off by whole seconds).
+
+        Keyword arguments:
+            n_samples: [int] Number of frames sampled. 64 by default.
+
+        Return:
+            [tuple] The model (see Vid.fitTimeModel), or None if the counter doesn't give the timestamps.
+        """
+
+        seqs, secs, usecs = [], [], []
+        for k in np.unique(np.linspace(0, self.total_frames - 1, min(n_samples, self.total_frames)).astype(int)):
+
+            # The header words of the frame: the first row, byteswapped as when the frame is read (see loadFrame)
+            img = cv2.imread(os.path.join(self.dir_path, self.img_list[k]), -1)
+            if (img is None) or (img.dtype != np.uint16) or (self.getUWOMagickType(img) != "emccd"):
+                continue
+            row = img[0].byteswap().astype(np.int64)
+            secs.append(int(row[6] + (row[7] << 16)))
+            usecs.append(int(row[8] + (row[9] << 16)))
+            seqs.append(int(row[14] + (row[15] << 16)))
+
+        return fitTimeModel(seqs, secs, usecs)
 
 
     def getUWOMagickType(self, img):
