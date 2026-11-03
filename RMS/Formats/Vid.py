@@ -169,9 +169,9 @@ def frameTimeModel(fid, n_samples=64, tolerance=0.1, max_run=3):
             samples off the model are a step in the timestamps. 3 by default.
 
     Return:
-        [tuple] (counter, seconds, offset, period) of the model: the time of a frame with the counter c is
-            seconds + offset + period*(c - counter). None if the counter doesn't give the timestamps of most of
-            the sampled frames.
+        [tuple] (counter, seconds, offset, period, counters, residuals) of the model (see fitTimeModel): the time
+            of a frame with the counter c is seconds + offset + period*(c - counter), plus the residuals of the
+            sampled frames interpolated at c. None if the counter doesn't give the timestamps of the sampled frames.
     """
 
     file_pos = fid.tell()
@@ -205,7 +205,14 @@ def frameTimeModel(fid, n_samples=64, tolerance=0.1, max_run=3):
     return fitTimeModel(seqs, secs, usecs, tolerance=tolerance, max_run=max_run)
 
 
-def fitTimeModel(seqs, secs, usecs, tolerance=0.1, max_run=3):
+# A timestamp with its seconds field off reads exactly whole seconds early: the stamps are written to the
+#   microsecond from the counter, and the model gives them to a fraction of a millisecond, while a real gap in the
+#   timestamps (lost frames) is a multiple of the frame period, which is not a whole number of seconds to within
+#   this tolerance (32 frames of 31.119 ms are 4.2 ms short of a second)
+WHOLE_SECOND_TOLERANCE = 0.002
+
+
+def fitTimeModel(seqs, secs, usecs, tolerance=0.1, max_run=3, whole_tolerance=WHOLE_SECOND_TOLERANCE):
     """ The model of the frame timestamps from the frame counter, fitted to the headers of sampled frames (see
         frameTimeModel). Shared by the vid files and the UWO PNG frame dumps, whose headers carry the same fields.
 
@@ -215,12 +222,15 @@ def fitTimeModel(seqs, secs, usecs, tolerance=0.1, max_run=3):
         usecs: [list] Microseconds fields of their timestamps.
 
     Keyword arguments:
-        tolerance: [float] Largest difference (s) between a sampled timestamp and the model, apart from whole
-            seconds. 0.1 by default.
+        tolerance: [float] Largest difference (s) between a sampled timestamp and the model for the sample to be on
+            the model (a few lost frames). 0.1 by default.
         max_run: [int] Most consecutive sampled frames off the model by whole seconds. 3 by default.
+        whole_tolerance: [float] Largest difference (s) from exactly whole seconds early of a sample off the model.
+            WHOLE_SECOND_TOLERANCE by default.
 
     Return:
-        [tuple] (counter, seconds, offset, period) of the model (see frameTimeModel), or None.
+        [tuple] (counter, seconds, offset, period, counters, residuals) of the model: the line of frameTimeModel
+            and the residuals of the samples on it, between which it is interpolated; or None.
     """
 
     if len(seqs) < 8:
@@ -240,31 +250,41 @@ def fitTimeModel(seqs, secs, usecs, tolerance=0.1, max_run=3):
         return None
     offset = float(np.median(t - period*(seqs - seq0)))
 
-    # The model is used only if it gives the timestamps of all sampled frames apart from whole seconds, and of
-    #   most of them exactly. A sampled frame off by a fraction of a second is a real gap in the timestamps (many
-    #   lost frames), and a long series of samples off by whole seconds a step, which must both be kept as they are
-    res = t - offset - period*(seqs - seq0)
-    whole = np.round(res)
-    if np.any(np.abs(res - whole) >= tolerance):
+    # Most sampled frames have to be on the model
+    on = np.abs(t - offset - period*(seqs - seq0)) < tolerance
+    if np.sum(on) < 0.5*len(t):
         return None
-    on = (whole == 0)
-    if np.sum(on) < 0.5*len(res):
-        return None
-    run = 0
-    for off in ~on:
-        run = run + 1 if off else 0
-        if run > max_run:
-            return None
 
     # The period and the offset refined by a line fit to the samples on the model
     if np.sum(on) >= 3:
         period, offset = np.polyfit(seqs[on] - seq0, t[on], 1)
 
-    return seq0, sec0, float(offset), float(period)
+    # The residuals of the samples on the model, between which the model is interpolated: a few lost frames make
+    #   steps of a frame period in the timestamps, which the line leaves in its residuals
+    res = t - offset - period*(seqs - seq0)
+    seq_on, res_on = seqs[on], res[on]
+
+    # Every sample off the model has to read exactly whole seconds early (the seconds field low) against the
+    #   samples on the model around it: a sample off by anything else, or late, is a real gap or step in the
+    #   timestamps (e.g. many lost frames near an end of the input, which leave few samples after them), and the
+    #   timestamps are then kept as they are. A long series of samples off the model is a step too
+    res = res - np.interp(seqs, seq_on, res_on)
+    whole = np.round(res)
+    off = ~on
+    if np.any(off & ((whole >= 0) | (np.abs(res - whole) >= whole_tolerance))):
+        return None
+    run = 0
+    for o in off:
+        run = run + 1 if o else 0
+        if run > max_run:
+            return None
+
+    return seq0, sec0, float(offset), float(period), seq_on.astype(np.float64), res_on
 
 
-def wholeSecondsOff(ts, tu, seq, model, tolerance=0.1):
-    """ The whole seconds by which a timestamp differs from the time its frame counter gives (see fitTimeModel).
+def wholeSecondsOff(ts, tu, seq, model, tolerance=WHOLE_SECOND_TOLERANCE):
+    """ The whole seconds by which a timestamp reads early compared to the time its frame counter gives (see
+        fitTimeModel).
 
     Arguments:
         ts: [int] Seconds field of the timestamp.
@@ -273,27 +293,29 @@ def wholeSecondsOff(ts, tu, seq, model, tolerance=0.1):
         model: [tuple] The model of the timestamps. 0 is returned if None.
 
     Keyword arguments:
-        tolerance: [float] Largest difference (s) from the model, apart from whole seconds. 0.1 by default.
+        tolerance: [float] Largest difference (s) from exactly whole seconds early. WHOLE_SECOND_TOLERANCE by
+            default.
 
     Return:
-        [int] The whole seconds the seconds field is off (to be subtracted), 0 if it is not off.
+        [int] The whole seconds the seconds field is off (negative: to be subtracted), 0 if it is not off.
     """
 
     if model is None:
         return 0
 
-    seq0, sec0, offset, period = model
+    seq0, sec0, offset, period, seq_on, res_on = model
 
-    # The difference of the timestamp from the model, and the whole seconds in it
-    res = (ts - sec0) + tu/1e6 - offset - period*(seq - seq0)
+    # The difference of the timestamp from the model, interpolated between the samples on the model around the
+    #   frame: only exactly whole seconds early is the seconds field off
+    res = (ts - sec0) + tu/1e6 - offset - period*(seq - seq0) - float(np.interp(seq, seq_on, res_on))
     n = int(round(res))
-    if (n == 0) or (abs(res - n) >= tolerance):
+    if (n >= 0) or (abs(res - n) >= tolerance):
         return 0
 
     return n
 
 
-def repairFrameTime(st, model, tolerance=0.1):
+def repairFrameTime(st, model, tolerance=WHOLE_SECOND_TOLERANCE):
     """ Correct the seconds field of the timestamp of a frame read into the given structure (see readFrame) if
         it differs from the time given by the frame counter by whole seconds.
 
@@ -302,7 +324,8 @@ def repairFrameTime(st, model, tolerance=0.1):
         model: [tuple] The model of the timestamps of the file (see frameTimeModel). Nothing is done if None.
 
     Keyword arguments:
-        tolerance: [float] Largest difference (s) from the model, apart from whole seconds. 0.1 by default.
+        tolerance: [float] Largest difference (s) from exactly whole seconds early. WHOLE_SECOND_TOLERANCE by
+            default.
 
     Return:
         [int] The whole seconds added to the seconds field, 0 if the timestamp was not changed.

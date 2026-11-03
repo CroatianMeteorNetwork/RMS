@@ -160,3 +160,33 @@ def test_plain_images_untouched(tmp_path):
     handle = InputTypeImages(str(d), cr.Config(), beginning_time=datetime.datetime(2026, 10, 20, 1, 2, 3), fps=25.0)
     assert not handle.uwo_png_mode
     assert handle.png_time_model is None
+
+
+@pytest.mark.parametrize('after', [10, 389])
+def test_gap_near_an_end_kept(tmp_path, after):
+
+    # About a second of lost frames (32 frames) near the start or the end of the input, where few sampled frames
+    #   are on one side of the gap: the timestamps are right and nothing is changed
+    n = 400
+    times, counters = regular(n, lost=(after,), n_lost=32)
+    path = str(tmp_path/'endgap')
+    writeDumps(path, times, counters)
+
+    handle, read = readTimes(path, n)
+    assert np.max(np.abs(read - times)) < 2e-6
+    assert not handle.png_repaired_frames
+
+
+def test_seconds_late_kept(tmp_path):
+
+    # Frames reading a second late are not the seconds field off (it only reads low): kept as they are
+    n = 400
+    times, counters = regular(n)
+    stamped = times.copy()
+    stamped[100:107] += 1.0
+    path = str(tmp_path/'late')
+    writeDumps(path, stamped, counters)
+
+    handle, read = readTimes(path, n)
+    assert np.max(np.abs(read - stamped)) < 2e-6
+    assert not handle.png_repaired_frames
