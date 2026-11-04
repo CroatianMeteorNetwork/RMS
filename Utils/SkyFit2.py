@@ -11939,6 +11939,7 @@ class PlateTool(QtWidgets.QMainWindow):
         picks = []  # N x args_dict array for addCentroid
         pick_frame_indices = []  # (N,) array of frame indices
         pick_frame_times = []  # (N,) array of frame times
+        pick_frame_numbers = []  # (N,) frames of the picks, in the files which have them
         fragment_points = []  # (frame, fragment_id, x, y) of the points of additional fragments
 
         # wrap in try except to catch unknown errors
@@ -12023,6 +12024,9 @@ class PlateTool(QtWidgets.QMainWindow):
                         pick_frame_times.append(datetime.datetime.strptime(line[pick_frame_times_idx], 
                                                                            '%Y-%m-%dT%H:%M:%S.%f'))
 
+                        if frame_ind is not None:
+                            pick_frame_numbers.append(int(line[frame_ind]))
+
                         # Load in pick parameters, use default for other values 
                         picks.append({
                             'x_centroid': cx,
@@ -12037,20 +12041,28 @@ class PlateTool(QtWidgets.QMainWindow):
                             'trajectory_use': (line[traj_ind] == 'True') if traj_ind is not None else True,
                         })
 
-            # Converts times into frame indices, accounting for floating-point errors
-            pick_frame_indices = []
             frame_count = self.img_handle.total_frames
-            time_idx = 0
-            for i in range(frame_count):
-                frame_time = self.img_handle.currentFrameTime(frame_no=i, dt_obj=True)
-                time = pick_frame_times[time_idx]
-                if frame_time == time or \
-                    frame_time == time + datetime.timedelta(microseconds=1) or \
-                    frame_time == time - datetime.timedelta(microseconds=1):
-                    pick_frame_indices.append(i)
-                    time_idx += 1
-                if time_idx >= len(pick_frame_times):
-                    break
+
+            # Files with annotations have the frame of every pick. Their times can't give it, as they include the
+            #   rolling shutter correction. Frames that the input doesn't have mean it's the wrong file, which
+            #   the times show for the other files
+            if frame_ind is not None:
+                pick_frame_indices = [frame for frame in pick_frame_numbers if 0 <= frame < frame_count]
+
+            # Converts times into frame indices, accounting for floating-point errors
+            else:
+                pick_frame_indices = []
+                time_idx = 0
+                for i in range(frame_count):
+                    frame_time = self.img_handle.currentFrameTime(frame_no=i, dt_obj=True)
+                    time = pick_frame_times[time_idx]
+                    if frame_time == time or \
+                        frame_time == time + datetime.timedelta(microseconds=1) or \
+                        frame_time == time - datetime.timedelta(microseconds=1):
+                        pick_frame_indices.append(i)
+                        time_idx += 1
+                    if time_idx >= len(pick_frame_times):
+                        break
 
             # if arrays are different dimensions raise error
             if len(picks) != len(pick_frame_indices):

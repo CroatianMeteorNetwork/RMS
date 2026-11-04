@@ -257,6 +257,77 @@ def test_load_legacy_ecsv(tmp_path):
     assert list(loaded.fragment_picks.keys()) == [11]
 
 
+def shiftEcsvTimes(file_path, milliseconds):
+    """ Move the times of the rows of an ECSV file, as the rolling shutter correction does. """
+
+    with open(file_path) as f:
+        lines = f.read().splitlines()
+
+    header_seen = False
+    for i, line in enumerate(lines):
+
+        if line.startswith('#'):
+            continue
+
+        if not header_seen:
+            header_seen = True
+            continue
+
+        time_str, rest = line.split(',', 1)
+
+        # Frames with only additional fragments have no main time
+        if not time_str:
+            continue
+
+        time = datetime.datetime.strptime(time_str, '%Y-%m-%dT%H:%M:%S.%f')
+        time += datetime.timedelta(milliseconds=milliseconds)
+        lines[i] = time.strftime('%Y-%m-%dT%H:%M:%S.%f') + ',' + rest
+
+    with open(file_path, 'w') as f:
+        f.write('\n'.join(lines) + '\n')
+
+
+def test_load_rolling_shutter_times(tmp_path, monkeypatch):
+    """ A file with annotations gets its frames from the frame numbers: times with the rolling shutter correction
+        don't match the times of the frames. """
+
+    reduction = Reduction(tmp_path)
+    reduction.addPick(10, 110.0, 200.0)
+    reduction.addPick(11, 111.0, 200.0, flare=True)
+    reduction.addPick(12, 112.0, 200.0)
+    reduction.addFragmentPoint(13, 1, 113.0, 210.0)
+    file_path, _, _, _ = saveAndRead(reduction)
+    shiftEcsvTimes(file_path, 13)
+
+    # The message of a file which can't be read needs a running application
+    monkeypatch.setattr('Utils.SkyFit2.qmessagebox', lambda **kwargs: None)
+
+    loaded = Reduction(tmp_path)
+    pick_list = loaded.loadECSV(file_path)
+
+    assert sorted(pick_list.keys()) == [10, 11, 12]
+    assert pick_list[11]['x_centroid'] == pytest.approx(111.0)
+    assert pick_list[11]['flare']
+    assert sorted(loaded.fragment_picks.keys()) == [13]
+
+
+def test_load_frame_number_out_of_range(tmp_path, monkeypatch):
+    """ A file with annotations whose frames are not in the input is refused, as one whose times don't match. """
+
+    reduction = Reduction(tmp_path)
+    reduction.addPick(200, 110.0, 200.0, flare=True)
+    file_path, _, _, _ = saveAndRead(reduction)
+
+    loaded = Reduction(tmp_path)
+    loaded.img_handle.total_frames = 100
+
+    messages = []
+    monkeypatch.setattr('Utils.SkyFit2.qmessagebox', lambda **kwargs: messages.append(kwargs))
+
+    assert loaded.loadECSV(file_path) is None
+    assert len(messages) == 1
+
+
 def test_valid_ecsv(tmp_path):
     """ The column declarations in the header match the data columns, including the empty values. """
 
