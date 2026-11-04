@@ -130,6 +130,10 @@ def loadConfigFromDirectory(cml_args_config, dir_path):
             # Load the config file from the full path
             config_file = os.path.abspath(cml_args_config[0].replace('"', ''))
 
+            # A missing file would be read as an empty one, and reported as not configured
+            if not os.path.isfile(config_file):
+                raise FileNotFoundError("The config file does not exist: {:s}".format(config_file))
+
 
         if config_file is None:
             raise FileNotFoundError("A config file could not be found in directory: {:s}, config arg: {}".format(
@@ -861,12 +865,14 @@ def parseSystem(config, parser):
     
     section= "System"
     if not parser.has_section(section):
-        raise RuntimeError("Not configured!")
-    
+        raise RuntimeError("Not configured! There is no [System] section in the config file: {}".format(
+            config.config_file_name))
+
     try:
         config.stationID = parser.get(section, "stationID")
     except NoOptionError:
-        raise RuntimeError("Not configured!")
+        raise RuntimeError("Not configured! There is no stationID in the [System] section of the config file: "
+                           "{}".format(config.config_file_name))
 
 
     if parser.has_option(section, "latitude"):

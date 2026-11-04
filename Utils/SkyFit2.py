@@ -191,7 +191,8 @@ from RMS.ExtractStars import extractStarsAndSave, extractStarsFF
 import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.Platepar import Platepar, getCatalogStarsImagePositions
 from RMS.Formats.FFfile import convertFRNameToFF, constructFFName
-from RMS.Formats.FrameInterface import detectInputTypeFolder, detectInputTypeFile
+from RMS.Formats.FrameInterface import detectInputTypeFolder, detectInputTypeFile, checkIfVideoFile, \
+    beginningTimeFromVideoName, BEGINNING_TIME_FORMATS
 from RMS.Formats.FTPdetectinfo import writeFTPdetectinfo
 from RMS.Formats import StarCatalog
 from RMS.Pickling import loadPickle, savePickle
@@ -3345,6 +3346,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # If the file is being loaded, detect the input type
         if loaded_file:
+
+            detect_input_type = False
 
             if not hasattr(self, "img_handle"):
                 detect_input_type = True
@@ -9347,10 +9350,14 @@ class PlateTool(QtWidgets.QMainWindow):
                 del dic[k]
 
 
+        # The beginning time doesn't pass the filter above (a datetime inherits from date), but without it an input
+        #   with no time in its name could not be opened again
+        dic['beginning_time'] = self.beginning_time
+
         # Save the FF file name if the input type is FF
         if self.img_handle.input_type == 'ff':
             dic['ff_file'] = self.img_handle.name()
-            
+
         savePickle(dic, self.dir_path, 'skyFitMR_latest.state')
         print("Saved state to file")
 
@@ -9494,6 +9501,96 @@ class PlateTool(QtWidgets.QMainWindow):
             self.loadState(os.path.dirname(file_), os.path.basename(file_))
 
 
+    def findDataFileOfState(self, dir_path, saved_path, session_input=None):
+        """ Find the data file of a state: next to the state, at the path saved in it, the one open in the session if
+            it's the same, and otherwise ask where it is.
+
+        Arguments:
+            dir_path: [str] Folder of the state.
+            saved_path: [str] Path of the data file saved in the state.
+
+        Keyword arguments:
+            session_input: [str] The data file open in the session if it's the one of the state, None otherwise.
+
+        Return:
+            [str] The path, or None if the user cancelled.
+        """
+
+        saved_path = saved_path.replace('\\', os.sep).replace('/', os.sep)
+        name = os.path.basename(saved_path)
+
+        data_file = os.path.join(dir_path, name)
+
+        if not os.path.isfile(data_file):
+            data_file = saved_path
+
+        if (not os.path.isfile(data_file)) and (session_input is not None) and os.path.isfile(session_input):
+            data_file = session_input
+
+        if not os.path.isfile(data_file):
+            data_file = QtWidgets.QFileDialog.getOpenFileName(self,
+                "Select the data file of this state: {:s}".format(name), dir_path)[0]
+
+        return data_file if data_file else None
+
+
+    def sameInputAsSession(self, variables):
+        """ Whether the video of a state is the one open in the running session: the same file name from the same
+            station, as the names alone can repeat (e.g. the same name for the videos of several cameras).
+
+        Arguments:
+            variables: [dict] Contents of the state.
+        """
+
+        state_input = str(variables.get("input_path") or "").replace('\\', '/')
+        session_input = str(getattr(self, "input_path", None) or "").replace('\\', '/')
+
+        return (os.path.basename(state_input) != "") \
+            and (os.path.basename(state_input) == os.path.basename(session_input)) \
+            and (getattr(variables.get("config"), "stationID", None) == getattr(self.config, "stationID", None))
+
+
+    def beginningTimeOfState(self, variables):
+        """ The beginning time to load a state with from a running session, where there is no command line to
+            give it with. Only needed for a video which has it neither in the state nor in its name: it's the
+            time of the session if the state is on the same video, otherwise it's asked for.
+
+        Arguments:
+            variables: [dict] Contents of the state.
+
+        Return:
+            [datetime] The time. None if it's not needed, False if the user cancelled.
+        """
+
+        input_name = os.path.basename(str(variables.get("input_path") or "").replace('\\', '/'))
+
+        if (variables.get("beginning_time") is not None) or (not checkIfVideoFile(input_name)) \
+            or (beginningTimeFromVideoName(input_name) is not None):
+
+            return None
+
+        if self.sameInputAsSession(variables) and (getattr(self, "beginning_time", None) is not None):
+            return self.beginning_time
+
+        while True:
+
+            text, ok = QtWidgets.QInputDialog.getText(self, "Beginning time of the video",
+                "The time of the beginning of {:s} is neither in the state nor in the file name.\n"
+                "Enter it as YYYYMMDD_hhmmss:".format(input_name))
+
+            if (not ok) or (not text.strip()):
+                return False
+
+            for time_format in BEGINNING_TIME_FORMATS:
+                try:
+                    return datetime.datetime.strptime(text.strip(), time_format)
+                except ValueError:
+                    pass
+
+            qmessagebox(title="Beginning time of the video", message="The time could not be read, please enter "
+                "it as YYYYMMDD_hhmmss.", message_type="warning")
+
+
     def loadState(self, dir_path, state_name, beginning_time=None, mask=None):
         """ Loads state with path to file dir_path and file name state_name. Works mid-program and at the start of
         the program (if done properly).
@@ -9513,9 +9610,85 @@ class PlateTool(QtWidgets.QMainWindow):
         """
 
         variables = loadPickle(dir_path, state_name)
+
+        # From a running session. This goes before anything of the state replaces the session, which is left as it
+        #   was if the user cancels
+        state_data_file = None
+        if hasattr(self, "central"):
+
+            saved_input = str(variables.get("input_path") or "")
+            if "." in os.path.basename(saved_input.replace('\\', '/')):
+
+                session_input = self.input_path if self.sameInputAsSession(variables) else None
+                state_data_file = self.findDataFileOfState(dir_path, saved_input, session_input)
+
+                if state_data_file is None:
+                    return
+
+            if beginning_time is None:
+                beginning_time = self.beginningTimeOfState(variables)
+
+                if beginning_time is False:
+                    return
+
         for k, v in variables.items():
             setattr(self, k, v)
-        
+
+        # Whether the state was saved before the readout time of the rolling shutter could be set (see the end)
+        old_rolling_shutter = "rolling_shutter_readout" not in vars(self.config)
+
+        # A state only holds what existed when it was saved. Options added to the config since get their
+        #   default, what the state does hold is left as it is
+        for k, v in vars(cr.Config()).items():
+            if not hasattr(self.config, k):
+                setattr(self.config, k, v)
+
+        # Force the CV2 backend, as in a new session. A state saved before it was forced has the GStreamer one
+        self.config.media_backend = 'cv2'
+
+        # The same for the variables added to the constructor since, with the values it gives them
+        state_defaults = {
+            '_file_manager_custom_locations': [],
+            '_original_band_ratios': self.config.star_catalog_band_ratios,
+            '_original_catalog_file': self.config.star_catalog_file,
+            '_original_config_gamma': None,
+            '_show_calibration_dialog_on_start': False,
+            'closest_planet_indx': None,
+            'closest_type': None,
+            'current_autopan_x': None,
+            'current_autopan_y': None,
+            'dark_source_path': None,
+            'flat_image_data': None,
+            'flat_source_path': None,
+            'fps': None,
+            'geo_points_input': None,
+            'last_mask_dir': None,
+            'mask_source_path': None,
+            'mask_use_flat_background': False,
+            'old_autopan_x': None,
+            'old_autopan_y': None,
+            'override_gamma': 1.0,
+            'override_intensity_threshold': 18,
+            'override_max_feature_ratio': 0.8,
+            'override_max_stars': 200,
+            'override_neighborhood_size': 10,
+            'override_roundness_threshold': 0.5,
+            'override_segment_radius': 4,
+            'photom_fit_resids': None,
+            'photom_fit_stddev': None,
+            'platepar_modified': False,
+            'previous_picks': [],
+            'star_detection_override_data': {},
+            'star_detection_override_enabled': False,
+            'star_fwhm': None,
+            'use_fr_files': False,
+        }
+        for k, v in state_defaults.items():
+
+            # Check the state, not the object: when loading from a running session it holds the previous data
+            if k not in variables:
+                setattr(self, k, v)
+
         # Init matplotlib figure references (stripped from saved state, not picklable)
         if not hasattr(self, 'fig_astrometry'):
             self.fig_astrometry = None
@@ -9659,7 +9832,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         # Update possibly missing input_path variable
-        if not hasattr(self, "input_path"):
+        if "input_path" not in variables:
             self.input_path = dir_path
 
         # Update the input path if it exists
@@ -9672,7 +9845,16 @@ class PlateTool(QtWidgets.QMainWindow):
                 # Check if the last part of the input path is a file or a directory (check for the dot)
                 tmp_name = os.path.basename(self.input_path)
                 if "." in tmp_name:
-                    self.input_path = os.path.join(dir_path, tmp_name)
+
+                    data_file = state_data_file or self.findDataFileOfState(dir_path, self.input_path)
+
+                    # The image is needed to open the state
+                    if not data_file:
+                        print("The data file of the state was not found:", tmp_name)
+                        sys.exit()
+
+                    self.input_path = data_file
+
                 else:
                     self.input_path = dir_path
 
@@ -9704,18 +9886,27 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         # Update the possibly missing begin time
-        if not hasattr(self, "beginning_time"):
+        if "beginning_time" not in variables:
             self.beginning_time = beginning_time
 
 
-        # Add the mask
-        if not hasattr(self, "mask"):
+        # Add the mask (check the state, hasattr would find the mask() method of the window)
+        if "mask" not in variables:
             self.mask = mask
 
 
-        # If the previous beginning time is None and the new one is not, update the beginning time
-        if (self.beginning_time is None) and (beginning_time is not None):
+        # A beginning time given when loading takes precedence over the one in the state
+        if beginning_time is not None:
             self.beginning_time = beginning_time
+
+        # The image handle of an old state holds the beginning time, keep it as the handle won't be saved again
+        elif (self.beginning_time is None) and (variables.get("img_handle") is not None):
+            self.beginning_time = getattr(self.img_handle, "beginning_datetime", None)
+
+            # With a single image the handle took the given time as the one of frame 100 and moved it back to
+            #   frame 0. Undo that, or the time would be moved twice when the handle is created again
+            if (self.beginning_time is not None) and getattr(self.img_handle, "single_image_mode", False):
+                self.beginning_time += datetime.timedelta(seconds=100/self.img_handle.fps)
 
 
         if not hasattr(self, "pick_list"):
@@ -9815,7 +10006,15 @@ class PlateTool(QtWidgets.QMainWindow):
             for entry in self.paired_stars:
                 
                 img_coords, sky_coords = entry
-                x, y, fwhm, intens_acc, snr = img_coords
+
+                # The oldest states only hold x, y and the intensity
+                if len(img_coords) == 3:
+                    x, y, intens_acc = img_coords
+                    fwhm, snr = 0.0, 1.0
+
+                else:
+                    x, y, fwhm, intens_acc, snr = img_coords
+
                 sky_obj = CatalogStar(*sky_coords)
 
                 paired_stars_new.addPair(x, y, fwhm, intens_acc, sky_obj, snr=snr)
@@ -9880,7 +10079,7 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             
             # Get and set the new img_handle
-            self.detectInputType(load=True)  
+            self.detectInputType(load=True, beginning_time=self.beginning_time)
             self.img.changeHandle(self.img_handle)
             self.img_zoom.changeHandle(self.img_handle)
 
@@ -9910,6 +10109,13 @@ class PlateTool(QtWidgets.QMainWindow):
         # Update the FPS if forced
         if hasattr(self, 'fps'):
             self.setFPS()
+
+        # A state saved before the readout time could be set was reduced with the rolling shutter correction over
+        #   a whole frame. Keep it, or saving the state again would move the times of its picks by up to a frame
+        if old_rolling_shutter and (self.config.deinterlace_order == -1):
+            self.config.rolling_shutter_readout = 1.0/(getattr(self.img_handle, 'fps', None) or self.config.fps)
+            print("State saved before rolling_shutter_readout: keeping the correction over a whole frame "
+                  "({:.4f} s)".format(self.config.rolling_shutter_readout))
 
 
     def _isTextInputFocused(self):
@@ -17874,7 +18080,20 @@ if __name__ == '__main__':
     if cml_args.input_path is not None and cml_args.input_path.endswith('.state'):
 
         dir_path, state_name = os.path.split(cml_args.input_path)
-        config = cr.loadConfigFromDirectory(cml_args.config if cml_args.config is not None else '.', cml_args.input_path)
+        config_arg = cml_args.config if cml_args.config is not None else '.'
+
+        # The state carries its own config, this one only locates the mask. A folder without a config that can
+        #   be used must not stop the state from loading, only a config file given by its path has to be valid
+        try:
+            config = cr.loadConfigFromDirectory(config_arg, cml_args.input_path)
+
+        except Exception as e:
+            if config_arg[0] != '.':
+                raise
+
+            print("Locating the mask with the default config, none could be loaded from the folder of the "
+                  "state: {}".format(e))
+            config = cr.Config()
 
         # Create plate_tool without calling its constructor then calling loadstate
         plate_tool = PlateTool.__new__(PlateTool)
