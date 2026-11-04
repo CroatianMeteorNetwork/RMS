@@ -15,10 +15,10 @@ pytest.importorskip("pyqtgraph")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pyqtgraph as pg
-from pyqtgraph.Qt import QtWidgets
+from pyqtgraph.Qt import QtCore, QtGui, QtTest, QtWidgets
 
 from RMS.Formats.Platepar import Platepar
-from RMS.Routines.CustomPyqtgraphClasses import AnnotationsWidget, FRAGMENT_COLORS
+from RMS.Routines.CustomPyqtgraphClasses import AnnotationsWidget, cleanNote, FRAGMENT_COLORS, NOTE_MAX_LENGTH
 from Utils.SkyFit2 import GREAT_CIRCLE_COLOR, PlateTool
 
 
@@ -613,6 +613,135 @@ def test_apply_astrometry_refuses_frames_without_main_pick(tmp_path):
         assert f.read() == original
 
 
+def test_note_columns(tmp_path):
+    """ The notes are the last columns, only for the fragments that have notes. """
+
+    reduction = Reduction(tmp_path)
+    reduction.addPick(10, 110.0, 200.0, note='first point')
+    reduction.addPick(11, 111.0, 200.0)
+    reduction.addFragmentPoint(11, 1, 111.0, 210.0)
+    reduction.addFragmentPoint(11, 2, 111.0, 220.0)
+    reduction.fragment_picks[11][2]['note'] = 'splits here'
+
+    _, _, columns, rows = saveAndRead(reduction)
+
+    assert columns[-2:] == ['note', 'note2']
+    assert 'note1' not in columns
+    assert column(columns, rows, 'note') == ['first point', '']
+    assert column(columns, rows, 'note2') == ['', 'splits here']
+
+
+def test_note_alone_is_an_annotation(tmp_path):
+    """ A note is enough to write the annotation columns, which are needed to read it back. """
+
+    reduction = Reduction(tmp_path)
+    reduction.addPick(10, 110.0, 200.0, note='first point')
+
+    _, _, columns, _ = saveAndRead(reduction)
+
+    assert columns == LEGACY_COLUMNS + ['frame_number', 'flare', 'trajectory_use', 'note']
+
+
+def test_no_note_columns_without_notes(tmp_path):
+    """ Empty notes and the notes of removed picks, whose data stays in the pick, write no columns. """
+
+    reduction = Reduction(tmp_path)
+    reduction.addPick(10, 110.0, 200.0, note='  ')
+    reduction.addPick(11, 111.0, 200.0)
+    reduction.addPick(12, 112.0, 200.0, note='removed')
+    reduction.pick_list[12]['x_centroid'] = None
+
+    _, _, columns, rows = saveAndRead(reduction)
+
+    assert columns == LEGACY_COLUMNS
+    assert len(rows) == 2
+
+
+def test_note_round_trip(tmp_path):
+    """ Saving and loading the ECSV keeps the notes of every fragment. """
+
+    reduction = Reduction(tmp_path)
+    reduction.addPick(10, 110.0, 200.0, note='first point')
+    reduction.addPick(11, 111.0, 200.0)
+    reduction.addFragmentPoint(11, 1, 111.0, 210.0)
+    reduction.addFragmentPoint(12, 1, 112.0, 210.0)
+    reduction.fragment_picks[12][1]['note'] = 'seen alone'
+    file_path, _, _, _ = saveAndRead(reduction)
+
+    loaded = Reduction(tmp_path)
+    pick_list = loaded.loadECSV(file_path)
+
+    assert pick_list[10]['note'] == 'first point'
+    assert pick_list[11]['note'] == ''
+    assert loaded.fragment_picks[11][1]['note'] == ''
+    assert loaded.fragment_picks[12][1]['note'] == 'seen alone'
+
+
+def test_note_every_character_in_every_reader(tmp_path):
+    """ Every character a note can have is read back by astropy, by SkyFit2 and by the call of WMPL, which
+        doesn't handle quoted values, also after astropy rewrites the file as ApplyAstrometryECSV does.
+    """
+
+    table_module = pytest.importorskip("astropy.table")
+
+    # With the space in the middle, as the ends of a note are stripped
+    characters = [chr(code) for code in range(0x21, 0x7F)]
+    note = cleanNote(''.join(characters[:40]) + ' ' + ''.join(characters[40:]))
+    assert len(note) == len(characters) - 3 + 1
+
+    reduction = Reduction(tmp_path)
+    reduction.addPick(10, 110.0, 200.0, note=note)
+    reduction.addPick(11, 111.0, 200.0)
+    reduction.addFragmentPoint(11, 1, 111.0, 210.0)
+    reduction.fragment_picks[11][1]['note'] = note
+    file_path, _, _, _ = saveAndRead(reduction)
+
+    def checkReaders():
+
+        table = table_module.Table.read(file_path, format='ascii.ecsv')
+        assert str(table['note'][0]) == note
+        assert str(table['note1'][1]) == note
+
+        data = np.loadtxt(file_path, comments='#', delimiter=',', dtype=str)
+        header = [name.strip() for name in data[0].tolist()]
+        assert data[1, header.index('note')].strip() == note
+        assert data[2, header.index('note1')].strip() == note
+        assert float(data[1, header.index('x_image')]) == pytest.approx(110.0)
+
+        loaded = Reduction(tmp_path)
+        assert loaded.loadECSV(file_path)[10]['note'] == note
+        assert loaded.fragment_picks[11][1]['note'] == note
+
+    checkReaders()
+
+    table = table_module.Table.read(file_path, format='ascii.ecsv')
+    table.write(file_path, format='ascii.ecsv', delimiter=',', overwrite=True)
+
+    checkReaders()
+
+
+def test_clean_note():
+    """ Only plain ASCII on one line is kept, without the characters that break other readers. """
+
+    assert cleanNote('  fragmentación, "doble" #2\n ') == 'fragmentacion doble 2'
+    assert cleanNote('flare → split') == 'flare  split'
+    assert cleanNote("operator's guess (maybe); see frame 3") == "operator's guess (maybe); see frame 3"
+    assert len(cleanNote('x'*(NOTE_MAX_LENGTH + 50))) == NOTE_MAX_LENGTH
+
+
+def test_saved_note_is_clean(tmp_path):
+    """ A note with characters that could not be written, e.g. from a file edited by hand, doesn't break the
+        file. """
+
+    reduction = Reduction(tmp_path)
+    reduction.addPick(10, 110.0, 200.0, note='one, "two" #three\nfour')
+
+    file_path, _, columns, rows = saveAndRead(reduction)
+
+    assert column(columns, rows, 'note') == ['one two threefour']
+    assert all(len(row) == len(columns) for row in rows)
+
+
 class Gui(object):
     """ Stand-in for PlateTool with what the Annotations tab uses. """
 
@@ -665,6 +794,7 @@ def test_widget_without_data(qapp):
     assert widget.currentPick() is None
     assert not widget.flare.isEnabled()
     assert not widget.trajectory_use.isEnabled()
+    assert not widget.note.isEnabled()
 
 
 def test_widget_main_fragment(widget):
@@ -721,3 +851,96 @@ def test_widget_secondary_fragment(widget):
     widget.gui.frame = 10
     widget.fragment.setCurrentIndex(0)
     assert widget.trajectory_use.isEnabled() and widget.trajectory_use.isChecked()
+
+
+def test_widget_note_characters(widget):
+    """ The characters a note can't have are removed while it is typed or pasted, and its length limited. """
+
+    # Inserting text is what pasting does
+    widget.note.insert('Fragmentación, "doble" #1')
+    assert widget.note.text() == 'Fragmentacion doble 1'
+    assert widget.gui.pick_list[10]['note'] == 'Fragmentacion doble 1'
+
+    QtTest.QTest.keyClicks(widget.note, ', end #')
+    assert widget.note.text() == 'Fragmentacion doble 1 end '
+
+    widget.note.clear()
+    widget.note.insert('x'*(NOTE_MAX_LENGTH + 50))
+    assert len(widget.note.text()) == NOTE_MAX_LENGTH
+    assert len(widget.gui.pick_list[10]['note']) == NOTE_MAX_LENGTH
+
+
+@pytest.fixture
+def focused_note(qapp, widget):
+    """ The Annotations tab in a window, with the keyboard on the note. """
+
+    widget.show()
+    widget.activateWindow()
+    qapp.processEvents()
+
+    widget.note.setFocus()
+    qapp.processEvents()
+    assert widget.note.hasFocus()
+
+    yield widget
+
+    widget.close()
+
+
+def test_enter_leaves_the_note(qapp, focused_note):
+    """ Enter returns the keyboard to the shortcuts. The field still has the focus when the key reaches the
+        main window, whose shortcuts don't run while a text input has it.
+    """
+
+    focus_seen = []
+    focused_note.keyPressEvent = lambda event: focus_seen.append(focused_note.note.hasFocus())
+
+    QtTest.QTest.keyClick(focused_note.note, QtCore.Qt.Key.Key_Return)
+    assert focus_seen == [True]
+
+    qapp.processEvents()
+    assert not focused_note.note.hasFocus()
+
+
+def test_escape_leaves_the_note(qapp, focused_note):
+    """ Esc returns the keyboard to the shortcuts, which focusing the image item doesn't do by itself. """
+
+    tool = SimpleNamespace(_isTextInputFocused=lambda: PlateTool._isTextInputFocused(None),
+                           img_frame=SimpleNamespace(setFocus=lambda: None), star_pick_mode=False)
+
+    event = QtGui.QKeyEvent(QtCore.QEvent.Type.KeyPress, QtCore.Qt.Key.Key_Escape,
+                            QtCore.Qt.KeyboardModifier.NoModifier)
+
+    assert PlateTool.eventFilter(tool, focused_note.note, event)
+    assert not focused_note.note.hasFocus()
+
+
+def test_widget_note_of_each_point(widget):
+    """ Every point has its own note, and the field is only available on the frames with a point. """
+
+    assert widget.note.isEnabled() and (widget.note.text() == '')
+    widget.note.insert('main note')
+
+    # Fragment 1 has no point on this frame yet
+    widget.fragment.setCurrentIndex(1)
+    assert not widget.note.isEnabled() and (widget.note.text() == '')
+
+    widget.gui.fragment_picks = {10: {1: {'x_centroid': 1.0, 'y_centroid': 1.0}}}
+    widget.updateAnnotations()
+    assert widget.note.isEnabled() and (widget.note.text() == '')
+
+    widget.note.insert('fragment note')
+    assert widget.gui.fragment_picks[10][1]['note'] == 'fragment note'
+    assert widget.gui.pick_list[10]['note'] == 'main note'
+
+    widget.fragment.setCurrentIndex(0)
+    assert widget.note.text() == 'main note'
+
+    # Another frame without picks
+    widget.gui.frame = 11
+    widget.updateAnnotations()
+    assert not widget.note.isEnabled() and (widget.note.text() == '')
+
+    widget.gui.frame = 10
+    widget.fragment.setCurrentIndex(1)
+    assert widget.note.isEnabled() and (widget.note.text() == 'fragment note')

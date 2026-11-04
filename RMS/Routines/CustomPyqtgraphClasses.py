@@ -20,6 +20,7 @@ from RMS.Routines.SkyFitHelp import HELP_STYLE, buildHelpHome, buildHelpTopic, s
 import time
 import re
 import sys
+import unicodedata
 
 
 class _CornerHelpOverlay(QtCore.QObject):
@@ -1991,6 +1992,38 @@ FRAGMENT_COLORS = [
 ]
 
 
+# Longest note of a pick, in characters
+NOTE_MAX_LENGTH = 140
+
+
+def noteCharacters(text):
+    """ Keep the characters of a note that every reader of the ECSV can read: plain ASCII on one line, with
+        accented letters written without the accent. A comma or a # would make WMPL unable to load the file,
+        as it doesn't handle quoted values and takes # as the start of a comment, and other characters depend
+        on the encoding of the platform.
+    """
+
+    text = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('ascii')
+
+    return re.sub(r'[^\x20-\x7E]|[,#"]', '', text)
+
+
+def cleanNote(note):
+    """ Return a note of a pick as it is written to the ECSV. """
+
+    return noteCharacters(note)[:NOTE_MAX_LENGTH].strip()
+
+
+class NoteValidator(QtGui.QValidator):
+    """ Remove the characters a note can't have while it is typed or pasted. """
+
+    def validate(self, text, pos):
+
+        clean = noteCharacters(text)
+
+        return QtGui.QValidator.State.Acceptable, clean, max(0, pos - (len(text) - len(clean)))
+
+
 class AnnotationsWidget(QtWidgets.QWidget, ScaledSizeHelper):
     """ Manual reduction tab for annotating the picks on the current frame. The normal picks are the main
         fragment (0). While another fragment is selected, picking adds and removes the points of that
@@ -2035,6 +2068,20 @@ class AnnotationsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.trajectory_use.clicked.connect(self.onAnnotationChanged)
         layout.addWidget(self.trajectory_use)
 
+        layout.addWidget(QtWidgets.QLabel('Note'))
+        self.note = QtWidgets.QLineEdit()
+        self.note.setMaxLength(NOTE_MAX_LENGTH)
+        self.note.setValidator(NoteValidator(self.note))
+        self.note.setToolTip("Note on the point of the selected fragment on this frame, saved in the ECSV. "
+                             "Up to {:d} characters, without accents, commas, # or double "
+                             "quotes.".format(NOTE_MAX_LENGTH))
+        self.note.textEdited.connect(self.onNoteEdited)
+
+        # Enter returns the keyboard to the shortcuts. After this event, which also reaches the main window: the
+        #   field must still have the focus then, or Enter would run the shortcuts of that key
+        self.note.returnPressed.connect(lambda: QtCore.QTimer.singleShot(0, self.note.clearFocus))
+        layout.addWidget(self.note)
+
         self.updateAnnotations()
 
     def currentPick(self):
@@ -2068,6 +2115,19 @@ class AnnotationsWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
         self.trajectory_use.setEnabled(main and (pick is not None))
         self.trajectory_use.setChecked(main and ((pick is None) or pick.get('trajectory_use', True)))
+
+        # The point of any fragment can have a note. The text is only set if it changed, to keep the cursor
+        note = pick.get('note', '') if (pick is not None) else ''
+        self.note.setEnabled(pick is not None)
+        if self.note.text() != note:
+            self.note.setText(note)
+
+    def onNoteEdited(self, text):
+        """ Store the note in the point of the selected fragment on the current frame. """
+
+        pick = self.currentPick()
+        if pick is not None:
+            pick['note'] = text
 
     def onFragmentChanged(self):
         """ Show the annotations of the selected fragment, and the fragment in the image info panel. """

@@ -1053,6 +1053,10 @@ def _topic_mr_annotations(gui):
         "<li>Both options only apply to the main fragment, and are disabled while another fragment "
         "is selected. Flares are drawn with thicker lines, and picks not used in the main trajectory "
         "with dotted lines.</li>"
+        "<li><b>Note</b> &ndash; a short text on the point of the selected fragment on this frame, of any "
+        "fragment, kept with the point and saved in the ECSV. Up to 140 characters: accents are removed, "
+        "and commas, # and double quotes are not accepted, as other software could not read the file "
+        "then. Press Enter or Esc to return the keyboard to the shortcuts.</li>"
         "<li>The image info panel (" + _key("F1") + ") shows the selected fragment, and the annotations of "
         "the main fragment pick on the current frame.</li>"
         "<li>Shortcuts: " + _key("0") + "-" + _key("8") + " select the fragment, " + _key("B") + " toggles "
@@ -1070,6 +1074,9 @@ def _topic_mr_annotations(gui):
              "empty and the time is that of the frame. A fragment number not used has its position columns "
              "empty on every row. The fragments are observational labels, not a physical fragmentation "
              "model (e.g. MetSim)."),
+            ("note, note1, note2, ...",
+             "Notes of the points of the main fragment and of the others. The last columns, written only for "
+             "the fragments with a note."),
         ])
         + _callout("FTPdetectinfo files only contain the main fragment picks, without annotations.",
                    kind="note")

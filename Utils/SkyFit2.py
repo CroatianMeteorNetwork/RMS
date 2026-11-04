@@ -199,7 +199,7 @@ from RMS.Math import angularSeparation, RMSD, vectNorm
 from RMS.Misc import decimalDegreesToSexHours
 from RMS.Routines.AddCelestialGrid import updateRaDecGrid, updateAzAltGrid
 from RMS.Routines.SkyFitHelp import shortcutsTopicId
-from RMS.Routines.CustomPyqtgraphClasses import ViewBox, TextItem, TextItemList, Crosshair, Plus, Cross, CursorItem, BrushCursorItem, ImageItem, RightOptionsTab, qmessagebox, PointingIndicator, FRAGMENT_COLORS, MarkedSlider
+from RMS.Routines.CustomPyqtgraphClasses import ViewBox, TextItem, TextItemList, Crosshair, Plus, Cross, CursorItem, BrushCursorItem, ImageItem, RightOptionsTab, qmessagebox, PointingIndicator, FRAGMENT_COLORS, MarkedSlider, cleanNote
 from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle
 from RMS.Routines.SphericalPolygonCheck import sphericalPolygonCheck
 from RMS.Routines.Image import loadFlat, loadDark, applyFlat, applyDark, signalToNoise, gammaCorrectionImage, adjustLevels, saveImage, loadImage
@@ -10108,6 +10108,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Intercept Escape key to return focus to image
             elif key == QtCore.Qt.Key.Key_Escape:
+
+                # Focusing the image item doesn't take the keyboard away from a text input
+                if self._isTextInputFocused():
+                    QtWidgets.QApplication.focusWidget().clearFocus()
+
                 self.img_frame.setFocus()
                 if self.star_pick_mode:
                     # Let the event propagate to keyPressEvent for star pick handling
@@ -11954,7 +11959,7 @@ class PlateTool(QtWidgets.QMainWindow):
         pick_frame_indices = []  # (N,) array of frame indices
         pick_frame_times = []  # (N,) array of frame times
         pick_frame_numbers = []  # (N,) frames of the picks, in the files which have them
-        fragment_points = []  # (frame, fragment_id, x, y) of the points of additional fragments
+        fragment_points = []  # (frame, fragment_id, x, y, note) of the points of additional fragments
 
         # wrap in try except to catch unknown errors
         try:
@@ -12007,6 +12012,11 @@ class PlateTool(QtWidgets.QMainWindow):
                                       column_names.index('y_image' + str(k)))
                                      for k in range(1, len(FRAGMENT_COLORS)) if ('x_image' + str(k)) in column_names]
 
+                        # Columns of the notes: note for the main fragment, note1, note2, ... for the others
+                        note_inds = {k: column_names.index('note' + (str(k) if k else ''))
+                                     for k in range(len(FRAGMENT_COLORS))
+                                     if ('note' + (str(k) if k else '')) in column_names}
+
                         # Ensure essential values are in the ECSV
                         if x_ind is None or y_ind is None or pick_frame_times_idx is None:
                             qmessagebox(title="ECSV File Format Error", 
@@ -12022,7 +12032,9 @@ class PlateTool(QtWidgets.QMainWindow):
                         for fragment_id, fx_ind, fy_ind in frag_inds:
                             if line[fx_ind]:
                                 fragment_points.append((int(line[frame_ind]), fragment_id,
-                                                        float(line[fx_ind]), float(line[fy_ind])))
+                                                        float(line[fx_ind]), float(line[fy_ind]),
+                                                        line[note_inds[fragment_id]] if fragment_id in note_inds
+                                                        else ''))
 
                         # Skip the frames without a main fragment pick
                         if not line[x_ind]:
@@ -12053,6 +12065,7 @@ class PlateTool(QtWidgets.QMainWindow):
                             'saturated': saturated,
                             'flare': (line[flare_ind] == 'True') if flare_ind is not None else False,
                             'trajectory_use': (line[traj_ind] == 'True') if traj_ind is not None else True,
+                            'note': line[note_inds[0]] if 0 in note_inds else '',
                         })
 
             frame_count = self.img_handle.total_frames
@@ -12090,8 +12103,9 @@ class PlateTool(QtWidgets.QMainWindow):
             # Files which have annotations replace the points of additional fragments
             if frame_ind is not None:
                 self.fragment_picks = {}
-                for frame, fragment_id, x, y in fragment_points:
+                for frame, fragment_id, x, y, note in fragment_points:
                     self.addFragmentPoint(frame, fragment_id, x, y)
+                    self.fragment_picks[frame][fragment_id]['note'] = note
 
             return pick_list
         
@@ -17644,9 +17658,16 @@ class PlateTool(QtWidgets.QMainWindow):
                          for fragment_id, pick in fragments.items()]
         fragment_ids = list(range(1, max(obs[1] for obs in observations) + 1)) if observations else []
 
+        # Notes of the points written to the file, as {(frame, fragment_id): note}, and the fragments with notes
+        notes = {(frame, fragment_id): cleanNote(pick.get('note', '')) for frame, fragment_id, pick in observations
+                 if (pick['x_centroid'] is not None) and (pick['mode'] != 0)}
+        notes = {key: note for key, note in notes.items() if note}
+        note_ids = sorted(set(fragment_id for _, fragment_id in notes))
+
         # The annotation columns are only written if the annotations are used
-        annotated = bool(fragment_ids) or any(pick.get('flare', False) or not pick.get('trajectory_use', True)
-                                              for pick in self.pick_list.values())
+        annotated = bool(fragment_ids) or bool(notes) \
+            or any(pick.get('flare', False) or not pick.get('trajectory_use', True)
+                   for pick in self.pick_list.values())
 
         # Write the meta header
         meta_dict = {
@@ -17702,6 +17723,9 @@ class PlateTool(QtWidgets.QMainWindow):
                 ('datetime', '', 'string'), ('ra', 'deg', 'float64'), ('dec', 'deg', 'float64'),
                 ('azimuth', '', 'float64'), ('altitude', '', 'float64'), ('x_image', 'pix', 'float64'),
                 ('y_image', 'pix', 'float64')]]
+
+        # The columns of the notes are the last ones: note for the main fragment, note1, note2, ... for the others
+        extra_columns += [('note' + (str(k) if k else ''), '', 'string') for k in note_ids]
 
         for name, unit, datatype in extra_columns:
             out_str += "# - {name: " + name + (", unit: " + unit if unit else "") + ", datatype: " + datatype + "}\n"
@@ -17848,6 +17872,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
             for fragment_id in fragment_ids:
                 entry += entries.get(fragment_id, [row_time] + [''] * 6)
+
+            entry += [notes.get((frame, k), '') for k in note_ids]
 
             out_str += ",".join(entry) + "\n"
 
