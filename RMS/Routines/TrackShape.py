@@ -93,10 +93,11 @@ class VidSource(object):
         """
 
         # Imported here, so the module is usable without the .vid reader for the other sources
-        from RMS.Formats.Vid import VidStruct, readFrame
+        from RMS.Formats.Vid import VidStruct, readFrame, frameTimeModel, repairFrameTime
 
         self._VidStruct = VidStruct
         self._readFrame = readFrame
+        self._repairFrameTime = repairFrameTime
 
         self.path = path
         self.frame_time_offset = float(frame_time_offset)
@@ -108,6 +109,11 @@ class VidSource(object):
         self.frame_bytes = info.seqlen
         self.height, self.width = info.ht, info.wid
         self.n_frames = os.path.getsize(path)//self.frame_bytes
+
+        # The model of the timestamps from the frame counter, which corrects a seconds field off by whole seconds
+        #   (as the reading of .vid files in the processing does, see Vid.frameTimeModel), so the frames are timed
+        #   as the detections were and stay in time order for the search below
+        self.time_model = frameTimeModel(self.fid)
 
         # The times of the frames which were read
         self._times = {}
@@ -128,6 +134,7 @@ class VidSource(object):
             st = self._VidStruct()
             self.fid.seek(i*self.frame_bytes)
             self._readFrame(st, self.fid, metadata_only=True)
+            self._repairFrameTime(st, self.time_model)
             self._times[i] = st.ts + st.tu/1e6 + self.frame_time_offset
 
         return self._times[i]
@@ -177,6 +184,7 @@ class VidSource(object):
             raise IndexError('Frame {} is not in {}'.format(i, self.path))
 
         # The time of the frame is kept, as its header was read too
+        self._repairFrameTime(st, self.time_model)
         self._times[i] = st.ts + st.tu/1e6 + self.frame_time_offset
 
         return img.astype(np.float32)
@@ -463,6 +471,7 @@ def measureTrackShape(source, t, x, y, psf_sigma, window_half=WINDOW_HALF, max_t
     cache = {}
 
     def readFrame(i):
+        """ Frame i of the source, read from the file only the first time. """
         if i not in cache:
             cache[i] = source.frame(int(i))
         return cache[i]

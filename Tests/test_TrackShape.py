@@ -67,27 +67,32 @@ class MemorySource(object):
     """ A raw frame source of frames held in memory, with the methods which the measurement uses. """
 
     def __init__(self, frames, times):
+        """ The frames (2D arrays) and their times (Unix s). """
         self.frames, self.times = frames, np.asarray(times)
         self.height, self.width = frames[0].shape
         self.n_frames = len(frames)
 
     def frameTime(self, i):
+        """ Time of frame i. """
         return float(self.times[i])
 
     def framesBetween(self, t0, t1):
+        """ The frames whose times are between t0 and t1, and their times. """
         sel = np.where((self.times >= t0) & (self.times <= t1))[0]
         return sel, self.times[sel]
 
     def frame(self, i):
+        """ Frame i as float32. """
         return self.frames[i].astype(np.float32)
 
     def close(self):
+        """ Nothing to release. """
         return None
 
 
-def writeVid(path, frames, times):
+def writeVid(path, frames, times, seconds_off=()):
     """ Write frames to a .vid file: every frame is a record of the size of the image, with the header in the
-        first bytes of the first row. """
+        first bytes of the first row. The seconds field of the frames in seconds_off is written one second low. """
 
     header = np.dtype([('magic', '<u4'), ('seqlen', '<u4'), ('headlen', '<u4'), ('flags', '<u4'), ('seq', '<u4'),
                        ('ts', '<i4'), ('tu', '<i4'), ('station_id', '<i2'), ('wid', '<i2'), ('ht', '<i2'),
@@ -98,7 +103,7 @@ def writeVid(path, frames, times):
             record = frame.astype('<u2').copy()
             head = np.zeros(1, dtype=header)
             head['seqlen'], head['headlen'], head['seq'] = frame.nbytes, header.itemsize, k
-            head['ts'], head['tu'] = int(t), int(round((t - int(t))*1e6))
+            head['ts'], head['tu'] = int(t) - (1 if k in seconds_off else 0), int(round((t - int(t))*1e6))
             head['wid'], head['ht'], head['depth'], head['exposure'] = WIDTH, HEIGHT, 16, 100
             buf = record.view(np.uint8).reshape(-1)
             buf[:header.itemsize] = np.frombuffer(head.tobytes(), dtype=np.uint8)
@@ -180,7 +185,7 @@ def test_vid_and_frame_block_sources(tmp_path):
     assert np.array_equal(source.frame(7)[1:], frames[7][1:].astype(np.float32))
     idx, tf = source.framesBetween(times[10] - 1e-3, times[20] + 1e-3)
     assert list(idx) == list(range(10, 21))
-    assert np.allclose(tf, times[10:21], atol=1e-5)
+    assert np.allclose(tf, times[10:21], rtol=0, atol=1e-5)
     res = ts.measureTrackShape(source, t, x, y, psf_sigma=1.0)
     source.close()
     assert abs(res['spread'] - reference['spread']) < 0.02
@@ -193,7 +198,7 @@ def test_vid_and_frame_block_sources(tmp_path):
     source = ts.openRawSource(str(block_dir), TRACK_T[0], TRACK_T[1])
     assert isinstance(source, ts.FrameBlockSource)
     assert source.n_frames == N_FRAMES
-    assert np.allclose(source.times, times, atol=1e-6)
+    assert np.allclose(source.times, times, rtol=0, atol=1e-6)
     assert np.array_equal(source.frame(77), frames[77].astype(np.float32))
     res = ts.measureTrackShape(source, t, x, y, psf_sigma=1.0)
     source.close()
@@ -205,6 +210,27 @@ def test_vid_and_frame_block_sources(tmp_path):
     assert ts.frameBlockStart(paths[0]) == pytest.approx(times[0], abs=1e-5)
 
 
+def test_vid_seconds_field_repaired(tmp_path):
+    """ Frames of a .vid file whose seconds field is one second low (a short run within the track; the sampled
+        model of the file sees a longer run as a step) are timed from the frame counter, as the processing reads them, so the frames stay in time order and the measurement is the
+        same as without the error. """
+
+    t, x, y = trackPoints()
+    frames, times = syntheticFrames(1.0, 1.0)
+    reference = ts.measureTrackShape(MemorySource(frames, times), t, x, y, psf_sigma=1.0)
+
+    vid_path = str(tmp_path/'glitch.vid')
+    writeVid(vid_path, frames, times, seconds_off=range(62, 66))
+    source = ts.openRawSource(vid_path, TRACK_T[0], TRACK_T[1])
+    assert np.allclose([source.frameTime(i) for i in range(N_FRAMES)], times, rtol=0, atol=1e-5)
+    idx, _ = source.framesBetween(times[55] - 1e-3, times[75] + 1e-3)
+    assert list(idx) == list(range(55, 76))
+    res = ts.measureTrackShape(source, t, x, y, psf_sigma=1.0)
+    source.close()
+    assert abs(res['spread'] - reference['spread']) < 0.02
+    assert res['n_stack'] == reference['n_stack']
+
+
 def test_frame_numbers_and_missing_frames():
     """ A track given in frame numbers is converted to times; a track without frames is flagged. """
 
@@ -212,7 +238,8 @@ def test_frame_numbers_and_missing_frames():
     source = MemorySource(frames, times)
 
     # Fractional frame numbers to times
-    assert np.allclose(ts.timesOfFrames(source, [10, 10.5, 30]), [times[10], times[10] + 0.05, times[30]])
+    assert np.allclose(ts.timesOfFrames(source, [10, 10.5, 30]), [times[10], times[10] + 0.05, times[30]], rtol=0,
+                       atol=1e-6)
 
     # A track outside the frames, and a track of a single point
     res = ts.measureTrackShape(source, [times[-1] + 100, times[-1] + 104], [30, 40], [40, 45], psf_sigma=1.0)
