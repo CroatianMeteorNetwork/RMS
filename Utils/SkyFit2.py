@@ -191,7 +191,8 @@ from RMS.ExtractStars import extractStarsAndSave, extractStarsFF
 import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.Platepar import Platepar, getCatalogStarsImagePositions
 from RMS.Formats.FFfile import convertFRNameToFF, constructFFName
-from RMS.Formats.FrameInterface import detectInputTypeFolder, detectInputTypeFile
+from RMS.Formats.FrameInterface import detectInputTypeFolder, detectInputTypeFile, checkIfVideoFile, \
+    beginningTimeFromVideoName, BEGINNING_TIME_FORMATS
 from RMS.Formats.FTPdetectinfo import writeFTPdetectinfo
 from RMS.Formats import StarCatalog
 from RMS.Pickling import loadPickle, savePickle
@@ -9500,6 +9501,96 @@ class PlateTool(QtWidgets.QMainWindow):
             self.loadState(os.path.dirname(file_), os.path.basename(file_))
 
 
+    def findDataFileOfState(self, dir_path, saved_path, session_input=None):
+        """ Find the data file of a state: next to the state, at the path saved in it, the one open in the session if
+            it's the same, and otherwise ask where it is.
+
+        Arguments:
+            dir_path: [str] Folder of the state.
+            saved_path: [str] Path of the data file saved in the state.
+
+        Keyword arguments:
+            session_input: [str] The data file open in the session if it's the one of the state, None otherwise.
+
+        Return:
+            [str] The path, or None if the user cancelled.
+        """
+
+        saved_path = saved_path.replace('\\', os.sep).replace('/', os.sep)
+        name = os.path.basename(saved_path)
+
+        data_file = os.path.join(dir_path, name)
+
+        if not os.path.isfile(data_file):
+            data_file = saved_path
+
+        if (not os.path.isfile(data_file)) and (session_input is not None) and os.path.isfile(session_input):
+            data_file = session_input
+
+        if not os.path.isfile(data_file):
+            data_file = QtWidgets.QFileDialog.getOpenFileName(self,
+                "Select the data file of this state: {:s}".format(name), dir_path)[0]
+
+        return data_file if data_file else None
+
+
+    def sameInputAsSession(self, variables):
+        """ Whether the video of a state is the one open in the running session: the same file name from the same
+            station, as the names alone can repeat (e.g. the same name for the videos of several cameras).
+
+        Arguments:
+            variables: [dict] Contents of the state.
+        """
+
+        state_input = str(variables.get("input_path") or "").replace('\\', '/')
+        session_input = str(getattr(self, "input_path", None) or "").replace('\\', '/')
+
+        return (os.path.basename(state_input) != "") \
+            and (os.path.basename(state_input) == os.path.basename(session_input)) \
+            and (getattr(variables.get("config"), "stationID", None) == getattr(self.config, "stationID", None))
+
+
+    def beginningTimeOfState(self, variables):
+        """ The beginning time to load a state with from a running session, where there is no command line to
+            give it with. Only needed for a video which has it neither in the state nor in its name: it's the
+            time of the session if the state is on the same video, otherwise it's asked for.
+
+        Arguments:
+            variables: [dict] Contents of the state.
+
+        Return:
+            [datetime] The time. None if it's not needed, False if the user cancelled.
+        """
+
+        input_name = os.path.basename(str(variables.get("input_path") or "").replace('\\', '/'))
+
+        if (variables.get("beginning_time") is not None) or (not checkIfVideoFile(input_name)) \
+            or (beginningTimeFromVideoName(input_name) is not None):
+
+            return None
+
+        if self.sameInputAsSession(variables) and (getattr(self, "beginning_time", None) is not None):
+            return self.beginning_time
+
+        while True:
+
+            text, ok = QtWidgets.QInputDialog.getText(self, "Beginning time of the video",
+                "The time of the beginning of {:s} is neither in the state nor in the file name.\n"
+                "Enter it as YYYYMMDD_hhmmss:".format(input_name))
+
+            if (not ok) or (not text.strip()):
+                return False
+
+            for time_format in BEGINNING_TIME_FORMATS:
+                try:
+                    return datetime.datetime.strptime(text.strip(), time_format)
+                except ValueError:
+                    pass
+
+            qmessagebox(title="Beginning time of the video", message="The time could not be read, please enter "
+                "it as YYYYMMDD_hhmmss.", message_type="warning")
+
+
     def loadState(self, dir_path, state_name, beginning_time=None, mask=None):
         """ Loads state with path to file dir_path and file name state_name. Works mid-program and at the start of
         the program (if done properly).
@@ -9519,6 +9610,27 @@ class PlateTool(QtWidgets.QMainWindow):
         """
 
         variables = loadPickle(dir_path, state_name)
+
+        # From a running session. This goes before anything of the state replaces the session, which is left as it
+        #   was if the user cancels
+        state_data_file = None
+        if hasattr(self, "central"):
+
+            saved_input = str(variables.get("input_path") or "")
+            if "." in os.path.basename(saved_input.replace('\\', '/')):
+
+                session_input = self.input_path if self.sameInputAsSession(variables) else None
+                state_data_file = self.findDataFileOfState(dir_path, saved_input, session_input)
+
+                if state_data_file is None:
+                    return
+
+            if beginning_time is None:
+                beginning_time = self.beginningTimeOfState(variables)
+
+                if beginning_time is False:
+                    return
+
         for k, v in variables.items():
             setattr(self, k, v)
 
@@ -9731,20 +9843,12 @@ class PlateTool(QtWidgets.QMainWindow):
                 tmp_name = os.path.basename(self.input_path)
                 if "." in tmp_name:
 
-                    data_file = os.path.join(dir_path, tmp_name)
+                    data_file = state_data_file or self.findDataFileOfState(dir_path, self.input_path)
 
-                    # If the data file is not next to the state, try the saved path and then ask where it is
-                    if not os.path.isfile(data_file):
-                        data_file = self.input_path
-
-                    if not os.path.isfile(data_file):
-                        data_file = QtWidgets.QFileDialog.getOpenFileName(self,
-                            "Select the data file of this state: {:s}".format(tmp_name), dir_path)[0]
-
-                        # The image is needed to open the state
-                        if not data_file:
-                            print("The data file of the state was not found:", tmp_name)
-                            sys.exit()
+                    # The image is needed to open the state
+                    if not data_file:
+                        print("The data file of the state was not found:", tmp_name)
+                        sys.exit()
 
                     self.input_path = data_file
 
