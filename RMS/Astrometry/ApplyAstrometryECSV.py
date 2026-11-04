@@ -8,7 +8,7 @@ import numpy as np
 from astropy.table import QTable
 
 import RMS.Formats.Platepar
-from RMS.Astrometry.Conversions import trueOfDateRaDec2ApparentAltAz
+from RMS.Astrometry.Conversions import trueOfDateRaDec2ApparentAltAz, trueRaDec2ApparentAltAz
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, computeFOVSize, rotationWrtHorizon
 
 
