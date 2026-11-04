@@ -1066,8 +1066,10 @@ def _topic_mr_annotations(gui):
             ("trajectory_use", "True if the main fragment pick is meant for the main trajectory solution."),
             ("datetime1, ra1, dec1, azimuth1, altitude1, x_image1, y_image1",
              "Time and position of fragment 1, and so on for the others (the main fragment, 0, uses the "
-             "columns without a suffix). Empty on the frames where the fragment was not picked. The fragments are observational labels, not a physical fragmentation model "
-             "(e.g. MetSim)."),
+             "columns without a suffix). On the frames where the fragment was not picked, the position is "
+             "empty and the time is that of the frame. A fragment number not used has its position columns "
+             "empty on every row. The fragments are observational labels, not a physical fragmentation "
+             "model (e.g. MetSim)."),
         ])
         + _callout("FTPdetectinfo files only contain the main fragment picks, without annotations.",
                    kind="note")

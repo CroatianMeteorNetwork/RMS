@@ -141,8 +141,9 @@ def test_annotated_reduction(tmp_path):
 
 
 def test_fragment_columns(tmp_path):
-    """ Additional fragments are written in their own columns, one row per frame (GDEF standard), with
-        empty values on the frames where a fragment or the main fragment was not picked.
+    """ Additional fragments are written in their own columns, one row per frame (GDEF standard). On the
+        frames where a fragment or the main fragment was not picked, its values are empty and its time is
+        that of the frame.
     """
 
     reduction = Reduction(tmp_path)
@@ -168,11 +169,14 @@ def test_fragment_columns(tmp_path):
     assert column(columns, rows, 'x_image1') == ['', '111.000', '112.000', '113.000']
     assert column(columns, rows, 'y_image2') == ['', '', '220.000', '']
 
-    # The main fragment columns are empty on the frame where only fragment 1 was picked
-    assert set(rows[3][:len(LEGACY_COLUMNS)] + [rows[3][columns.index('flare')]]) == {''}
+    # The main fragment columns are empty on the frame where only fragment 1 was picked, except the time
+    assert set(rows[3][1:len(LEGACY_COLUMNS)] + [rows[3][columns.index('flare')]]) == {''}
+    assert column(columns, rows, 'datetime')[3] == column(columns, rows, 'datetime1')[3]
 
-    # With a global shutter, a fragment point has the time of its frame
+    # With a global shutter, a fragment point has the time of its frame, as a fragment not picked on it
     assert column(columns, rows, 'datetime1')[1] == column(columns, rows, 'datetime')[1]
+    assert column(columns, rows, 'datetime1')[0] == column(columns, rows, 'datetime')[0]
+    assert column(columns, rows, 'datetime2')[0] == column(columns, rows, 'datetime')[0]
 
 
 def test_fragment_ids_0_to_8(tmp_path):
@@ -494,6 +498,119 @@ def test_no_great_circles_with_ground_points(qapp, tmp_path):
     session.updateGreatCircle()
 
     assert session.fragment_great_circle_lines[1].getData()[0] is None
+
+
+def test_time_on_every_row(tmp_path):
+    """ Every time column has a valid time on every row, as the GFE standard requires. """
+
+    table_module = pytest.importorskip("astropy.table")
+
+    reduction = Reduction(tmp_path)
+    reduction.addPick(10, 110.0, 200.0)
+    reduction.addFragmentPoint(11, 1, 111.0, 210.0)
+    reduction.addFragmentPoint(12, 3, 112.0, 230.0)
+    file_path, _, _, _ = saveAndRead(reduction)
+
+    table = table_module.Table.read(file_path, format='ascii.ecsv')
+
+    for name in ('datetime', 'datetime1', 'datetime2', 'datetime3'):
+        assert len(table[name]) == 3
+        for value in table[name]:
+            datetime.datetime.strptime(str(value), '%Y-%m-%dT%H:%M:%S.%f')
+
+
+def test_times_with_rolling_shutter(tmp_path):
+    """ A point has the time of its own image row, and a fragment not picked on a frame that of the frame. """
+
+    reduction = Reduction(tmp_path)
+    reduction.config.deinterlace_order = -1
+    reduction.getRollingShutterCorrectedFrameNo = lambda frame_no, pick: frame_no + pick['y_centroid']/1000
+
+    # Frames 10 and 11 start at 0.40 and 0.44 s, and a frame lasts 0.04 s
+    reduction.addPick(10, 110.0, 200.0)
+    reduction.addFragmentPoint(10, 1, 110.0, 500.0)
+    reduction.addPick(11, 111.0, 200.0)
+
+    _, _, columns, rows = saveAndRead(reduction)
+
+    assert column(columns, rows, 'datetime') == ['2024-01-01T00:00:00.408000', '2024-01-01T00:00:00.448000']
+    assert column(columns, rows, 'datetime1') == ['2024-01-01T00:00:00.420000', '2024-01-01T00:00:00.440000']
+
+
+def test_fragment_number_not_used(tmp_path):
+    """ All the numbers up to no_frags - 1 have columns, as in the GFE standard: those of a number not used
+        have no positions, and the others keep their number, which identifies them across the stations.
+    """
+
+    reduction = Reduction(tmp_path)
+    reduction.addPick(10, 110.0, 200.0)
+    reduction.addFragmentPoint(10, 2, 110.0, 220.0)
+
+    file_path, meta, columns, rows = saveAndRead(reduction)
+
+    assert "# - {no_frags: 3}" in meta
+
+    for name in ('ra', 'dec', 'azimuth', 'altitude', 'x_image', 'y_image'):
+        assert column(columns, rows, name + '1') == ['']
+
+    assert float(column(columns, rows, 'y_image2')[0]) == pytest.approx(220.0)
+
+    # Loading the file adds no points to the number not used
+    loaded = Reduction(tmp_path)
+    loaded.loadECSV(file_path)
+    assert {frame: sorted(fragments) for frame, fragments in loaded.fragment_picks.items()} == {10: [2]}
+
+
+def fragmentOnlyFrame(tmp_path):
+    """ Save a reduction with a frame on which only an additional fragment was picked. """
+
+    reduction = Reduction(tmp_path)
+    reduction.addPick(10, 110.0, 200.0)
+    reduction.addPick(11, 111.0, 200.0)
+    reduction.addFragmentPoint(12, 1, 112.0, 210.0)
+
+    return reduction, saveAndRead(reduction)[0]
+
+
+def test_astra_skips_frames_without_main_pick(tmp_path):
+    """ ASTRA only takes the main fragment picks, not the values of a frame with only other fragments. """
+
+    from Utils.Astra import loadECSV
+
+    reduction, file_path = fragmentOnlyFrame(tmp_path)
+
+    picks = loadECSV(file_path, str(tmp_path), reduction.img_handle)
+
+    assert sorted(picks.keys()) == [10, 11]
+    assert picks[11]['x_centroid'] == pytest.approx(111.0)
+
+
+def test_kalman_refuses_frames_without_main_pick(tmp_path):
+    """ The Kalman filter must not take an empty main fragment position as a pick. """
+
+    from Utils.KalmanFilter import loadECSV
+
+    _, file_path = fragmentOnlyFrame(tmp_path)
+
+    with pytest.raises(Exception, match="without a main fragment pick"):
+        loadECSV(file_path)
+
+
+def test_apply_astrometry_refuses_frames_without_main_pick(tmp_path):
+    """ Applying a platepar must not compute coordinates from an empty main fragment position. """
+
+    from RMS.Astrometry.ApplyAstrometryECSV import applyAstrometryECSV
+
+    reduction, file_path = fragmentOnlyFrame(tmp_path)
+
+    with open(file_path) as f:
+        original = f.read()
+
+    assert applyAstrometryECSV(str(tmp_path), os.path.basename(file_path), None,
+                               platepar=reduction.platepar) is None
+
+    with open(file_path) as f:
+        assert f.read() == original
 
 
 class Gui(object):

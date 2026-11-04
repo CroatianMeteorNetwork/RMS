@@ -3090,8 +3090,8 @@ def loadECSV(ECSV_file_path, dir_path, img_obj):
         # Process the contents
         for line in contents:
 
-            # Clean the line
-            line = [part.strip() for part in line.split(',') if part]
+            # Clean the line (keeping the empty values of the fragments not picked on a frame)
+            line = [part.strip() for part in line.split(',')]
 
             # Skip header lines
             if line[0].startswith('#'):
@@ -3112,6 +3112,10 @@ def loadECSV(ECSV_file_path, dir_path, img_obj):
                 continue
 
             else:
+                # Skip the frames without a main fragment pick
+                if not line[x_ind]:
+                    continue
+
                 # Unpack line
 
                 # Populate arrays

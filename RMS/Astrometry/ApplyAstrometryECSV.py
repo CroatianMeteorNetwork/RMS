@@ -63,6 +63,13 @@ def applyAstrometryECSV(dir_path, ecsv_file, platepar_file, platepar=None, time_
         data = QTable.read(ecsv_content, format='ascii.ecsv')
 
 
+    # The frames on which only additional fragments were picked have no main fragment position to compute
+    if np.any(getattr(data['x_image'], 'mask', False)):
+        print('The ECSV file has frames without a main fragment pick:', os.path.join(dir_path, ecsv_file))
+        print('The astrometry was not computed!')
+        return None
+
+
     # Compute alt/az pointing
     azim, elev = trueRaDec2ApparentAltAz(platepar.RA_d, platepar.dec_d, platepar.JD, \
         platepar.lat, platepar.lon, refraction=False)

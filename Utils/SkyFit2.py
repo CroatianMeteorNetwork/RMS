@@ -17636,11 +17636,13 @@ class PlateTool(QtWidgets.QMainWindow):
             n_stars = 0
 
         # Main fragment picks (fragment ID 0) and the points of additional fragments. Following the GDEF
-        #   standard, fragment k is written to the columns with the suffix k (e.g. ra1, dec1, ...)
+        #   standard, fragment k is written to the columns with the suffix k (e.g. ra1, dec1, ...), numbered
+        #   from 0 to no_frags - 1. The columns of a number without points are written empty instead of
+        #   renumbering the others, as the numbers identify the fragments across the stations of an event
         observations = [(frame, 0, pick) for frame, pick in self.pick_list.items()]
         observations += [(frame, fragment_id, pick) for frame, fragments in self.fragment_picks.items()
                          for fragment_id, pick in fragments.items()]
-        fragment_ids = sorted(set(obs[1] for obs in observations if obs[1] > 0))
+        fragment_ids = list(range(1, max(obs[1] for obs in observations) + 1)) if observations else []
 
         # The annotation columns are only written if the annotations are used
         annotated = bool(fragment_ids) or any(pick.get('flare', False) or not pick.get('trajectory_use', True)
@@ -17723,6 +17725,39 @@ class PlateTool(QtWidgets.QMainWindow):
         out_str += "# schema: astropy-2.0\n"
         out_str += column_names + "\n"
 
+        # Determine whether to save the raw times that came with in the data
+        save_raw_times = False
+        if (self.img_handle.input_type == "vid") or (self.img_handle.input_type == "dfn"):
+            save_raw_times = True
+
+        if self.img_handle.input_type == "images":
+            if self.img_handle.fripon_mode or self.img_handle.uwo_png_mode:
+                save_raw_times = True
+
+
+        def frameTime(frame, pick=None):
+            """ Time of a frame in the ECSV, at the image row of the given pick if there is one. """
+
+            # Normalize the frame number to the actual time
+            frame_dt = self.img_handle.currentFrameTime(frame_no=frame, dt_obj=True)
+            frame_no = (frame_dt - dt_ref).total_seconds()*self.img_handle.fps
+
+            # Get the rolling shutter corrected (or not, depending on the config) frame number
+            if (pick is not None) and (self.config.deinterlace_order == -1):
+                frame_no = self.getRollingShutterCorrectedFrameNo(frame_no, pick)
+
+            # If the global shutter is used, the frame number can only be an integer
+            if self.config.deinterlace_order == -2:
+                frame_no = round(frame_no, 0)
+
+            # For UWO .vid files DFN data, don't normalize the time to the FPS, as the time is GPS-synced
+            if save_raw_times:
+                return frame_dt
+
+            # Compute the datetime of the point, from the time relative to the reference JD
+            return dt_ref + datetime.timedelta(seconds=frame_no/self.img_handle.fps)
+
+
         # Entries of every frame, as {frame: {fragment_id: entry}}
         rows = {}
 
@@ -17777,42 +17812,9 @@ class PlateTool(QtWidgets.QMainWindow):
             # Compute alt/az (topocentric, i.e. without refraction)
             azim, alt = trueRaDec2ApparentAltAz(ra, dec, jd, pp_tmp.lat, pp_tmp.lon, refraction=False)
 
-            # Normalize the frame number to the actual time
-            frame_dt = self.img_handle.currentFrameTime(frame_no=frame, dt_obj=True)
-            frame_no = (frame_dt - dt_ref).total_seconds()*self.img_handle.fps
-
-            # Get the rolling shutter corrected (or not, depending on the config) frame number
-            if self.config.deinterlace_order == -1:
-                frame_no = self.getRollingShutterCorrectedFrameNo(frame_no, pick)
-
-            # If the global shutter is used, the frame number can only be an integer
-            if self.config.deinterlace_order == -2:
-                frame_no = round(frame_no, 0)
-
-            # Compute the time relative to the reference JD
-            t_rel = frame_no/self.img_handle.fps
-
-            # Determine whether to save the raw times that came with in the data
-            save_raw_times = False
-            if (self.img_handle.input_type == "vid") or (self.img_handle.input_type == "dfn"):
-                save_raw_times = True
-
-            if self.img_handle.input_type == "images":
-                if self.img_handle.fripon_mode or self.img_handle.uwo_png_mode:
-                    save_raw_times = True
-
-            # For UWO .vid files DFN data, don't normalize the time to the FPS, as the time is GPS-synced
-            if save_raw_times:
-                frame_time = frame_dt
-            
-            else:
-                
-                # Compute the datetime of the point
-                frame_time = dt_ref + datetime.timedelta(seconds=t_rel)
-
             # Add an entry to the ECSV file (only the time and position of additional fragments)
             entry = [
-                frame_time.strftime(isodate_format_entry),
+                frameTime(frame, pick).strftime(isodate_format_entry),
                 "{:10.6f}".format(ra), "{:+10.6f}".format(dec),
                 "{:10.6f}".format(azim), "{:+10.6f}".format(alt),
                 "{:9.3f}".format(pick['x_centroid']), "{:9.3f}".format(pick['y_centroid'])
@@ -17832,17 +17834,20 @@ class PlateTool(QtWidgets.QMainWindow):
             rows.setdefault(frame, {})[fragment_id] = entry
 
 
-        # Write one row per frame, leaving empty the columns of the fragments not picked on that frame
+        # Write one row per frame. The columns of the fragments not picked on that frame are left empty, except
+        #   their time, which the GFE standard requires on every row: it is the time of the frame
         for frame, entries in sorted(rows.items()):
 
-            main_entry = entries.get(0, [''] * 16)
+            row_time = frameTime(frame).strftime(isodate_format_entry)
+
+            main_entry = entries.get(0, [row_time] + [''] * 15)
             entry = main_entry[:14]
 
             if annotated:
                 entry += ["{:6d}".format(frame)] + main_entry[14:]
 
             for fragment_id in fragment_ids:
-                entry += entries.get(fragment_id, [''] * 7)
+                entry += entries.get(fragment_id, [row_time] + [''] * 6)
 
             out_str += ",".join(entry) + "\n"
 
