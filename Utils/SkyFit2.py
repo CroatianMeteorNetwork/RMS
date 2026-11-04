@@ -9519,6 +9519,15 @@ class PlateTool(QtWidgets.QMainWindow):
         variables = loadPickle(dir_path, state_name)
         for k, v in variables.items():
             setattr(self, k, v)
+
+        # From a running session, what was computed for the stars of its catalog doesn't match the catalog of the state
+        for k in [k for k in vars(self) if k.startswith('catalog_stars_') and (k not in variables)]:
+            setattr(self, k, None)
+
+        for k in ('_star_label_cache', '_star_label_html_spectral', '_star_label_html_name',
+                  '_filtered_original_indices'):
+            if hasattr(self, k) and (k not in variables):
+                delattr(self, k)
         
         # Init matplotlib figure references (stripped from saved state, not picklable)
         if not hasattr(self, 'fig_astrometry'):
