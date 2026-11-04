@@ -63,9 +63,13 @@ def applyAstrometryECSV(dir_path, ecsv_file, platepar_file, platepar=None, time_
         data = QTable.read(ecsv_content, format='ascii.ecsv')
 
 
-    # The frames on which only additional fragments were picked have no main fragment position to compute
-    if np.any(getattr(data['x_image'], 'mask', False)):
-        print('The ECSV file has frames without a main fragment pick:', os.path.join(dir_path, ecsv_file))
+    # Only the main fragment is computed: additional fragments would keep the coordinates of the previous
+    #   platepar, and the frames on which only they were picked have no main fragment position
+    if any(name.startswith('x_image') and (name != 'x_image') for name in data.colnames) \
+        or np.any(getattr(data['x_image'], 'mask', False)):
+
+        print('The ECSV file has additional fragments, which are not supported:',
+              os.path.join(dir_path, ecsv_file))
         print('The astrometry was not computed!')
         return None
 

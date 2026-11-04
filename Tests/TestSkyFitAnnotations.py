@@ -742,6 +742,52 @@ def test_saved_note_is_clean(tmp_path):
     assert all(len(row) == len(columns) for row in rows)
 
 
+def test_apply_astrometry_refuses_additional_fragments(tmp_path):
+    """ Applying a platepar only computes the main fragment, so the file is refused also when the other
+        fragments were picked on its frames: they would keep the coordinates of the previous platepar.
+    """
+
+    from RMS.Astrometry.ApplyAstrometryECSV import applyAstrometryECSV
+
+    reduction = Reduction(tmp_path)
+    reduction.addPick(10, 110.0, 200.0)
+    reduction.addFragmentPoint(10, 1, 110.0, 210.0)
+    file_path, _, _, _ = saveAndRead(reduction)
+
+    with open(file_path) as f:
+        original = f.read()
+
+    assert applyAstrometryECSV(str(tmp_path), os.path.basename(file_path), None,
+                               platepar=reduction.platepar) is None
+
+    with open(file_path) as f:
+        assert f.read() == original
+
+
+def test_apply_astrometry_keeps_annotations(tmp_path):
+    """ A file with annotations of the main fragment only is computed, and keeps them. """
+
+    table_module = pytest.importorskip("astropy.table")
+
+    from RMS.Astrometry.ApplyAstrometryECSV import applyAstrometryECSV
+
+    reduction = Reduction(tmp_path)
+    reduction.platepar.star_list = []
+    reduction.addPick(10, 110.0, 200.0, flare=True)
+    reduction.addPick(11, 111.0, 200.0)
+    file_path, _, _, _ = saveAndRead(reduction)
+
+    before = table_module.Table.read(file_path, format='ascii.ecsv')
+
+    applyAstrometryECSV(str(tmp_path), os.path.basename(file_path), None, platepar=reduction.platepar)
+
+    after = table_module.Table.read(file_path, format='ascii.ecsv')
+
+    assert list(after['flare']) == [True, False]
+    assert list(after['frame_number']) == [10, 11]
+    assert list(after['azimuth']) == pytest.approx(list(before['azimuth']), abs=1e-5)
+
+
 class Gui(object):
     """ Stand-in for PlateTool with what the Annotations tab uses. """
 
