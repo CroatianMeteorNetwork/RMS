@@ -6,6 +6,7 @@
 
 import datetime
 import os
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -354,11 +355,16 @@ class GreatCircles(Reduction):
 
     updateGreatCircle = PlateTool.updateGreatCircle
     drawGreatCircle = PlateTool.drawGreatCircle
+    removeCentroid = PlateTool.removeCentroid
+    getCurrentPick = PlateTool.getCurrentPick
 
     def __init__(self, dir_path):
 
         Reduction.__init__(self, dir_path)
 
+        self.frame = 10
+        self.img = SimpleNamespace(getFrame=lambda: self.frame)
+        self.tab = SimpleNamespace(debruijn=SimpleNamespace(removeRow=lambda frame: None))
         self.img_handle.currentFrameTime = lambda dt_obj=False: self.img_handle.beginning_datetime
         self.platepar.F_scale = 20.0
         self.platepar.updateRefRADec(skip_rot_update=True)
@@ -457,6 +463,25 @@ def test_great_circle_of_main_leaves_out_unused_picks_only(qapp, tmp_path):
 
     assert session.great_circle_line.getData()[0] is None
     assert len(session.fragment_great_circle_lines[1].getData()[0]) > 0
+
+
+def test_removing_a_main_pick_refits_the_great_circle(qapp, tmp_path):
+    """ The line of the main fragment doesn't stay on a pick which is no longer there. """
+
+    session = GreatCircles(tmp_path)
+    session.addPick(10, 200.0, 100.0)
+    session.addPick(14, 400.0, 200.0)
+    session.addPick(18, 600.0, 500.0)
+    session.updateGreatCircle()
+    assert distanceToLine(session.great_circle_line, 400.5, 200.5) > 1
+
+    session.frame = 18
+    session.removeCentroid(18)
+    assert distanceToLine(session.great_circle_line, 400.5, 200.5) < 1
+
+    session.frame = 14
+    session.removeCentroid(14)
+    assert session.great_circle_line.getData()[0] is None
 
 
 def test_no_great_circles_with_ground_points(qapp, tmp_path):

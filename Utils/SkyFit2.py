@@ -15088,6 +15088,8 @@ class PlateTool(QtWidgets.QMainWindow):
             self.pick_list[self.img.getFrame()]['mode'] = None
             self.tab.debruijn.removeRow(frame)
 
+            self.updateGreatCircle()
+
         # Update Kalman/ASTRA Ready status if instance exists
         if hasattr(self, 'astra_dialog') and self.astra_dialog is not None:
             self.checkASTRACanRun()
