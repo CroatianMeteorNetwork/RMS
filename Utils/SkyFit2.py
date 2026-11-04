@@ -9522,6 +9522,9 @@ class PlateTool(QtWidgets.QMainWindow):
         for k, v in variables.items():
             setattr(self, k, v)
 
+        # Whether the state was saved before the readout time of the rolling shutter could be set (see the end)
+        old_rolling_shutter = "rolling_shutter_readout" not in vars(self.config)
+
         # A state only holds what existed when it was saved. Options added to the config since get their
         #   default, what the state does hold is left as it is
         for k, v in vars(cr.Config()).items():
@@ -9999,6 +10002,13 @@ class PlateTool(QtWidgets.QMainWindow):
         # Update the FPS if forced
         if hasattr(self, 'fps'):
             self.setFPS()
+
+        # A state saved before the readout time could be set was reduced with the rolling shutter correction over
+        #   a whole frame. Keep it, or saving the state again would move the times of its picks by up to a frame
+        if old_rolling_shutter and (self.config.deinterlace_order == -1):
+            self.config.rolling_shutter_readout = 1.0/(getattr(self.img_handle, 'fps', None) or self.config.fps)
+            print("State saved before rolling_shutter_readout: keeping the correction over a whole frame "
+                  "({:.4f} s)".format(self.config.rolling_shutter_readout))
 
 
     def _isTextInputFocused(self):
