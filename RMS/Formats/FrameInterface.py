@@ -898,7 +898,7 @@ class InputTypeVideo(InputType):
                     fn_timestamp = fn_data[1] + '_' + fn_data[2] + '_' + fn_data[3]
                     self.beginning_datetime = datetime.datetime.strptime(fn_timestamp, "%Y%m%d_%H%M%S_%f")
 
-                except ValueError:
+                except (ValueError, IndexError):
 
                     messagebox(title="Input error", \
                     message="The time of the beginning cannot be read from the file name! Either change the name of the file to be in the YYYYMMDD_hhmmss format, or specify the beginning time using command line options.")

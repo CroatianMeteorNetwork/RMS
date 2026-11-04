@@ -3346,6 +3346,8 @@ class PlateTool(QtWidgets.QMainWindow):
         # If the file is being loaded, detect the input type
         if loaded_file:
 
+            detect_input_type = False
+
             if not hasattr(self, "img_handle"):
                 detect_input_type = True
 
@@ -9347,10 +9349,14 @@ class PlateTool(QtWidgets.QMainWindow):
                 del dic[k]
 
 
+        # The beginning time doesn't pass the filter above (a datetime inherits from date), but without it an input
+        #   with no time in its name could not be opened again
+        dic['beginning_time'] = self.beginning_time
+
         # Save the FF file name if the input type is FF
         if self.img_handle.input_type == 'ff':
             dic['ff_file'] = self.img_handle.name()
-            
+
         savePickle(dic, self.dir_path, 'skyFitMR_latest.state')
         print("Saved state to file")
 
@@ -9515,7 +9521,56 @@ class PlateTool(QtWidgets.QMainWindow):
         variables = loadPickle(dir_path, state_name)
         for k, v in variables.items():
             setattr(self, k, v)
-        
+
+        # A state only holds what existed when it was saved. Options added to the config since get their
+        #   default, what the state does hold is left as it is
+        for k, v in vars(cr.Config()).items():
+            if not hasattr(self.config, k):
+                setattr(self.config, k, v)
+
+        # The same for the variables added to the constructor since, with the values it gives them
+        state_defaults = {
+            '_file_manager_custom_locations': [],
+            '_original_band_ratios': self.config.star_catalog_band_ratios,
+            '_original_catalog_file': self.config.star_catalog_file,
+            '_original_config_gamma': None,
+            '_show_calibration_dialog_on_start': False,
+            'closest_planet_indx': None,
+            'closest_type': None,
+            'current_autopan_x': None,
+            'current_autopan_y': None,
+            'dark_source_path': None,
+            'flat_image_data': None,
+            'flat_source_path': None,
+            'fps': None,
+            'geo_points_input': None,
+            'last_mask_dir': None,
+            'mask_source_path': None,
+            'mask_use_flat_background': False,
+            'old_autopan_x': None,
+            'old_autopan_y': None,
+            'override_gamma': 1.0,
+            'override_intensity_threshold': 18,
+            'override_max_feature_ratio': 0.8,
+            'override_max_stars': 200,
+            'override_neighborhood_size': 10,
+            'override_roundness_threshold': 0.5,
+            'override_segment_radius': 4,
+            'photom_fit_resids': None,
+            'photom_fit_stddev': None,
+            'platepar_modified': False,
+            'previous_picks': [],
+            'star_detection_override_data': {},
+            'star_detection_override_enabled': False,
+            'star_fwhm': None,
+            'use_fr_files': False,
+        }
+        for k, v in state_defaults.items():
+
+            # Check the state, not the object: when loading from a running session it holds the previous data
+            if k not in variables:
+                setattr(self, k, v)
+
         # Init matplotlib figure references (stripped from saved state, not picklable)
         if not hasattr(self, 'fig_astrometry'):
             self.fig_astrometry = None
@@ -9659,7 +9714,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         # Update possibly missing input_path variable
-        if not hasattr(self, "input_path"):
+        if "input_path" not in variables:
             self.input_path = dir_path
 
         # Update the input path if it exists
@@ -9672,7 +9727,24 @@ class PlateTool(QtWidgets.QMainWindow):
                 # Check if the last part of the input path is a file or a directory (check for the dot)
                 tmp_name = os.path.basename(self.input_path)
                 if "." in tmp_name:
-                    self.input_path = os.path.join(dir_path, tmp_name)
+
+                    data_file = os.path.join(dir_path, tmp_name)
+
+                    # If the data file is not next to the state, try the saved path and then ask where it is
+                    if not os.path.isfile(data_file):
+                        data_file = self.input_path
+
+                    if not os.path.isfile(data_file):
+                        data_file = QtWidgets.QFileDialog.getOpenFileName(self,
+                            "Select the data file of this state: {:s}".format(tmp_name), dir_path)[0]
+
+                        # The image is needed to open the state
+                        if not data_file:
+                            print("The data file of the state was not found:", tmp_name)
+                            sys.exit()
+
+                    self.input_path = data_file
+
                 else:
                     self.input_path = dir_path
 
@@ -9704,18 +9776,27 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         # Update the possibly missing begin time
-        if not hasattr(self, "beginning_time"):
+        if "beginning_time" not in variables:
             self.beginning_time = beginning_time
 
 
-        # Add the mask
-        if not hasattr(self, "mask"):
+        # Add the mask (check the state, hasattr would find the mask() method of the window)
+        if "mask" not in variables:
             self.mask = mask
 
 
-        # If the previous beginning time is None and the new one is not, update the beginning time
-        if (self.beginning_time is None) and (beginning_time is not None):
+        # A beginning time given when loading takes precedence over the one in the state
+        if beginning_time is not None:
             self.beginning_time = beginning_time
+
+        # The image handle of an old state holds the beginning time, keep it as the handle won't be saved again
+        elif (self.beginning_time is None) and (variables.get("img_handle") is not None):
+            self.beginning_time = getattr(self.img_handle, "beginning_datetime", None)
+
+            # With a single image the handle took the given time as the one of frame 100 and moved it back to
+            #   frame 0. Undo that, or the time would be moved twice when the handle is created again
+            if (self.beginning_time is not None) and getattr(self.img_handle, "single_image_mode", False):
+                self.beginning_time += datetime.timedelta(seconds=100/self.img_handle.fps)
 
 
         if not hasattr(self, "pick_list"):
@@ -9815,7 +9896,15 @@ class PlateTool(QtWidgets.QMainWindow):
             for entry in self.paired_stars:
                 
                 img_coords, sky_coords = entry
-                x, y, fwhm, intens_acc, snr = img_coords
+
+                # The oldest states only hold x, y and the intensity
+                if len(img_coords) == 3:
+                    x, y, intens_acc = img_coords
+                    fwhm, snr = 0.0, 1.0
+
+                else:
+                    x, y, fwhm, intens_acc, snr = img_coords
+
                 sky_obj = CatalogStar(*sky_coords)
 
                 paired_stars_new.addPair(x, y, fwhm, intens_acc, sky_obj, snr=snr)
@@ -9880,7 +9969,7 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             
             # Get and set the new img_handle
-            self.detectInputType(load=True)  
+            self.detectInputType(load=True, beginning_time=self.beginning_time)
             self.img.changeHandle(self.img_handle)
             self.img_zoom.changeHandle(self.img_handle)
 
@@ -17874,7 +17963,18 @@ if __name__ == '__main__':
     if cml_args.input_path is not None and cml_args.input_path.endswith('.state'):
 
         dir_path, state_name = os.path.split(cml_args.input_path)
-        config = cr.loadConfigFromDirectory(cml_args.config if cml_args.config is not None else '.', cml_args.input_path)
+        config_arg = cml_args.config if cml_args.config is not None else '.'
+
+        # The state carries its own config, this one only locates the mask. A folder without a single .config
+        #   must not stop the state from loading, only a config file given by its path has to exist
+        try:
+            config = cr.loadConfigFromDirectory(config_arg, cml_args.input_path)
+
+        except FileNotFoundError:
+            if config_arg[0] != '.':
+                raise
+
+            config = cr.loadConfigFromDirectory(None, cml_args.input_path)
 
         # Create plate_tool without calling its constructor then calling loadstate
         plate_tool = PlateTool.__new__(PlateTool)
