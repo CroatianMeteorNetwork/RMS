@@ -9643,6 +9643,9 @@ class PlateTool(QtWidgets.QMainWindow):
             if not hasattr(self.config, k):
                 setattr(self.config, k, v)
 
+        # Force the CV2 backend, as in a new session. A state saved before it was forced has the GStreamer one
+        self.config.media_backend = 'cv2'
+
         # The same for the variables added to the constructor since, with the values it gives them
         state_defaults = {
             '_file_manager_custom_locations': [],
