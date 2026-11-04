@@ -236,6 +236,9 @@ except Exception as e:
 #   far fewer stars than the nightly processing needs.
 MIN_CONFIG_MAX_STARS = 800
 
+# Colour of the great circle line when only the main fragment has been picked
+GREAT_CIRCLE_COLOR = (138, 43, 226)
+
 # Keys which select the fragment to pick in manual reduction (0 is the main fragment)
 FRAGMENT_KEYS = [QtCore.Qt.Key.Key_0, QtCore.Qt.Key.Key_1, QtCore.Qt.Key.Key_2, QtCore.Qt.Key.Key_3,
                  QtCore.Qt.Key.Key_4, QtCore.Qt.Key.Key_5, QtCore.Qt.Key.Key_6, QtCore.Qt.Key.Key_7,
@@ -3300,9 +3303,17 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         # Great circle fit
-        self.great_circle_line = pg.PlotCurveItem(pen=pg.mkPen((138, 43, 226, 255), style=QtCore.Qt.PenStyle.DotLine))
+        self.great_circle_line = pg.PlotCurveItem(pen=pg.mkPen(GREAT_CIRCLE_COLOR, style=QtCore.Qt.PenStyle.DotLine))
         self.great_circle_line.setZValue(1)
         self.img_frame.addItem(self.great_circle_line)
+
+        # Great circle fits of the additional fragments, in the colours of their markers
+        self.fragment_great_circle_lines = {}
+        for fragment_id in range(1, len(FRAGMENT_COLORS)):
+            line = pg.PlotCurveItem(pen=pg.mkPen(FRAGMENT_COLORS[fragment_id], style=QtCore.Qt.PenStyle.DotLine))
+            line.setZValue(1)
+            self.img_frame.addItem(line)
+            self.fragment_great_circle_lines[fragment_id] = line
 
 
         # Fit residuals (image, orange)
@@ -3655,7 +3666,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.tab.onSkyFit()
             self.pick_marker.hide()
             self.pick_marker2.hide()
-            self.great_circle_line.hide()
+            self.setGreatCirclesVisible(False)
             self.region.hide()
             if hasattr(self, "region_zoom"):
                 self.region_zoom.hide()
@@ -3746,7 +3757,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             self.pick_marker.show()
             self.pick_marker2.show()
-            self.great_circle_line.show()
+            self.setGreatCirclesVisible(True)
             self.region.show()
             if hasattr(self, "region_zoom"):
                 self.region_zoom.show()
@@ -3862,6 +3873,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.residuals = None
             self.updateFitResiduals()
             self.updatePicks()
+            self.updateGreatCircle()
             self.drawPhotometryColoring()
             self.photometry()
 
@@ -10361,6 +10373,7 @@ class PlateTool(QtWidgets.QMainWindow):
                         self.addFragmentPoint(self.img.getFrame(), fragment_id, self.x_centroid, self.y_centroid,
                                               snr=self.snr_centroid, saturated=self.saturated_centroid)
                         self.updatePicks()
+                        self.updateGreatCircle()
                         return
 
                     self.addCentroid(self.img.getFrame(), self.x_centroid, self.y_centroid, mode=mode,
@@ -10389,6 +10402,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     fragment_id = self.tab.annotations.fragment.currentIndex()
                     if fragment_id > 0:
                         self.removeFragmentPoint(self.img.getFrame(), fragment_id)
+                        self.updateGreatCircle()
                     else:
                         self.removeCentroid(self.img.getFrame())
 
@@ -12673,13 +12687,19 @@ class PlateTool(QtWidgets.QMainWindow):
             self.pick_marker.show()
             self.pick_marker2.show()
 
+    def setGreatCirclesVisible(self, visible):
+        """ Show or hide the great circle lines of all fragments. """
+
+        self.great_circle_line.setVisible(visible)
+
+        for line in self.fragment_great_circle_lines.values():
+            line.setVisible(visible)
+
+
     def toggleShowGreatCircle(self):
-        """ Toggle the visibility of the great circle line. """
-        
-        if self.great_circle_line.isVisible():
-            self.great_circle_line.hide()
-        else:
-            self.great_circle_line.show()
+        """ Toggle the visibility of the great circle lines. """
+
+        self.setGreatCirclesVisible(not self.great_circle_line.isVisible())
 
 
     def toggleShowRegion(self):
@@ -15387,17 +15407,39 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def updateGreatCircle(self):
-        """ Fits great circle to observations. """
+        """ Fits great circles to the picks of the main fragment and of each additional fragment. """
 
         # Extract picked points, without the picks not used in the main trajectory
         good_picks = collections.OrderedDict((frame, pick) for frame, pick in self.pick_list.items() 
                                              if (pick['mode'] == 1) and (pick['x_centroid'] is not None)
                                              and pick.get('trajectory_use', True))
 
-        # Remove the old great circle
-        self.great_circle_line.clear()
+        # Once there are other fragments, tell the main fragment line from theirs with the colour of its markers
+        main_color = FRAGMENT_COLORS[0] if self.fragment_picks else GREAT_CIRCLE_COLOR
+        self.great_circle_line.setPen(pg.mkPen(main_color, style=QtCore.Qt.PenStyle.DotLine))
 
-        # If there are more than 2 picks, fit a great circle to the picks
+        self.drawGreatCircle(self.great_circle_line, good_picks)
+
+        # Draw the line of each additional fragment which has enough points
+        for fragment_id, line in self.fragment_great_circle_lines.items():
+            fragment_points = {frame: fragments[fragment_id] for frame, fragments in self.fragment_picks.items()
+                               if fragment_id in fragments}
+            self.drawGreatCircle(line, fragment_points)
+
+
+    def drawGreatCircle(self, line, good_picks):
+        """ Fits a great circle to the given picks and draws it, or leaves the line empty if there are too few.
+
+        Arguments:
+            line: [pg.PlotCurveItem] Line to draw the great circle on.
+            good_picks: [dict] Picks to fit, as {frame: pick}.
+
+        """
+
+        # Remove the old great circle
+        line.clear()
+
+        # If there are at least 2 picks, fit a great circle to the picks
         # If ground points are measured, don't fit the great circle
         if (len(good_picks) > 1) and (not self.meas_ground_points):
 
@@ -15522,7 +15564,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     connect[break_indx-1] = 0
 
                 
-                self.great_circle_line.setData(x=x_array + 0.5, y=y_array + 0.5, connect=connect)
+                line.setData(x=x_array + 0.5, y=y_array + 0.5, connect=connect)
 
 
                 ### ###
