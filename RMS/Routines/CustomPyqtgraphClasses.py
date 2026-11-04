@@ -20,6 +20,7 @@ from RMS.Routines.SkyFitHelp import HELP_STYLE, buildHelpHome, buildHelpTopic, s
 import time
 import re
 import sys
+import unicodedata
 
 
 class _CornerHelpOverlay(QtCore.QObject):
@@ -143,6 +144,52 @@ def qmessagebox(message="", title="Error", message_type="warning"):
     msg.exec()
 
 
+class MarkedSlider(QtWidgets.QSlider):
+  """ A horizontal slider that draws thin red ticks on its groove, under the handle, at the marked values """
+  def __init__(self, *args):
+    super().__init__(*args)
+    self.marks = []
+
+  def setMarks(self, marks):
+    self.marks = list(marks)
+    self.update()
+
+  def paintEvent(self, event):
+    painter = QtWidgets.QStylePainter(self)
+    opt = QtWidgets.QStyleOptionSlider()
+    self.initStyleOption(opt)
+    style = self.style()
+    cc, sc = QtWidgets.QStyle.ComplexControl.CC_Slider, QtWidgets.QStyle.SubControl
+
+    # Draw the groove off-screen first to find its vertical position, which the native style doesn't report
+    dpr = self.devicePixelRatioF()
+    pixmap = QtGui.QPixmap(self.size()*dpr)
+    pixmap.setDevicePixelRatio(dpr)
+    pixmap.fill(QtCore.Qt.GlobalColor.transparent)
+    opt.subControls = sc.SC_SliderGroove
+    QtWidgets.QStylePainter(pixmap, self).drawComplexControl(cc, opt)
+    img = pixmap.toImage()
+    rows = [y for y in range(img.height()) if img.pixelColor(img.width()//2, y).alpha() > 0]
+    groove_y = (rows[0] + rows[-1] + 1)/2/dpr if rows else self.height()/2
+
+    groove = style.subControlRect(cc, opt, sc.SC_SliderGroove, self)
+    handle = QtCore.QRectF(style.subControlRect(cc, opt, sc.SC_SliderHandle, self))
+    handle_w = int(handle.width())
+    y = handle.center().y()
+
+    # Groove centred on the handle, then the ticks, then a semi-transparent handle on top
+    painter.drawPixmap(QtCore.QPointF(0, y - groove_y), pixmap)
+    painter.setPen(QtGui.QPen(QtGui.QColor(255, 0, 0), 1))
+    for mark in self.marks:
+      x = groove.x() + handle_w/2 + QtWidgets.QStyle.sliderPositionFromValue(
+        self.minimum(), self.maximum(), mark, groove.width() - handle_w)
+      painter.drawLine(QtCore.QLineF(x, y - 2, x, y + 2))
+
+    opt.subControls = sc.SC_SliderHandle
+    painter.setOpacity(0.6)
+    painter.drawComplexControl(cc, opt)
+
+
 class QHSeparationLine(QtWidgets.QFrame):
   """ A horizontal separation line """
   def __init__(self):
@@ -161,9 +208,13 @@ class Plus(QtGui.QPainterPath):
     ex. item.setSymbol(Plus())
 
     Consists of two lines with no fill making a plus sign
+
+    Keyword arguments:
+        dotted: [bool] Draw the lines from their ends to the centre, so that dotted lines start with a dot
+            at every end and no line is drawn twice. False by default.
     """
 
-    def __init__(self):
+    def __init__(self, dotted=False):
         QtGui.QPainterPath.__init__(self)
         points = np.asarray([
             (-0.5, 0),
@@ -172,10 +223,16 @@ class Plus(QtGui.QPainterPath):
             (0, -0.5),
         ])
 
-        for i in range(0, len(points), 2):
-            self.moveTo(*points[i])
-            self.lineTo(*points[i + 1])
-        self.closeSubpath()
+        if dotted:
+            for point in points:
+                self.moveTo(*point)
+                self.lineTo(0, 0)
+
+        else:
+            for i in range(0, len(points), 2):
+                self.moveTo(*points[i])
+                self.lineTo(*points[i + 1])
+            self.closeSubpath()
 
 
 class Cross(QtGui.QPainterPath):
@@ -1346,6 +1403,7 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
         self.settings = SettingsWidget(gui)
         self.help = HelpWidget(gui)
         self.debruijn = DebruijnSequenceManager(gui)
+        self.annotations = AnnotationsWidget(gui)
 
         self.index = 0
         self.maximized = True
@@ -1439,6 +1497,7 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
 
         # Remove ManualReduction-specific tabs
         self.removeTabText('Debruijn')
+        self.removeTabText('Annotations')
 
         # Add Skyfit-specific tabs
         self.insertTab(1, self.param_manager, "Fit Parameters")
@@ -1455,6 +1514,7 @@ class RightOptionsTab(QtWidgets.QTabWidget, ScaledSizeHelper):
         self.settings.onManualReduction()
 
         # Add ManualReduction-specific tabs
+        self.insertTab(1, self.annotations, 'Annotations')
         if self.gui.img.img_handle.input_type == 'dfn':
             self.insertTab(1, self.debruijn, 'Debruijn')
 
@@ -1916,6 +1976,180 @@ class DebruijnSequenceManager(QtWidgets.QWidget, ScaledSizeHelper):
                 pick['mode'] = 1
 
             self.gui.updatePicks()
+
+
+# Marker colors of the fragment IDs 0-8. Fragment 0 is the main fragment, drawn in the existing pick color
+FRAGMENT_COLORS = [
+    (255, 0, 0),      # Red
+    (0, 255, 255),    # Cyan
+    (0, 255, 0),      # Green
+    (255, 0, 255),    # Magenta
+    (60, 100, 255),   # Lighter Blue
+    (255, 128, 0),    # Orange
+    (170, 90, 255),   # Purple
+    (255, 255, 255),  # White
+    (255, 160, 200),  # Pink
+]
+
+
+# Longest note of a pick, in characters
+NOTE_MAX_LENGTH = 140
+
+
+def noteCharacters(text):
+    """ Keep the characters of a note that every reader of the ECSV can read: plain ASCII on one line, with
+        accented letters written without the accent. A comma or a # would make WMPL unable to load the file,
+        as it doesn't handle quoted values and takes # as the start of a comment, and other characters depend
+        on the encoding of the platform.
+    """
+
+    text = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('ascii')
+
+    return re.sub(r'[^\x20-\x7E]|[,#"]', '', text)
+
+
+def cleanNote(note):
+    """ Return a note of a pick as it is written to the ECSV. """
+
+    return noteCharacters(note)[:NOTE_MAX_LENGTH].strip()
+
+
+class NoteValidator(QtGui.QValidator):
+    """ Remove the characters a note can't have while it is typed or pasted. """
+
+    def validate(self, text, pos):
+
+        clean = noteCharacters(text)
+
+        return QtGui.QValidator.State.Acceptable, clean, max(0, pos - (len(text) - len(clean)))
+
+
+class AnnotationsWidget(QtWidgets.QWidget, ScaledSizeHelper):
+    """ Manual reduction tab for annotating the picks on the current frame. The normal picks are the main
+        fragment (0). While another fragment is selected, picking adds and removes the points of that
+        fragment instead, next to the main picks.
+    """
+
+    def __init__(self, gui):
+        QtWidgets.QWidget.__init__(self)
+        self.gui = gui
+
+        layout = QtWidgets.QVBoxLayout()
+        layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
+        self.setLayout(layout)
+
+        # Tab help button (top-right)
+        self.addCornerHelpButton('mr_annotations', "Help: the Annotations tab")
+
+        layout.addWidget(QtWidgets.QLabel('Fragment'))
+        self.fragment = QtWidgets.QComboBox()
+        for fragment_id, color in enumerate(FRAGMENT_COLORS):
+
+            # Show the marker color of the fragment as a dot next to its name
+            dot = QtGui.QPixmap(12, 12)
+            dot.fill(QtCore.Qt.GlobalColor.transparent)
+            painter = QtGui.QPainter(dot)
+            painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+            painter.setBrush(QtGui.QColor(*color))
+            painter.drawEllipse(1, 1, 10, 10)
+            painter.end()
+
+            name = 'Main' if fragment_id == 0 else 'Fragment {:d}'.format(fragment_id)
+            self.fragment.addItem(QtGui.QIcon(dot), '{:d} — {:s}'.format(fragment_id, name))
+
+        self.fragment.currentIndexChanged.connect(self.onFragmentChanged)
+        layout.addWidget(self.fragment)
+
+        self.flare = QtWidgets.QCheckBox('Flare')
+        self.flare.clicked.connect(self.onAnnotationChanged)
+        layout.addWidget(self.flare)
+
+        self.trajectory_use = QtWidgets.QCheckBox('Use in main trajectory')
+        self.trajectory_use.clicked.connect(self.onAnnotationChanged)
+        layout.addWidget(self.trajectory_use)
+
+        layout.addWidget(QtWidgets.QLabel('Note'))
+        self.note = QtWidgets.QLineEdit()
+        self.note.setMaxLength(NOTE_MAX_LENGTH)
+        self.note.setValidator(NoteValidator(self.note))
+        self.note.setToolTip("Note on the point of the selected fragment on this frame, saved in the ECSV. "
+                             "Up to {:d} characters, without accents, commas, # or double "
+                             "quotes.".format(NOTE_MAX_LENGTH))
+        self.note.textEdited.connect(self.onNoteEdited)
+
+        # Enter returns the keyboard to the shortcuts. After this event, which also reaches the main window: the
+        #   field must still have the focus then, or Enter would run the shortcuts of that key
+        self.note.returnPressed.connect(lambda: QtCore.QTimer.singleShot(0, self.note.clearFocus))
+        layout.addWidget(self.note)
+
+        self.updateAnnotations()
+
+    def currentPick(self):
+        """ Return the pick of the selected fragment on the current frame, or None if there is none. """
+
+        # Without data (SkyFit2 started with no input) there is no current frame
+        if not self.gui.hasData():
+            return None
+
+        frame = self.gui.img.getFrame()
+        fragment_id = self.fragment.currentIndex()
+
+        if fragment_id == 0:
+            pick = self.gui.pick_list.get(frame)
+            if pick and (pick['x_centroid'] is not None):
+                return pick
+
+            return None
+
+        return self.gui.fragment_picks.get(frame, {}).get(fragment_id)
+
+    def updateAnnotations(self):
+        """ Show the annotations of the selected fragment on the current frame. """
+
+        main = self.fragment.currentIndex() == 0
+        pick = self.currentPick()
+
+        # Only the main fragment picks are annotated
+        self.flare.setEnabled(main and (pick is not None))
+        self.flare.setChecked(main and (pick is not None) and pick.get('flare', False))
+
+        self.trajectory_use.setEnabled(main and (pick is not None))
+        self.trajectory_use.setChecked(main and ((pick is None) or pick.get('trajectory_use', True)))
+
+        # The point of any fragment can have a note. The text is only set if it changed, to keep the cursor
+        note = pick.get('note', '') if (pick is not None) else ''
+        self.note.setEnabled(pick is not None)
+        if self.note.text() != note:
+            self.note.setText(note)
+
+    def onNoteEdited(self, text):
+        """ Store the note in the point of the selected fragment on the current frame. """
+
+        pick = self.currentPick()
+        if pick is not None:
+            pick['note'] = text
+
+    def onFragmentChanged(self):
+        """ Show the annotations of the selected fragment, and the fragment in the image info panel. """
+
+        self.updateAnnotations()
+        self.gui.updateLeftLabels()
+
+    def onAnnotationChanged(self):
+        """ Store the checkbox states in the main fragment pick on the current frame. """
+
+        pick = self.currentPick()
+        if (pick is None) or (self.fragment.currentIndex() != 0):
+            return
+
+        pick['flare'] = self.flare.isChecked()
+        pick['trajectory_use'] = self.trajectory_use.isChecked()
+
+        # Redraw the pick marker with the new annotation and refit the great circle without the picks not
+        #   used in the main trajectory
+        self.gui.updatePicks()
+        self.gui.updateGreatCircle()
+        self.gui.updateLeftLabels()
 
 
 class GeolocationWidget(QtWidgets.QWidget, ScaledSizeHelper):
