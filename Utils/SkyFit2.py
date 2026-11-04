@@ -17975,16 +17975,18 @@ if __name__ == '__main__':
         dir_path, state_name = os.path.split(cml_args.input_path)
         config_arg = cml_args.config if cml_args.config is not None else '.'
 
-        # The state carries its own config, this one only locates the mask. A folder without a single .config
-        #   must not stop the state from loading, only a config file given by its path has to exist
+        # The state carries its own config, this one only locates the mask. A folder without a config that can
+        #   be used must not stop the state from loading, only a config file given by its path has to be valid
         try:
             config = cr.loadConfigFromDirectory(config_arg, cml_args.input_path)
 
-        except FileNotFoundError:
+        except Exception as e:
             if config_arg[0] != '.':
                 raise
 
-            config = cr.loadConfigFromDirectory(None, cml_args.input_path)
+            print("Locating the mask with the default config, none could be loaded from the folder of the "
+                  "state: {}".format(e))
+            config = cr.Config()
 
         # Create plate_tool without calling its constructor then calling loadstate
         plate_tool = PlateTool.__new__(PlateTool)
