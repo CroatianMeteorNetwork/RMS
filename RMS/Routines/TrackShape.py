@@ -467,24 +467,25 @@ def measureTrackShape(source, t, x, y, psf_sigma, window_half=WINDOW_HALF, max_t
         result['flag'] = 'no frames'
         return result
 
-    # The frames are read once, as some are used for both the background and the track
-    cache = {}
-
-    def readFrame(i):
-        """ Frame i of the source, read from the file only the first time. """
-        if i not in cache:
-            cache[i] = source.frame(int(i))
-        return cache[i]
-
     # The box around the track in which the background is computed
     height, width = source.height, source.width
     bx0, bx1 = int(max(x.min() - BOX_MARGIN, 0)), int(min(x.max() + BOX_MARGIN, width))
     by0, by1 = int(max(y.min() - BOX_MARGIN, 0)), int(min(y.max() + BOX_MARGIN, height))
 
+    # The frames are read once, as some are used for both the background and the track; only the box is kept, so
+    #   the memory doesn't grow with the size of the frames
+    cache = {}
+
+    def readBox(i):
+        """ The box of frame i of the source, read from the file only the first time. """
+        if i not in cache:
+            cache[i] = source.frame(int(i))[by0:by1, bx0:bx1].copy()
+        return cache[i]
+
     # The background: the median of frames spread evenly over the track and the time around it (the object stays
     #   on any pixel only briefly, so it doesn't enter the median)
     bg_idx = all_idx[::max(1, len(all_idx)//background_frames)]
-    background = np.median(np.array([readFrame(i)[by0:by1, bx0:bx1] for i in bg_idx]), axis=0)
+    background = np.median(np.array([readBox(i) for i in bg_idx]), axis=0)
 
     # The frames of the track, minus the background, shifted so the object is at the centre of the window and
     #   averaged. The window is cut 2 px larger on every side, so the shift doesn't bring in the edge values
@@ -494,7 +495,7 @@ def measureTrackShape(source, t, x, y, psf_sigma, window_half=WINDOW_HALF, max_t
     n_stack = 0
     for i, tf in zip(track_idx[::step], track_times[::step]):
 
-        img = readFrame(i)[by0:by1, bx0:bx1] - background
+        img = readBox(i) - background
 
         # The position of the object at the time of the frame, in the box
         cx, cy = np.interp(tf, t, x) - bx0, np.interp(tf, t, y) - by0
@@ -572,6 +573,38 @@ def psfSigmaFromDone(ftp_path, config=None):
     binning = getattr(config, 'detection_binning_factor', 1) if config is not None else 1
 
     return float(sigma)*binning
+
+
+
+def psfSigmaForRawFrames(ftp_path, config=None, psf_sigma=None):
+    """ The PSF sigma in the pixels of the raw frames: the one given, else the one the matched filter measured for
+        the file (its done file next to the FTPdetectinfo file), else mf_psf_sigma of the config. The last two are
+        in the pixels of the frames the matched filter searched, so they are multiplied by the detection binning.
+
+    Arguments:
+        ftp_path: [str] Path to the FTPdetectinfo file.
+
+    Keyword arguments:
+        config: [Config] Configuration object. None by default.
+        psf_sigma: [float] PSF sigma in the pixels of the raw frames, used as given. None by default.
+
+    Return:
+        [float] PSF sigma (px), None if not known.
+    """
+
+    if psf_sigma is not None:
+        return float(psf_sigma)
+
+    # Measured by the matched filter for this file
+    measured = psfSigmaFromDone(ftp_path, config)
+    if measured is not None:
+        return measured
+
+    # The configured one, in the pixels of the binned frames
+    if (config is not None) and (getattr(config, 'mf_psf_sigma', 0) > 0):
+        return float(config.mf_psf_sigma)*getattr(config, 'detection_binning_factor', 1)
+
+    return None
 
 
 
@@ -696,8 +729,9 @@ if __name__ == "__main__":
                             'used if found, else the blocks around the time of every detection.')
     arg_parser.add_argument('-c', '--config', help='Config file, for the frame time correction, the timing of the '
                             'frame blocks, the detection binning and the PSF sigma (mf_psf_sigma).')
-    arg_parser.add_argument('--psf_sigma', type=float, help='PSF sigma (px). By default from the done file of the '
-                            'matched filter next to the FTPdetectinfo file, else mf_psf_sigma of the config.')
+    arg_parser.add_argument('--psf_sigma', type=float, help='PSF sigma (px of the raw frames). By default from the '
+                            'done file of the matched filter next to the FTPdetectinfo file, else mf_psf_sigma of the '
+                            'config, both times the detection binning.')
     arg_parser.add_argument('-o', '--output', help='Output CSV file. By default next to the FTPdetectinfo file, '
                             'with the suffix _track_shape.csv.')
 
@@ -710,12 +744,8 @@ if __name__ == "__main__":
         import RMS.ConfigReader as cr
         config = cr.parse(args.config)
 
-    # The PSF sigma: given, else measured by the matched filter, else from the config
-    psf_sigma = args.psf_sigma
-    if psf_sigma is None:
-        psf_sigma = psfSigmaFromDone(args.ftpdetectinfo, config)
-    if (psf_sigma is None) and (config is not None) and (getattr(config, 'mf_psf_sigma', 0) > 0):
-        psf_sigma = config.mf_psf_sigma
+    # The PSF sigma in raw pixels: given, else measured by the matched filter, else from the config
+    psf_sigma = psfSigmaForRawFrames(args.ftpdetectinfo, config, args.psf_sigma)
     if psf_sigma is None:
         raise SystemExit('The PSF sigma is not known: give --psf_sigma or a config with mf_psf_sigma')
 

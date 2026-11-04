@@ -231,6 +231,27 @@ def test_vid_seconds_field_repaired(tmp_path):
     assert res['n_stack'] == reference['n_stack']
 
 
+def test_psf_sigma_in_raw_pixels(tmp_path):
+    """ The PSF sigma is in the pixels of the raw frames: the given one as is; the matched filter's (done file) and
+        the configured one times the detection binning. """
+
+    import json
+    import types
+
+    ftp_path = str(tmp_path/'FTPdetectinfo_XX0001_20261027_101258_485479.txt')
+    config = types.SimpleNamespace(mf_psf_sigma=0.7, detection_binning_factor=2)
+
+    # Without a done file: the configured one, binned
+    assert ts.psfSigmaForRawFrames(ftp_path, config) == pytest.approx(1.4)
+    assert ts.psfSigmaForRawFrames(ftp_path, config, psf_sigma=0.9) == pytest.approx(0.9)
+    assert ts.psfSigmaForRawFrames(ftp_path, None) is None
+
+    # With the matched filter's measurement
+    with open(str(tmp_path/'matched_filter_done.json'), 'w') as f:
+        json.dump({'psf_sigma': 0.6}, f)
+    assert ts.psfSigmaForRawFrames(ftp_path, config) == pytest.approx(1.2)
+
+
 def test_frame_numbers_and_missing_frames():
     """ A track given in frame numbers is converted to times; a track without frames is flagged. """
 
