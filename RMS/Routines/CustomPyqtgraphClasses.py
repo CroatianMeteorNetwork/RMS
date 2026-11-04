@@ -2040,6 +2040,10 @@ class AnnotationsWidget(QtWidgets.QWidget, ScaledSizeHelper):
     def currentPick(self):
         """ Return the pick of the selected fragment on the current frame, or None if there is none. """
 
+        # Without data (SkyFit2 started with no input) there is no current frame
+        if not self.gui.hasData():
+            return None
+
         frame = self.gui.img.getFrame()
         fragment_id = self.fragment.currentIndex()
 

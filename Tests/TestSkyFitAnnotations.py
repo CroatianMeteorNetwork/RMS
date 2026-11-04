@@ -358,6 +358,10 @@ class Gui(object):
         self.fragment_picks = {}
         self.redraws = 0
         self.refits = 0
+        self.has_data = True
+
+    def hasData(self):
+        return self.has_data
 
     def updatePicks(self):
         self.redraws += 1
@@ -377,6 +381,24 @@ def qapp():
 @pytest.fixture
 def widget(qapp):
     return AnnotationsWidget(Gui())
+
+
+def test_widget_without_data(qapp):
+    """ SkyFit2 started with no input has no current frame, so the tab has no pick to annotate. """
+
+    gui = Gui()
+    gui.has_data = False
+
+    def noFrame(_):
+        raise AttributeError("'NoneType' object has no attribute 'current_frame'")
+
+    gui.img = type('Img', (), {'getFrame': noFrame})()
+
+    widget = AnnotationsWidget(gui)
+
+    assert widget.currentPick() is None
+    assert not widget.flare.isEnabled()
+    assert not widget.trajectory_use.isEnabled()
 
 
 def test_widget_main_fragment(widget):
