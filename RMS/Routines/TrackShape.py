@@ -16,11 +16,14 @@ The measurement of a track:
     4) The spread is the Gaussian sigma across the motion divided by the PSF sigma: about 1 for a point source,
         clearly larger for an extended structure.
 
-Only the raw recording is used (.vid files and frame block files), never compressed video, as the compression
-smooths and blurs faint extended structures. The frames are read through a raw frame source (VidSource,
-FrameBlockSource), which gives the frames and their times; any object with the same methods can be used instead.
+Only the raw frames of the recording are used, never compressed video (mp4, mkv, ...) or FF files, as the
+compression smooths and blurs faint extended structures. The frames are read through the frame interface
+(RMS.Formats.FrameInterface), so every raw input of RMS can be measured (.vid files, frame block files, image frames
+such as UWO PNG frame dumps), and the frames are timed exactly as the processing timed them (frame_time_offset, the
+point of the exposure of frame blocks, the repair of the timestamps). RawFrames joins the inputs around a track; any
+object with the same methods (framesBetween, frame, height, width) can be measured instead.
 
-Command line: python -m RMS.Routines.TrackShape FTPdetectinfo_... raw_dir [-c config] [--psf_sigma 0.7]
+Command line: python -m RMS.Routines.TrackShape FTPdetectinfo_... raw_path [-c config] [--psf_sigma 0.7]
 writes a CSV file with the shape of every detection in the FTPdetectinfo file.
 """
 
@@ -75,52 +78,118 @@ CSV_COLUMNS = ['ff_name', 'meteor_no', 'n_points', 'time_start_utc', 'time_end_u
                'sigma_cross', 'sigma_along', 'spread', 'snr', 'n_frames', 'n_stack', 'ok', 'flag', 'time_s']
 
 
-### Raw frame sources ###
+### Raw frames, read through the frame interface ###
 
-class VidSource(object):
-    def __init__(self, path, frame_time_offset=0.0):
-        """ Frames of a .vid file and their times (the time in the header of every frame), read one at a time
-            as they are needed. The frames of a .vid file all have the same size, so a frame is found directly
-            from its number, and the frames around a time are found by a binary search over the times in the
-            headers (the frames are in time order).
+# File names which carry the time of the beginning of a raw recording: frame blocks (..._YYYYMMDD_hhmmss_ffffff.fblk)
+#   and UWO .vid files (dump_<Unix time in hex>_<camera>.vid)
+BLOCK_NAME_TIME = re.compile(r'(\d{8})_(\d{6})_(\d{6})\.fblk$', re.IGNORECASE)
+VID_NAME_TIME = re.compile(r'_([0-9A-Fa-f]{8})_[^_]*\.vid$')
+
+# Extensions of the raw recordings searched for in a directory
+RAW_FILE_EXTENSIONS = ('.fblk', '.vid')
+
+# Frames read when an input is opened (the frame interface loads a first chunk of frames)
+OPEN_CHUNK_FRAMES = 2
+
+
+def frameTimeOfInput(img_handle, frame_no):
+    """ Time of a frame of an input of the frame interface, as the processing timed it (with frame_time_offset and
+        the repair of the timestamps the input applies).
+
+    Arguments:
+        img_handle: [InputType] Input of the frame interface.
+        frame_no: [int] Frame number of the input.
+
+    Return:
+        [float] Unix time (s).
+    """
+
+    from RMS.Astrometry.Conversions import datetime2UnixTime
+
+    # A frame table of the input is used directly, else the time of the frame as the input gives it
+    table = getattr(img_handle, 'frame_unix_times', None)
+    if table is not None:
+        return float(table[frame_no])
+
+    return datetime2UnixTime(img_handle.currentFrameTime(frame_no=int(frame_no), dt_obj=True))
+
+
+
+def closeInput(img_handle):
+    """ Close the files of an input of the frame interface (the .vid file, the memory map of a frame block).
+
+    Arguments:
+        img_handle: [InputType] Input of the frame interface.
+    """
+
+    # The open file of a .vid input
+    vid_file = getattr(img_handle, 'vid_file', None)
+    if vid_file is not None:
+        vid_file.close()
+
+    # The memory map of a frame block
+    reader = getattr(img_handle, 'reader', None)
+    if reader is not None:
+        reader.close()
+
+
+
+class RawFrames(object):
+    def __init__(self, img_handles, names=None):
+        """ The frames of one or more inputs of the frame interface (RMS.Formats.FrameInterface), numbered
+            continuously in time order, with the time of every frame as the processing timed it. The frames are
+            read one at a time as they are needed, and their times only once.
 
         Arguments:
-            path: [str] Path to the .vid file.
+            img_handles: [list] Inputs of the frame interface, opened on the raw frames (no binning).
 
         Keyword arguments:
-            frame_time_offset: [float] Correction added to the times of the frames (s), as frame_time_offset of
-                the config. 0 by default.
+            names: [list] Names of the files or directories of the inputs, for the output. None by default.
         """
 
-        # Imported here, so the module is usable without the .vid reader for the other sources
-        from RMS.Formats.Vid import VidStruct, readFrame, frameTimeModel, repairFrameTime
+        # The inputs in the order of the times of their first frames
+        if names is None:
+            names = [getattr(h, 'file_name', '') or getattr(h, 'dir_path', '') for h in img_handles]
+        starts = [frameTimeOfInput(h, 0) for h in img_handles]
+        order = np.argsort(starts, kind='stable')
+        self.img_handles = [img_handles[k] for k in order]
+        self.names = [os.path.basename(str(names[k]).rstrip(os.sep)) for k in order]
 
-        self._VidStruct = VidStruct
-        self._readFrame = readFrame
-        self._repairFrameTime = repairFrameTime
+        # The frames of every input follow those of the inputs before it
+        counts = [int(h.total_frames) for h in self.img_handles]
+        self.first_frames = np.concatenate([[0], np.cumsum(counts)]).astype(int)
+        self.n_frames = int(self.first_frames[-1])
 
-        self.path = path
-        self.frame_time_offset = float(frame_time_offset)
-        self.fid = open(path, 'rb')
-
-        # The size of the frames and of their records from the first header
-        info = VidStruct()
-        readFrame(info, self.fid, metadata_only=True)
-        self.frame_bytes = info.seqlen
-        self.height, self.width = info.ht, info.wid
-        self.n_frames = os.path.getsize(path)//self.frame_bytes
-
-        # The model of the timestamps from the frame counter, which corrects a seconds field off by whole seconds
-        #   (as the reading of .vid files in the processing does, see Vid.frameTimeModel), so the frames are timed
-        #   as the detections were and stay in time order for the search below
-        self.time_model = frameTimeModel(self.fid)
+        # The size of the frames (all inputs of one camera have the same)
+        self.height = int(self.img_handles[0].nrows) if self.img_handles else 0
+        self.width = int(self.img_handles[0].ncols) if self.img_handles else 0
 
         # The times of the frames which were read
         self._times = {}
 
 
+    def _input(self, i):
+        """ The input of frame i and the number of the frame in it.
+
+        Arguments:
+            i: [int] Frame number.
+
+        Return:
+            (img_handle, frame_no): [tuple] The input and its frame.
+        """
+
+        # Only the frames of the inputs exist
+        if (i < 0) or (i >= self.n_frames):
+            raise IndexError('Frame {} is not in the raw frames'.format(i))
+
+        # The last input which begins at or before the frame
+        k = int(np.searchsorted(self.first_frames, i, side='right')) - 1
+
+        return self.img_handles[k], int(i - self.first_frames[k])
+
+
     def frameTime(self, i):
-        """ Time of frame i (Unix s, with the correction of the times).
+        """ Time of frame i (Unix s).
 
         Arguments:
             i: [int] Frame number.
@@ -129,19 +198,17 @@ class VidSource(object):
             [float] Time of the frame.
         """
 
-        # The time is read from the header of the frame only once
+        # The time is read from the input only once
         if i not in self._times:
-            st = self._VidStruct()
-            self.fid.seek(i*self.frame_bytes)
-            self._readFrame(st, self.fid, metadata_only=True)
-            self._repairFrameTime(st, self.time_model)
-            self._times[i] = st.ts + st.tu/1e6 + self.frame_time_offset
+            img_handle, frame_no = self._input(int(i))
+            self._times[i] = frameTimeOfInput(img_handle, frame_no)
 
         return self._times[i]
 
 
     def framesBetween(self, t0, t1):
-        """ The frames whose times are between t0 and t1 (inclusive).
+        """ The frames whose times are between t0 and t1 (inclusive). The frames of every input are in time order,
+            so the first one at or after t0 is found by a binary search over the times of its frames.
 
         Arguments:
             t0: [float] Beginning (Unix s).
@@ -151,154 +218,95 @@ class VidSource(object):
             (indices, times): [tuple of ndarrays] Frame numbers and times, in time order.
         """
 
-        if self.n_frames == 0:
-            return np.zeros(0, dtype=int), np.zeros(0)
-
-        # The first frame at or after t0, by a binary search over the times in the headers
-        lo, hi = 0, self.n_frames
-        while lo < hi:
-            mid = (lo + hi)//2
-            if self.frameTime(mid) < t0:
-                lo = mid + 1
-            else:
-                hi = mid
-
-        # The frames which follow it, up to t1
         indices, times = [], []
-        i = lo
-        while (i < self.n_frames) and (self.frameTime(i) <= t1):
-            indices.append(i)
-            times.append(self.frameTime(i))
-            i += 1
+        for k in range(len(self.img_handles)):
 
-        return np.array(indices, dtype=int), np.array(times, dtype=np.float64)
+            first, end = int(self.first_frames[k]), int(self.first_frames[k + 1])
+
+            # The first frame of the input at or after t0
+            lo, hi = first, end
+            while lo < hi:
+                mid = (lo + hi)//2
+                if self.frameTime(mid) < t0:
+                    lo = mid + 1
+                else:
+                    hi = mid
+
+            # The frames which follow it, up to t1
+            i = lo
+            while (i < end) and (self.frameTime(i) <= t1):
+                indices.append(i)
+                times.append(self.frameTime(i))
+                i += 1
+
+        # Inputs which overlap in time are merged in time order
+        indices, times = np.array(indices, dtype=int), np.array(times, dtype=np.float64)
+        order = np.argsort(times, kind='stable')
+
+        return indices[order], times[order]
 
 
     def frame(self, i):
-        """ Frame i as float32 (the header in the first row of the frame is set to 0, see Vid.readFrame). """
-
-        st = self._VidStruct()
-        self.fid.seek(i*self.frame_bytes)
-        img = self._readFrame(st, self.fid)
-        if img is None:
-            raise IndexError('Frame {} is not in {}'.format(i, self.path))
-
-        # The time of the frame is kept, as its header was read too
-        self._repairFrameTime(st, self.time_model)
-        self._times[i] = st.ts + st.tu/1e6 + self.frame_time_offset
-
-        return img.astype(np.float32)
-
-
-    def close(self):
-        """ Close the file. """
-
-        if self.fid is not None:
-            self.fid.close()
-            self.fid = None
-
-
-
-class FrameBlockSource(object):
-    def __init__(self, paths, frame_time_offset=0.0, frame_block_time='middle'):
-        """ Frames of one or more frame block files (see RMS.Formats.FrameBlock), numbered continuously in time
-            order, with the time of every frame.
+        """ Frame i as float32, as the input reads it.
 
         Arguments:
-            paths: [list] Paths to the block files.
+            i: [int] Frame number.
 
-        Keyword arguments:
-            frame_time_offset: [float] Correction added to the times of the frames (s), as frame_time_offset of
-                the config. 0 by default.
-            frame_block_time: [str] The point of the exposure at which the frames are timed ('start', 'middle' or
-                'end'), as frame_block_time of the config, so the times are those of the detections. 'middle' by
-                default.
+        Return:
+            [ndarray] The frame.
         """
 
-        from RMS.Formats.FrameBlock import FrameBlockReader
+        # The frame is read by its input, as the processing reads it
+        img_handle, frame_no = self._input(int(i))
+        img_handle.setFrame(frame_no)
 
-        fraction = {'start': 0.0, 'middle': 0.5, 'end': 1.0}[frame_block_time]
-
-        # The blocks with their frame times (as the frame interface of the blocks computes them), in time order
-        blocks = []
-        for path in paths:
-            reader = FrameBlockReader(path)
-            if reader.n_frames == 0:
-                reader.close()
-                continue
-            exposure_s = np.asarray(reader.table['exposure_us'], dtype=np.float64)/1e6
-            times = np.asarray(reader.times, dtype=np.float64) + float(frame_time_offset) + fraction*exposure_s
-            blocks.append((times[0], reader, times))
-        blocks.sort(key=lambda b: b[0])
-
-        # Every frame is a (block, frame of the block), with its time
-        self.readers = [b[1] for b in blocks]
-        self.times = np.concatenate([b[2] for b in blocks]) if blocks else np.zeros(0)
-        self._block = np.concatenate([np.full(len(b[2]), k, dtype=int) for k, b in enumerate(blocks)]) \
-            if blocks else np.zeros(0, dtype=int)
-        self._local = np.concatenate([np.arange(len(b[2])) for b in blocks]) if blocks else np.zeros(0, dtype=int)
-        self.n_frames = len(self.times)
-        self.height = self.readers[0].height if self.readers else 0
-        self.width = self.readers[0].width if self.readers else 0
-
-
-    def frameTime(self, i):
-        """ Time of frame i (Unix s, with the correction of the times). """
-
-        return float(self.times[i])
-
-
-    def framesBetween(self, t0, t1):
-        """ The frames whose times are between t0 and t1 (inclusive), see VidSource.framesBetween. """
-
-        sel = np.where((self.times >= t0) & (self.times <= t1))[0]
-        order = np.argsort(self.times[sel], kind='stable')
-
-        return sel[order], self.times[sel][order]
-
-
-    def frame(self, i):
-        """ Frame i as float32 (the values as stored, without a shift to 16 bits). """
-
-        return self.readers[self._block[i]].frame(int(self._local[i])).astype(np.float32)
+        return np.asarray(img_handle.loadFrame(), dtype=np.float32)
 
 
     def close(self):
-        """ Release the memory maps of the blocks. """
+        """ Close the files of the inputs. """
 
-        for reader in self.readers:
-            reader.close()
+        for img_handle in self.img_handles:
+            closeInput(img_handle)
 
 
 
-def frameBlockStart(path):
-    """ The time of the beginning of a frame block from its name (e.g. XX0001_20261027_101258_485479.fblk), None if
-        the name has no time.
+def rawFileStart(path):
+    """ The time of the beginning of a raw recording from its name: a frame block
+        (e.g. XX0001_20261027_101258_485479.fblk) or a UWO .vid file (dump_6AEAEB15_02G.vid, the Unix time in hex).
+        None if the name has no time.
 
     Arguments:
-        path: [str] Path to the block file.
+        path: [str] Path to the file.
 
     Return:
         [float] Unix time (s), or None.
     """
 
-    match = re.search(r'(\d{8})_(\d{6})_(\d{6})\.fblk$', os.path.basename(path))
-    if match is None:
-        return None
+    name = os.path.basename(path)
 
-    dt = datetime.datetime.strptime(''.join(match.groups()), '%Y%m%d%H%M%S%f')
+    # A frame block: the date and time of its first frame
+    match = BLOCK_NAME_TIME.search(name)
+    if match is not None:
+        dt = datetime.datetime.strptime(''.join(match.groups()), '%Y%m%d%H%M%S%f')
+        return dt.replace(tzinfo=datetime.timezone.utc).timestamp()
 
-    return dt.replace(tzinfo=datetime.timezone.utc).timestamp()
+    # A .vid file: the Unix time of its beginning in hex
+    match = VID_NAME_TIME.search(name)
+    if match is not None:
+        return float(int(match.group(1), 16))
+
+    return None
 
 
 
-def frameBlocksAround(raw_dir, t0, t1, margin=0.0):
-    """ The frame block files of a directory (searched recursively) which can hold frames between t0 and t1: the
-        blocks which begin before t1 and whose next block begins after t0, from the times in their names. Blocks
-        without a time in the name are all taken (their own times decide which frames are used).
+def rawFilesAround(raw_dir, t0, t1, margin=0.0):
+    """ The raw recording files of a directory (.fblk and .vid, searched recursively) which can hold frames
+        between t0 and t1: the files which begin before t1 and whose next file begins after t0, from the times in
+        their names. Files without a time in the name are all taken (their own times decide which frames are used).
 
     Arguments:
-        raw_dir: [str] Directory of the block files.
+        raw_dir: [str] Directory of the raw files.
         t0: [float] Beginning (Unix s).
         t1: [float] End (Unix s).
 
@@ -307,16 +315,17 @@ def frameBlocksAround(raw_dir, t0, t1, margin=0.0):
             0 by default.
 
     Return:
-        [list] Paths of the block files, in time order.
+        [list] Paths of the files, in time order.
     """
 
-    paths = sorted(glob.glob(os.path.join(raw_dir, '**', '*.fblk'), recursive=True))
+    paths = sorted(p for ext in RAW_FILE_EXTENSIONS
+                   for p in glob.glob(os.path.join(raw_dir, '**', '*' + ext), recursive=True))
 
-    # The blocks named by their time, in time order, and the others
-    named = sorted((frameBlockStart(p), p) for p in paths if frameBlockStart(p) is not None)
-    unnamed = [p for p in paths if frameBlockStart(p) is None]
+    # The files named by their time, in time order, and the others
+    named = sorted((rawFileStart(p), p) for p in paths if rawFileStart(p) is not None)
+    unnamed = [p for p in paths if rawFileStart(p) is None]
 
-    # A block can hold frames of the interval if it begins before its end and the next block begins after its
+    # A file can hold frames of the interval if it begins before its end and the next file begins after its
     #   beginning
     t0, t1 = t0 - margin, t1 + margin
     selected = []
@@ -329,37 +338,109 @@ def frameBlocksAround(raw_dir, t0, t1, margin=0.0):
 
 
 
-def openRawSource(raw_path, t0, t1, frame_time_offset=0.0, frame_block_time='middle'):
-    """ A raw frame source for the frames between t0 and t1: a .vid file, a frame block file, or a directory of
-        frame block files.
+def openInput(path, config):
+    """ Open a raw recording with the frame interface, on its raw frames (no binning). Only raw frames are
+        accepted: compressed video smooths and blurs faint extended structures, and FF files hold images of
+        chunks of frames, not the frames.
 
     Arguments:
-        raw_path: [str] Path to a .vid file, a .fblk file, or a directory of .fblk files.
+        path: [str] A raw file (.vid, .fblk, ...) or a directory of images (e.g. UWO PNG frame dumps).
+        config: [Config] Configuration of the camera.
+
+    Return:
+        [InputType] The input, None if the frame interface doesn't recognise it.
+    """
+
+    from RMS.Formats.FFfile import validFFName
+    from RMS.Formats.FRbin import validFRName
+    from RMS.Formats.FrameInterface import checkIfVideoFile, detectInputType
+
+    # Compressed video and FF files are refused before anything is read
+    name = os.path.basename(path.rstrip(os.sep))
+    if os.path.isfile(path) and checkIfVideoFile(name):
+        raise ValueError('{:s} is compressed video: the shape is measured on raw frames only (.vid, frame blocks, '
+                         'image frames), as the compression blurs faint extended structures'.format(name))
+    if os.path.isfile(path) and (validFFName(name) or validFRName(name)):
+        raise ValueError('{:s} is an FF file, which holds images of a chunk of frames, not the frames'.format(name))
+
+    # The input as the processing opens it, without the binning of the detection. An input whose beginning
+    #   can't be found stops the frame interface (sys.exit), which is turned into an error here
+    try:
+        img_handle = detectInputType(path, config, detection=False, chunk_frames=OPEN_CHUNK_FRAMES)
+    except SystemExit:
+        raise ValueError('The frame interface could not open {:s}'.format(path))
+
+    # A directory of FF files is not a recording of frames either
+    if (img_handle is not None) and (getattr(img_handle, 'input_type', None) == 'ff'):
+        closeInput(img_handle)
+        raise ValueError('{:s} holds FF files, not the frames of a recording'.format(path))
+
+    return img_handle
+
+
+
+def openRawSource(raw_path, t0, t1, config=None, frame_time_offset=None, frame_block_time=None):
+    """ The raw frames between t0 and t1, read through the frame interface: a raw file (.vid, .fblk), a directory
+        of raw files (those around the interval are opened, see rawFilesAround), or a directory of image frames
+        (e.g. UWO PNG frame dumps). The frames are timed as the processing timed them, from the config.
+
+    Arguments:
+        raw_path: [str] Path to the raw recording.
         t0: [float] Beginning (Unix s).
         t1: [float] End (Unix s).
 
     Keyword arguments:
-        frame_time_offset: [float] Correction added to the times of the frames (s). 0 by default.
-        frame_block_time: [str] Point of the exposure of the times of frame blocks, see FrameBlockSource.
-            'middle' by default.
+        config: [Config] Configuration of the camera (frame_time_offset, frame_block_time, fps, ...). The RMS
+            defaults if None (default).
+        frame_time_offset: [float] frame_time_offset to use instead of the one of the config. None by default.
+        frame_block_time: [str] frame_block_time to use instead of the one of the config. None by default.
 
     Return:
-        [VidSource or FrameBlockSource] The source, None if no raw frames were found.
+        [RawFrames] The frames, None if no raw frames were found.
     """
 
+    import copy
+
+    # The config of the camera (the RMS defaults without one), with the given timing of the frames
+    if config is None:
+        import RMS.ConfigReader as cr
+        config = cr.Config()
+    if (frame_time_offset is not None) or (frame_block_time is not None):
+        config = copy.copy(config)
+        if frame_time_offset is not None:
+            config.frame_time_offset = float(frame_time_offset)
+        if frame_block_time is not None:
+            config.frame_block_time = frame_block_time
+
+    # The raw files of a directory around the interval (the margin covers a correction of the times of the
+    #   frames), else the directory as one input (e.g. image frames); a file as one input
+    paths = [raw_path]
     if os.path.isdir(raw_path):
-        paths = frameBlocksAround(raw_path, t0, t1, margin=abs(frame_time_offset) + 1.0)
-        if not paths:
+        around = rawFilesAround(raw_path, t0, t1, margin=abs(getattr(config, 'frame_time_offset', 0.0)) + 1.0)
+        if around:
+            paths = around
+        elif any(os.path.isfile(p) for ext in RAW_FILE_EXTENSIONS
+                 for p in glob.glob(os.path.join(raw_path, '**', '*' + ext), recursive=True)):
             return None
-        return FrameBlockSource(paths, frame_time_offset=frame_time_offset, frame_block_time=frame_block_time)
 
-    if raw_path.lower().endswith('.fblk'):
-        return FrameBlockSource([raw_path], frame_time_offset=frame_time_offset, frame_block_time=frame_block_time)
+    # Every input opened by the frame interface (those it doesn't recognise are skipped)
+    img_handles, names = [], []
+    try:
+        for path in paths:
+            img_handle = openInput(path, config)
+            if (img_handle is not None) and (img_handle.total_frames > 0):
+                img_handles.append(img_handle)
+                names.append(path)
+    except Exception:
+        for img_handle in img_handles:
+            closeInput(img_handle)
+        raise
 
-    if raw_path.lower().endswith('.vid'):
-        return VidSource(raw_path, frame_time_offset=frame_time_offset)
+    # The frames of all inputs as one sequence
+    if not img_handles:
+        return None
 
-    return None
+    return RawFrames(img_handles, names)
 
 
 
@@ -424,8 +505,8 @@ def measureTrackShape(source, t, x, y, psf_sigma, window_half=WINDOW_HALF, max_t
         along the motion in the frames averaged along the track (see the module docstring).
 
     Arguments:
-        source: [object] Raw frame source (VidSource, FrameBlockSource, or any object with framesBetween(t0, t1),
-            frame(i), and the height and width of the frames).
+        source: [object] Raw frames (RawFrames, or any object with framesBetween(t0, t1), frame(i), and the
+            height and width of the frames).
         t: [array] Times of the measured positions of the object (Unix s, in the time base of the source).
         x: [array] X positions of the object (px).
         y: [array] Y positions of the object (px).
@@ -609,15 +690,16 @@ def psfSigmaForRawFrames(ftp_path, config=None, psf_sigma=None):
 
 
 def rawInputFromDone(ftp_path, raw_dir):
-    """ The raw file which the matched filter processed (from its done file), looked up by name in the raw
-        directory (the file may have been moved since). None if not known or not found.
+    """ The raw input which the matched filter processed (a file or a directory of image frames, from its done
+        file), looked up by name in the raw directory (it may have been moved since). None if not known or not
+        found.
 
     Arguments:
         ftp_path: [str] Path to the FTPdetectinfo file.
-        raw_dir: [str] Directory of the raw files.
+        raw_dir: [str] Directory of the raw recordings.
 
     Return:
-        [str] Path to the raw file, or None.
+        [str] Path to the raw input, or None.
     """
 
     done_path = os.path.join(os.path.dirname(os.path.abspath(ftp_path)), 'matched_filter_done.json')
@@ -629,10 +711,10 @@ def rawInputFromDone(ftp_path, raw_dir):
     if not input_file:
         return None
 
-    # The file where it was processed, else in the raw directory
-    if os.path.isfile(input_file):
+    # The file or directory where it was processed, else in the raw directory
+    if os.path.exists(input_file):
         return input_file
-    found = glob.glob(os.path.join(raw_dir, '**', os.path.basename(input_file)), recursive=True)
+    found = glob.glob(os.path.join(raw_dir, '**', os.path.basename(input_file.rstrip(os.sep))), recursive=True)
 
     return found[0] if found else None
 
@@ -659,18 +741,18 @@ def detectionTimes(ff_name, fps, frames):
 
 
 
-def measureFTPdetectinfo(ftp_path, raw_path, psf_sigma, frame_time_offset=0.0, frame_block_time='middle'):
+def measureFTPdetectinfo(ftp_path, raw_path, psf_sigma, config=None):
     """ Measure the shape of every detection of an FTPdetectinfo file on the raw recording.
 
     Arguments:
         ftp_path: [str] Path to the FTPdetectinfo file.
-        raw_path: [str] Raw recording: a .vid or .fblk file, or a directory of frame block files.
+        raw_path: [str] Raw recording, any raw input of the frame interface: a raw file (.vid, .fblk), a directory
+            of raw files, or a directory of image frames (see openRawSource).
         psf_sigma: [float] PSF sigma (px).
 
     Keyword arguments:
-        frame_time_offset: [float] Correction added to the times of the raw frames (s), as the processing applied
-            it. 0 by default.
-        frame_block_time: [str] Point of the exposure of the times of frame blocks. 'middle' by default.
+        config: [Config] Configuration of the camera, which times the raw frames as the processing did. The RMS
+            defaults if None (default).
 
     Return:
         [list] A dict per detection: the measurement (see measureTrackShape) and the detection (CSV_COLUMNS).
@@ -694,14 +776,12 @@ def measureFTPdetectinfo(ftp_path, raw_path, psf_sigma, frame_time_offset=0.0, f
         # The raw frames around the detection
         t_start = time.time()
         pad = max(t.max() - t.min(), MIN_DURATION, MIN_BACKGROUND_PAD)
-        source = openRawSource(raw_path, t.min() - pad, t.max() + pad, frame_time_offset=frame_time_offset,
-                               frame_block_time=frame_block_time)
+        source = openRawSource(raw_path, t.min() - pad, t.max() + pad, config=config)
         if source is None:
             row.update(sigma_cross=float('nan'), sigma_along=float('nan'), spread=float('nan'),
                        snr=float('nan'), n_frames=0, n_stack=0, ok=False, flag='no raw data')
         else:
-            row['raw_file'] = ';'.join(os.path.basename(getattr(r, 'path', '')) for r in
-                                       getattr(source, 'readers', [source]))
+            row['raw_file'] = ';'.join(source.names)
             try:
                 row.update(measureTrackShape(source, t, x, y, psf_sigma))
             finally:
@@ -719,16 +799,19 @@ if __name__ == "__main__":
     ### COMMAND LINE ARGUMENTS
 
     arg_parser = argparse.ArgumentParser(description="Measure the shape of the light of every detection of an "
-        "FTPdetectinfo file on the raw recording (.vid or frame block files): the width across and along the "
+        "FTPdetectinfo file on the raw frames of the recording (any raw input of RMS: .vid files, frame block files, image "
+        "frames such as UWO PNG frame dumps; never compressed video): the width across and along the "
         "motion in the frames averaged along the track, and the spread (width across the motion in PSF sigmas, "
         "about 1 for a point source, larger for extended structures such as clouds). Writes a CSV file.")
 
     arg_parser.add_argument('ftpdetectinfo', help='FTPdetectinfo file.')
-    arg_parser.add_argument('raw', help='Raw recording: a .vid or .fblk file, or a directory of frame block files. '
-                            'For a directory, the file which the matched filter processed (from its done file) is '
-                            'used if found, else the blocks around the time of every detection.')
-    arg_parser.add_argument('-c', '--config', help='Config file, for the frame time correction, the timing of the '
-                            'frame blocks, the detection binning and the PSF sigma (mf_psf_sigma).')
+    arg_parser.add_argument('raw', help='Raw recording: a raw file (.vid, .fblk), a directory of raw files, or a '
+                            'directory of image frames. For a directory, the input which the matched filter processed '
+                            '(from its done file) is used if found and it is not a frame block, else the raw files '
+                            'around the time of every detection.')
+    arg_parser.add_argument('-c', '--config', help='Config file of the camera, which times the frames as the '
+                            'processing did (frame_time_offset, frame_block_time, fps) and gives the detection binning '
+                            'and the PSF sigma (mf_psf_sigma).')
     arg_parser.add_argument('--psf_sigma', type=float, help='PSF sigma (px of the raw frames). By default from the '
                             'done file of the matched filter next to the FTPdetectinfo file, else mf_psf_sigma of the '
                             'config, both times the detection binning.')
@@ -749,18 +832,16 @@ if __name__ == "__main__":
     if psf_sigma is None:
         raise SystemExit('The PSF sigma is not known: give --psf_sigma or a config with mf_psf_sigma')
 
-    # For a directory, the .vid file which was processed if it is known; the frame blocks around every detection
-    #   are taken from the directory (the background is taken also from the frames before and after the block)
+    # For a directory, the input which was processed if it is known; frame blocks are taken from the directory
+    #   around every detection instead (the background is taken also from the frames before and after the block)
     raw_path = args.raw
     if os.path.isdir(raw_path):
         processed = rawInputFromDone(args.ftpdetectinfo, raw_path)
-        if (processed is not None) and processed.lower().endswith('.vid'):
+        if (processed is not None) and (not processed.lower().endswith('.fblk')):
             raw_path = processed
 
     # Measure every detection
-    rows = measureFTPdetectinfo(args.ftpdetectinfo, raw_path, psf_sigma,
-                                frame_time_offset=getattr(config, 'frame_time_offset', 0.0),
-                                frame_block_time=getattr(config, 'frame_block_time', 'middle'))
+    rows = measureFTPdetectinfo(args.ftpdetectinfo, raw_path, psf_sigma, config=config)
 
     # Save the CSV file
     out_path = args.output or os.path.splitext(os.path.abspath(args.ftpdetectinfo))[0] + '_track_shape.csv'

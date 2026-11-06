@@ -1,6 +1,7 @@
 """ Tests of the shape of moving objects measured on raw frames (RMS.Routines.TrackShape): a point source gives a
-    spread of about 1, an extended structure a large one, the motion direction is taken into account, and the
-    .vid and frame block sources give the same frames and times as written. """
+    spread of about 1, an extended structure a large one, the motion direction is taken into account, and the raw
+    inputs read through the frame interface (.vid files, frame blocks, UWO PNG frame dumps) give the same frames,
+    times and measurement as the frames written. """
 
 from __future__ import print_function, division, absolute_import
 
@@ -168,52 +169,164 @@ def test_width_across_the_motion():
     assert res['sigma_along'] < 1.5
 
 
-def test_vid_and_frame_block_sources(tmp_path):
-    """ The .vid and frame block sources give the frames and times as written, and the same measurement as the
-        frames in memory. """
+def writeDumps(dir_path, frames, times):
+    """ Write frames to a directory of UWO PNG frame dumps (dump_NNNNN.png, 16-bit): the values are stored
+        byteswapped, and the first row is the header with the magick number, the timestamp (seconds and
+        microseconds in 32-bit words 3 and 4) and the frame counter (word 7). """
+
+    import cv2
+    from RMS.Formats.FrameInterface import UWO_MAGICK_EMCCD
+
+    os.makedirs(dir_path, exist_ok=True)
+    for k, (frame, t) in enumerate(zip(frames, times)):
+
+        # The timestamp as seconds and microseconds
+        ts = int(np.floor(t))
+        tu = int(round((t - ts)*1e6))
+
+        # The header words of the first row (as read, then stored byteswapped with the magick number first)
+        row = np.zeros(WIDTH, dtype=np.uint16)
+        for word, value in ((3, ts), (4, tu), (7, 500000 + k)):
+            row[2*word] = value & 0xFFFF
+            row[2*word + 1] = (value >> 16) & 0xFFFF
+        stored = frame.astype(np.uint16).byteswap()
+        stored[0] = row.byteswap()
+        stored[0, :2] = np.frombuffer(np.uint32(UWO_MAGICK_EMCCD).tobytes(), dtype=np.uint16)
+        cv2.imwrite(os.path.join(dir_path, 'dump_{:05d}.png'.format(k)), stored)
+
+
+def test_vid_input(tmp_path):
+    """ A .vid file is read through the frame interface: the frames as written (the header row is set to 0), their
+        times from the headers, frame_time_offset of the config added, and the same measurement as the frames in
+        memory. """
+
+    from RMS.Formats.FrameInterface import InputTypeUWOVid
 
     t, x, y = trackPoints()
     frames, times = syntheticFrames(1.0, 1.0)
     reference = ts.measureTrackShape(MemorySource(frames, times), t, x, y, psf_sigma=1.0)
 
-    # .vid: the frames (the header row is set to 0) and their times
+    # The frames and their times
     vid_path = str(tmp_path/'test.vid')
     writeVid(vid_path, frames, times)
     source = ts.openRawSource(vid_path, TRACK_T[0], TRACK_T[1])
-    assert isinstance(source, ts.VidSource)
+    assert isinstance(source, ts.RawFrames) and isinstance(source.img_handles[0], InputTypeUWOVid)
     assert source.n_frames == N_FRAMES
+    assert source.names == ['test.vid']
     assert np.array_equal(source.frame(7)[1:], frames[7][1:].astype(np.float32))
     idx, tf = source.framesBetween(times[10] - 1e-3, times[20] + 1e-3)
     assert list(idx) == list(range(10, 21))
     assert np.allclose(tf, times[10:21], rtol=0, atol=1e-5)
+
+    # The measurement
     res = ts.measureTrackShape(source, t, x, y, psf_sigma=1.0)
     source.close()
     assert abs(res['spread'] - reference['spread']) < 0.02
     assert res['n_stack'] == reference['n_stack']
 
-    # Frame blocks: the frames of all blocks numbered continuously, timed at the middle of the exposure
+    # The correction of the times of the config
+    source = ts.openRawSource(vid_path, TRACK_T[0], TRACK_T[1], frame_time_offset=0.084)
+    assert np.allclose([source.frameTime(i) for i in (0, 50, 119)], times[[0, 50, 119]] + 0.084, rtol=0,
+                       atol=1e-5)
+    source.close()
+
+
+def test_frame_block_input(tmp_path):
+    """ Frame blocks are read through the frame interface: the frames of all blocks around the interval numbered
+        continuously, timed at the middle of the exposure, and the same measurement as the frames in memory (the
+        12-bit values are read spanning 16 bits, which doesn't change the shape). """
+
+    from RMS.Formats.FrameInterface import InputTypeFrameBlock
+
+    t, x, y = trackPoints()
+    frames, times = syntheticFrames(1.0, 1.0)
+    reference = ts.measureTrackShape(MemorySource(frames, times), t, x, y, psf_sigma=1.0)
+
     block_dir = tmp_path/'blocks'
     block_dir.mkdir()
     paths = writeBlocks(str(block_dir), frames, times)
-    source = ts.openRawSource(str(block_dir), TRACK_T[0], TRACK_T[1])
-    assert isinstance(source, ts.FrameBlockSource)
+    source = ts.openRawSource(str(block_dir), TRACK_T[0] - 4, TRACK_T[1] + 4)
+    assert all(isinstance(h, InputTypeFrameBlock) for h in source.img_handles)
     assert source.n_frames == N_FRAMES
-    assert np.allclose(source.times, times, rtol=0, atol=1e-6)
-    assert np.array_equal(source.frame(77), frames[77].astype(np.float32))
+    assert np.allclose([source.frameTime(i) for i in range(N_FRAMES)], times, rtol=0, atol=1e-6)
+    assert np.array_equal(source.frame(77), 16*frames[77].astype(np.float32))
     res = ts.measureTrackShape(source, t, x, y, psf_sigma=1.0)
     source.close()
-    assert abs(res['spread'] - reference['spread']) < 1e-6
+    assert abs(res['spread'] - reference['spread']) < 1e-3
+    assert res['n_stack'] == reference['n_stack']
 
     # Only the blocks which can hold frames of the interval are opened
-    assert ts.frameBlocksAround(str(block_dir), times[60], times[70]) == [paths[1]]
-    assert ts.frameBlocksAround(str(block_dir), times[45], times[55]) == paths[:2]
-    assert ts.frameBlockStart(paths[0]) == pytest.approx(times[0], abs=1e-5)
+    assert ts.rawFilesAround(str(block_dir), times[60], times[70]) == [paths[1]]
+    assert ts.rawFilesAround(str(block_dir), times[45], times[55]) == paths[:2]
+    assert ts.rawFileStart(paths[0]) == pytest.approx(times[0], abs=1e-5)
+
+
+def test_vid_files_of_a_directory(tmp_path):
+    """ The .vid files of a directory named by the time of their beginning (dump_<Unix time in hex>_<camera>.vid)
+        which hold the interval are joined into one sequence of frames. """
+
+    t, x, y = trackPoints()
+    frames, times = syntheticFrames(1.0, 1.0)
+    reference = ts.measureTrackShape(MemorySource(frames, times), t, x, y, psf_sigma=1.0)
+
+    # Two files of 60 frames, and one far later which is not opened
+    vid_dir = tmp_path/'vids'
+    vid_dir.mkdir()
+    for first in (0, 60):
+        writeVid(str(vid_dir/'dump_{:08X}_99X.vid'.format(int(times[first]))), frames[first:first + 60],
+                 times[first:first + 60])
+    writeVid(str(vid_dir/'dump_{:08X}_99X.vid'.format(int(times[0]) + 3600)), frames[:10], times[:10] + 3600)
+
+    source = ts.openRawSource(str(vid_dir), TRACK_T[0] - 4, TRACK_T[1] + 4)
+    assert len(source.img_handles) == 2 and source.n_frames == N_FRAMES
+    assert np.allclose([source.frameTime(i) for i in range(N_FRAMES)], times, rtol=0, atol=1e-5)
+    res = ts.measureTrackShape(source, t, x, y, psf_sigma=1.0)
+    source.close()
+    assert abs(res['spread'] - reference['spread']) < 0.02
+    assert res['n_stack'] == reference['n_stack']
+
+
+def test_png_frame_dumps(tmp_path):
+    """ A directory of UWO PNG frame dumps is read through the frame interface (image input): the frames as written,
+        their times from the headers, and the same measurement as the frames in memory. """
+
+    from RMS.Formats.FrameInterface import InputTypeImages
+
+    t, x, y = trackPoints()
+    frames, times = syntheticFrames(1.0, 1.0)
+    reference = ts.measureTrackShape(MemorySource(frames, times), t, x, y, psf_sigma=1.0)
+
+    dump_dir = str(tmp_path/'dumps')
+    writeDumps(dump_dir, frames, times)
+    source = ts.openRawSource(dump_dir, TRACK_T[0], TRACK_T[1])
+    assert isinstance(source.img_handles[0], InputTypeImages) and source.img_handles[0].uwo_png_mode
+    assert source.n_frames == N_FRAMES
+    assert np.allclose([source.frameTime(i) for i in range(0, N_FRAMES, 7)], times[::7], rtol=0, atol=2e-6)
+    assert np.array_equal(source.frame(33)[1:], frames[33][1:].astype(np.float32))
+    res = ts.measureTrackShape(source, t, x, y, psf_sigma=1.0)
+    source.close()
+    assert abs(res['spread'] - reference['spread']) < 0.02
+    assert res['n_stack'] == reference['n_stack']
+
+
+def test_compressed_video_and_ff_files_refused(tmp_path):
+    """ Only raw frames are measured: compressed video and FF files are refused. """
+
+    clip = tmp_path/'clip.mkv'
+    clip.write_bytes(b'')
+    with pytest.raises(ValueError, match='compressed video'):
+        ts.openRawSource(str(clip), T_BEGIN, T_BEGIN + 1)
+
+    ff = tmp_path/'FF_XX0001_20261027_101258_485_0000000.fits'
+    ff.write_bytes(b'')
+    with pytest.raises(ValueError, match='FF file'):
+        ts.openRawSource(str(ff), T_BEGIN, T_BEGIN + 1)
 
 
 def test_vid_seconds_field_repaired(tmp_path):
     """ Frames of a .vid file whose seconds field is one second low (a short run within the track; the sampled
-        model of the file sees a longer run as a step) are timed from the frame counter, as the processing reads them, so the frames stay in time order and the measurement is the
-        same as without the error. """
+        model of the file sees a longer run as a step) are timed from the frame counter, as the processing reads
+        them, so the frames stay in time order and the measurement is the same as without the error. """
 
     t, x, y = trackPoints()
     frames, times = syntheticFrames(1.0, 1.0)
