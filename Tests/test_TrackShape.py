@@ -427,3 +427,53 @@ def test_detections_of_an_ftpdetectinfo(tmp_path):
     assert rows[0]['ok'] and (rows[0]['n_frames'] == 41)
     assert 0.9 < rows[0]['spread'] < 1.3
     assert rows[0]['raw_file'].count('.fblk') == 3
+
+
+def test_rolling_shutter_row_delay_removed(tmp_path):
+    """ With a rolling shutter the processing writes the frame of a point moved by the time its row was read after
+        the top row; on the raw frames (timed by their top row) that delay is removed again, so the measurement of
+        a detection written so is the one of the frames in memory. """
+
+    import RMS.ConfigReader as cr
+    from RMS.Formats.FFfile import constructFFName
+    from RMS.Formats.FTPdetectinfo import writeFTPdetectinfo
+
+    # A sensor which reads its rows in one frame period: a point at the middle row is read half a frame late
+    config = cr.Config()
+    config.deinterlace_order, config.rolling_shutter_readout, config.fps = -1, 1.0/FPS, FPS
+    assert np.allclose(ts.rawFrameNumbers([10, 20], [0, HEIGHT/2], config, HEIGHT, 'fblk', fps=FPS), [10, 19.5])
+    config_global = cr.Config()
+    assert np.allclose(ts.rawFrameNumbers([10, 20], [0, HEIGHT/2], config_global, HEIGHT, 'fblk'), [10, 20])
+
+    # A fast object on frame blocks (the frames are timed by the top row), and its detection written with the frames
+    #   moved by the row delay, as the processing writes them
+    rng = np.random.default_rng(3)
+    times = T_BEGIN + np.arange(N_FRAMES)/FPS
+    yy, xx = np.mgrid[0:HEIGHT, 0:WIDTH].astype(np.float64)
+    t, x, y = trackPoints(41)
+    frames = []
+    for tf in times:
+        img = SKY + rng.normal(0, NOISE, (HEIGHT, WIDTH))
+        if TRACK_T[0] <= tf <= TRACK_T[1]:
+            cx, cy = np.interp(tf, t, x), np.interp(tf, t, y)
+            img += 200.0*np.exp(-((xx - cx)**2 + (yy - cy)**2)/2.0)
+        frames.append(np.clip(np.round(img), 0, 4095).astype(np.uint16))
+    reference = ts.measureTrackShape(MemorySource(frames, times), t, x, y, psf_sigma=1.0)
+
+    block_dir = tmp_path/'blocks'
+    block_dir.mkdir()
+    writeBlocks(str(block_dir), frames, times)
+    ref_time = datetime.datetime.fromtimestamp(times[30], datetime.timezone.utc).replace(tzinfo=None)
+    ff_name = constructFFName('XX0001', ref_time)
+    picked = (t - times[30])*FPS + y/HEIGHT
+    centroids = [[fk, xk, yk, 0, 0, 0, 0, 100, 5.0, 100, 10.0, 0] for fk, xk, yk in zip(picked, x, y)]
+    out_dir = tmp_path/'detections'
+    out_dir.mkdir()
+    writeFTPdetectinfo([[ff_name, 1, 0, 0, centroids]], str(out_dir), 'FTPdetectinfo_XX0001_rs.txt', str(out_dir),
+                       'XX0001', FPS, celestial_coords_given=True)
+
+    # The measurement of the detection (a frame at either end may fall out of the track by rounding)
+    rows = ts.measureFTPdetectinfo(str(out_dir/'FTPdetectinfo_XX0001_rs.txt'), str(block_dir), 1.0, config=config)
+    assert rows[0]['ok']
+    assert abs(rows[0]['spread'] - reference['spread']) < 0.015
+    assert abs(rows[0]['n_stack'] - reference['n_stack']) <= 1

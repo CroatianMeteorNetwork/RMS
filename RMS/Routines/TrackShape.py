@@ -741,6 +741,44 @@ def detectionTimes(ff_name, fps, frames):
 
 
 
+def rawFrameNumbers(frames, y, config, n_rows, input_type, fps=None):
+    """ The frames of the measurements of a detection on the raw frames. With a rolling shutter (deinterlace_order
+        -1 and a measured rolling_shutter_readout), the processing moves the frame of a point by the time its row
+        was read after the top row (see MatchedFilterDetection.correctRollingShutter), while a raw frame is timed by
+        its top row; the same row delay is removed here, so the positions line up with the raw frames. Unchanged
+        without a rolling shutter.
+
+    Arguments:
+        frames: [array] Frame numbers of the measurements, as written by the processing.
+        y: [array] Rows of the measurements (px of the raw frames).
+        config: [Config] Configuration of the camera, or None (no correction).
+        n_rows: [int] Number of rows of the raw frames.
+        input_type: [str] Type of the input of the frame interface (the crop of the capture applies to some).
+
+    Keyword arguments:
+        fps: [float] Frame rate of the input. None by default (the frame rate of the config).
+
+    Return:
+        [ndarray] Frame numbers on the raw frames.
+    """
+
+    from RMS.Routines import RollingShutterCorrection
+
+    frames = np.asarray(frames, dtype=np.float64)
+
+    # Only a rolling shutter moved the frames
+    if (config is None) or (getattr(config, 'deinterlace_order', None) != -1):
+        return frames
+
+    # The row delay of every point, as the processing added it (the correction of frame 0 is the delay alone)
+    delay = RollingShutterCorrection.correctFrameTime(np.zeros_like(frames), np.asarray(y, dtype=np.float64),
+                                                      n_rows, config, fps=fps,
+                                                      cropped=RollingShutterCorrection.croppedInput(input_type))
+
+    return frames - delay
+
+
+
 def measureFTPdetectinfo(ftp_path, raw_path, psf_sigma, config=None):
     """ Measure the shape of every detection of an FTPdetectinfo file on the raw recording.
 
@@ -773,7 +811,7 @@ def measureFTPdetectinfo(ftp_path, raw_path, psf_sigma, config=None):
                    time_end_utc=datetime.datetime.fromtimestamp(t.max(), datetime.timezone.utc).isoformat(),
                    raw_file='', psf_sigma=psf_sigma)
 
-        # The raw frames around the detection
+        # The raw frames around the detection (the padding covers the row delay of a rolling shutter)
         t_start = time.time()
         pad = max(t.max() - t.min(), MIN_DURATION, MIN_BACKGROUND_PAD)
         source = openRawSource(raw_path, t.min() - pad, t.max() + pad, config=config)
@@ -782,8 +820,14 @@ def measureFTPdetectinfo(ftp_path, raw_path, psf_sigma, config=None):
                        snr=float('nan'), n_frames=0, n_stack=0, ok=False, flag='no raw data')
         else:
             row['raw_file'] = ';'.join(source.names)
+
+            # The times of the measurements on the raw frames, without the row delay of a rolling shutter
+            first_input = source.img_handles[0]
+            t_raw = detectionTimes(ff_name, fps, rawFrameNumbers(meas[:, 1], y, config, source.height,
+                                                                 first_input.input_type,
+                                                                 fps=getattr(first_input, 'fps', None)))
             try:
-                row.update(measureTrackShape(source, t, x, y, psf_sigma))
+                row.update(measureTrackShape(source, t_raw, x, y, psf_sigma))
             finally:
                 source.close()
         row['time_s'] = round(time.time() - t_start, 3)
