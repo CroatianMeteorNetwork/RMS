@@ -1856,12 +1856,35 @@ class BufferedCapture(Process):
                     # Set debug level from environment or default given value
                     # The Gst debug level is set in Logger.py
                     debug_env = os.environ.get("GST_DEBUG", "2")
-                    Gst.debug_set_default_threshold(int(debug_env))
+
+                    # GST_DEBUG is a comma separated list, where an entry is either a bare level,
+                    # which is the default for every category, or category:level. Only the default
+                    # belongs here; the per category parts are applied by Gst.init from the same
+                    # variable. int() of the whole string throws on anything but a bare number, and
+                    # since the log handler is registered below, that exception took the RMS log's
+                    # GStreamer messages with it - so asking for detail from one element by setting
+                    # GST_DEBUG=2,someelement:4 silenced the lot.
+                    default_level = 2
+
+                    for part in debug_env.split(','):
+                        part = part.strip()
+
+                        if part.isdigit():
+                            default_level = int(part)
+                            continue
+
+                        name, _, level = part.rpartition(':')
+
+                        if name in ('*', '') and level.isdigit():
+                            default_level = int(level)
+
+                    Gst.debug_set_default_threshold(default_level)
 
                     # Comment out if higher than logging level 3 is needed
                     Gst.debug_add_log_function(gstDebugLogger, None)
 
-                    log.info("GStreamer logging initialized at level: {}".format(debug_env))
+                    log.info("GStreamer logging initialized, default level %d (GST_DEBUG=%s)",
+                             default_level, debug_env)
 
                 except Exception as e:
                     log.error("Failed to initialize GStreamer logging: {}".format(e))
