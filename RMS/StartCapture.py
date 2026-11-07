@@ -169,7 +169,7 @@ import RMS.ConfigReader as cr
 from RMS.Logger import LoggingManager, getLogger, checkLoggingHealth
 from RMS.BufferedCapture import BufferedCapture
 from RMS.CaptureDuration import captureDuration
-from RMS.CaptureModeSwitcher import captureModeSwitcher
+from RMS.CaptureModeSwitcher import captureModeSwitcher, captureModeAt
 from RMS.Compression import Compressor
 from RMS.DeleteOldObservations import deleteOldObservations
 from RMS.DetectStarsAndMeteors import detectStarsAndMeteors
@@ -566,12 +566,32 @@ def startNightDetector(config, night_data_dir, duration, nodetect=False, detect_
 
     else:
 
-        if detect_end and (duration is not None):
+        delay_detection = None
+
+        if detect_end:
 
             # Delay detection until the end of the night
-            delay_detection = duration
+            if duration is not None:
+                delay_detection = duration
 
-        else:
+            # Continuous capture has no duration, it switches to daytime mode at the end of the night
+            #   instead, so wait until then. Not during polar day or night, when there is no such switch
+            elif config.continuous_capture:
+
+                now_utc = RmsDateTime.utcnow()
+                daytime, next_change, _ = captureModeAt(config, now_utc)
+
+                if (not daytime) and (next_change is not None):
+                    delay_detection = max(0.0, (next_change - now_utc).total_seconds())
+                    log.info('postprocess_at_end: holding detection for {:.2f} h, until daytime '
+                        'mode'.format(delay_detection/3600))
+
+                else:
+                    log.info('postprocess_at_end: no switch to daytime mode ahead, detecting during '
+                        'capture')
+
+        if delay_detection is None:
+
             # Delay the detection for 2 minutes after capture start (helps stability)
             delay_detection = 120
 
