@@ -492,6 +492,25 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
         # Compute radius of every star from image centre
         radius_arr = np.hypot(image_stars[:, 0] - img_h/2, image_stars[:, 1] - img_w/2)
 
+        # Drop stars whose summed intensity came out as zero. The photometry is a fit against
+        # -2.5*log10 of that sum, which for zero is infinite: a handful of them is enough to make the
+        # fit return nan and the plot come out blank, taking every good star with them. They arise
+        # where the scene occupies so little of the sensor's range that a star's linearised sum lands
+        # below one and CALSTARS, which stores it as an integer, writes zero - on one night here, 27
+        # of 999 matched stars.
+        intensity_positive = star_intensities > 0
+
+        if not np.all(intensity_positive):
+
+            print('Photometry: {:d}/{:d} matched stars have zero intensity and are left out'.format(
+                int(np.sum(~intensity_positive)), len(intensity_positive)))
+
+            star_intensities = star_intensities[intensity_positive]
+            radius_arr = radius_arr[intensity_positive]
+            catalog_mags = catalog_mags[intensity_positive]
+            catalog_ra = catalog_ra[intensity_positive]
+            catalog_dec = catalog_dec[intensity_positive]
+
         # Compute apparent extinction corrected magnitudes
         catalog_mags = extinctionCorrectionTrueToApparent(catalog_mags, catalog_ra, catalog_dec, max_jd, \
             platepar)
