@@ -396,6 +396,9 @@ class Config:
         # Automatically reprocess broken capture directories
         self.auto_reprocess = True
 
+        # Auto-reprocess at startup, before capture. If False, it is done after the night's processing
+        self.auto_reprocess_at_start = True
+
         # Give up on a capture directory after this many failed auto-reprocess attempts. 0 disables
         #   the guard and retries forever
         self.auto_reprocess_max_attempts = 3
@@ -1294,6 +1297,9 @@ def parseCapture(config, parser):
     # Enable/disable auto reprocessing
     if parser.has_option(section, "auto_reprocess"):
         config.auto_reprocess = parser.getboolean(section, "auto_reprocess")
+
+    if parser.has_option(section, "auto_reprocess_at_start"):
+        config.auto_reprocess_at_start = parser.getboolean(section, "auto_reprocess_at_start")
 
     # Load the cap on failed auto-reprocess attempts per capture directory
     if parser.has_option(section, "auto_reprocess_max_attempts"):

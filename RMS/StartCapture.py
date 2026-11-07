@@ -1450,6 +1450,18 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
                 log.warning("Skipping the external script, the night was not successfully processed!")
 
 
+            # Reprocess the folders that were held back at startup to let the capture start first. Not on a
+            #   manual stop, and not the night that was just processed
+            if config.auto_reprocess and (not config.auto_reprocess_at_start) and (not STOP_CAPTURE):
+
+                try:
+                    log.info('Reprocessing the folders held back at startup...')
+                    processIncompleteCaptures(config, upload_manager, skip_dirs=[night_data_dir])
+
+                except Exception:
+                    log.exception('An error occurred while reprocessing the folders held back at startup!')
+
+
         # Continuous mode, polar day: the daytime session was split - make and upload the timelapse of the
         #   daytime frames up to the split, and free up disk space as no night starts to do it
         elif config.continuous_capture and daytime_mode_prev and (session_cut_utc is not None) \
@@ -1549,13 +1561,21 @@ def setReprocessAttempts(config, captured_dir_path, attempts):
 
 
 
-def processIncompleteCaptures(config, upload_manager):
+def processIncompleteCaptures(config, upload_manager, skip_dirs=None, list_only=False):
     """ Reprocess broken capture folders.
     Arguments:
         config: [config object] Configuration read from the .config file.
         upload_manager: [UploadManager object] A handle to the UploadManager, which handles uploading files to
             the central server.
+
+    Keyword arguments:
+        skip_dirs: [list] Capture directories to leave out, e.g. the night that was just processed. None by
+            default.
+        list_only: [bool] Only log the folders that need reprocessing, without processing them. False by
+            default.
     """
+
+    skip_dirs = set(os.path.abspath(path) for path in (skip_dirs or []))
 
     log.debug('Checking for folders containing partially-processed data')
 
@@ -1583,6 +1603,10 @@ def processIncompleteCaptures(config, upload_manager):
 
         captured_dir_path = os.path.join(config.data_dir, config.captured_dir, captured_subdir)
         log.debug("Checking folder: {:s}".format(captured_subdir))
+
+        if os.path.abspath(captured_dir_path) in skip_dirs:
+            log.debug("    ... skipped!")
+            continue
 
         # Work out how far processing got on this night. The observation summary is the marker,
         #   not the detection backups - a night which finished but failed to delete its backups
@@ -1625,6 +1649,11 @@ def processIncompleteCaptures(config, upload_manager):
                 .format(captured_subdir, attempts, config.processing_status_file))
             continue
 
+
+        if list_only:
+            log.info("Found partially-processed data in {:s}, it will be reprocessed after the night"\
+                .format(captured_dir_path))
+            continue
 
         log.info("Found partially-processed data in {:s}".format(captured_dir_path))
 
@@ -2034,7 +2063,9 @@ if __name__ == "__main__":
 
                 # Check if there's a folder containing unprocessed data.
                 # This may happen if the system crashed during processing.
-                processIncompleteCaptures(config, upload_manager)
+                # If recording has priority, only list them now and reprocess them after the night
+                processIncompleteCaptures(config, upload_manager,
+                    list_only=(not config.auto_reprocess_at_start))
 
 
         # Wait to start capturing and initialize last night's slideshow
