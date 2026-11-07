@@ -199,7 +199,7 @@ from RMS.Math import angularSeparation, RMSD, vectNorm
 from RMS.Misc import decimalDegreesToSexHours
 from RMS.Routines.AddCelestialGrid import updateRaDecGrid, updateAzAltGrid
 from RMS.Routines.SkyFitHelp import shortcutsTopicId
-from RMS.Routines.CustomPyqtgraphClasses import ViewBox, TextItem, TextItemList, Crosshair, Plus, Cross, CursorItem, BrushCursorItem, ImageItem, RightOptionsTab, qmessagebox, PointingIndicator
+from RMS.Routines.CustomPyqtgraphClasses import ViewBox, TextItem, TextItemList, Crosshair, Plus, Cross, CursorItem, BrushCursorItem, ImageItem, RightOptionsTab, qmessagebox, PointingIndicator, FRAGMENT_COLORS, MarkedSlider
 from RMS.Routines.GreatCircle import fitGreatCircle, greatCircle
 from RMS.Routines.SphericalPolygonCheck import sphericalPolygonCheck
 from RMS.Routines.Image import loadFlat, loadDark, applyFlat, applyDark, signalToNoise, gammaCorrectionImage, adjustLevels, saveImage, loadImage
@@ -235,6 +235,14 @@ except Exception as e:
 # Smallest max_stars a config save is allowed to write. Tuning for interactive work can settle on
 #   far fewer stars than the nightly processing needs.
 MIN_CONFIG_MAX_STARS = 800
+
+# Colour of the great circle line when only the main fragment has been picked
+GREAT_CIRCLE_COLOR = (138, 43, 226)
+
+# Keys which select the fragment to pick in manual reduction (0 is the main fragment)
+FRAGMENT_KEYS = [QtCore.Qt.Key.Key_0, QtCore.Qt.Key.Key_1, QtCore.Qt.Key.Key_2, QtCore.Qt.Key.Key_3,
+                 QtCore.Qt.Key.Key_4, QtCore.Qt.Key.Key_5, QtCore.Qt.Key.Key_6, QtCore.Qt.Key.Key_7,
+                 QtCore.Qt.Key.Key_8]
 
 
 ##############################################################################################################
@@ -2448,6 +2456,9 @@ class PlateTool(QtWidgets.QMainWindow):
         self.paired_stars = PairedStars()
         self.residuals = None
 
+        # Manual reduction points of additional fragments (fragment ID > 0), as {frame: {fragment_id: pick}}
+        self.fragment_picks = {}
+
         # Autopan coordinates
         self.old_autopan_x, self.old_autopan_y = None, None
         self.current_autopan_x, self.current_autopan_y = None, None
@@ -2843,8 +2854,33 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # bottom information
         self.status_bar = QtWidgets.QStatusBar()
-        self.status_bar.setFont(QtGui.QFont('monospace'))
+        status_font = QtGui.QFont('monospace')
+        status_font.setPointSizeF(status_font.pointSizeF() - 0.5)
+        self.status_bar.setFont(status_font)
         self.setStatusBar(self.status_bar)
+
+        # Image navigation slider (like a video timeline). Added before the buttons so they stay anchored
+        #   to the right edge and don't shift when the slider/label show, hide or resize. The label comes
+        #   after the slider so it's not next to the mouse-over coordinates text.
+        self.image_navigation_slider = MarkedSlider(QtCore.Qt.Orientation.Horizontal)
+        self.image_navigation_slider.setMinimum(1)
+        self.image_navigation_slider.setMaximum(1)
+        self.image_navigation_slider.setValue(1)
+        self.image_navigation_slider.setMinimumWidth(220)
+        self.image_navigation_slider.setMaximumWidth(330)
+        self.image_navigation_slider.setToolTip("Drag or click to navigate through images (frames in manual "
+                                                "reduction)")
+        # Shrink the handle so it fits within the status bar height without being clipped. A background is
+        #   needed or the handle renders invisible once a stylesheet is set.
+        self.image_navigation_slider.setStyleSheet(
+            "QSlider::handle:horizontal { width: 10px; height: 10px; margin: -3px 0; border-radius: 5px; "
+            "background: palette(button); border: 1px solid palette(dark); }")
+        self.image_navigation_slider.valueChanged.connect(self.jumpToImage)
+        self.status_bar.addPermanentWidget(self.image_navigation_slider)
+
+        self.image_navigation_label = QtWidgets.QLabel('Image: 1 / 1')
+        self.image_navigation_label.setMinimumWidth(80)
+        self.status_bar.addPermanentWidget(self.image_navigation_label)
 
         self.file_manager_button = QtWidgets.QPushButton('File Manager')
         self.file_manager_button.pressed.connect(self.showCalibrationFilesDialog)
@@ -2857,21 +2893,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.manualreduction_button.pressed.connect(lambda: self.changeMode('manualreduction'))
         self.status_bar.addPermanentWidget(self.skyfit_button)
         self.status_bar.addPermanentWidget(self.manualreduction_button)
-
-        # Image navigation slider (like a video timeline)
-        self.image_navigation_label = QtWidgets.QLabel('Image: 1 / 1')
-        self.image_navigation_label.setMinimumWidth(80)
-        self.status_bar.addPermanentWidget(self.image_navigation_label)
-
-        self.image_navigation_slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
-        self.image_navigation_slider.setMinimum(1)
-        self.image_navigation_slider.setMaximum(1)
-        self.image_navigation_slider.setValue(1)
-        self.image_navigation_slider.setMinimumWidth(200)
-        self.image_navigation_slider.setMaximumWidth(400)
-        self.image_navigation_slider.setToolTip("Drag or click to navigate through images")
-        self.image_navigation_slider.valueChanged.connect(self.jumpToImage)
-        self.status_bar.addPermanentWidget(self.image_navigation_slider)
 
         self.nextstar_button = QtWidgets.QPushButton('SkyFit')
         self.nextstar_button.pressed.connect(self.jumpNextStar)
@@ -3215,6 +3236,9 @@ class PlateTool(QtWidgets.QMainWindow):
         # pick markers (manual reduction)
         self.pick_marker = pg.ScatterPlotItem()
         self.pick_marker.setSymbol(Plus())
+
+        # Plus symbol for the annotated picks, which can have dotted lines
+        self.annotated_pick_symbol = Plus(dotted=True)
         self.pick_marker.setZValue(5)
         self.img_frame.addItem(self.pick_marker)
 
@@ -3279,9 +3303,17 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         # Great circle fit
-        self.great_circle_line = pg.PlotCurveItem(pen=pg.mkPen((138, 43, 226, 255), style=QtCore.Qt.PenStyle.DotLine))
+        self.great_circle_line = pg.PlotCurveItem(pen=pg.mkPen(GREAT_CIRCLE_COLOR, style=QtCore.Qt.PenStyle.DotLine))
         self.great_circle_line.setZValue(1)
         self.img_frame.addItem(self.great_circle_line)
+
+        # Great circle fits of the additional fragments, in the colours of their markers
+        self.fragment_great_circle_lines = {}
+        for fragment_id in range(1, len(FRAGMENT_COLORS)):
+            line = pg.PlotCurveItem(pen=pg.mkPen(FRAGMENT_COLORS[fragment_id], style=QtCore.Qt.PenStyle.DotLine))
+            line.setZValue(1)
+            self.img_frame.addItem(line)
+            self.fragment_great_circle_lines[fragment_id] = line
 
 
         # Fit residuals (image, orange)
@@ -3635,7 +3667,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.tab.onSkyFit()
             self.pick_marker.hide()
             self.pick_marker2.hide()
-            self.great_circle_line.hide()
+            self.setGreatCirclesVisible(False)
             self.region.hide()
             if hasattr(self, "region_zoom"):
                 self.region_zoom.hide()
@@ -3726,13 +3758,16 @@ class PlateTool(QtWidgets.QMainWindow):
 
             self.pick_marker.show()
             self.pick_marker2.show()
-            self.great_circle_line.show()
+            self.setGreatCirclesVisible(True)
             self.region.show()
             if hasattr(self, "region_zoom"):
                 self.region_zoom.show()
 
             # Update the great circle
             self.updateGreatCircle()
+
+        # Switch the navigation slider between images and frames
+        self.updateImageNavigationDisplay()
 
 
     def changeStation(self, dir_path=None, config_override=None):
@@ -3835,9 +3870,11 @@ class PlateTool(QtWidgets.QMainWindow):
             self.paired_stars = PairedStars()
             self.updatePairedStars()
             self.pick_list = {}
+            self.fragment_picks = {}
             self.residuals = None
             self.updateFitResiduals()
             self.updatePicks()
+            self.updateGreatCircle()
             self.drawPhotometryColoring()
             self.photometry()
 
@@ -4138,7 +4175,20 @@ class PlateTool(QtWidgets.QMainWindow):
             text_str += self.img_type_flag + '\n'
             text_str += "Time  = {:s}\n".format(
                 self.img_handle.currentFrameTime(dt_obj=True).strftime("%Y/%m/%d %H:%M:%S.%f")[:-3])
-            text_str += 'Frame = {:d}\n'.format(self.img.getFrame())
+            text_str += 'Frame = {:d} / {:d}\n'.format(self.img.getFrame(), self.img_handle.total_frames - 1)
+
+            # Show the fragment being picked, and the annotations of the main fragment pick on this frame
+            if hasattr(self, 'tab'):
+                fragment_id = self.tab.annotations.fragment.currentIndex()
+                pick = self.tab.annotations.currentPick()
+                notes = []
+                if (fragment_id == 0) and (pick is not None):
+                    notes += ['flare'] if pick.get('flare', False) else []
+                    notes += ['not used'] if not pick.get('trajectory_use', True) else []
+
+                text_str += 'Fragment = {:s}{:s}\n'.format('Main' if fragment_id == 0 else str(fragment_id),
+                                                           ' ({:s})'.format(', '.join(notes)) if notes else '')
+
             if self.img_handle.input_type == "ff":
                 if self.use_fr_files:
                     text_str += 'Line = {:d}\n'.format(self.img_handle.current_line)
@@ -7245,6 +7295,25 @@ class PlateTool(QtWidgets.QMainWindow):
         data1 = []
         data2 = []
 
+        # Markers drawn with their own pen (annotated main picks and points of additional fragments)
+        spots = []
+
+        # Draw flares with thicker lines and picks not used in the main trajectory with dotted lines
+        annotated_pens = {}
+        for flare in (False, True):
+            for use in (False, True):
+                width = 2 if flare else 1
+                pen = pg.mkPen((255, 0, 0), width=width)
+                if not use:
+
+                    # Dots as long as the line is wide and 2 px apart (the pattern is in units of the width),
+                    #   flat caps keep the dots from growing
+                    pen.setDashPattern([1, 2/width])
+                    pen.setCapStyle(QtCore.Qt.PenCapStyle.FlatCap)
+
+                annotated_pens[(flare, use)] = pen
+        fragment_pens = [pg.mkPen(color) for color in FRAGMENT_COLORS]
+
         # Sort picks by frame
         sorted_picks = collections.OrderedDict(sorted(self.pick_list.items(), key=lambda t: t[0]))
 
@@ -7252,8 +7321,16 @@ class PlateTool(QtWidgets.QMainWindow):
         for frame, pick in sorted_picks.items():
             if pick['x_centroid'] is not None:
 
+                # Annotated main fragment picks
+                annotation = (pick.get('flare', False), pick.get('trajectory_use', True))
+                if (pick['mode'] == 1) and (annotation != (False, True)):
+                    spots.append({'pos': (pick['x_centroid'] + 0.5, pick['y_centroid'] + 0.5),
+                                  'size': 30 if (self.img.getFrame() == frame) else 10,
+                                  'pen': annotated_pens[annotation],
+                                  'symbol': self.annotated_pick_symbol})
+
                 # Get the color of the current pick
-                if self.img.getFrame() == frame:
+                elif self.img.getFrame() == frame:
                     current = [(pick['x_centroid'] + 0.5, pick['y_centroid'] + 0.5)]
 
                     # Position picks
@@ -7284,12 +7361,32 @@ class PlateTool(QtWidgets.QMainWindow):
         # Plot gap colors
         self.pick_marker.addPoints(pos=data2, size=10, pen=gap_color)
 
+        # Mark the picked frames on the navigation slider
+        self.image_navigation_slider.setMarks(frame for frame, pick in sorted_picks.items()
+            if pick['x_centroid'] is not None)
+
 
         # Draw zoom window picks
         self.pick_marker2.clear()
         self.pick_marker2.addPoints(pos=current, size=30, pen=current_pen)
         self.pick_marker2.addPoints(pos=data1, size=10, pen=pick_color)
         self.pick_marker2.addPoints(pos=data2, size=10, pen=gap_color)
+
+        # Draw the points of additional fragments with smaller markers in the color of each fragment (even
+        #   sizes keep the lines 1 px wide)
+        for frame, fragments in self.fragment_picks.items():
+            for fragment_id, pick in fragments.items():
+                spots.append({'pos': (pick['x_centroid'] + 0.5, pick['y_centroid'] + 0.5),
+                              'size': 20 if (self.img.getFrame() == frame) else 8,
+                              'pen': fragment_pens[fragment_id]})
+
+        self.pick_marker.addPoints(spots)
+        self.pick_marker2.addPoints(spots)
+
+        # Show the annotations of the picks on the current frame (the tabs might not be created yet when a
+        #   state is loaded)
+        if hasattr(self, 'tab'):
+            self.tab.annotations.updateAnnotations()
 
     def updateFitResiduals(self):
         """ Draw fit residual lines. """
@@ -9089,6 +9186,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Reset paired stars
             self.pick_list = {}
+            self.fragment_picks = {}
             self.paired_stars = PairedStars()
             self.unsuitable_stars = PairedStars()
             self.residuals = None
@@ -9211,11 +9309,17 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def jumpToImage(self, image_num):
-        """ Jump directly to a specific image number (1-indexed).
+        """ Jump directly to a specific image number (1-indexed), or to a frame in manual reduction.
 
         Arguments:
-            image_num: [int] Target image number (1-indexed, 1 to total_images)
+            image_num: [int] Target image number (1-indexed, 1 to total_images), or the frame number in
+                manual reduction.
         """
+        # In manual reduction the slider moves through the frames
+        if self.mode == 'manualreduction':
+            self.nextImg(n=image_num - self.img.getFrame())
+            return
+
         # Only works in skyfit mode with multiple images
         if self.mode != 'skyfit':
             return
@@ -9243,6 +9347,27 @@ class PlateTool(QtWidgets.QMainWindow):
         if not self.hasData():
             return
 
+        # In manual reduction the slider moves through the frames. DFN and single images only allow moving
+        #   next to the picks, so they get no slider. The frame number is already on the floating info
+        #   panel (updateLeftLabels), so the label next to the slider is not needed here.
+        if self.mode == 'manualreduction':
+
+            show = not ((self.img_handle.input_type == 'dfn')
+                or ((self.img_handle.input_type == 'images') and self.img_handle.single_image_mode))
+
+            self.image_navigation_slider.setVisible(show)
+            self.image_navigation_label.hide()
+
+            if show:
+                last_frame = self.img_handle.total_frames - 1
+
+                self.image_navigation_slider.blockSignals(True)
+                self.image_navigation_slider.setRange(0, last_frame)
+                self.image_navigation_slider.setValue(self.img.getFrame())
+                self.image_navigation_slider.blockSignals(False)
+
+            return
+
         # Only update if we have a multi-image handle with ff_list
         if not hasattr(self.img_handle, 'ff_list'):
             self.image_navigation_slider.hide()
@@ -9258,12 +9383,23 @@ class PlateTool(QtWidgets.QMainWindow):
         current_index = self.img_handle.current_ff_index
 
         self.image_navigation_slider.blockSignals(True)
-        self.image_navigation_slider.setMaximum(total_images)
+        self.image_navigation_slider.setRange(1, total_images)
         self.image_navigation_slider.setValue(current_index + 1)  # 1-indexed display
         self.image_navigation_slider.blockSignals(False)
 
         # Update label text
-        self.image_navigation_label.setText(f'Image: {current_index + 1} / {total_images}')
+        self.setNavigationLabel('Image', current_index + 1, total_images)
+
+
+    def setNavigationLabel(self, name, current, last):
+        """ Set the navigation label, keeping the width of its longest text so the slider does not move. """
+
+        label = self.image_navigation_label
+
+        label.setText(f'{name}: {last} / {last}')
+        label.setMinimumWidth(label.sizeHint().width())
+
+        label.setText(f'{name}: {current} / {last}')
 
 
     def saveState(self):
@@ -9720,6 +9856,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
         if not hasattr(self, "pick_list"):
             self.pick_list = {}
+
+        if not hasattr(self, "fragment_picks"):
+            self.fragment_picks = {}
 
         # If SNR and saturation flags are missing in the pick list, add them
         for _, pick in self.pick_list.items():
@@ -10232,10 +10371,20 @@ class PlateTool(QtWidgets.QMainWindow):
                             self.img.img_handle.input_type == 'dfn':
                         mode = 0
 
+                    # Pick the point of an additional fragment instead of the main pick, if one is selected
+                    fragment_id = self.tab.annotations.fragment.currentIndex()
+                    if fragment_id > 0:
+                        self.addFragmentPoint(self.img.getFrame(), fragment_id, self.x_centroid, self.y_centroid,
+                                              snr=self.snr_centroid, saturated=self.saturated_centroid)
+                        self.updatePicks()
+                        self.updateGreatCircle()
+                        return
+
                     self.addCentroid(self.img.getFrame(), self.x_centroid, self.y_centroid, mode=mode,
                                      snr=self.snr_centroid, saturated=self.saturated_centroid)
 
                     self.updatePicks()
+                    self.updateLeftLabels()
 
                     # Add photometry coloring if single-click photometry is turned on
                     if self.single_click_photometry:
@@ -10252,8 +10401,17 @@ class PlateTool(QtWidgets.QMainWindow):
 
             elif button == QtCore.Qt.MouseButton.RightButton:
                 if self.cursor.mode == 0:
-                    self.removeCentroid(self.img.getFrame())
+
+                    # Remove the point of the selected additional fragment, or the main pick
+                    fragment_id = self.tab.annotations.fragment.currentIndex()
+                    if fragment_id > 0:
+                        self.removeFragmentPoint(self.img.getFrame(), fragment_id)
+                        self.updateGreatCircle()
+                    else:
+                        self.removeCentroid(self.img.getFrame())
+
                     self.updatePicks()
+                    self.updateLeftLabels()
                 elif self.cursor.mode == 2:
                     self.changePhotometry(self.img.getFrame(), self.photometryColoring(),
                                           add_photometry=False)
@@ -11206,6 +11364,18 @@ class PlateTool(QtWidgets.QMainWindow):
                     print('Current line: {}'.format(self.img.img_handle.current_line))
                     self.img.nextLine()
 
+            # Select the fragment to pick. Holding Num0 to mark a DFN gap also selects the main fragment, which
+            #   the gaps belong to
+            elif event.key() in FRAGMENT_KEYS:
+                self.tab.annotations.fragment.setCurrentIndex(FRAGMENT_KEYS.index(event.key()))
+
+            # Toggle the flare and the main trajectory use of the main fragment pick on this frame
+            elif (event.key() == QtCore.Qt.Key.Key_B) and self.tab.annotations.flare.isEnabled():
+                self.tab.annotations.flare.click()
+
+            elif (event.key() == QtCore.Qt.Key.Key_X) and self.tab.annotations.trajectory_use.isEnabled():
+                self.tab.annotations.trajectory_use.click()
+
             # Launch ASTRA GUI
             elif (event.key() == QtCore.Qt.Key.Key_K) and (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier):
                 
@@ -11791,6 +11961,8 @@ class PlateTool(QtWidgets.QMainWindow):
         picks = []  # N x args_dict array for addCentroid
         pick_frame_indices = []  # (N,) array of frame indices
         pick_frame_times = []  # (N,) array of frame times
+        pick_frame_numbers = []  # (N,) frames of the picks, in the files which have them
+        fragment_points = []  # (frame, fragment_id, x, y) of the points of additional fragments
 
         # wrap in try except to catch unknown errors
         try:
@@ -11806,8 +11978,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 # Process the contents
                 for line in contents:
 
-                    # Clean the line
-                    line = [part.strip() for part in line.split(',') if part]
+                    # Clean the line (keeping the empty values of the fragments not picked on a frame)
+                    line = [part.strip() for part in line.split(',')]
 
                     # Skip header lines
                     if line[0].startswith('#'):
@@ -11832,6 +12004,16 @@ class PlateTool(QtWidgets.QMainWindow):
                         sat_ind = column_names.index('saturated_pixels') if 'saturated_pixels' in column_names \
                                                                                         else None
                         snr_ind = column_names.index('snr') if 'snr' in column_names else None
+                        frame_ind = column_names.index('frame_number') if 'frame_number' in column_names \
+                                                                                        else None
+                        flare_ind = column_names.index('flare') if 'flare' in column_names else None
+                        traj_ind = column_names.index('trajectory_use') if 'trajectory_use' in column_names \
+                                                                                        else None
+
+                        # Columns of additional fragments, with the fragment ID as their suffix
+                        frag_inds = [(k, column_names.index('x_image' + str(k)),
+                                      column_names.index('y_image' + str(k)))
+                                     for k in range(1, len(FRAGMENT_COLORS)) if ('x_image' + str(k)) in column_names]
 
                         # Ensure essential values are in the ECSV
                         if x_ind is None or y_ind is None or pick_frame_times_idx is None:
@@ -11844,6 +12026,16 @@ class PlateTool(QtWidgets.QMainWindow):
                         continue
 
                     else:
+                        # Points of additional fragments, placed by their frame number
+                        for fragment_id, fx_ind, fy_ind in frag_inds:
+                            if line[fx_ind]:
+                                fragment_points.append((int(line[frame_ind]), fragment_id,
+                                                        float(line[fx_ind]), float(line[fy_ind])))
+
+                        # Skip the frames without a main fragment pick
+                        if not line[x_ind]:
+                            continue
+
                         # Unpack line
 
                         # Populate arrays
@@ -11853,6 +12045,9 @@ class PlateTool(QtWidgets.QMainWindow):
                         snr = float(line[snr_ind]) if snr_ind is not None else 1
                         pick_frame_times.append(datetime.datetime.strptime(line[pick_frame_times_idx], 
                                                                            '%Y-%m-%dT%H:%M:%S.%f'))
+
+                        if frame_ind is not None:
+                            pick_frame_numbers.append(int(line[frame_ind]))
 
                         # Load in pick parameters, use default for other values 
                         picks.append({
@@ -11864,22 +12059,32 @@ class PlateTool(QtWidgets.QMainWindow):
                             'background_intensity': background,
                             'snr': snr,
                             'saturated': saturated,
+                            'flare': (line[flare_ind] == 'True') if flare_ind is not None else False,
+                            'trajectory_use': (line[traj_ind] == 'True') if traj_ind is not None else True,
                         })
 
-            # Converts times into frame indices, accounting for floating-point errors
-            pick_frame_indices = []
             frame_count = self.img_handle.total_frames
-            time_idx = 0
-            for i in range(frame_count):
-                frame_time = self.img_handle.currentFrameTime(frame_no=i, dt_obj=True)
-                time = pick_frame_times[time_idx]
-                if frame_time == time or \
-                    frame_time == time + datetime.timedelta(microseconds=1) or \
-                    frame_time == time - datetime.timedelta(microseconds=1):
-                    pick_frame_indices.append(i)
-                    time_idx += 1
-                if time_idx >= len(pick_frame_times):
-                    break
+
+            # Files with annotations have the frame of every pick. Their times can't give it, as they include the
+            #   rolling shutter correction. Frames that the input doesn't have mean it's the wrong file, which
+            #   the times show for the other files
+            if frame_ind is not None:
+                pick_frame_indices = [frame for frame in pick_frame_numbers if 0 <= frame < frame_count]
+
+            # Converts times into frame indices, accounting for floating-point errors
+            else:
+                pick_frame_indices = []
+                time_idx = 0
+                for i in range(frame_count):
+                    frame_time = self.img_handle.currentFrameTime(frame_no=i, dt_obj=True)
+                    time = pick_frame_times[time_idx]
+                    if frame_time == time or \
+                        frame_time == time + datetime.timedelta(microseconds=1) or \
+                        frame_time == time - datetime.timedelta(microseconds=1):
+                        pick_frame_indices.append(i)
+                        time_idx += 1
+                    if time_idx >= len(pick_frame_times):
+                        break
 
             # if arrays are different dimensions raise error
             if len(picks) != len(pick_frame_indices):
@@ -11889,6 +12094,12 @@ class PlateTool(QtWidgets.QMainWindow):
                             message_type="error")
                 return None
             pick_list = {frame: pick for frame, pick in zip(pick_frame_indices, picks)}
+
+            # Files which have annotations replace the points of additional fragments
+            if frame_ind is not None:
+                self.fragment_picks = {}
+                for frame, fragment_id, x, y in fragment_points:
+                    self.addFragmentPoint(frame, fragment_id, x, y)
 
             return pick_list
         
@@ -12484,13 +12695,19 @@ class PlateTool(QtWidgets.QMainWindow):
             self.pick_marker.show()
             self.pick_marker2.show()
 
+    def setGreatCirclesVisible(self, visible):
+        """ Show or hide the great circle lines of all fragments. """
+
+        self.great_circle_line.setVisible(visible)
+
+        for line in self.fragment_great_circle_lines.values():
+            line.setVisible(visible)
+
+
     def toggleShowGreatCircle(self):
-        """ Toggle the visibility of the great circle line. """
-        
-        if self.great_circle_line.isVisible():
-            self.great_circle_line.hide()
-        else:
-            self.great_circle_line.show()
+        """ Toggle the visibility of the great circle lines. """
+
+        self.setGreatCirclesVisible(not self.great_circle_line.isVisible())
 
 
     def toggleShowRegion(self):
@@ -14887,10 +15104,59 @@ class PlateTool(QtWidgets.QMainWindow):
             self.pick_list[self.img.getFrame()]['mode'] = None
             self.tab.debruijn.removeRow(frame)
 
+            self.updateGreatCircle()
+
         # Update Kalman/ASTRA Ready status if instance exists
         if hasattr(self, 'astra_dialog') and self.astra_dialog is not None:
             self.checkASTRACanRun()
             self.checkKalmanCanRun()
+
+
+    def addFragmentPoint(self, frame, fragment_id, x_centroid, y_centroid, snr=1, saturated=False):
+        """
+        Adds or moves the point of an additional fragment on the given frame. The main pick on that frame
+        is not changed, and there is at most one point per fragment and frame.
+
+        Arguments:
+            frame: [int] Frame to add/modify the point to.
+            fragment_id: [int] Fragment ID, 1-8 (0 is the main fragment in self.pick_list).
+            x_centroid: [float] x coordinate of the point.
+            y_centroid: [float] y coordinate of the point.
+
+        Keyword arguments:
+            snr: [float] Signal to noise ratio of the point.
+            saturated: [bool] Whether the point is saturated.
+
+        """
+        print('Added fragment {:d} point at ({:.2f}, {:.2f}) on frame {:d}'.format(fragment_id, x_centroid,
+                                                                                    y_centroid, frame))
+
+        fragments = self.fragment_picks.setdefault(frame, {})
+
+        if fragment_id in fragments:
+            fragments[fragment_id]['x_centroid'] = x_centroid
+            fragments[fragment_id]['y_centroid'] = y_centroid
+
+        else:
+            fragments[fragment_id] = {'x_centroid': x_centroid,
+                                      'y_centroid': y_centroid,
+                                      'mode': 1,
+                                      'intensity_sum': 1,
+                                      'photometry_pixels': None,
+                                      'background_intensity': 0,
+                                      'snr': snr,
+                                      'saturated': saturated}
+
+
+    def removeFragmentPoint(self, frame, fragment_id):
+        """ Removes the point of the given additional fragment from the given frame, if it is there. """
+
+        fragments = self.fragment_picks.get(frame, {})
+        if fragments.pop(fragment_id, None) is not None:
+            print('Removed fragment {:d} point on frame {:d}'.format(fragment_id, frame))
+
+        if not fragments:
+            self.fragment_picks.pop(frame, None)
 
 
     def centroid(self, prev_x_cent=None, prev_y_cent=None):
@@ -15159,16 +15425,39 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
     def updateGreatCircle(self):
-        """ Fits great circle to observations. """
+        """ Fits great circles to the picks of the main fragment and of each additional fragment. """
 
-        # Extract picked points
+        # Extract picked points, without the picks not used in the main trajectory
         good_picks = collections.OrderedDict((frame, pick) for frame, pick in self.pick_list.items() 
-                                             if (pick['mode'] == 1) and (pick['x_centroid'] is not None))
+                                             if (pick['mode'] == 1) and (pick['x_centroid'] is not None)
+                                             and pick.get('trajectory_use', True))
+
+        # Once there are other fragments, tell the main fragment line from theirs with the colour of its markers
+        main_color = FRAGMENT_COLORS[0] if self.fragment_picks else GREAT_CIRCLE_COLOR
+        self.great_circle_line.setPen(pg.mkPen(main_color, style=QtCore.Qt.PenStyle.DotLine))
+
+        self.drawGreatCircle(self.great_circle_line, good_picks)
+
+        # Draw the line of each additional fragment which has enough points
+        for fragment_id, line in self.fragment_great_circle_lines.items():
+            fragment_points = {frame: fragments[fragment_id] for frame, fragments in self.fragment_picks.items()
+                               if fragment_id in fragments}
+            self.drawGreatCircle(line, fragment_points)
+
+
+    def drawGreatCircle(self, line, good_picks):
+        """ Fits a great circle to the given picks and draws it, or leaves the line empty if there are too few.
+
+        Arguments:
+            line: [pg.PlotCurveItem] Line to draw the great circle on.
+            good_picks: [dict] Picks to fit, as {frame: pick}.
+
+        """
 
         # Remove the old great circle
-        self.great_circle_line.clear()
+        line.clear()
 
-        # If there are more than 2 picks, fit a great circle to the picks
+        # If there are at least 2 picks, fit a great circle to the picks
         # If ground points are measured, don't fit the great circle
         if (len(good_picks) > 1) and (not self.meas_ground_points):
 
@@ -15293,7 +15582,7 @@ class PlateTool(QtWidgets.QMainWindow):
                     connect[break_indx-1] = 0
 
                 
-                self.great_circle_line.setData(x=x_array + 0.5, y=y_array + 0.5, connect=connect)
+                line.setData(x=x_array + 0.5, y=y_array + 0.5, connect=connect)
 
 
                 ### ###
@@ -17362,6 +17651,19 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             n_stars = 0
 
+        # Main fragment picks (fragment ID 0) and the points of additional fragments. Following the GDEF
+        #   standard, fragment k is written to the columns with the suffix k (e.g. ra1, dec1, ...), numbered
+        #   from 0 to no_frags - 1. The columns of a number without points are written empty instead of
+        #   renumbering the others, as the numbers identify the fragments across the stations of an event
+        observations = [(frame, 0, pick) for frame, pick in self.pick_list.items()]
+        observations += [(frame, fragment_id, pick) for frame, fragments in self.fragment_picks.items()
+                         for fragment_id, pick in fragments.items()]
+        fragment_ids = list(range(1, max(obs[1] for obs in observations) + 1)) if observations else []
+
+        # The annotation columns are only written if the annotations are used
+        annotated = bool(fragment_ids) or any(pick.get('flare', False) or not pick.get('trajectory_use', True)
+                                              for pick in self.pick_list.values())
+
         # Write the meta header
         meta_dict = {
             'obs_latitude': self.platepar.lat,                        # Decimal signed latitude (-90 S to +90 N)
@@ -17376,7 +17678,7 @@ class PlateTool(QtWidgets.QMainWindow):
             'isodate_start_obs': str(dt_ref.strftime(isodate_format_entry)), # The date and time of the start of the video or exposure
             'astrometry_number_stars' : n_stars,                      # The number of stars identified and used in the astrometric calibration
             'mag_label': 'mag_data',                                  # The label of the Magnitude column in the Point Observation data
-            'no_frags': 1,                                            # The number of meteoroid fragments described in this data
+            'no_frags': max(fragment_ids, default=0) + 1,             # The number of meteoroid fragments described in this data
             'obs_az': azim,                                           # The azimuth of the centre of the field of view in decimal degrees. North = 0, increasing to the East
             'obs_ev': elev,                                           # The elevation of the centre of the field of view in decimal degrees. Horizon =0, Zenith = 90
             'obs_rot': rotationWrtHorizon(self.platepar),             # Rotation of the field of view from horizontal, decimal degrees. Clockwise is positive
@@ -17403,9 +17705,26 @@ class PlateTool(QtWidgets.QMainWindow):
 # - {name: err_minus_mag, datatype: float64}
 # - {name: err_plus_mag, datatype: float64}
 # - {name: snr, datatype: float64}
-# delimiter: ','
-# meta: !!omap
 """
+
+        # Declare the annotation columns and the time and position columns of additional fragments
+        column_names = "datetime,ra,dec,azimuth,altitude,x_image,y_image,integrated_pixel_value,background_pixel_value,saturated_pixels,mag_data,err_minus_mag,err_plus_mag,snr"
+        extra_columns = []
+        if annotated:
+            extra_columns += [('frame_number', '', 'int64'), ('flare', '', 'bool'), ('trajectory_use', '', 'bool')]
+
+        for fragment_id in fragment_ids:
+            extra_columns += [(name + str(fragment_id), unit, datatype) for name, unit, datatype in [
+                ('datetime', '', 'string'), ('ra', 'deg', 'float64'), ('dec', 'deg', 'float64'),
+                ('azimuth', '', 'float64'), ('altitude', '', 'float64'), ('x_image', 'pix', 'float64'),
+                ('y_image', 'pix', 'float64')]]
+
+        for name, unit, datatype in extra_columns:
+            out_str += "# - {name: " + name + (", unit: " + unit if unit else "") + ", datatype: " + datatype + "}\n"
+            column_names += "," + name
+
+        out_str += "# delimiter: ','\n"
+        out_str += "# meta: !!omap\n"
         # Add the meta information
         for key in meta_dict:
 
@@ -17420,10 +17739,46 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         out_str += "# schema: astropy-2.0\n"
-        out_str += "datetime,ra,dec,azimuth,altitude,x_image,y_image,integrated_pixel_value,background_pixel_value,saturated_pixels,mag_data,err_minus_mag,err_plus_mag,snr\n"
+        out_str += column_names + "\n"
 
-        # Add the data (sort by frame)
-        for frame, pick in sorted(self.pick_list.items(), key=lambda x: x[0]):
+        # Determine whether to save the raw times that came with in the data
+        save_raw_times = False
+        if (self.img_handle.input_type == "vid") or (self.img_handle.input_type == "dfn"):
+            save_raw_times = True
+
+        if self.img_handle.input_type == "images":
+            if self.img_handle.fripon_mode or self.img_handle.uwo_png_mode:
+                save_raw_times = True
+
+
+        def frameTime(frame, pick=None):
+            """ Time of a frame in the ECSV, at the image row of the given pick if there is one. """
+
+            # Normalize the frame number to the actual time
+            frame_dt = self.img_handle.currentFrameTime(frame_no=frame, dt_obj=True)
+            frame_no = (frame_dt - dt_ref).total_seconds()*self.img_handle.fps
+
+            # Get the rolling shutter corrected (or not, depending on the config) frame number
+            if (pick is not None) and (self.config.deinterlace_order == -1):
+                frame_no = self.getRollingShutterCorrectedFrameNo(frame_no, pick)
+
+            # If the global shutter is used, the frame number can only be an integer
+            if self.config.deinterlace_order == -2:
+                frame_no = round(frame_no, 0)
+
+            # For UWO .vid files DFN data, don't normalize the time to the FPS, as the time is GPS-synced
+            if save_raw_times:
+                return frame_dt
+
+            # Compute the datetime of the point, from the time relative to the reference JD
+            return dt_ref + datetime.timedelta(seconds=frame_no/self.img_handle.fps)
+
+
+        # Entries of every frame, as {frame: {fragment_id: entry}}
+        rows = {}
+
+        # Compute the data
+        for frame, fragment_id, pick in observations:
 
             # Make sure to centroid is picked and is not just the photometry
             if pick['x_centroid'] is None:
@@ -17473,51 +17828,42 @@ class PlateTool(QtWidgets.QMainWindow):
             # Compute alt/az (topocentric, i.e. without refraction)
             azim, alt = trueRaDec2ApparentAltAz(ra, dec, jd, pp_tmp.lat, pp_tmp.lon, refraction=False)
 
-            # Normalize the frame number to the actual time
-            frame_dt = self.img_handle.currentFrameTime(frame_no=frame, dt_obj=True)
-            frame_no = (frame_dt - dt_ref).total_seconds()*self.img_handle.fps
-
-            # Get the rolling shutter corrected (or not, depending on the config) frame number
-            if self.config.deinterlace_order == -1:
-                frame_no = self.getRollingShutterCorrectedFrameNo(frame_no, pick)
-
-            # If the global shutter is used, the frame number can only be an integer
-            if self.config.deinterlace_order == -2:
-                frame_no = round(frame_no, 0)
-
-            # Compute the time relative to the reference JD
-            t_rel = frame_no/self.img_handle.fps
-
-            # Determine whether to save the raw times that came with in the data
-            save_raw_times = False
-            if (self.img_handle.input_type == "vid") or (self.img_handle.input_type == "dfn"):
-                save_raw_times = True
-
-            if self.img_handle.input_type == "images":
-                if self.img_handle.fripon_mode or self.img_handle.uwo_png_mode:
-                    save_raw_times = True
-
-            # For UWO .vid files DFN data, don't normalize the time to the FPS, as the time is GPS-synced
-            if save_raw_times:
-                frame_time = frame_dt
-            
-            else:
-                
-                # Compute the datetime of the point
-                frame_time = dt_ref + datetime.timedelta(seconds=t_rel)
-
-            # Add an entry to the ECSV file
+            # Add an entry to the ECSV file (only the time and position of additional fragments)
             entry = [
-                frame_time.strftime(isodate_format_entry),
+                frameTime(frame, pick).strftime(isodate_format_entry),
                 "{:10.6f}".format(ra), "{:+10.6f}".format(dec),
                 "{:10.6f}".format(azim), "{:+10.6f}".format(alt),
-                "{:9.3f}".format(pick['x_centroid']), "{:9.3f}".format(pick['y_centroid']), 
-                "{:10d}".format(int(pick['intensity_sum'])),
-                "{:10d}".format(int(pick['background_intensity'])),
-                "{:5s}".format(str(pick['saturated'])),
-                "{:+7.2f}".format(mag), "{:+6.2f}".format(-mag_err_total), "{:+6.2f}".format(mag_err_total),
-                "{:10.2f}".format(snr)
+                "{:9.3f}".format(pick['x_centroid']), "{:9.3f}".format(pick['y_centroid'])
                 ]
+
+            if fragment_id == 0:
+                entry += [
+                    "{:10d}".format(int(pick['intensity_sum'])),
+                    "{:10d}".format(int(pick['background_intensity'])),
+                    "{:5s}".format(str(pick['saturated'])),
+                    "{:+7.2f}".format(mag), "{:+6.2f}".format(-mag_err_total), "{:+6.2f}".format(mag_err_total),
+                    "{:10.2f}".format(snr),
+                    "{:5s}".format(str(pick.get('flare', False))),
+                    "{:5s}".format(str(pick.get('trajectory_use', True)))
+                    ]
+
+            rows.setdefault(frame, {})[fragment_id] = entry
+
+
+        # Write one row per frame. The columns of the fragments not picked on that frame are left empty, except
+        #   their time, which the GFE standard requires on every row: it is the time of the frame
+        for frame, entries in sorted(rows.items()):
+
+            row_time = frameTime(frame).strftime(isodate_format_entry)
+
+            main_entry = entries.get(0, [row_time] + [''] * 15)
+            entry = main_entry[:14]
+
+            if annotated:
+                entry += ["{:6d}".format(frame)] + main_entry[14:]
+
+            for fragment_id in fragment_ids:
+                entry += entries.get(fragment_id, [row_time] + [''] * 6)
 
             out_str += ",".join(entry) + "\n"
 
