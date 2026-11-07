@@ -272,7 +272,7 @@ def _formatLine(line, first_frame, last_frame):
 
     x1, y1, z1, x2, y2, z2 = line.get_points()
 
-    return [(x1, y1, z1), (x2, y2, z2), line.counter, line.line_quality, first_frame, last_frame]
+    return [(x1, y1, z1), (x2, y2, z2), line.counter, line.line_quality, int(first_frame), int(last_frame)]
 
 
 
