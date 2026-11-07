@@ -232,6 +232,9 @@ class BufferedCapture(Process):
         # Timestamp correction between smoothed PTS and pipeline running time
         self.last_pts_correction_ns = 0
         self.last_running_time_ns = None
+        self.held_sample = None
+        self.held_buffer = None
+        self.held_map = None
 
         # handle for the Gst bus-poller thread
         self._bus_should_exit = False
@@ -500,6 +503,20 @@ class BufferedCapture(Process):
         return m, self.b - self.m_jump_error
 
 
+    def releaseHeldFrame(self):
+        """ Unmap the buffer whose pixels were handed out by the previous read(). """
+
+        if getattr(self, 'held_map', None) is not None:
+            try:
+                self.held_buffer.unmap(self.held_map)
+            except Exception as e:
+                log.debug("Failed to unmap held buffer: %s", e)
+
+        self.held_map = None
+        self.held_buffer = None
+        self.held_sample = None
+
+
     def smoothPTS(self, new_pts):
         """ Smooth pts using linear regression.
 
@@ -580,6 +597,11 @@ class BufferedCapture(Process):
             if GST_IMPORTED and (self.config.media_backend == 'gst') and (not self.media_backend_override):
 
                 # Pull a frame from the GStreamer pipeline with a .5 sec timeout
+                # Release the previous frame's mapping. Holding it until now is what lets the frame be
+                # handed out as a view instead of a copy: the caller is finished with it by the time it
+                # asks for the next one.
+                self.releaseHeldFrame()
+
                 sample = self.device.emit("try-pull-sample", 500 * Gst.MSECOND)
                 if not sample:
                     log.info("GStreamer pipeline did not emit a sample.")
@@ -605,8 +627,16 @@ class BufferedCapture(Process):
                     return False, None, None
 
                 try:
-                    # Convert to np.ndarray
+                    # The frame is a view into the mapped buffer, not a copy. The mapping, the buffer
+                    # and the sample are kept alive until the next call, which is what makes that safe:
+                    # unmapping here would pull the pixels out from under the caller on sources backed
+                    # by dma-buf, and copying 5 MB per frame to avoid that costs more than the rest of
+                    # this function put together
                     frame = np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
+
+                    self.held_sample = sample
+                    self.held_buffer = buffer
+                    self.held_map = map_info
 
                     # Smooth raw pts and calculate actual timestamp
                     smoothed_pts = self.smoothPTS(gst_timestamp_ns)
@@ -637,9 +667,9 @@ class BufferedCapture(Process):
                         self.last_pts_correction_ns = 0
                         timestamp = self.start_timestamp + (smoothed_pts/1e9)
 
-                finally:
-                    # Always unmap buffer to prevent memory leaks
-                    buffer.unmap(map_info)
+                except Exception:
+                    self.releaseHeldFrame()
+                    raise
 
             # OpenCV
             else:
@@ -1541,11 +1571,14 @@ class BufferedCapture(Process):
                     else:
                         self.frame_shape = (height, width, 3)
 
-                    frame = np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
+                    # Copied, because the frame is inspected below after the buffer has been unmapped.
+                    # On sources backed by dma-buf, such as libcamera, unmapping really takes the pages
+                    # away, and reading a view of them afterwards kills the process
+                    frame = np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8).copy()
 
                     # Unmap the buffer
                     buffer.unmap(map_info)
-                    
+
                     # Check if frame is grayscale and set flag
                     gray_result = self.isGrayscale(frame)
                     if gray_result is not None:
@@ -1624,6 +1657,9 @@ class BufferedCapture(Process):
             log.debug("releaseResources: Already in progress, skipping duplicate call")
             return
         self._releasing_resources = True
+
+        # Give the last frame's mapping back before the pipeline it belongs to goes away
+        self.releaseHeldFrame()
 
         log.debug("releaseResources: Starting")
 
