@@ -621,6 +621,9 @@ class BufferedCapture(Process):
                     if running_time_ns is not None:
                         self.last_running_time_ns = running_time_ns
                         self.last_pts_correction_ns = smoothed_pts - running_time_ns
+
+                        # Note: this reduces to smoothed_pts. The two values above are kept because
+                        # moveSegment() applies the correction to a fresh running time.
                         corrected_running_time_ns = running_time_ns + self.last_pts_correction_ns
                         timestamp = self.start_timestamp + (corrected_running_time_ns/1e9)
                     else:
@@ -1252,6 +1255,37 @@ class BufferedCapture(Process):
                 success, _ = self.handleStateChange(self.pipeline, Gst.State.PLAYING)
                 if not success:
                     raise ValueError("Failed to transition pipeline to PLAYING state")
+
+                # Re-anchor the start time to the pipeline's base time, which is the origin the buffer
+                # running times are measured from. start_timestamp was taken when the PAUSED transition
+                # was initiated, and a source's start() runs inside that transition (opening the
+                # device, configuring the sensor...). Whatever time it takes would otherwise be
+                # subtracted from every frame timestamp for the whole session.
+                # Only the difference of two GStreamer clock readings is used, so it does not matter
+                # that the GStreamer clock is monotonic and time.time() is not.
+                try:
+                    clock = self.pipeline.get_clock()
+                    base_time = self.pipeline.get_base_time()
+
+                    if clock is not None and base_time != Gst.CLOCK_TIME_NONE:
+                        clock_time = clock.get_time()
+
+                        if clock_time != Gst.CLOCK_TIME_NONE and clock_time >= base_time:
+                            running_now = (clock_time - base_time)/1e9
+                            anchored = time.time() - running_now \
+                                       - (self.config.camera_buffer/self.config.fps
+                                          + self.config.camera_latency)
+
+                            if self.start_timestamp is not None:
+                                shift = anchored - self.start_timestamp
+                                if abs(shift) > 0.5:
+                                    log.info("Start time re-anchored to the pipeline base time, "
+                                             "moved by %.2f s (source start-up time)", shift)
+
+                            self.start_timestamp = anchored
+
+                except Exception as clock_exc:
+                    log.debug("Could not anchor the start time to the pipeline clock: %s", clock_exc)
 
                 # Log start time
                 start_time_str = (UTCFromTimestamp.utcfromtimestamp(self.start_timestamp)
