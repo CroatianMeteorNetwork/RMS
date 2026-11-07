@@ -805,7 +805,7 @@ class BufferedCapture(Process):
         """
         Quickly check if a frame is grayscale by sampling pixels along the diagonal.
         If all three channels match on those diagonal samples, return True.
-        If an IndexError is raised (i.e., frame is single-channel), also return True.
+        A single-channel frame is always reported as grayscale.
         This trades completeness for speed, as only the diagonal is checked.
 
         Args:
@@ -820,9 +820,11 @@ class BufferedCapture(Process):
         if frame is None:
             raise ValueError("isGrayscale() called with frame=None")
 
-        # We don't explicitly check frame.shape first; instead we rely on an IndexError
-        # if 'frame' is single-channel (which is inherently grayscale).
-        # This is faster than an extra dimension check for most BGR GMN stations
+        # A single channel frame has no channel axis to compare, so it is grayscale by definition.
+        # This has to be checked explicitly: ellipsis indexing does not raise on a 2D array, it slices
+        # columns instead, and comparing columns of an image reports a mono frame as colour
+        if frame.ndim < 3:
+            return True
 
         try:
             # If diagonal samples are not identical, frame is color
