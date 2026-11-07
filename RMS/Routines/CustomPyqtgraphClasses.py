@@ -2028,6 +2028,9 @@ class AnnotationsWidget(QtWidgets.QWidget, ScaledSizeHelper):
         layout.addWidget(self.fragment)
 
         self.flare = QtWidgets.QCheckBox('Flare')
+        self.flare.setToolTip("Mark this pick as part of a flare (B). Mark every frame of the flare: "
+            "consecutive marked picks are one flare. To separate two flares, leave a pick between them "
+            "unmarked.")
         self.flare.clicked.connect(self.onAnnotationChanged)
         layout.addWidget(self.flare)
 

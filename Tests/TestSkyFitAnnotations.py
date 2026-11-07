@@ -767,3 +767,16 @@ def test_widget_secondary_fragment(widget):
     widget.gui.frame = 10
     widget.fragment.setCurrentIndex(0)
     assert widget.trajectory_use.isEnabled() and widget.trajectory_use.isChecked()
+
+
+def test_flare_explains_how_flares_are_told_apart(widget):
+    """ The tooltip of Flare and the help say that consecutive marked picks are one flare, and that an
+        unmarked pick separates two, as the trajectory solver reads them.
+    """
+
+    from RMS.Routines.SkyFitHelp import _topic_mr_annotations
+
+    for text in (widget.flare.toolTip(), _topic_mr_annotations(None)):
+        assert "Mark every frame of the flare" in text
+        assert "consecutive marked picks are one" in text
+        assert "leave a pick between them unmarked" in text
