@@ -1130,6 +1130,26 @@ class BufferedCapture(Process):
                 which can be used for further processing of the captured video frames.
         """
 
+        # A device string that already names an appsink is a complete pipeline written by the user.
+        # Take it as it is: it is the only way to express what RMS cannot build itself, such as the two
+        # independent streams of different resolutions a Raspberry Pi camera can deliver, which a tee
+        # cannot reproduce. Everything below the parse_launch works on any pipeline, so a user supplied
+        # one also gets the timestamped segment names and the frame timing of the GStreamer backend.
+        if 'name=appsink' in self.config.deviceID:
+
+            log.info("Device is a complete GStreamer pipeline, using it as given.")
+
+            # RMS adds no storage branch to a pipeline it did not build, so raw video saving is down to
+            # the pipeline itself
+            if video_file_dir is not None:
+                log.info("raw_video_save has no effect on a user supplied pipeline. Put a splitmuxsink "
+                         "named splitmuxsink0 in the pipeline to save video and have its segments named "
+                         "after their timestamp.")
+
+            return self.startGstPipeline(self.config.deviceID, max_retries=max_retries,
+                                         retry_interval=retry_interval)
+
+
         device_url = self.extractRtspUrl(self.config.deviceID)
 
         # Common timeout settings for both UDP and TCP
@@ -1202,6 +1222,29 @@ class BufferedCapture(Process):
          # Combine all parts of the pipeline
         pipeline_str = "{:s} {:s} {:s}".format(source_to_tee, processing_branch, storage_branch)
 
+        return self.startGstPipeline(pipeline_str, max_retries=max_retries, retry_interval=retry_interval)
+
+
+
+    def startGstPipeline(self, pipeline_str, max_retries=5, retry_interval=5):
+        """
+        Parse the given GStreamer pipeline, bring it to PLAYING and return its appsink.
+
+        Works on any pipeline, whether built by createGstreamDevice or supplied whole by the user, as
+        long as it names its appsink "appsink". A splitmuxsink named "splitmuxsink0" gets the segment
+        naming callback connected to it.
+
+        Arguments:
+            pipeline_str: [str] The GStreamer pipeline description.
+
+        Keyword arguments:
+            max_retries: [int] The maximum number of retry attempts
+            retry_interval: [float] The number of seconds to wait between retries
+
+        Returns:
+            Gst.Element: The appsink element of the pipeline, or False if it could not be started.
+        """
+
         # Obfuscate the password in the pipeline string before logging
         obfuscated_pipeline_str = obfuscatePassword(pipeline_str)
 
@@ -1226,11 +1269,10 @@ class BufferedCapture(Process):
                 self._bus_thread = threading.Thread(target=self._busPoller, daemon=True)
                 self._bus_thread.start()
                 
-                # If raw video saving is enabled, connect the "format-location-full" signal to the
-                # moveSegment function
-                if video_file_dir is not None:
-                    
-                    splitmuxsink = self.pipeline.get_by_name("splitmuxsink0")
+                # Name the segments after their timestamp. Keyed on the element being there rather than
+                # on the config, so a splitmuxsink in a user supplied pipeline is picked up too
+                splitmuxsink = self.pipeline.get_by_name("splitmuxsink0")
+                if splitmuxsink is not None:
                     splitmuxsink.connect("format-location-full", self.moveSegment)
 
                 # Transition through states
