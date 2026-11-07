@@ -50,6 +50,12 @@ from RMS.Logger import LoggingManager, getLogger, gstDebugLogger, getLoggingQueu
 from RMS.CaptureModeSwitcher import switchCameraMode
 import Utils.CameraControl as cc
 
+# How many consecutive failed reads mean the device is gone rather than merely slow. Each attempt is a
+# try-pull-sample with a 500 ms timeout, so this is the number of half seconds of silence tolerated
+# before the pipeline is rebuilt.
+MAX_FAILED_READS = 4
+
+
 # Get the logger from the main module
 log = getLogger("rmslogger")
 
@@ -2155,12 +2161,35 @@ class BufferedCapture(Process):
 
                 # Read the frame (keep track how long it took to grab it), and check for color if saving raw frame
                 t1_frame = time.time()
-                ret, frame, frame_timestamp = self.read()
+
+                # Retried here rather than by going round the outer loop again, so a failed read does
+                # not consume a slot in the block - that would leave the previous block's pixels in it.
+                failed_reads = 0
+
+                while True:
+                    ret, frame, frame_timestamp = self.read()
+
+                    if ret or (self.video_file is not None) or self.exit.is_set():
+                        break
+
+                    failed_reads += 1
+
+                    if failed_reads >= MAX_FAILED_READS:
+                        break
+
+                    log.info('Frame grabbing failed (%d/%d), retrying before giving up on the device',
+                             failed_reads, MAX_FAILED_READS)
+
                 t_frame = time.time() - t1_frame
+
+                if failed_reads and ret:
+                    log.info('Frame grabbing recovered after %d failed attempt(s); the device was '
+                             'slow, not gone', failed_reads)
 
                 # If the video device was disconnected, wait for reconnection
                 if (self.video_file is None) and (not ret):
-                    log.info('Frame grabbing failed, video device is probably disconnected!')
+                    log.info('Frame grabbing failed %d times in a row, video device is probably '
+                             'disconnected!', failed_reads)
                     self.releaseResources()
                     # Note: releaseResources() includes proper RTSP cleanup with fallback force close
                     wait_for_reconnect = True
