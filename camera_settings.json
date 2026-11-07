@@ -67,5 +67,26 @@
     ["SetParam", "Camera", "BroadTrends", "AutoGain", "0"],
     ["SetParam", "Camera", "ClearFog", "enable", "0"],
     ["reboot"]
-  ]
+  ],
+
+  "_gst_comment": [
+    "Properties set on the running GStreamer pipeline when the mode switches, for a camera driven",
+    "by a GStreamer source element rather than over dvrip (e.g. a MIPI sensor). Keyed by element",
+    "name (name= in the pipeline) or by element type when exactly one element of it is present.",
+    "When a mode is filled in here and deviceID has no IP address, the dvrip lists above are not",
+    "used, so they do not need to be emptied. Leave both empty for a dvrip camera.",
+    "These reach a pipeline that is already PLAYING, so a property an element only reads when it",
+    "starts has no effect from here, and nothing warns about it. For mipimvsrc that means cam-fps,",
+    "cam-curve, format, width and height - set those in the pipeline string instead.",
+    "Example for mipimvsrc, fixed exposure at night and the camera's own auto exposure by day:",
+    "  \"night\": {\"mipimvsrc\": {\"cam-auto-exposure\": 0, \"cam-auto-gain\": 0,",
+    "                           \"exposure\": 40000, \"gain\": 30}},",
+    "  \"day\":   {\"mipimvsrc\": {\"cam-auto-exposure\": 2, \"cam-auto-gain\": 2,",
+    "                           \"cam-ae-target\": 75}}"
+  ],
+
+  "gst": {
+    "day": {},
+    "night": {}
+  }
 }
