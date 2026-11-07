@@ -1842,6 +1842,14 @@ class BufferedCapture(Process):
             # GStreamer debug setup
             if GST_IMPORTED:
                 try:
+                    # Gst.debug_set_active() raises "Please call Gst.init(argv) before using
+                    # GStreamer" when the library is not initialised yet, which only happens later in
+                    # initVideoDevice(). The except below then swallowed it, the log handler was never
+                    # registered and no GStreamer message ever reached the RMS log. Gst.init is
+                    # idempotent, so initialising here is safe.
+                    if not Gst.is_initialized():
+                        Gst.init(None)
+
                     # Activate debug system
                     Gst.debug_set_active(True)
 
