@@ -16,6 +16,7 @@ import traceback
 #import time
 import datetime
 import shutil
+import json
 
 # --- TensorFlow-Lite import cascade -----------------------------------------
 #
@@ -75,7 +76,8 @@ FTPDETECTINFO_UNFILTERED_SUFFIX = '_unfiltered.txt'
 #   normalize - scale the crop so its brightest pixel is 1
 # meteorml32 ran with a 20 px margin and normalisation from 2022 until hyper_model replaced it as the
 # default, which also changed the preparation for every model. Models not listed get the hyper_model
-# preparation.
+# preparation, unless a <model name>.json next to the model file gives its own (written by training
+# scripts, e.g. {"padding": 20, "normalize": true}).
 MODEL_PREPROCESSING = {
     "meteorml32.tflite": {"padding": 20, "normalize": True},
 }
@@ -92,7 +94,24 @@ def modelPreprocessing(model_path):
         [dict] With keys 'padding' (int) and 'normalize' (bool).
     """
 
-    return dict(MODEL_PREPROCESSING.get(os.path.basename(model_path), DEFAULT_PREPROCESSING))
+    preprocessing = dict(MODEL_PREPROCESSING.get(os.path.basename(model_path), DEFAULT_PREPROCESSING))
+
+    sidecar_path = os.path.splitext(model_path)[0] + ".json"
+    if os.path.isfile(sidecar_path):
+        try:
+            with open(sidecar_path) as f:
+                sidecar = json.load(f)
+
+            if "padding" in sidecar:
+                preprocessing["padding"] = int(sidecar["padding"])
+
+            if "normalize" in sidecar:
+                preprocessing["normalize"] = bool(sidecar["normalize"])
+
+        except (OSError, ValueError, TypeError) as e:
+            log.warning("Could not read the model preprocessing from {:s}: {:s}".format(sidecar_path, repr(e)))
+
+    return preprocessing
 
 
 def standardize_me1(a, axis=None): 
