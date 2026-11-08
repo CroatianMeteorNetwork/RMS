@@ -1799,6 +1799,11 @@ def getObservationSummaryDict(data_dir, final=False, config=None):
         else:
             return {}
 
+    # Absolute and without a trailing separator, so the dict keeps pointing at this directory whatever
+    # the working directory is later, and basename() gives the directory name
+    if data_dir is not None:
+        data_dir = os.path.abspath(data_dir)
+
     json_name = OBSERVATION_SUMMARY_NAME_JSON if final else OBSERVATION_SUMMARY_WORKING_NAME_JSON
 
     observation_summary_json_path = getRMSStyleFileName(data_dir, json_name)
@@ -1816,6 +1821,10 @@ def getObservationSummaryDict(data_dir, final=False, config=None):
                             type(d).__name__))
 
                     log.info(f"Loaded {os.path.basename(observation_summary_json_path)}")
+
+                    # The file holds the path it was first written with, which may be relative or
+                    # from before the directory was moved. Later saves go to d['night_data_dir'].
+                    d['night_data_dir'] = data_dir
 
                 except:
                     # Don't silently delete - back up the unparseable/invalid file so data is
@@ -1866,6 +1875,8 @@ def saveObservationSummaryDict(d, night_dir=None):
     if night_dir is None:
         log.warning("saveObservationSummaryDict: no night_data_dir available; skipping save")
         return
+
+    night_dir = os.path.abspath(night_dir)
 
     if not os.path.isdir(night_dir):
         log.warning("saveObservationSummaryDict: night_data_dir does not exist, skipping save: {}".format(night_dir))
