@@ -1287,19 +1287,25 @@ class InputTypeVideo(InputType):
 
 
 class InputTypeUWOVid(InputType):
-    def readNextFrame(self):
+    def readNextFrame(self, metadata_only=False):
         """ Read the next frame of the vid file into self.vid, with its timestamp corrected by frame_time_offset
             (every time of the input comes from the timestamps of its frames).
 
+        Keyword arguments:
+            metadata_only: [bool] Read only the header of the frame (its time), not the image. False by default.
+
         Return:
-            [ndarray] The frame, as from Vid.readFrame.
+            [ndarray] The frame, as from Vid.readFrame (None with metadata_only).
         """
 
-        frame = readVidFrame(self.vid, self.vid_file)
+        # The header is read if the file doesn't end before the frame (the image is not read with metadata_only)
+        file_pos = self.vid_file.tell()
+        frame = readVidFrame(self.vid, self.vid_file, metadata_only=metadata_only)
+        header_read = (frame is not None) or (metadata_only and (self.vid_file.tell() > file_pos))
 
         # A seconds field off by whole seconds is corrected from the frame counter (see Vid.frameTimeModel),
         #   before frame_time_offset
-        if frame is not None:
+        if header_read:
             if repairVidFrameTime(self.vid, self.vid_time_model) != 0:
                 if not self.vid_repaired_frames:
                     log.info('Frames of {:s} with the seconds field of the timestamp off, corrected from the '
@@ -1632,8 +1638,8 @@ class InputTypeUWOVid(InputType):
                 # Set the vid file to the right frame
                 self.vid_file.seek(frame_no*self.vidinfo.seqlen)
 
-                # Read the vid file metadata
-                self.readNextFrame()
+                # Read the header of the frame (its time), not the image
+                self.readNextFrame(metadata_only=True)
 
                 # Store the current time to the dictionary
                 unix_time_lst = (self.vid.ts, self.vid.tu)
