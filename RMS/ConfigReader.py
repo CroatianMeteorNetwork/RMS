@@ -637,6 +637,19 @@ class Config:
         self.auto_calibration_max_mag_stddev = 0.25
         self.auto_calibration_max_zone_mag_residual = 0.3
 
+        # Automatic calibration of a classic camera without a platepar during the night: minutes after the first
+        #   platepar before it is checked on new stars and refitted, minutes before the next attempt after a failed
+        #   one, attempts per night, and workers of the joint fit at the end of the night
+        self.auto_calibration_check_min = 30.0
+        self.auto_calibration_retry_min = 10.0
+        self.auto_calibration_max_fits = 5
+        self.auto_calibration_nproc = 2
+
+        # Periodic refit of the lens distortion on the recent nights: days between the refits (0 turns them off)
+        #   and the number of nights
+        self.auto_calibration_refit_days = 7.0
+        self.auto_calibration_refit_nights = 14
+
 
         self.catalog_mag_limit = 5.5
 
@@ -1885,6 +1898,24 @@ def parseCalibration(config, parser):
     if parser.has_option(section, "auto_calibration_max_zone_mag_residual"):
         config.auto_calibration_max_zone_mag_residual = parser.getfloat(section,
                                                                         "auto_calibration_max_zone_mag_residual")
+
+    if parser.has_option(section, "auto_calibration_check_min"):
+        config.auto_calibration_check_min = parser.getfloat(section, "auto_calibration_check_min")
+
+    if parser.has_option(section, "auto_calibration_retry_min"):
+        config.auto_calibration_retry_min = parser.getfloat(section, "auto_calibration_retry_min")
+
+    if parser.has_option(section, "auto_calibration_max_fits"):
+        config.auto_calibration_max_fits = parser.getint(section, "auto_calibration_max_fits")
+
+    if parser.has_option(section, "auto_calibration_nproc"):
+        config.auto_calibration_nproc = parser.getint(section, "auto_calibration_nproc")
+
+    if parser.has_option(section, "auto_calibration_refit_days"):
+        config.auto_calibration_refit_days = parser.getfloat(section, "auto_calibration_refit_days")
+
+    if parser.has_option(section, "auto_calibration_refit_nights"):
+        config.auto_calibration_refit_nights = parser.getint(section, "auto_calibration_refit_nights")
 
 
 
