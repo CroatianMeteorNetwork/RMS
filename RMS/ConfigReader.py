@@ -2636,8 +2636,11 @@ def parseMonitorProcessing(config, parser):
     if parser.has_option(section, "monitor_auto_calibration"):
         config.monitor_auto_calibration = parser.getboolean(section, "monitor_auto_calibration")
 
+    # The interval of the monitor is also the interval of the shared automatic calibration
+    #   (RMS.Astrometry.AutoCalibration reads auto_calibration_interval)
     if parser.has_option(section, "monitor_auto_calibration_interval"):
         config.monitor_auto_calibration_interval = parser.getfloat(section, "monitor_auto_calibration_interval")
+        config.auto_calibration_interval = config.monitor_auto_calibration_interval
 
     if parser.has_option(section, "monitor_auto_calibration_fit_vignetting"):
         config.monitor_auto_calibration_fit_vignetting = parser.getboolean(section,

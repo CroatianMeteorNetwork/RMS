@@ -51,6 +51,7 @@ except ImportError:
 
 import RMS.ConfigReader as cr
 from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
+from RMS.Astrometry.AutoCalibration import autoPlateparPath, writePlatepar
 from RMS.CaptureDuration import CAPTURE_HORIZON_DEG
 from RMS.DeleteOldObservations import availableSpace, deleteOldLogfiles, deleteOldObservations, getNightDirs
 from RMS.Formats import CALSTARS
@@ -279,21 +280,6 @@ def latestPlateparPath(output_dir, config):
     """
 
     return os.path.join(output_dir, 'latest_' + config.platepar_name)
-
-
-def autoPlateparPath(output_dir, config):
-    """ Path of the platepar fitted by the automatic calibration (monitor_auto_calibration). It has its own name,
-        so the platepar given to the monitor is never overwritten.
-
-    Arguments:
-        output_dir: [str] Output directory of the monitor.
-        config: [Config] Configuration.
-
-    Return:
-        [str] Path of the platepar.
-    """
-
-    return os.path.join(output_dir, 'auto_' + config.platepar_name)
 
 
 
@@ -889,10 +875,15 @@ def newestPlateparRecalibrations(output_dir, results, recalibrated, config):
 
 
 def _writePlatepar(platepar, file_path):
-    """ Write the platepar to a temporary file and rename it, as other processes may be reading it. """
+    """ Write the platepar to a temporary file and rename it, as other processes may be reading it (see
+        AutoCalibration.writePlatepar).
 
-    platepar.write(file_path + '.tmp', fmt='json')
-    os.replace(file_path + '.tmp', file_path)
+    Arguments:
+        platepar: [Platepar] The platepar.
+        file_path: [str] Path of the platepar.
+    """
+
+    writePlatepar(platepar, file_path)
 
 
 def saveNightPlatepar(platepar, night_dir, night_name, output_dir, config):
