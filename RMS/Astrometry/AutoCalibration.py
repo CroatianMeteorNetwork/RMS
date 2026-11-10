@@ -1003,6 +1003,73 @@ def fitPhotometry(platepar, chunks, catalog_stars, config, ff_frames=256, fit_vi
     return result
 
 
+def vignettingRefitEnabled(config):
+    """ Whether the vignetting coefficient of an existing platepar is refitted (auto_calibration_fit_vignetting),
+        which is never the case for a camera with a flat (its vignetting is 0).
+
+    Arguments:
+        config: [Config] Configuration.
+
+    Return:
+        [bool]
+    """
+
+    return bool(getattr(config, 'auto_calibration_fit_vignetting', False)) and (not config.use_flat)
+
+
+def refitVignetting(platepar, chunks, catalog_stars, config, ff_frames=256, mask=None):
+    """ Refit the vignetting coefficient of a platepar on half of the clear chunks and keep it only if the
+        photometry of the other half isn't worse with it: neither the scatter of the photometric fits nor the
+        worst photometric residual of a zone, and one of them better.
+
+    Arguments:
+        platepar: [Platepar] Platepar (it is not changed).
+        chunks: [list] Clear chunks as (name, jd, stars).
+        catalog_stars: [ndarray] Catalog stars (ra, dec, mag).
+        config: [Config] Configuration.
+
+    Keyword arguments:
+        ff_frames: [int] Number of frames of a chunk. 256 by default.
+        mask: [ndarray] Mask image (0 is masked), for the photometry of the held-out chunks. None by default.
+
+    Return:
+        (platepar, info): [tuple] A copy of the platepar with the new coefficient if it is kept, otherwise the
+            given platepar; and what was done ('kept' whether the new coefficient is kept, 'reason').
+    """
+
+    if len(chunks) < MIN_CLEAR_CHUNKS:
+        return platepar, {'kept': False, 'reason': 'not enough clear chunks'}
+
+    # The coefficient is fitted on every other chunk and checked on the others
+    fit_chunks = spreadChunks(chunks[0::2], 2*MAX_HELD_OUT)
+    check = spreadChunks(chunks[1::2], MAX_HELD_OUT)
+    trial = copy.deepcopy(platepar)
+    result = fitPhotometry(trial, fit_chunks, catalog_stars, config, ff_frames=ff_frames, fit_vignetting=True)
+    if not result['vignetting_fitted']:
+        return platepar, {'kept': False, 'reason': 'not fitted ({:s})'.format(result.get('vignetting_reason', ''))}
+
+    # The photometry of the held-out chunks with both coefficients, over the zones both can judge
+    before = scorePlatepar(platepar, check, catalog_stars, config, ff_frames=ff_frames, mask=mask)
+    after = scorePlatepar(trial, check, catalog_stars, config, ff_frames=ff_frames, mask=mask)
+    judged = before.judged() & after.judged()
+    if (not len(before.mag_lev_stddev)) or (not len(after.mag_lev_stddev)) or (not np.any(judged)):
+        return platepar, {'kept': False, 'reason': 'the photometry of the held-out chunks could not be compared'}
+
+    scatter_before = float(np.median(before.mag_lev_stddev))
+    scatter_after = float(np.median(after.mag_lev_stddev))
+    zone_before = float(np.nanmax(np.abs(before.zone_mag_residual[judged])))
+    zone_after = float(np.nanmax(np.abs(after.zone_mag_residual[judged])))
+    summary = 'vignetting {:.5f} -> {:.5f}: scatter {:.3f} -> {:.3f} mag, worst zone {:.3f} -> {:.3f} mag'.format(
+        platepar.vignetting_coeff, trial.vignetting_coeff, scatter_before, scatter_after, zone_before, zone_after)
+
+    # Kept only if nothing gets worse and something gets better
+    if (scatter_after <= scatter_before) and (zone_after <= zone_before) \
+            and ((scatter_after < scatter_before) or (zone_after < zone_before)):
+        return trial, {'kept': True, 'reason': summary}
+
+    return platepar, {'kept': False, 'reason': 'not better, ' + summary}
+
+
 def _jointVignetting(platepar, chunks, catalog_stars, config, ff_frames):
     """ Fit the vignetting coefficient jointly on the matched stars of all chunks: one coefficient for all, and a
         photometric offset for every chunk (the transparency changes), minimizing the robust scatter of the
