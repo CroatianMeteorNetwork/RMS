@@ -1003,3 +1003,39 @@ def test_detections_next_to_the_mask_left_out_of_the_photometry(monkeypatch):
 
     ac.scorePlatepar(pp, [('FF', 0.0, stars)], None, config, mask=mask)
     assert seen == [10]
+
+
+def test_fitted_vignetting_within_the_limit_of_a_platepar(monkeypatch):
+    """ The fitted vignetting coefficient is at most the one a platepar keeps when it is read, so the coefficient
+        which is judged is the one which is used: for stars whose brightness falls off far more than the limit, the
+        fit stops at it. """
+
+    from RMS.Astrometry.ApplyAstrometry import limitVignettingCoefficient
+
+    pp = Platepar()
+    pp.X_res, pp.Y_res = 1280, 720
+    pp.vignetting_coeff = 0.0
+    config = cr.Config()
+    config.min_matched_stars = 3
+
+    # Stars to the corners whose magnitudes need a coefficient beyond the limit
+    rng = np.random.default_rng(1)
+    n = 200
+    x, y = rng.uniform(0, 1280, n), rng.uniform(0, 720, n)
+    radius = np.hypot(x - 640, y - 360)
+    true_coeff = 0.0025
+    mags = rng.uniform(2, 5, n)
+    intensity = 10**(-0.4*(mags - 10.0))*np.cos(true_coeff*radius)**4
+    stars = np.zeros((n, 8))
+    stars[:, ac.STAR_X], stars[:, ac.STAR_Y], stars[:, ac.STAR_INTENSITY], stars[:, ac.STAR_FWHM] = \
+        x, y, intensity, 2.0
+
+    monkeypatch.setattr(ac, 'recalibrateChunk', lambda pp, name, stars, cat, config, ff, jd=None: (pp, True))
+    monkeypatch.setattr(ac, 'matchChunk', lambda pp, jd, s, cat, lim, radius: (np.zeros(n), np.zeros(n),
+                                                                               np.zeros(n), mags))
+    monkeypatch.setattr(ac, 'extinctionCorrectionTrueToApparent', lambda mag, ra, dec, jd, pp: mag)
+
+    coeff, reason = ac._jointVignetting(pp, [('FF', 0.0, stars)], None, config, 256)
+    limit = limitVignettingCoefficient(1280, 720, np.inf)
+    assert coeff <= limit*(1 + 1e-6)
+    assert coeff == pytest.approx(limit, rel=0.02)

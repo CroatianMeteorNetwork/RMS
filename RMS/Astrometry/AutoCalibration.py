@@ -35,8 +35,9 @@ import numpy as np
 
 from scipy.spatial import cKDTree
 
-from RMS.Astrometry.ApplyAstrometry import (extinctionCorrectionTrueToApparent, getFOVSelectionRadius, photomLine,
-                                            photometryFitRobust, xyToRaDecPP)
+from RMS.Astrometry.ApplyAstrometry import (extinctionCorrectionTrueToApparent, getFOVSelectionRadius,
+                                            limitVignettingCoefficient, photomLine, photometryFitRobust,
+                                            xyToRaDecPP)
 from RMS.Astrometry.Conversions import jd2Date
 from RMS.Astrometry.CyFunctions import subsetCatalog
 from RMS.Formats.Platepar import getCatalogStarsImagePositions
@@ -1077,10 +1078,12 @@ def _jointVignetting(platepar, chunks, catalog_stars, config, ff_frames):
 
         return np.median(np.abs(residuals))
 
-    # The coefficient between 0 and a multiple of the default for the resolution
+    # The coefficient between 0 and a multiple of the default for the resolution, and at most the limit a platepar
+    #   keeps when it is read (Platepar.read, ApplyAstrometry.limitVignettingCoefficient), so the coefficient
+    #   which is judged is the one which is used
     default = 0.001*np.hypot(1280, 720)/corner/2.0
-    result = scipy.optimize.minimize_scalar(_scatter, bounds=(0.0, VIGNETTING_MAX_FACTOR*default),
-                                            method='bounded')
+    upper = min(VIGNETTING_MAX_FACTOR*default, limitVignettingCoefficient(platepar.X_res, platepar.Y_res, np.inf))
+    result = scipy.optimize.minimize_scalar(_scatter, bounds=(0.0, upper), method='bounded')
 
     return float(result.x), None
 
