@@ -80,6 +80,7 @@ def setup(tmp_path, monkeypatch):
 
     def _jointFit(dir_paths, platepar, config, **kwargs):
         plan['calls'].append(('refit', platepar.mag_lev, kwargs.get('max_chunks')))
+        plan['holdout_names'] = kwargs.get('holdout_names')
         if plan['refit'] is None:
             return None, None
         report = {'qc': {'ok': plan.get('qc_ok', True), 'failed': [] if plan.get('qc_ok', True) else ['converged'],
@@ -116,6 +117,7 @@ def _vignettingStandIn(monkeypatch, plan):
 
     def _refitVignetting(platepar, chunks, catalog_stars, config, ff_frames=256, mask=None):
         plan['vig_calls'].append(platepar.mag_lev)
+        plan['vig_chunks'] = [chunk[0] for chunk in chunks]
         if plan['vig_kept']:
             refitted = copy.deepcopy(platepar)
             refitted.mag_lev += 0.25
@@ -699,6 +701,12 @@ def test_joint_fit_of_the_night_starts_from_the_refitted_vignetting(setup, monke
     assert platepar.mag_lev == 1.25
     assert _installed(config) == 1.25
 
+    # The vignetting is fitted only on the chunks the joint fit is fitted on, never on those it is checked on
+    held = plan['holdout_names']
+    assert held and (len(held) == 240//nc.END_HOLDOUT_CHUNKS)
+    assert plan['vig_chunks'] and not (set(plan['vig_chunks']) & set(held))
+    assert len(plan['vig_chunks']) + len(held) == 240
+
 
 def test_vignetting_refitted_in_the_periodic_refit(refit):
     """ With auto_calibration_fit_vignetting the periodic refit also refits the vignetting on the newest night:
@@ -722,3 +730,33 @@ def test_vignetting_refitted_in_the_periodic_refit(refit):
     action = nc.periodicRefit(config, nproc=1, now=now + datetime.timedelta(days=8))
     assert plan['vig_calls'][-1] == 2.0
     assert _installed(config) == 2.25
+
+
+@pytest.mark.parametrize("fps", [15.0, 25.0])
+def test_written_chunks_keep_their_times(tmp_path, fps):
+    """ Chunks timed with a frame rate other than the config's (e.g. a night recorded before the frame rate was
+        changed, timed by the header of its CALSTARS file) keep their times and durations when they are written for
+        the fits and read back; the clear hours count them at their frame rate. """
+
+    from RMS.Astrometry import JointDistortionFit
+    from RMS.Astrometry.Conversions import date2JD
+    from RMS.Formats.FFfile import getMiddleTimeFF
+
+    config = cr.Config()
+    config.fps = 25.0
+    names = ['FF_{:s}_20261105_{:02d}{:02d}00_000_000000.fits'.format(config.stationID, 1 + m//60, m%60)
+             for m in range(20)]
+    stars = np.zeros((40, 8))
+    chunks = [(name, date2JD(*getMiddleTimeFF(name, fps, ret_milliseconds=True, ff_frames=256)), stars)
+              for name in names]
+
+    assert nc.chunksFps(chunks, config, ff_frames=256) == pytest.approx(fps, rel=1e-6)
+
+    nc.writeChunks(chunks, str(tmp_path), config, ff_frames=256)
+    read = JointDistortionFit.readChunks(str(tmp_path), config)
+    assert [chunk[0] for chunk in read] == names
+    assert np.allclose([chunk[1] for chunk in read], [chunk[1] for chunk in chunks], rtol=0, atol=1e-3/86400)
+    assert all(chunk[4] == pytest.approx(256/fps, rel=1e-5) for chunk in read)
+
+    read, ff_frames = ac.readChunks(str(tmp_path), config)
+    assert np.allclose([chunk[1] for chunk in read], [chunk[1] for chunk in chunks], rtol=0, atol=1e-3/86400)

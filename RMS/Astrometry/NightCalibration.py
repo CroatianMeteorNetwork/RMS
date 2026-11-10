@@ -158,8 +158,47 @@ def writeState(night_dir, state):
     os.replace(path + '.tmp', path)
 
 
+def chunksFps(chunks, config, ff_frames=256):
+    """ The frame rate the middle times of chunks were computed with (e.g. the one of the header of their CALSTARS
+        file, see AutoCalibration.readChunks), from the time of their names and their middle times.
+
+    Arguments:
+        chunks: [list] Chunks as (name, jd, stars).
+        config: [Config] Configuration.
+
+    Keyword arguments:
+        ff_frames: [int] Number of frames of a chunk. 256 by default.
+
+    Return:
+        [float] The frame rate, config.fps if it can't be told or is the config's within 1e-4 of it.
+    """
+
+    from RMS.Astrometry.Conversions import datetime2JD
+    from RMS.Formats.FFfile import filenameToDatetime
+
+    # Half a chunk is the time from the start in the name to the middle
+    rates = []
+    for chunk in chunks:
+        try:
+            half = (chunk[1] - datetime2JD(filenameToDatetime(chunk[0])))*86400.0
+        except Exception:
+            continue
+        if half > 0:
+            rates.append(ff_frames/2.0/half)
+
+    if not rates:
+        return config.fps
+
+    fps = float(np.median(rates))
+    if abs(fps - config.fps) <= 1e-4*config.fps:
+        return config.fps
+
+    return fps
+
+
 def writeChunks(chunks, dir_path, config, ff_frames=256):
-    """ Write chunks to the only CALSTARS file of a directory (which the plate solver and the joint fit read).
+    """ Write chunks to the only CALSTARS file of a directory (which the plate solver and the joint fit read), with
+        the frame rate of their times in its header (see chunksFps), so they are read back at the same times.
 
     Arguments:
         chunks: [list] Chunks as (name, jd, stars).
@@ -183,7 +222,8 @@ def writeChunks(chunks, dir_path, config, ff_frames=256):
     # The chunks in time order
     star_list = [[name, [tuple(row) for row in stars]] for name, _, stars in sorted(chunks, key=lambda c: c[1])]
     CALSTARS.writeCALSTARS(star_list, dir_path, 'CALSTARS_{:s}_auto.txt'.format(config.stationID),
-                           config.stationID, config.height, config.width, chunk_frames=ff_frames)
+                           config.stationID, config.height, config.width, chunk_frames=ff_frames,
+                           fps=chunksFps(chunks, config, ff_frames=ff_frames))
 
 
 def skyStable(chunks, now_jd):
@@ -643,10 +683,23 @@ class NightCalibrationProcess(object):
 
 
 
+def nightHoldout(clear):
+    """ The clear chunks of a night which its joint fit holds out: every END_HOLDOUT_CHUNKS-th chunk.
+
+    Arguments:
+        clear: [list] Clear chunks of the night as (name, jd, stars), in time order.
+
+    Return:
+        [set] Names of the held-out chunks.
+    """
+
+    return set(chunk[0] for chunk in clear[END_HOLDOUT_CHUNKS//2::END_HOLDOUT_CHUNKS])
+
+
 def jointFitNight(clear, start, config, night_dir, night_hours, ff_frames=256, nproc=1,
                   max_chunks=END_MAX_CHUNKS, mask=None):
-    """ The joint fit of the lens distortion on the clear chunks of a night, every END_HOLDOUT_CHUNKS-th chunk held
-        out, with the quality control of a night (END_MIN_HOURS of clear chunks over END_MIN_SPAN_SHARE of the
+    """ The joint fit of the lens distortion on the clear chunks of a night, the chunks of nightHoldout held out,
+        with the quality control of a night (END_MIN_HOURS of clear chunks over END_MIN_SPAN_SHARE of the
         night). The report of the fit is written to the night directory (auto_calibration_joint_report.txt).
 
     Arguments:
@@ -675,7 +728,7 @@ def jointFitNight(clear, start, config, night_dir, night_hours, ff_frames=256, n
 
     # Every few clear chunks held out, with enough clear sky over the night
     fitted, report = _quietJointFit([fit_dir], start, config, n_iter=JOINT_ITERATIONS, chunk_step=1,
-                                    holdout_chunks=END_HOLDOUT_CHUNKS, max_chunks=max_chunks, nproc=nproc,
+                                    holdout_names=nightHoldout(clear), max_chunks=max_chunks, nproc=nproc,
                                     qc_options={'min_hours': END_MIN_HOURS,
                                                 'min_span_hours': END_MIN_SPAN_SHARE*night_hours}, mask=mask)
 
@@ -773,11 +826,14 @@ def endOfNightCalibration(config, night_dir, calstars_name, platepar, platepar_p
         log.info("Automatic calibration at the end of the night: the platepar fails ({:s}), it is refitted".format(
             '; '.join(reasons)))
 
-    # The vignetting of the start is refitted first if asked for, so the quality control of the joint fit (which
-    #   keeps the photometry of its start) judges it on held-out chunks
+    # The vignetting of the start is refitted first if asked for, on the chunks the joint fit is fitted on, so the
+    #   quality control of the joint fit (which keeps the photometry of its start) judges it on chunks which were
+    #   used in neither fit
     from_scratch = start is not platepar
     if ac.vignettingRefitEnabled(config):
-        start, info = ac.refitVignetting(start, clear, catalog_stars, config, ff_frames=ff_frames, mask=mask_img)
+        joint_held = nightHoldout(clear)
+        start, info = ac.refitVignetting(start, [chunk for chunk in clear if chunk[0] not in joint_held],
+                                         catalog_stars, config, ff_frames=ff_frames, mask=mask_img)
         log.info("Automatic calibration at the end of the night: {:s} the refitted vignetting ({:s})".format(
             'kept' if info['kept'] else 'did not keep', info['reason']))
 
@@ -927,7 +983,7 @@ def refitNights(night_dirs, platepar, config, work_dir, max_nights=None, nproc=1
         # The mask of the newest night is the one of the quality control
         if (mask_img is None) and (mask is not None):
             mask_img = getattr(mask, 'img', None)
-        if len(clear)*ff_frames/config.fps/3600.0 < REFIT_MIN_CLEAR_HOURS:
+        if len(clear)*ff_frames/chunksFps(clear, config, ff_frames=ff_frames)/3600.0 < REFIT_MIN_CLEAR_HOURS:
             continue
 
         # The clear chunks of the newest night are the ones of the refit of the vignetting
