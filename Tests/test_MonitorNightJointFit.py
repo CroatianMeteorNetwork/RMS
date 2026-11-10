@@ -1,7 +1,8 @@
 """
 Tests of the joint fit of the night in the monitor (MonitorNightReport.nightJointFit): a platepar which the
 automatic calibration installed during a night is refitted on the whole night at its report, installed only if the
-fit meets its quality control, once per night; nothing happens without an install during the night.
+fit meets its quality control, once per night; nothing happens without an install during the night. The mask
+of the night is used for the clear chunks and the quality control.
 
 The fit itself is replaced by a stand-in whose outcome each test sets.
 """
@@ -51,13 +52,18 @@ def monitor(tmp_path, monkeypatch):
 
     def _fit(clear, start, config, night_dir, night_hours, **kwargs):
         plan['calls'].append((len(clear), start.mag_lev, round(night_hours, 2)))
+        plan['fit_mask'] = kwargs.get('mask')
         report = {'qc': {'ok': plan['qc_ok'], 'failed': [] if plan['qc_ok'] else ['converged'], 'checks': []}}
         return _platepar(plan['value']), report
 
     monkeypatch.setattr(mnr, 'scanNights', lambda output_dir, config: {'20261105': {'r1': {}, 'r2': {}}})
     monkeypatch.setattr(ac, 'readChunks', lambda path, config: (chunks[:150] if path.endswith('r1')
                                                                 else chunks[150:], 256))
-    monkeypatch.setattr(ac, 'clearChunks', lambda chunks, *args, **kwargs: list(chunks))
+    def _clear(chunks, *args, **kwargs):
+        plan['clear_mask'] = kwargs.get('mask')
+        return list(chunks)
+
+    monkeypatch.setattr(ac, 'clearChunks', _clear)
     monkeypatch.setattr(nc, 'jointFitNight', _fit)
 
     return config, output_dir, plan
@@ -132,3 +138,28 @@ def test_dry_run_installs_a_candidate(monitor):
     assert mnr.nightJointFit(output_dir, '20261105', config) is None
     assert _installed(config, output_dir) == 1.0
     assert os.path.isfile(os.path.join(output_dir, 'auto_candidate_' + config.platepar_name))
+
+
+def test_mask_of_the_night_is_used(monitor, tmp_path, monkeypatch):
+    """ The mask the files of the night were processed with is used to pick the clear chunks and in the quality
+        control of the fit; without a mask there is none. """
+
+    config, output_dir, plan = monitor
+    _install(output_dir, JD0 + 0.05)
+
+    # Without a mask file
+    mnr.nightJointFit(output_dir, '20261105', config)
+    assert plan['clear_mask'] is None
+    assert plan['fit_mask'] is None
+
+    # With the mask of the files of the night
+    mask_path = str(tmp_path/'mask.bmp')
+    open(mask_path, 'w').close()
+    mask_img = np.ones((720, 1280), dtype=np.uint8)
+    monkeypatch.setattr(mnr, 'scanNights', lambda output_dir, config: {'20261106': {'r1': {'mask_path': mask_path},
+                                                                                    'r2': {}}})
+    monkeypatch.setattr(mnr, 'loadMask', lambda path: type('Mask', (), {'img': mask_img})())
+
+    mnr.nightJointFit(output_dir, '20261106', config)
+    assert plan['clear_mask'] is mask_img
+    assert plan['fit_mask'] is mask_img

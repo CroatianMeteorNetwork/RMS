@@ -1411,6 +1411,13 @@ def nightJointFit(output_dir, night_name, config):
     chunks = sorted(chunks, key=lambda chunk: chunk[1])
     start_jd, end_jd = chunks[0][1], chunks[-1][1]
 
+    # The mask the files of the night were processed with, for the clear chunks and the quality control
+    mask_img = None
+    mask_paths = [results[results_dir].get('mask_path') for results_dir in sorted(results)]
+    mask_paths = [path for path in mask_paths if path and os.path.isfile(path)]
+    if mask_paths:
+        mask_img = getattr(loadMask(mask_paths[0]), 'img', None)
+
     # Only after a platepar was installed during the night, and once per night
     state = ac.readState(output_dir)
     done = state.get('night_joint_fits', {})
@@ -1422,7 +1429,8 @@ def nightJointFit(output_dir, night_name, config):
     # The clear chunks, judged against the clearest sky seen by the camera
     reference = np.percentile(state['star_counts'], ac.CLEAR_REFERENCE_PERCENTILE) if state.get('star_counts') \
         else None
-    clear = ac.clearChunks(chunks, int(config.width), int(config.height), reference_stars=reference)
+    clear = ac.clearChunks(chunks, int(config.width), int(config.height), mask=mask_img,
+                           reference_stars=reference)
 
     # The joint fit from the installed platepar (its version is kept), the report next to the night
     start_mtime = plateparTime(platepar_path)
@@ -1430,7 +1438,7 @@ def nightJointFit(output_dir, night_name, config):
     night_dir = nightDirPath(output_dir, night_name, config)
     os.makedirs(night_dir, exist_ok=True)
     fitted, report = jointFitNight(clear, start, config, night_dir, (end_jd - start_jd)*24.0, ff_frames=ff_frames,
-                                   nproc=config.auto_calibration_nproc)
+                                   nproc=config.auto_calibration_nproc, mask=mask_img)
     ok = (fitted is not None) and report['qc']['ok']
     verdict = 'failed' if report is None else ('OK' if ok else 'FAIL ({:s})'.format(
         ', '.join(report['qc']['failed'])))
