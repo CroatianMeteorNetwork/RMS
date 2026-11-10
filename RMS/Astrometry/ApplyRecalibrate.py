@@ -818,6 +818,38 @@ def recalibratePlateparsForFF(
     return recalibrated_platepars
 
 
+def recalibrateSingleFF(platepar, ff_name, stars, catalog_stars, config, ff_frames=256):
+    """ Recalibrate the pointing of a platepar on the stars of one image (FF file or frame chunk), as the
+        processing does (recalibratePlateparsForFF), starting from the given platepar alone.
+
+    Arguments:
+        platepar: [Platepar] Platepar to start from (it is not changed).
+        ff_name: [str] Name of the image, which gives its time.
+        stars: [list] Stars of the image as rows of a CALSTARS file (y, x, intensity, amplitude, FWHM,
+            background, SNR, saturated).
+        catalog_stars: [ndarray] Catalog stars (ra, dec, mag).
+        config: [Config instance]
+
+    Keyword arguments:
+        ff_frames: [int] Number of frames in the FF file or frame chunk. 256 by default.
+
+    Return:
+        (platepar, ok): [tuple] The recalibrated platepar (a copy of the given one if the recalibration failed)
+            and whether the recalibration succeeded.
+    """
+
+    # The recalibration of a list of images with only this image in it
+    result = recalibratePlateparsForFF(platepar, [ff_name], {ff_name: [tuple(row) for row in stars]},
+                                       catalog_stars, config, ff_frames=ff_frames)
+
+    # A failed recalibration returns the platepar it started from, marked as not recalibrated
+    recalibrated = result.get(ff_name)
+    if (recalibrated is not None) and getattr(recalibrated, 'auto_recalibrated', False):
+        return recalibrated, True
+
+    return copy.deepcopy(platepar), False
+
+
 def recalibrateSelectedFF(dir_path, ff_file_names, calstars_data, config, lim_mag, \
     pp_recalib_name, ignore_distance_threshold=False, ignore_max_stars=False, platepar=None):
     """Recalibrate FF files, ignoring whether there are detections.
