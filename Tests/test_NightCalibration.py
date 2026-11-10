@@ -11,6 +11,7 @@ the night.
 from __future__ import print_function, division, absolute_import
 
 import copy
+import datetime
 import json
 import os
 
@@ -461,3 +462,114 @@ def test_platepar_of_the_last_attempt_is_checked(setup):
     assert not [call for call in plan['calls'] if call[0] == 'refit']
     assert calibration.state['done'] and (calibration.state['attempts'] == 1)
     assert _installed(config) == 2.0
+
+### Periodic refit over many nights ###
+
+def _stats(worst):
+    """ Residual statistics whose worst zone is the given size (arcsec). """
+
+    zones = [[(0.1, 0.0, 100)]*3 for _ in range(3)]
+    zones[0][0] = (worst, 0.0, 100)
+
+    return {'zones': zones, 'corners': {name: (0.1, 0.0, 100) for name in ('TL', 'TR', 'BL', 'BR')}, 'rms': 50.0}
+
+
+@pytest.fixture
+def refit(tmp_path, monkeypatch):
+    """ Archived nights with a stand-in fit: plan sets the clear hours of every night, the verdict of the quality
+        control and the worst zone before and after.
+
+    Return:
+        (config, plan)
+    """
+
+    config = cr.Config()
+    config.config_file_path = str(tmp_path/"config")
+    os.makedirs(config.config_file_path)
+    config.data_dir = str(tmp_path/"data")
+    archived = os.path.join(config.data_dir, config.archived_dir)
+    for n in range(20):
+        os.makedirs(os.path.join(archived, '{:s}_202611{:02d}_000000_000000'.format(config.stationID, n + 1)))
+    ac.writePlatepar(_platepar(1.0), nc.installPath(config))
+
+    plan = {'hours': {}, 'qc_ok': True, 'before': 30.0, 'after': 5.0, 'calls': []}
+
+    def _readChunks(night_dir, config, file_name=None):
+        hours = plan['hours'].get(os.path.basename(night_dir), 2.0)
+        n = int(hours*3600*config.fps/256)
+        return [('FF_{:05d}'.format(m), JD0 + m/1e4, np.full((10, 8), 2.0)) for m in range(n)], 256
+
+    def _jointFit(dir_paths, platepar, config, **kwargs):
+        plan['calls'].append((sorted(os.path.basename(d) for d in dir_paths), kwargs.get('holdout')))
+        report = {'qc': {'ok': plan['qc_ok'], 'failed': [] if plan['qc_ok'] else ['converged'], 'checks': []},
+                  'held_out_stats': {'start': {'stats': _stats(plan['before'])},
+                                     'fitted': {'stats': _stats(plan['after'])}},
+                  'nights': [], 'held_out': [], 'distortion_type': 'radial7-odd', 'chunks': 0, 'match_radius': 1,
+                  'lim_mag': 6, 'snr_min': 0, 'iterations': [{'iteration': 0, 'recalibrated': 0, 'stats': None}]}
+        fitted = _platepar(2.0)
+        fitted.F_scale = 3600.0/60.0
+        return fitted, report
+
+    monkeypatch.setattr(ac, 'readChunks', _readChunks)
+    monkeypatch.setattr(ac, 'clearChunks', lambda chunks, *args, **kwargs: list(chunks))
+    monkeypatch.setattr(nc, '_quietJointFit', _jointFit)
+    monkeypatch.setattr(nc, 'writeChunks', lambda chunks, dir_path, *args, **kwargs: os.makedirs(dir_path,
+                                                                                                 exist_ok=True))
+    import RMS.Astrometry.JointDistortionFit as jdf
+    monkeypatch.setattr(jdf, 'transferPointing', lambda platepar, pointing, **kwargs: (platepar, 0.0))
+    monkeypatch.setattr(jdf, 'formatReport', lambda report: '')
+
+    return config, plan
+
+
+def test_refit_on_the_newest_clear_nights(refit):
+    """ The refit uses the newest nights with enough clear sky, every few held out, and installs a clearly better
+        fit; it isn't run again before the interval. """
+
+    config, plan = refit
+    plan['hours']['{:s}_20261120_000000_000000'.format(config.stationID)] = 0.5
+    now = datetime.datetime(2026, 11, 21, tzinfo=datetime.timezone.utc)
+
+    action = nc.periodicRefit(config, nproc=1, now=now)
+    assert action.startswith('installed the refit')
+    assert _installed(config) == 2.0
+
+    nights, holdout = plan['calls'][0]
+    assert len(nights) == config.auto_calibration_refit_nights
+    assert '{:s}_20261120_000000_000000'.format(config.stationID) not in nights
+    assert '{:s}_20261119_000000_000000'.format(config.stationID) in nights
+    assert holdout == nc.REFIT_HOLDOUT
+
+    # Not again within the interval, again after it
+    assert nc.periodicRefit(config, nproc=1, now=now + datetime.timedelta(days=3)) is None
+    assert nc.periodicRefit(config, nproc=1, now=now + datetime.timedelta(days=8)) is not None
+
+
+def test_refit_not_installed_unless_clearly_better(refit):
+    """ A refit which fails the quality control, or whose worst zone isn't better by the needed number of standard
+        errors, isn't installed; nor without enough nights of clear sky. """
+
+    config, plan = refit
+    now = datetime.datetime(2026, 11, 21, tzinfo=datetime.timezone.utc)
+
+    plan['qc_ok'] = False
+    assert 'quality control' in nc.periodicRefit(config, nproc=1, now=now)
+    assert _installed(config) == 1.0
+
+    # The worst zone better by less than 3 standard errors (3 x 50"/sqrt(100) = 15")
+    plan['qc_ok'], plan['after'] = True, 20.0
+    assert 'not clearly better' in nc.periodicRefit(config, nproc=1, now=now + datetime.timedelta(days=8))
+    assert _installed(config) == 1.0
+
+    # Too few clear nights
+    plan['hours'] = {name: 0.5 for name in os.listdir(os.path.join(config.data_dir, config.archived_dir))}
+    assert 'only 0 nights' in nc.periodicRefit(config, nproc=1, now=now + datetime.timedelta(days=16))
+
+
+def test_refit_off(refit):
+    """ With auto_calibration_refit_days 0 there is no refit. """
+
+    config, plan = refit
+    config.auto_calibration_refit_days = 0
+    assert nc.periodicRefit(config, nproc=1) is None
+    assert not plan['calls']

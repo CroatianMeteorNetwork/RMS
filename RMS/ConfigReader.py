@@ -645,6 +645,11 @@ class Config:
         self.auto_calibration_max_fits = 5
         self.auto_calibration_nproc = 2
 
+        # Periodic refit of the lens distortion on the recent nights: days between the refits (0 turns them off)
+        #   and the number of nights
+        self.auto_calibration_refit_days = 7.0
+        self.auto_calibration_refit_nights = 14
+
 
         self.catalog_mag_limit = 5.5
 
@@ -1905,6 +1910,12 @@ def parseCalibration(config, parser):
 
     if parser.has_option(section, "auto_calibration_nproc"):
         config.auto_calibration_nproc = parser.getint(section, "auto_calibration_nproc")
+
+    if parser.has_option(section, "auto_calibration_refit_days"):
+        config.auto_calibration_refit_days = parser.getfloat(section, "auto_calibration_refit_days")
+
+    if parser.has_option(section, "auto_calibration_refit_nights"):
+        config.auto_calibration_refit_nights = parser.getint(section, "auto_calibration_refit_nights")
 
 
 

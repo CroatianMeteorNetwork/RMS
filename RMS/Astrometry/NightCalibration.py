@@ -782,6 +782,207 @@ def endOfNightCalibration(config, night_dir, calstars_name, platepar, platepar_p
 
 
 
+
+### Periodic refit over many nights ###
+
+# Name of the state of the periodic refit, in the config directory
+REFIT_STATE_NAME = 'auto_calibration_refit.json'
+
+# Directory of the star lists of the refit, in the data directory
+REFIT_WORK_DIR = 'auto_calibration_refit'
+
+# A night is used in the refit only with this many hours of clear chunks, and the refit needs this many nights
+REFIT_MIN_CLEAR_HOURS = 1.0
+REFIT_MIN_NIGHTS = 4
+
+# Every N-th night from the K-th is held out of the refit, and at most this many chunks are in the fit (and held out)
+REFIT_HOLDOUT = (4, 1)
+REFIT_MAX_CHUNKS = 400
+
+# The refit replaces the platepar only if the worst zone or corner of the held-out nights gets better by at least
+#   this many standard errors of its mean residual (besides the quality control of the joint fit). A share of the
+#   width of the stars was tried first: 0.1 FWHM is 50" on the 1280x720 cameras of the network, more than the mean
+#   residuals of their corners, so a refit which made the worst corner 18" better (57" -> 39") was not used
+REFIT_MIN_GAIN_SE = 3.0
+
+
+def _worstZone(stats, min_stars):
+    """ The largest mean residual of the zones and corners with enough stars.
+
+    Arguments:
+        stats: [dict] Residual statistics (see JointDistortionFit.residualStats).
+        min_stars: [int] Minimum number of stars of a zone.
+
+    Return:
+        (size, n): [tuple] The largest mean residual (arcsec) and the number of stars of its zone, (0, 0) without
+            a zone with enough stars.
+    """
+
+    from RMS.Astrometry.JointDistortionFit import CORNER_NAMES
+
+    zones = [zone for row in stats['zones'] for zone in row] + [stats['corners'][name] for name in CORNER_NAMES]
+    sizes = [(np.hypot(dx, dy), n) for dx, dy, n in zones
+             if (n >= max(min_stars, 1)) and np.isfinite(dx) and np.isfinite(dy)]
+
+    return max(sizes) if sizes else (0.0, 0)
+
+
+def refitNights(night_dirs, platepar, config, work_dir, max_nights=None, nproc=1):
+    """ Refit the lens distortion of a platepar on the clear chunks of many nights with the joint fit (every few
+        nights held out), and decide whether it replaces the platepar: the fit has to meet its quality control,
+        and the worst zone or corner of the held-out nights has to get better by REFIT_MIN_GAIN_SE standard errors
+        of its mean residual. The fitted distortion gets the pointing of the given platepar.
+
+    Arguments:
+        night_dirs: [list] Directories of the nights with their CALSTARS files (and platepars), the newest first.
+        platepar: [Platepar] The platepar of the camera.
+        config: [Config] Configuration.
+        work_dir: [str] Directory of the star lists of the fit (emptied first).
+
+    Keyword arguments:
+        max_nights: [int] At most this many nights (the newest with enough clear sky). None by default (all).
+        nproc: [int] Workers of the fit. 1 by default.
+
+    Return:
+        (platepar, report, reason): [tuple] The platepar which replaces the given one (None if it isn't
+            replaced), the report of the joint fit (None if there was no fit) and why.
+    """
+
+    from RMS.Astrometry.JointDistortionFit import transferPointing
+
+    if os.path.isdir(work_dir):
+        shutil.rmtree(work_dir)
+
+    # The newest nights with enough clear sky, each with its clear chunks (and its platepar, the start of its
+    #   pointing) in a directory of the fit
+    selected = []
+    for night_dir in night_dirs:
+        if (max_nights is not None) and (len(selected) >= max_nights):
+            break
+
+        chunks, ff_frames = ac.readChunks(night_dir, config)
+        clear = ac.clearChunks(chunks, int(config.width), int(config.height))
+        if len(clear)*ff_frames/config.fps/3600.0 < REFIT_MIN_CLEAR_HOURS:
+            continue
+
+        fit_dir = os.path.join(work_dir, os.path.basename(os.path.normpath(night_dir)))
+        writeChunks(clear, fit_dir, config, ff_frames=ff_frames)
+        night_platepar = os.path.join(night_dir, config.platepar_name)
+        if os.path.isfile(night_platepar):
+            shutil.copy2(night_platepar, os.path.join(fit_dir, config.platepar_name))
+        selected.append(fit_dir)
+
+    if len(selected) < REFIT_MIN_NIGHTS:
+        return None, None, 'only {:d} nights with {:.0f} h of clear sky'.format(len(selected), REFIT_MIN_CLEAR_HOURS)
+
+    # The joint fit on the nights, every few nights held out
+    fitted, report = _quietJointFit(selected, platepar, config, n_iter=JOINT_ITERATIONS, chunk_step=1,
+                                    holdout=REFIT_HOLDOUT, max_chunks=REFIT_MAX_CHUNKS, nproc=nproc)
+    if fitted is None:
+        return None, None, 'the joint fit failed'
+    if not report['qc']['ok']:
+        return None, report, 'it fails the quality control ({:s})'.format(', '.join(report['qc']['failed']))
+
+    # The worst zone of the held-out nights has to get clearly better: by a few standard errors of its mean
+    #   residual (the rms residual of the held-out stars over the square root of the stars of the zone)
+    from RMS.Astrometry.JointDistortionFit import QC_DEFAULTS
+    held = report['held_out_stats']
+    min_stars = QC_DEFAULTS['min_zone_stars']
+    worst_before, n_before = _worstZone(held['start']['stats'], min_stars)
+    worst_after, _ = _worstZone(held['fitted']['stats'], min_stars)
+    gain = worst_before - worst_after
+    needed = REFIT_MIN_GAIN_SE*held['start']['stats']['rms']/np.sqrt(max(n_before, 1))
+    if gain < needed:
+        return None, report, 'not clearly better (worst zone {:+.2f}", needed {:.2f}")'.format(gain, needed)
+
+    # The fitted distortion with the pointing of the platepar of the camera
+    fitted, _ = transferPointing(fitted, platepar)
+
+    return fitted, report, 'the worst zone {:.2f}" better on {:d} nights'.format(gain, len(selected))
+
+
+def periodicRefit(config, nproc=None, now=None):
+    """ The periodic refit of the lens distortion of a classic camera on its recent nights (see refitNights):
+        every auto_calibration_refit_days days, on the newest auto_calibration_refit_nights archived nights with
+        enough clear sky. The state (the time of the last refit and its outcome) is kept in the config directory,
+        the report next to it.
+
+    Arguments:
+        config: [Config] Configuration.
+
+    Keyword arguments:
+        nproc: [int] Workers of the fit. config.auto_calibration_nproc by default.
+        now: [datetime] The time now (UTC). None by default (the clock).
+
+    Return:
+        [str] What was done, None if it wasn't time for a refit.
+    """
+
+    from RMS.Astrometry.JointDistortionFit import formatReport
+
+    if config.auto_calibration_refit_days <= 0:
+        return None
+
+    nproc = config.auto_calibration_nproc if nproc is None else nproc
+    now = now if now is not None else datetime.datetime.now(datetime.timezone.utc)
+
+    # Only every few days
+    state_path = os.path.join(config.config_file_path, REFIT_STATE_NAME)
+    state = {}
+    if os.path.isfile(state_path):
+        try:
+            with open(state_path) as f:
+                state = json.load(f)
+        except Exception:
+            state = {}
+    last = state.get('last_refit_utc')
+    if last is not None:
+        last = datetime.datetime.strptime(last, '%Y-%m-%d %H:%M:%S').replace(tzinfo=datetime.timezone.utc)
+        if now - last < datetime.timedelta(days=config.auto_calibration_refit_days):
+            return None
+
+    # The platepar of the camera
+    platepar_path = installPath(config)
+    platepar = ac._platepar(platepar_path, config.use_flat)
+    if platepar is None:
+        return None
+
+    # The archived nights of the camera, the newest first
+    archived = os.path.join(config.data_dir, config.archived_dir)
+    night_dirs = []
+    if os.path.isdir(archived):
+        night_dirs = sorted((os.path.join(archived, name) for name in os.listdir(archived)
+                             if name.startswith(config.stationID) and os.path.isdir(os.path.join(archived, name))),
+                            reverse=True)
+
+    work_dir = os.path.join(config.data_dir, REFIT_WORK_DIR)
+    fitted, report, reason = refitNights(night_dirs, platepar, config, work_dir,
+                                         max_nights=config.auto_calibration_refit_nights, nproc=nproc)
+
+    # The report next to the star lists of the fit
+    if report is not None:
+        with open(os.path.join(work_dir, 'auto_calibration_refit_report.txt'), 'w') as f:
+            f.write(formatReport(report))
+
+    # Installed if it is clearly better
+    if fitted is not None:
+        installPlatepar(fitted, platepar_path, 'refit on the recent nights: ' + reason,
+                        dry_run=config.auto_calibration_dry_run)
+        action = 'installed the refit ({:s})'.format(reason)
+    else:
+        action = 'kept the platepar ({:s})'.format(reason)
+    log.info("Automatic calibration, periodic refit: {:s}".format(action))
+
+    # The time of this refit, also if nothing was installed
+    state['last_refit_utc'] = now.strftime('%Y-%m-%d %H:%M:%S')
+    state['last_action'] = action
+    with open(state_path + '.tmp', 'w') as f:
+        json.dump(state, f, indent=4, sort_keys=True)
+    os.replace(state_path + '.tmp', state_path)
+
+    return action
+
+
 def replayNight(night_dir, config, out_dir, step_minutes=1.0, nproc=None):
     """ Replay the automatic calibration of a recorded night: its chunks (from its CALSTARS file) are given to the
         calibration of the night in time order, as the detection would give them, a step every few minutes of data;
