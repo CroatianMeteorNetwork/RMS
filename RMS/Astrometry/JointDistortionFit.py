@@ -107,18 +107,19 @@ CORNER_NAMES = ('TL', 'TR', 'BL', 'BR')
 #   than this share
 WORSE_SHARE = 0.02
 
-# A chunk whose median residual is more than this many times the median of the chunks (a passing cloud, dew, a
+# A chunk whose median residual is more than this many times the median of the chunks (a drifting cloud, dew, a
 #   chunk recalibrated to a wrong pointing) is left out of the next fit of the distortion, and so is a night whose
 #   median residual is more than this many times the median of the nights (with at least 3 nights)
 OUTLIER_CHUNK_FACTOR = 3.0
 OUTLIER_NIGHT_FACTOR = 2.0
 
-# The quality control of the fit (see qualityControl). It passes only if all of its checks pass:
+# The quality control of the fit (see qualityControl). It accepts the fit only if all of its checks are met:
 #   - enough data: chunks recalibrated in the fit, held-out chunks, and stars of the fit in every zone of the grid
 #       and in every corner (and the hours of clear sky and their span if asked for);
 #   - better on the held-out stars: their median and rms residual no larger than with the starting platepars (by
-#       at most a share), and the mean residual of no zone or corner larger by more than a fraction of a pixel;
-#   - the judgement of the automatic calibration (AutoCalibration.judgeScore) passes on the held-out chunks;
+#       at most a share), the mean residual of no zone or corner larger by more than a fraction of a pixel, and the
+#       largest mean residual of the zones and corners not larger;
+#   - the judgement of the automatic calibration (AutoCalibration.judgeScore) is good on the held-out chunks;
 #   - converged: the mapping of the image changed by less than a fraction of a pixel (rms) in the last fit, and
 #       few chunks were left out as outliers;
 #   - a sane model: the mapping changed from the starting platepar's by less than a share of the image diagonal,
@@ -130,9 +131,11 @@ QC_DEFAULTS = {
     'min_hours': None,
     'min_span_hours': None,
     'max_worse_share': 0.02,
-    'max_zone_worse_px': 0.05,
+    'max_zone_worse_px': 0.1,
+    'max_worst_zone_worse_px': 0.02,
     'judge': True,
     'judge_chunks': 12,
+    'judge_min_chunks': 8,
     'max_change_px': 0.05,
     'max_outlier_share': 0.1,
     'max_model_change_diag': 0.005,
@@ -1187,7 +1190,8 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
             if options['judge'] and held_keys:
                 for n in sorted(set(key[0] for key in held_keys)):
                     keys = [key for key in held_keys if key[0] == n]
-                    judge_groups.append((nights[n]['dir'], _startOf(nights[n], distortion),
+                    own_platepar = nights[n]['platepar'] if nights[n]['platepar'] is not None else platepar
+                    judge_groups.append((nights[n]['dir'], _startOf(nights[n], distortion), own_platepar,
                                          [_chunk(key) for key in keys]))
             chunk_hours = [len(night['chunks'])*night['chunks'][0][3]/config.fps/3600.0 for night in nights]
             spans = [(night['chunks'][-1][1] - night['chunks'][0][1])*24.0 for night in nights]
@@ -1274,19 +1278,30 @@ def qualityControl(fitted, start, report, config, options, judge_groups=(), clea
         options: [dict] Limits of the checks (see QC_DEFAULTS).
 
     Keyword arguments:
-        judge_groups: [list] Held-out chunks to judge the fitted distortion on, as (name, platepar to start from,
-            chunks as in readChunks), e.g. one group per night. Empty by default (not judged).
+        judge_groups: [list] Held-out chunks to judge the fitted distortion on, as (name, fitted platepar to start
+            from, starting platepar, chunks as in readChunks), e.g. one group per night. Only the clear chunks are
+            judged (AutoCalibration.clearChunks). A group fails if the fitted platepar fails while the starting
+            platepar is good; one on which both fail (e.g. a night of poor transparency) isn't judged. Empty by
+            default (not judged).
         clear_hours: [float] Hours of the chunks of the nights. None by default.
         longest_span_hours: [float] Hours from the first to the last chunk of the longest night. None by default.
 
     Return:
-        [dict] 'ok' (True if all checks pass), 'checks' (list of dictionaries with the 'name' of the check, whether
+        [dict] 'ok' (True if all checks are met), 'checks' (list of dictionaries with the 'name' of the check, whether
             it is 'ok' and the 'value' as text) and 'failed' (names of the failed checks).
     """
 
     checks = []
 
     def _check(name, ok, value):
+        """ Record the result of a check.
+
+        Arguments:
+            name: [str] Name of the check.
+            ok: [bool] Whether it is met.
+            value: [str] The measured value and the limit, as text.
+        """
+
         checks.append({'name': name, 'ok': bool(ok), 'value': value})
 
     last = report['iterations'][-1]
@@ -1327,6 +1342,7 @@ def qualityControl(fitted, start, report, config, options, judge_groups=(), clea
                                                                          before['rms'], after['rms']))
         tolerance = options['max_zone_worse_px']*scale
         worst, worst_name = -np.inf, ''
+        worst_before, worst_after = 0.0, 0.0
         zones_before = [zone for row in before['zones'] for zone in row] \
             + [before['corners'][name] for name in CORNER_NAMES]
         zones_after = [zone for row in after['zones'] for zone in row] \
@@ -1339,26 +1355,51 @@ def qualityControl(fitted, start, report, config, options, judge_groups=(), clea
             change = np.hypot(ax, ay) - np.hypot(bx, by)
             if change > worst:
                 worst, worst_name = change, name
+            worst_before = max(worst_before, np.hypot(bx, by))
+            worst_after = max(worst_after, np.hypot(ax, ay))
         _check('no held-out zone worse', worst <= tolerance,
                'largest change of a zone {:+.2f}" in {:s} (max {:+.2f}")'.format(worst, worst_name, tolerance)
                if np.isfinite(worst) else 'no zone with enough stars')
+        _check('worst held-out zone not worse',
+               worst_after <= worst_before + options['max_worst_zone_worse_px']*scale,
+               'largest mean residual of a zone {:.2f}" -> {:.2f}"'.format(worst_before, worst_after))
 
     # The judgement of the automatic calibration on the held-out chunks of every night
     if options['judge']:
         from RMS.Astrometry import AutoCalibration
 
-        failed = []
-        for name, platepar, group_chunks in judge_groups:
-            chunks = AutoCalibration.spreadChunks([chunk[:3] for chunk in group_chunks], options['judge_chunks'])
+        good_groups, failed, not_judged = [], [], []
+        for name, platepar, start_platepar, group_chunks in judge_groups:
+            label = os.path.basename(os.path.normpath(name))
+
+            # The clear held-out chunks of the group, spread over it
+            clear = AutoCalibration.clearChunks([chunk[:3] for chunk in group_chunks], int(fitted.X_res),
+                                                int(fitted.Y_res))
+            if len(clear) < options['judge_min_chunks']:
+                not_judged.append('{:s}: {:d} clear chunks'.format(label, len(clear)))
+                continue
+            chunks = AutoCalibration.spreadChunks(clear, options['judge_chunks'])
             catalog_stars = AutoCalibration._loadCatalog(config, chunks[len(chunks)//2][1])
-            score = AutoCalibration.scorePlatepar(platepar, chunks, catalog_stars, config,
-                                                  ff_frames=group_chunks[0][3])
-            ok, reasons = AutoCalibration.judgeScore(score)
-            if not ok:
-                failed.append('{:s}: {:s}'.format(os.path.basename(os.path.normpath(name)), '; '.join(reasons)))
-        _check('judged on the held-out chunks', bool(judge_groups) and not failed,
-               ('{:d} nights pass'.format(len(judge_groups)) if not failed else ' | '.join(failed))
-               if judge_groups else 'no held-out chunks')
+
+            # The fitted platepar, and if it fails, the starting platepar on the same chunks
+            ok, reasons = AutoCalibration.judgeScore(AutoCalibration.scorePlatepar(
+                platepar, chunks, catalog_stars, config, ff_frames=group_chunks[0][3]))
+            if ok:
+                good_groups.append(label)
+                continue
+            start_ok, _ = AutoCalibration.judgeScore(AutoCalibration.scorePlatepar(
+                start_platepar, chunks, catalog_stars, config, ff_frames=group_chunks[0][3]))
+            if start_ok:
+                failed.append('{:s}: {:s}'.format(label, '; '.join(reasons)))
+            else:
+                not_judged.append('{:s}: the starting platepar fails too ({:s})'.format(label, '; '.join(reasons)))
+
+        value = '{:d} good'.format(len(good_groups))
+        if failed:
+            value += ', fail: ' + ' | '.join(failed)
+        if not_judged:
+            value += ', not judged: ' + ' | '.join(not_judged)
+        _check('judged on the held-out chunks', bool(good_groups) and not failed, value)
 
     # Converged, with few outlier chunks
     changes = [entry['change_px'][0] for entry in report['iterations'] if 'change_px' in entry]
@@ -1398,7 +1439,7 @@ def _qcLine(qc):
     """
 
     if qc['ok']:
-        return 'PASS'
+        return 'OK'
 
     return 'FAIL ({:s})'.format(', '.join(qc['failed']))
 

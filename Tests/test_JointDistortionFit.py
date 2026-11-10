@@ -790,7 +790,7 @@ def test_decentering_with_a_polynomial_type_fails(nights, fit_poly, tmp_path, mo
 
 
 # The limits of the quality control for the few chunks of the synthetic nights
-SMALL_QC = {'min_chunks': 3, 'min_held_chunks': 1, 'min_zone_stars': 0}
+SMALL_QC = {'min_chunks': 3, 'min_held_chunks': 1, 'min_zone_stars': 0, 'judge_min_chunks': 1}
 
 
 @pytest.fixture(scope="module")
@@ -832,8 +832,8 @@ def test_held_out_chunks_of_the_nights_of_the_fit(nights, fit_held_chunks):
         jointDistortionFit(dirs, start, config, holdout_chunks=1)
 
 
-def test_quality_control_passes_a_good_fit(fit_held_chunks):
-    """ A fit which recovers the distortion passes every check of the quality control, and the report lists them;
+def test_quality_control_accepts_a_good_fit(fit_held_chunks):
+    """ A fit which recovers the distortion meets every check of the quality control, and the report lists them;
         the mapping converged. """
 
     fitted, report = fit_held_chunks
@@ -842,11 +842,12 @@ def test_quality_control_passes_a_good_fit(fit_held_chunks):
     assert qc['ok'], qc
     names = [check['name'] for check in qc['checks']]
     for name in ('chunks of the fit', 'held-out chunks', 'held-out stars not worse', 'no held-out zone worse',
+                 'worst held-out zone not worse',
                  'judged on the held-out chunks', 'converged', 'few outlier chunks',
                  'change from the starting platepar', 'no fold-over', 'forward and reverse agree'):
         assert name in names
     assert report['iterations'][-2]['change_px'][0] < QC_DEFAULTS['max_change_px']
-    assert 'Quality control: PASS' in JointDistortionFit.formatReport(report)
+    assert 'Quality control: OK' in JointDistortionFit.formatReport(report)
 
 
 def _failed(fitted, start, report, config, **options):
@@ -880,9 +881,10 @@ def test_quality_control_failures(nights, fit_held_chunks):
     worse = copy.deepcopy(report)
     after = worse['held_out_stats']['fitted']['stats']
     after['median'] *= 10
-    after['zones'][1][1] = (50.0, 50.0, 100)
+    after['zones'][1][1] = (500.0, 500.0, 100)
     failed = _failed(fitted, start, worse, config)
     assert 'held-out stars not worse' in failed and 'no held-out zone worse' in failed
+    assert 'worst held-out zone not worse' in failed
 
     # Without held-out stars
     no_held = copy.deepcopy(report)
