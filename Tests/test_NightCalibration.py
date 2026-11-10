@@ -502,6 +502,7 @@ def refit(tmp_path, monkeypatch):
     def _jointFit(dir_paths, platepar, config, **kwargs):
         plan['calls'].append((sorted(os.path.basename(d) for d in dir_paths), kwargs.get('holdout'),
                               kwargs.get('holdout_baseline')))
+        plan['qc_mask'] = kwargs.get('mask')
         report = {'qc': {'ok': plan['qc_ok'], 'failed': [] if plan['qc_ok'] else ['converged'], 'checks': []},
                   'held_out_stats': {'start': {'stats': _stats(plan['before'])},
                                      'fitted': {'stats': _stats(plan['after'])}},
@@ -550,8 +551,9 @@ def test_refit_on_the_newest_clear_nights(refit):
     # The held-out nights are compared with the platepar of the camera, which the refit would replace
     assert baseline == 'start'
 
-    # The clear chunks are judged with the mask
+    # The clear chunks are judged with the mask, also in the quality control of the fit
     assert plan['masks'] and all(mask == 'mask image' for mask in plan['masks'])
+    assert plan['qc_mask'] == 'mask image'
 
     # Not again within the interval, again after it
     assert nc.periodicRefit(config, nproc=1, now=now + datetime.timedelta(days=3)) is None

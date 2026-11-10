@@ -856,7 +856,7 @@ def refitNights(night_dirs, platepar, config, work_dir, max_nights=None, nproc=1
 
     # The newest nights with enough clear sky, each with its clear chunks (and its platepar, the start of its
     #   pointing) in a directory of the fit
-    selected = []
+    selected, mask_img = [], None
     for night_dir in night_dirs:
         if (max_nights is not None) and (len(selected) >= max_nights):
             break
@@ -865,6 +865,10 @@ def refitNights(night_dirs, platepar, config, work_dir, max_nights=None, nproc=1
         chunks, ff_frames = ac.readChunks(night_dir, config)
         mask = _mask(config, night_dir)
         clear = ac.clearChunks(chunks, int(config.width), int(config.height), mask=getattr(mask, 'img', None))
+
+        # The mask of the newest night is the one of the quality control
+        if (mask_img is None) and (mask is not None):
+            mask_img = getattr(mask, 'img', None)
         if len(clear)*ff_frames/config.fps/3600.0 < REFIT_MIN_CLEAR_HOURS:
             continue
 
@@ -882,7 +886,7 @@ def refitNights(night_dirs, platepar, config, work_dir, max_nights=None, nproc=1
     #   (its distortion with the pointing of every night carried over), the one the fit would replace
     fitted, report = _quietJointFit(selected, platepar, config, n_iter=JOINT_ITERATIONS, chunk_step=1,
                                     holdout=REFIT_HOLDOUT, max_chunks=REFIT_MAX_CHUNKS, nproc=nproc,
-                                    holdout_baseline='start')
+                                    holdout_baseline='start', mask=mask_img)
     if fitted is None:
         return None, None, 'the joint fit failed'
     if not report['qc']['ok']:
