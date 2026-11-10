@@ -704,6 +704,15 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     updateProcessingStatus(config, night_data_dir, archiving='completed',
         completed_utc=RmsDateTime.utcnow().strftime("%Y-%m-%d %H:%M:%S"))
 
+    # Automatic calibration: the periodic refit of the lens distortion on the recent archived nights (see
+    #   RMS.Astrometry.NightCalibration.periodicRefit). It never stops the processing of the night
+    if config.auto_calibration:
+        try:
+            from RMS.Astrometry.NightCalibration import periodicRefit
+            periodicRefit(config)
+        except Exception as e:
+            log.warning("The periodic refit of the automatic calibration failed: {:s}".format(repr(e)))
+
 
     return night_archive_dir, archive_name, imgdata_archive_name, metadata_archive_name, detector
 
