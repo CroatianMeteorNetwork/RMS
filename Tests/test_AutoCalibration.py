@@ -956,3 +956,16 @@ def test_chunks_timed_by_the_frame_rate_of_the_calstars_header(tmp_path, monkeyp
     assert seen[0] == pytest.approx(10.0, rel=1e-4)
     assert seen[1] == 25.0
     assert config.fps == 25.0
+
+
+def test_median_fwhm_of_measured_widths_only():
+    """ The width of the stars is the median of the measured widths: the -1 of older CALSTARS files (no width)
+        is left out, and without any measured width it is the default. """
+
+    stars = np.zeros((5, 8))
+    stars[:, ac.STAR_FWHM] = [-1, -1, -1, 3.0, 3.0]
+    assert ac.medianFWHM([('a', 0.0, stars)]) == 3.0
+
+    stars[:, ac.STAR_FWHM] = -1
+    assert ac.medianFWHM([('a', 0.0, stars)]) == ac.DEFAULT_FWHM
+    assert ac.medianFWHM([]) == ac.DEFAULT_FWHM

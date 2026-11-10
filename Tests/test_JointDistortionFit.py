@@ -979,3 +979,21 @@ def test_held_out_baseline_of_the_starting_distortion(nights):
 
     with pytest.raises(ValueError):
         jointDistortionFit(dirs, truth, config, holdout_baseline='other')
+
+
+def test_quality_control_selects_clear_chunks_with_the_mask(nights, fit_held_chunks, monkeypatch):
+    """ The judgement of the quality control selects the clear held-out chunks with the mask of the camera. """
+
+    import RMS.Astrometry.AutoCalibration as ac
+
+    config, truth, start, dirs, pointings = nights
+    fitted, report = fit_held_chunks
+
+    masks = []
+    monkeypatch.setattr(ac, 'clearChunks', lambda chunks, width, height, mask=None, **kwargs:
+                        masks.append(mask) or [])
+    qc = qualityControl(fitted, start, report, config, dict(QC_DEFAULTS, **SMALL_QC),
+                        judge_groups=[('night', fitted, start, [('FF', 0.0, np.zeros((3, 8)), 256)])],
+                        mask='mask image')
+    assert masks == ['mask image']
+    assert 'judged on the held-out chunks' in qc['failed']

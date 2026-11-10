@@ -893,7 +893,8 @@ def fitDistortion(platepars, matched_stars, jds, distortion_type, max_stars, see
 
 def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdout=None, n_iter=4, snr_min=10.0,
                        max_stars=20000, chunk_step=2, match_radius=None, lim_mag=None, nproc=None, decentering=None,
-                       holdout_chunks=None, max_chunks=None, qc=True, qc_options=None, holdout_baseline='night'):
+                       holdout_chunks=None, max_chunks=None, qc=True, qc_options=None, holdout_baseline='night',
+                       mask=None):
     """ Fit one distortion on the stars of many nights, with the pointing of every chunk fitted separately (see
         the description of the module).
 
@@ -931,6 +932,8 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
             and the quality control): 'night' for the platepar of every night as it is (the starting platepar for a
             night without one), 'start' for the starting distortion with the pointing of every night carried over
             (e.g. to decide whether the fit should replace the starting platepar). 'night' by default.
+        mask: [ndarray] Mask image of the camera (0 is masked), with which the quality control selects the clear
+            held-out chunks it judges. None by default (no mask).
 
     Return:
         (platepar, report): [tuple] The fitted platepar (the distortion of the last fit with the pointing of the
@@ -1208,7 +1211,8 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
             chunk_hours = [len(night['chunks'])*night['chunks'][0][3]/config.fps/3600.0 for night in nights]
             spans = [(night['chunks'][-1][1] - night['chunks'][0][1])*24.0 for night in nights]
             report['qc'] = qualityControl(distortion, platepar, report, config, options, judge_groups=judge_groups,
-                                          clear_hours=float(np.sum(chunk_hours)), longest_span_hours=max(spans))
+                                          clear_hours=float(np.sum(chunk_hours)), longest_span_hours=max(spans),
+                                          mask=mask)
             log.info("Quality control: {:s}".format(_qcLine(report['qc'])))
 
     # On an error the workers are stopped right away
@@ -1278,7 +1282,7 @@ def _outliers(results, keys, snr_min):
 
 
 def qualityControl(fitted, start, report, config, options, judge_groups=(), clear_hours=None,
-                   longest_span_hours=None):
+                   longest_span_hours=None, mask=None):
     """ The quality control of a joint fit: whether the fitted distortion can be installed (see QC_DEFAULTS for
         the checks).
 
@@ -1297,6 +1301,8 @@ def qualityControl(fitted, start, report, config, options, judge_groups=(), clea
             default (not judged).
         clear_hours: [float] Hours of the chunks of the nights. None by default.
         longest_span_hours: [float] Hours from the first to the last chunk of the longest night. None by default.
+        mask: [ndarray] Mask image of the camera (0 is masked) for the selection of the clear chunks. None by
+            default.
 
     Return:
         [dict] 'ok' (True if all checks are met), 'checks' (list of dictionaries with the 'name' of the check, whether
@@ -1391,7 +1397,7 @@ def qualityControl(fitted, start, report, config, options, judge_groups=(), clea
 
             # The clear held-out chunks of the group, spread over it
             clear = AutoCalibration.clearChunks([chunk[:3] for chunk in group_chunks], int(fitted.X_res),
-                                                int(fitted.Y_res))
+                                                int(fitted.Y_res), mask=mask)
             if len(clear) < options['judge_min_chunks']:
                 not_judged.append('{:s}: {:d} clear chunks'.format(label, len(clear)))
                 continue

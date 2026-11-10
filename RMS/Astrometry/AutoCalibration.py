@@ -170,6 +170,27 @@ def chunkCoverage(stars, width, height, mask=None, n_grid=4):
     return float(np.sum(occupied & usable))/np.sum(usable)
 
 
+# Width of the stars (px) when none of them has a measured one (older CALSTARS files have -1)
+DEFAULT_FWHM = 2.0
+
+
+def medianFWHM(chunks):
+    """ The median width of the stars of chunks, only of the stars with a measured width.
+
+    Arguments:
+        chunks: [list] Chunks as (name, jd, stars), the stars as CALSTARS rows.
+
+    Return:
+        [float] The median FWHM (px), DEFAULT_FWHM if no star has a measured one.
+    """
+
+    widths = np.array([row[STAR_FWHM] for _, _, stars in chunks for row in stars if len(row) > STAR_FWHM],
+                      dtype=np.float64)
+    widths = widths[np.isfinite(widths) & (widths > 0)]
+
+    return float(np.median(widths)) if len(widths) else DEFAULT_FWHM
+
+
 def _catalogInFOV(platepar, jd, catalog_stars, lim_mag):
     """ The catalog stars brighter than the limiting magnitude which are in the field of view.
 
@@ -483,9 +504,7 @@ def scorePlatepar(platepar, chunks, catalog_stars, config, ff_frames=256, recali
     score.max_zone_mag_residual = getattr(config, 'auto_calibration_max_zone_mag_residual', MAX_ZONE_MAG_RESIDUAL)
 
     # The width of the stars sets the match radius and the unit of the distances
-    all_fwhm = [row[STAR_FWHM] for _, _, stars in chunks for row in stars if len(row) > STAR_FWHM]
-    fwhm = float(np.median(all_fwhm)) if all_fwhm else 2.0
-    fwhm = fwhm if (np.isfinite(fwhm) and (fwhm > 0)) else 2.0
+    fwhm = medianFWHM(chunks)
     score.fwhm = fwhm
     match_radius = max(1.0, MATCH_RADIUS_FWHM*fwhm)
 
@@ -993,7 +1012,7 @@ def _jointVignetting(platepar, chunks, catalog_stars, config, ff_frames):
         pp, _ = recalibrateChunk(platepar, name, stars, catalog_stars, config, ff_frames, jd=jd)
 
         # The matched stars which are not saturated, the chunk is used only with enough of them
-        match_radius = max(1.0, MATCH_RADIUS_FWHM*np.median(stars[:, STAR_FWHM]))
+        match_radius = max(1.0, MATCH_RADIUS_FWHM*medianFWHM([(name, jd, stars)]))
         dist, cat_ra, cat_dec, cat_mag = matchChunk(pp, jd, stars, catalog_stars, config.catalog_mag_limit,
                                                     match_radius)
         saturated = stars[:, STAR_SATURATED] > 0 if stars.shape[1] > STAR_SATURATED else np.zeros(len(stars), bool)
@@ -1165,8 +1184,8 @@ def fitCandidate(chunk_dirs, section_chunks, held_out, catalog_stars, config, ma
         return None, info
     fits = good
 
-    # The width of the stars is the unit of the agreement
-    fwhm = np.median([row[STAR_FWHM] for _, _, stars in section_chunks for row in stars])
+    # The width of the stars is the unit of the agreement (only the measured widths)
+    fwhm = medianFWHM(section_chunks)
 
     # Agreement of every pair of sections
     agree = [[True]*len(fits) for _ in fits]
