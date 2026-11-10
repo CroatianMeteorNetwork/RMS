@@ -831,7 +831,8 @@ def refitNights(night_dirs, platepar, config, work_dir, max_nights=None, nproc=1
     """ Refit the lens distortion of a platepar on the clear chunks of many nights with the joint fit (every few
         nights held out), and decide whether it replaces the platepar: the fit has to meet its quality control,
         and the worst zone or corner of the held-out nights has to get better by REFIT_MIN_GAIN_SE standard errors
-        of its mean residual. The fitted distortion gets the pointing of the given platepar.
+        of its mean residual, both compared with the given platepar (its distortion with the pointing of every
+        night). The fitted distortion gets the pointing of the given platepar.
 
     Arguments:
         night_dirs: [list] Directories of the nights with their CALSTARS files (and platepars), the newest first.
@@ -875,9 +876,11 @@ def refitNights(night_dirs, platepar, config, work_dir, max_nights=None, nproc=1
     if len(selected) < REFIT_MIN_NIGHTS:
         return None, None, 'only {:d} nights with {:.0f} h of clear sky'.format(len(selected), REFIT_MIN_CLEAR_HOURS)
 
-    # The joint fit on the nights, every few nights held out
+    # The joint fit on the nights, every few nights held out, which are compared with the platepar of the camera
+    #   (its distortion with the pointing of every night carried over), the one the fit would replace
     fitted, report = _quietJointFit(selected, platepar, config, n_iter=JOINT_ITERATIONS, chunk_step=1,
-                                    holdout=REFIT_HOLDOUT, max_chunks=REFIT_MAX_CHUNKS, nproc=nproc)
+                                    holdout=REFIT_HOLDOUT, max_chunks=REFIT_MAX_CHUNKS, nproc=nproc,
+                                    holdout_baseline='start')
     if fitted is None:
         return None, None, 'the joint fit failed'
     if not report['qc']['ok']:

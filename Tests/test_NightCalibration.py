@@ -500,7 +500,8 @@ def refit(tmp_path, monkeypatch):
         return [('FF_{:05d}'.format(m), JD0 + m/1e4, np.full((10, 8), 2.0)) for m in range(n)], 256
 
     def _jointFit(dir_paths, platepar, config, **kwargs):
-        plan['calls'].append((sorted(os.path.basename(d) for d in dir_paths), kwargs.get('holdout')))
+        plan['calls'].append((sorted(os.path.basename(d) for d in dir_paths), kwargs.get('holdout'),
+                              kwargs.get('holdout_baseline')))
         report = {'qc': {'ok': plan['qc_ok'], 'failed': [] if plan['qc_ok'] else ['converged'], 'checks': []},
                   'held_out_stats': {'start': {'stats': _stats(plan['before'])},
                                      'fitted': {'stats': _stats(plan['after'])}},
@@ -534,11 +535,14 @@ def test_refit_on_the_newest_clear_nights(refit):
     assert action.startswith('installed the refit')
     assert _installed(config) == 2.0
 
-    nights, holdout = plan['calls'][0]
+    nights, holdout, baseline = plan['calls'][0]
     assert len(nights) == config.auto_calibration_refit_nights
     assert '{:s}_20261120_000000_000000'.format(config.stationID) not in nights
     assert '{:s}_20261119_000000_000000'.format(config.stationID) in nights
     assert holdout == nc.REFIT_HOLDOUT
+
+    # The held-out nights are compared with the platepar of the camera, which the refit would replace
+    assert baseline == 'start'
 
     # Not again within the interval, again after it
     assert nc.periodicRefit(config, nproc=1, now=now + datetime.timedelta(days=3)) is None
