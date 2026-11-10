@@ -625,7 +625,8 @@ class Config:
 
         # Automatic calibration (see RMS.Astrometry.AutoCalibration): fit and install a platepar from the stars,
         #   minutes between the checks whether a clearly better platepar can be fitted, fit the vignetting also when
-        #   a platepar exists, and only save the fitted platepars as candidates without installing them
+        #   a platepar exists, and only save the fitted platepars as candidates without installing them. The
+        #   default config file turns it on; a config file without the option keeps it off
         self.auto_calibration = False
         self.auto_calibration_interval = 30.0
         self.auto_calibration_fit_vignetting = False

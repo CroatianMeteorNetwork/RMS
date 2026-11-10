@@ -1039,3 +1039,21 @@ def test_fitted_vignetting_within_the_limit_of_a_platepar(monkeypatch):
     limit = limitVignettingCoefficient(1280, 720, np.inf)
     assert coeff <= limit*(1 + 1e-6)
     assert coeff == pytest.approx(limit, rel=0.02)
+
+
+def test_default_config_turns_auto_calibration_on_and_a_missing_option_keeps_it_off(tmp_path):
+    """ The default config file turns automatic calibration on, an older config file without the option keeps
+    it off.
+    """
+
+    # The default config file has the option on
+    assert cr.parse(REPO_CONFIG).auto_calibration
+
+    # The same config file without the option keeps it off
+    with open(REPO_CONFIG) as f:
+        lines = [line for line in f if not line.startswith("auto_calibration:")]
+
+    old_config = tmp_path/".config"
+    old_config.write_text("".join(lines))
+
+    assert not cr.parse(str(old_config)).auto_calibration
