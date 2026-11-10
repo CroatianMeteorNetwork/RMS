@@ -16,10 +16,13 @@
 
 
 import os
+import math
+
+from RMS.Formats.FFfile import validFFName
 
 
-def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols, chunk_frames=256):
-    """ Writes the star list into the CAMS CALSTARS format. 
+def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols, chunk_frames=256, fps=None):
+    """ Writes the star list into the CAMS CALSTARS format.
 
     Arguments:
         star_list: [list] a list of star data, entries:
@@ -34,6 +37,10 @@ def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols, ch
 
     Keyword arguments:
         chunk_frames: [int] Number of frames in the FF file or frame chunk. Default is 256.
+        fps: [float] Frames per second used to time the frame chunk. When given, it is written to the
+            header (FPS field) so the time can be reconstructed without relying on a possibly-wrong config
+            fps. For inputs with real per-frame timestamps (e.g. .vid) give the measured fps from the image
+            handle, not the nominal config value. None by default (not written).
 
     Return:
         None
@@ -41,10 +48,11 @@ def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols, ch
 
     with open(os.path.join(ff_directory, file_name), 'w') as star_file:
 
-        # Write the header
+        # Write the header. The middle (calibration) time of a chunk is reconstructed by the reader as
+        #   "FF header time + Nframes/(2*FPS)" seconds, so Nframes and FPS below must describe the chunk.
         star_file.write("==========================================================================\n")
         star_file.write("RMS star extractor" + "\n")
-        star_file.write("Cal time = FF header time plus 255/(2*framerate_Hz) seconds" + "\n")
+        star_file.write("Cal time = FF header time plus Nframes/(2*FPS) seconds" + "\n")
         star_file.write("      Y       X IntensSum Ampltd  FWHM  BgLvl   SNR NSatPx" + "\n")
         star_file.write("==========================================================================\n")
         star_file.write("FF folder = " + ff_directory + "\n")
@@ -52,6 +60,12 @@ def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols, ch
         star_file.write("Nrows   = " + str(nrows) + "\n")
         star_file.write("Ncols   = " + str(ncols) + "\n")
         star_file.write("Nframes = " + str(chunk_frames) + "\n")
+        # The definition of the FWHM column: 2.355 times the mean (quadratic) sigma of the two axes of the
+        #   fitted Gaussian. Older files, without this line, have 2.355*sqrt(sigma_x^2 + sigma_y^2), larger by
+        #   sqrt(2) for a round star
+        star_file.write("FWHM    = 2.355*sqrt((sigma_x^2 + sigma_y^2)/2)\n")
+        if fps is not None:
+            star_file.write("FPS     = {:.6f}\n".format(fps))
         star_file.write("Nstars  = -1" + "\n")
 
         # Write all stars in the CALSTARS file
@@ -93,8 +107,8 @@ def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols, ch
 
 
 
-def readCALSTARS(file_path, file_name, chunk_frames=256):
-    """ Reads a list of detected stars from a CAMS CALSTARS format. 
+def readCALSTARS(file_path, file_name, chunk_frames=256, return_fps=False):
+    """ Reads a list of detected stars from a CAMS CALSTARS format.
 
     Arguments:
         file_path: [str] Path to the directory where the CALSTARS file is located.
@@ -103,17 +117,20 @@ def readCALSTARS(file_path, file_name, chunk_frames=256):
     Keyword arguments:
         chunk_frames: [int] Number of frames in the FF file or frame chunk. Default is 256.
             Will be overwritten by a number in the CALSTARS file if present.
+        return_fps: [bool] If True, also return the FPS read from the header (None if absent). The return
+            becomes a 3-tuple (star_list, chunk_frames, fps). False by default for backward compatibility.
 
     Return:
-        star_list, chunk_frames: 
+        star_list, chunk_frames(, fps):
             - star_list [list] a list of star data, entries:
                 ff_name, star_data
                 star_data entries:
                     x, y, bg_level, level, fwhm
             - chunk_frames [int] Number of frames in the FF file or frame chunk.
+            - fps [float or None] Frames per second from the header, or None if not present. Only returned
+                when return_fps is True.
     """
 
-    
     calstars_path = os.path.join(file_path, file_name)
 
     # Check if the CALSTARS file exits
@@ -129,16 +146,43 @@ def readCALSTARS(file_path, file_name, chunk_frames=256):
         ff_name = ''
         star_data = []
         skip_lines = 0
-        for line in star_file.readlines()[11:]:
+        fps = None
+
+        all_lines = star_file.readlines()
+
+        # Find the first FF-block line; everything before it is the header. Detecting the body this way
+        #   (instead of skipping a fixed number of lines) is robust to optional header fields like FPS, and
+        #   does not mistake header text (e.g. "FF folder = ...") for an FF file name (validFFName rejects it).
+        body_start = len(all_lines)
+        for i, line in enumerate(all_lines):
+            if validFFName(line.strip()):
+                body_start = i
+                break
+
+        # Read Nframes and FPS from the header. These set the chunk timing, reconstructed downstream as
+        #   "FF header time + Nframes/(2*FPS)", so a wrong frame count or fps shifts the assigned star time.
+        #   The FWHM of older files, without the line of its definition (see writeCALSTARS), is larger by
+        #   sqrt(2), and it is divided by sqrt(2) so all files give the same quantity
+        fwhm_factor = 1.0/math.sqrt(2)
+        for line in all_lines[:body_start]:
+            if line.startswith("FWHM"):
+                fwhm_factor = 1.0
+            if "Nframes" in line:
+                try:
+                    chunk_frames = int(line.split('=')[-1])
+                except (ValueError, IndexError):
+                    pass
+            elif line.lstrip().upper().startswith("FPS"):
+                try:
+                    fps = float(line.split('=')[-1])
+                except (ValueError, IndexError):
+                    fps = None
+
+        for line in all_lines[body_start:]:
 
             # Skip lines if necessary
             if skip_lines > 0:
                 skip_lines -= 1
-                continue
-
-            # Read the number of frames if given (Nframes = ...)
-            if "Nframes" in line:
-                chunk_frames = int(line.split('=')[-1])
                 continue
 
             # Check for end of star entry
@@ -178,9 +222,11 @@ def readCALSTARS(file_path, file_name, chunk_frames=256):
             # Read the star data
             y, x, level, amplitude = float(line[0]), float(line[1]), int(line[2]), int(line[3])
 
-            # Read FWHM if given
+            # Read FWHM if given (-1 if it was not measured)
             if len(line) >= 5:
                 fwhm = float(line[4])
+                if fwhm > 0:
+                    fwhm *= fwhm_factor
             else:
                 fwhm = -1.0
 
@@ -205,5 +251,8 @@ def readCALSTARS(file_path, file_name, chunk_frames=256):
             # Save star data
             star_data.append([y, x, level, amplitude, fwhm, background, snr, saturated_count])
 
-    
+
+    if return_fps:
+        return calibrationstars_list, chunk_frames, fps
+
     return calibrationstars_list, chunk_frames
