@@ -895,8 +895,8 @@ def fitDistortion(platepars, matched_stars, jds, distortion_type, max_stars, see
 
 def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdout=None, n_iter=4, snr_min=10.0,
                        max_stars=20000, chunk_step=2, match_radius=None, lim_mag=None, nproc=None, decentering=None,
-                       holdout_chunks=None, max_chunks=None, qc=True, qc_options=None, holdout_baseline='night',
-                       mask=None):
+                       holdout_chunks=None, holdout_names=None, max_chunks=None, qc=True, qc_options=None,
+                       holdout_baseline='night', mask=None):
     """ Fit one distortion on the stars of many nights, with the pointing of every chunk fitted separately (see
         the description of the module).
 
@@ -925,6 +925,8 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
             radial (otherwise it is off). True with a type which isn't radial raises a ValueError.
         holdout_chunks: [int] Also hold out every N-th chunk of every night of the fit (from the N//2-th), so the
             fit can be checked within the nights it is fitted on (e.g. a single night). None by default.
+        holdout_names: [list] Also hold out the chunks of the nights of the fit with these names (FF file names),
+            e.g. so that the caller knows which chunks the fit is checked on. None by default.
         max_chunks: [int] At most this many chunks in the fit and this many held out, spread evenly in time over
             them (after chunk_step), which bounds the time of the fit. None by default (no limit).
         qc: [bool] Run the quality control of the fit (see qualityControl), its verdict is in the report. True by
@@ -1005,8 +1007,8 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
                 night['platepar'] = None
 
     # Every chunk_step-th chunk of the nights of the fit, all chunks of the held-out nights, and every
-    #   holdout_chunks-th chunk of the nights of the fit if asked for. The key of a chunk is (night index, chunk
-    #   index)
+    #   holdout_chunks-th chunk and the chunks named in holdout_names of the nights of the fit if asked for. The key
+    #   of a chunk is (night index, chunk index)
     usable = [(n, c) for n, night in enumerate(nights) for c in range(len(night['chunks']))]
     held_chunk_keys = set()
     if holdout_chunks:
@@ -1015,6 +1017,10 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
                 holdout_chunks))
         held_chunk_keys = set(key for key in usable if (key[0] not in held)
                               and (key[1]%holdout_chunks == holdout_chunks//2))
+    if holdout_names:
+        names = set(holdout_names)
+        held_chunk_keys |= set(key for key in usable if (key[0] not in held)
+                               and (nights[key[0]]['chunks'][key[1]][0] in names))
     train_keys = [key for key in usable if (key[0] not in held) and (key not in held_chunk_keys)][::max(1, chunk_step)]
     held_keys = [key for key in usable if (key[0] in held) or (key in held_chunk_keys)]
     if max_chunks:

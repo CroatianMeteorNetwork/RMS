@@ -1057,3 +1057,68 @@ def test_default_config_turns_auto_calibration_on_and_a_missing_option_keeps_it_
     old_config.write_text("".join(lines))
 
     assert not cr.parse(str(old_config)).auto_calibration
+
+
+def _vignettedChunks(monkeypatch, true_coeff, n_chunks=12, n_stars=400):
+    """ Clear chunks whose star brightness falls off with the given vignetting coefficient, with the recalibration
+        and the catalog match replaced by stand-ins (every star matched, at its catalog magnitude).
+    """
+
+    rng = np.random.default_rng(3)
+    chunks, mags_of = [], {}
+    for i in range(n_chunks):
+        x, y = rng.uniform(0, 1280, n_stars), rng.uniform(0, 720, n_stars)
+        radius = np.hypot(x - 640, y - 360)
+        mags = rng.uniform(2, 5, n_stars)
+        intensity = 10**(-0.4*(mags - 10.0))*np.cos(true_coeff*radius)**4*10**(-0.4*rng.normal(0, 0.03, n_stars))
+        stars = np.zeros((n_stars, 8))
+        stars[:, ac.STAR_X], stars[:, ac.STAR_Y], stars[:, ac.STAR_INTENSITY], stars[:, ac.STAR_FWHM] = \
+            x, y, intensity, 2.0
+        name = 'FF_{:02d}'.format(i)
+        chunks.append((name, JD_CHUNKS + i/1440.0, stars))
+        mags_of[id(stars)] = mags
+
+    monkeypatch.setattr(ac, 'recalibrateChunk', lambda pp, name, stars, cat, config, ff, jd=None: (pp, True))
+    monkeypatch.setattr(ac, 'matchChunk', lambda pp, jd, stars, cat, lim, radius: (
+        np.zeros(len(stars)), np.zeros(len(stars)), np.zeros(len(stars)), mags_of[id(stars)]))
+    monkeypatch.setattr(ac, 'extinctionCorrectionTrueToApparent', lambda mag, ra, dec, jd, pp: mag)
+
+    return chunks
+
+
+JD_CHUNKS = 2461000.0
+
+
+@pytest.mark.parametrize("start_coeff, kept", [(0.0, True), (0.0008, False)])
+def test_vignetting_refit_kept_only_if_the_photometry_gets_better(monkeypatch, start_coeff, kept):
+    """ The vignetting coefficient of an existing platepar is refitted on half of the clear chunks and kept only if
+        the photometry of the other half gets better: a platepar without vignetting gets the camera's, one which
+        already has it keeps its own.
+    """
+
+    chunks = _vignettedChunks(monkeypatch, 0.0008)
+    config = cr.Config()
+    config.min_matched_stars = 3
+    pp = Platepar()
+    pp.X_res, pp.Y_res = 1280, 720
+    pp.vignetting_coeff = start_coeff
+
+    refitted, info = ac.refitVignetting(pp, chunks, None, config)
+    assert info['kept'] == kept, info['reason']
+    if kept:
+        assert refitted is not pp
+        assert refitted.vignetting_coeff == pytest.approx(0.0008, rel=0.1)
+        assert pp.vignetting_coeff == start_coeff
+    else:
+        assert refitted is pp
+
+
+def test_vignetting_refit_enabled():
+    """ The vignetting of an existing platepar is refitted only if asked for, and never with a flat. """
+
+    config = cr.Config()
+    assert not ac.vignettingRefitEnabled(config)
+    config.auto_calibration_fit_vignetting = True
+    assert ac.vignettingRefitEnabled(config)
+    config.use_flat = True
+    assert not ac.vignettingRefitEnabled(config)

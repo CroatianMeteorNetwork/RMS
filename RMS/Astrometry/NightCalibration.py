@@ -158,8 +158,47 @@ def writeState(night_dir, state):
     os.replace(path + '.tmp', path)
 
 
+def chunksFps(chunks, config, ff_frames=256):
+    """ The frame rate the middle times of chunks were computed with (e.g. the one of the header of their CALSTARS
+        file, see AutoCalibration.readChunks), from the time of their names and their middle times.
+
+    Arguments:
+        chunks: [list] Chunks as (name, jd, stars).
+        config: [Config] Configuration.
+
+    Keyword arguments:
+        ff_frames: [int] Number of frames of a chunk. 256 by default.
+
+    Return:
+        [float] The frame rate, config.fps if it can't be told or is the config's within 1e-4 of it.
+    """
+
+    from RMS.Astrometry.Conversions import datetime2JD
+    from RMS.Formats.FFfile import filenameToDatetime
+
+    # Half a chunk is the time from the start in the name to the middle
+    rates = []
+    for chunk in chunks:
+        try:
+            half = (chunk[1] - datetime2JD(filenameToDatetime(chunk[0])))*86400.0
+        except Exception:
+            continue
+        if half > 0:
+            rates.append(ff_frames/2.0/half)
+
+    if not rates:
+        return config.fps
+
+    fps = float(np.median(rates))
+    if abs(fps - config.fps) <= 1e-4*config.fps:
+        return config.fps
+
+    return fps
+
+
 def writeChunks(chunks, dir_path, config, ff_frames=256):
-    """ Write chunks to the only CALSTARS file of a directory (which the plate solver and the joint fit read).
+    """ Write chunks to the only CALSTARS file of a directory (which the plate solver and the joint fit read), with
+        the frame rate of their times in its header (see chunksFps), so they are read back at the same times.
 
     Arguments:
         chunks: [list] Chunks as (name, jd, stars).
@@ -183,7 +222,8 @@ def writeChunks(chunks, dir_path, config, ff_frames=256):
     # The chunks in time order
     star_list = [[name, [tuple(row) for row in stars]] for name, _, stars in sorted(chunks, key=lambda c: c[1])]
     CALSTARS.writeCALSTARS(star_list, dir_path, 'CALSTARS_{:s}_auto.txt'.format(config.stationID),
-                           config.stationID, config.height, config.width, chunk_frames=ff_frames)
+                           config.stationID, config.height, config.width, chunk_frames=ff_frames,
+                           fps=chunksFps(chunks, config, ff_frames=ff_frames))
 
 
 def skyStable(chunks, now_jd):
@@ -454,6 +494,15 @@ class NightCalibration(object):
             candidate, _ = _quietJointFit([fit_dir], current, config, n_iter=JOINT_ITERATIONS, chunk_step=1,
                                           max_chunks=NIGHT_REFIT_MAX_CHUNKS, nproc=1, qc=False)
 
+            # The vignetting of the refit is refitted on the same chunks if asked for (it stays independent of
+            #   the new chunks the refit is compared on)
+            if (candidate is not None) and ac.vignettingRefitEnabled(config):
+                candidate, info = ac.refitVignetting(candidate, [chunk for chunk in clear
+                                                                 if chunk[0] not in check_names],
+                                                     catalog_stars, config, ff_frames=ff_frames, mask=self.mask_img)
+                log.info("Automatic calibration of the night: {:s} the refitted vignetting ({:s})".format(
+                    'kept' if info['kept'] else 'did not keep', info['reason']))
+
         # Both scored on the same new chunks, the better one is installed
         current_score = ac.scorePlatepar(current, check, catalog_stars, config, ff_frames=ff_frames,
                                          mask=self.mask_img)
@@ -634,10 +683,23 @@ class NightCalibrationProcess(object):
 
 
 
+def nightHoldout(clear):
+    """ The clear chunks of a night which its joint fit holds out: every END_HOLDOUT_CHUNKS-th chunk.
+
+    Arguments:
+        clear: [list] Clear chunks of the night as (name, jd, stars), in time order.
+
+    Return:
+        [set] Names of the held-out chunks.
+    """
+
+    return set(chunk[0] for chunk in clear[END_HOLDOUT_CHUNKS//2::END_HOLDOUT_CHUNKS])
+
+
 def jointFitNight(clear, start, config, night_dir, night_hours, ff_frames=256, nproc=1,
                   max_chunks=END_MAX_CHUNKS, mask=None):
-    """ The joint fit of the lens distortion on the clear chunks of a night, every END_HOLDOUT_CHUNKS-th chunk held
-        out, with the quality control of a night (END_MIN_HOURS of clear chunks over END_MIN_SPAN_SHARE of the
+    """ The joint fit of the lens distortion on the clear chunks of a night, the chunks of nightHoldout held out,
+        with the quality control of a night (END_MIN_HOURS of clear chunks over END_MIN_SPAN_SHARE of the
         night). The report of the fit is written to the night directory (auto_calibration_joint_report.txt).
 
     Arguments:
@@ -666,7 +728,7 @@ def jointFitNight(clear, start, config, night_dir, night_hours, ff_frames=256, n
 
     # Every few clear chunks held out, with enough clear sky over the night
     fitted, report = _quietJointFit([fit_dir], start, config, n_iter=JOINT_ITERATIONS, chunk_step=1,
-                                    holdout_chunks=END_HOLDOUT_CHUNKS, max_chunks=max_chunks, nproc=nproc,
+                                    holdout_names=nightHoldout(clear), max_chunks=max_chunks, nproc=nproc,
                                     qc_options={'min_hours': END_MIN_HOURS,
                                                 'min_span_hours': END_MIN_SPAN_SHARE*night_hours}, mask=mask)
 
@@ -749,10 +811,31 @@ def endOfNightCalibration(config, night_dir, calstars_name, platepar, platepar_p
         ok, reasons = ac.judgeScore(ac.scorePlatepar(platepar, held_out, catalog_stars, config,
                                                      ff_frames=ff_frames, mask=mask_img))
         if ok:
+
+            # A good platepar gets only its vignetting refitted, if asked for and if that improves the photometry
+            if ac.vignettingRefitEnabled(config):
+                refitted, info = ac.refitVignetting(platepar, clear, catalog_stars, config, ff_frames=ff_frames,
+                                                    mask=mask_img)
+                if info['kept']:
+                    return _installNight(refitted, platepar, platepar_path, platepar_fmt, config,
+                                         'vignetting refitted on the night ({:s})'.format(info['reason']),
+                                         dry_run)
+
             log.info("Automatic calibration at the end of the night: the platepar is good, it is kept")
             return platepar, platepar_path, platepar_fmt
         log.info("Automatic calibration at the end of the night: the platepar fails ({:s}), it is refitted".format(
             '; '.join(reasons)))
+
+    # The vignetting of the start is refitted first if asked for, on the chunks the joint fit is fitted on, so the
+    #   quality control of the joint fit (which keeps the photometry of its start) judges it on chunks which were
+    #   used in neither fit
+    from_scratch = start is not platepar
+    if ac.vignettingRefitEnabled(config):
+        joint_held = nightHoldout(clear)
+        start, info = ac.refitVignetting(start, [chunk for chunk in clear if chunk[0] not in joint_held],
+                                         catalog_stars, config, ff_frames=ff_frames, mask=mask_img)
+        log.info("Automatic calibration at the end of the night: {:s} the refitted vignetting ({:s})".format(
+            'kept' if info['kept'] else 'did not keep', info['reason']))
 
     # The joint fit of the whole night
     fitted, report = jointFitNight(clear, start, config, night_dir, (chunks[-1][1] - chunks[0][1])*24.0,
@@ -763,12 +846,33 @@ def endOfNightCalibration(config, night_dir, calstars_name, platepar, platepar_p
     if (fitted is not None) and report['qc']['ok']:
         installed, reason = fitted, 'joint fit of the night'
     elif start is not platepar:
-        installed, reason = start, 'fitted from scratch on the night (the joint fit {:s})'.format(
+        installed, reason = start, '{:s} (the joint fit {:s})'.format(
+            'fitted from scratch on the night' if from_scratch else 'vignetting refitted on the night',
             'failed' if report is None else 'fails: ' + ', '.join(report['qc']['failed']))
     else:
         log.info("Automatic calibration at the end of the night: the joint fit {:s}, the platepar is kept".format(
             'failed' if report is None else 'fails its quality control: ' + ', '.join(report['qc']['failed'])))
         return platepar, platepar_path, platepar_fmt
+
+    return _installNight(installed, platepar, platepar_path, platepar_fmt, config, reason, dry_run)
+
+
+def _installNight(installed, platepar, platepar_path, platepar_fmt, config, reason, dry_run):
+    """ Install the platepar of the end of the night and read it back as the platepar the night is reduced with.
+
+    Arguments:
+        installed: [Platepar] The platepar to install.
+        platepar: [Platepar] The platepar of the night until now (None if there is none).
+        platepar_path: [str] Its path, the platepar is installed there.
+        platepar_fmt: [str] Its format.
+        config: [Config] Configuration.
+        reason: [str] Why it is installed.
+        dry_run: [bool] Only save it as a candidate.
+
+    Return:
+        (platepar, platepar_path, platepar_fmt): [tuple] The platepar to reduce the night with (the one until now
+            in a dry run).
+    """
 
     path = installPlatepar(installed, platepar_path, reason, dry_run=dry_run)
     if dry_run:
@@ -843,7 +947,8 @@ def refitNights(night_dirs, platepar, config, work_dir, max_nights=None, nproc=1
         nights held out), and decide whether it replaces the platepar: the fit has to meet its quality control,
         and the worst zone or corner of the held-out nights has to get better by REFIT_MIN_GAIN_SE standard errors
         of its mean residual, both compared with the given platepar (its distortion with the pointing of every
-        night). The fitted distortion gets the pointing of the given platepar.
+        night). The fitted distortion gets the pointing of the given platepar. With auto_calibration_fit_vignetting
+        the vignetting is also refitted on the newest night (see AutoCalibration.refitVignetting).
 
     Arguments:
         night_dirs: [list] Directories of the nights with their CALSTARS files (and platepars), the newest first.
@@ -860,14 +965,12 @@ def refitNights(night_dirs, platepar, config, work_dir, max_nights=None, nproc=1
             replaced), the report of the joint fit (None if there was no fit) and why.
     """
 
-    from RMS.Astrometry.JointDistortionFit import transferPointing
-
     if os.path.isdir(work_dir):
         shutil.rmtree(work_dir)
 
     # The newest nights with enough clear sky, each with its clear chunks (and its platepar, the start of its
     #   pointing) in a directory of the fit
-    selected, mask_img = [], None
+    selected, mask_img, newest_clear, newest_ff_frames = [], None, None, 256
     for night_dir in night_dirs:
         if (max_nights is not None) and (len(selected) >= max_nights):
             break
@@ -880,8 +983,12 @@ def refitNights(night_dirs, platepar, config, work_dir, max_nights=None, nproc=1
         # The mask of the newest night is the one of the quality control
         if (mask_img is None) and (mask is not None):
             mask_img = getattr(mask, 'img', None)
-        if len(clear)*ff_frames/config.fps/3600.0 < REFIT_MIN_CLEAR_HOURS:
+        if len(clear)*ff_frames/chunksFps(clear, config, ff_frames=ff_frames)/3600.0 < REFIT_MIN_CLEAR_HOURS:
             continue
+
+        # The clear chunks of the newest night are the ones of the refit of the vignetting
+        if newest_clear is None:
+            newest_clear, newest_ff_frames = clear, ff_frames
 
         fit_dir = os.path.join(work_dir, os.path.basename(os.path.normpath(night_dir)))
         writeChunks(clear, fit_dir, config, ff_frames=ff_frames)
@@ -892,6 +999,42 @@ def refitNights(night_dirs, platepar, config, work_dir, max_nights=None, nproc=1
 
     if len(selected) < REFIT_MIN_NIGHTS:
         return None, None, 'only {:d} nights with {:.0f} h of clear sky'.format(len(selected), REFIT_MIN_CLEAR_HOURS)
+
+    fitted, report, reason = _refitDistortion(selected, platepar, config, mask_img, nproc)
+
+    # The vignetting of the platepar the camera will have is refitted on the newest night if asked for, also when
+    #   the distortion isn't replaced
+    if ac.vignettingRefitEnabled(config):
+        base = platepar if fitted is None else fitted
+        catalog_stars = ac._loadCatalog(config, newest_clear[len(newest_clear)//2][1])
+        refitted, info = ac.refitVignetting(base, newest_clear, catalog_stars, config, ff_frames=newest_ff_frames,
+                                            mask=mask_img)
+        if info['kept']:
+            fitted = refitted
+            reason += '; vignetting refitted ({:s})'.format(info['reason'])
+        else:
+            reason += '; vignetting kept ({:s})'.format(info['reason'])
+
+    return fitted, report, reason
+
+
+def _refitDistortion(selected, platepar, config, mask_img, nproc):
+    """ The joint fit of the lens distortion of the periodic refit and the decision whether it replaces the
+        platepar (see refitNights).
+
+    Arguments:
+        selected: [list] Directories of the nights of the fit.
+        platepar: [Platepar] The platepar of the camera.
+        config: [Config] Configuration.
+        mask_img: [ndarray] Mask image for the quality control, None if there is none.
+        nproc: [int] Workers of the fit.
+
+    Return:
+        (platepar, report, reason): [tuple] The fitted platepar if it replaces the given one (None otherwise), the
+            report of the joint fit (None if it failed) and why.
+    """
+
+    from RMS.Astrometry.JointDistortionFit import transferPointing
 
     # The joint fit on the nights, every few nights held out, which are compared with the platepar of the camera
     #   (its distortion with the pointing of every night carried over), the one the fit would replace
