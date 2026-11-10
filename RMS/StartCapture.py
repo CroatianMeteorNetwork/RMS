@@ -633,7 +633,8 @@ NIGHT_CALIBRATIONS = {}
 
 def startNightCalibration(config, night_data_dir):
     """ Start the automatic calibration of the night (RMS.Astrometry.NightCalibration) if it is enabled and the
-        camera has no platepar. It reads the stars of the detection as the detection runs.
+        camera has no platepar, or the calibration of this night is unfinished (the capture was restarted). It reads
+        the stars of the detection as the detection runs.
 
     Arguments:
         config: [Config] Configuration.
@@ -646,10 +647,15 @@ def startNightCalibration(config, night_data_dir):
     if not config.auto_calibration:
         return
 
-    from RMS.Astrometry.NightCalibration import NightCalibrationProcess, installPath
+    from RMS.Astrometry.NightCalibration import NightCalibrationProcess, installPath, readState
 
-    # Only a camera without a platepar
-    if os.path.isfile(installPath(config)) or os.path.isfile(os.path.join(night_data_dir, config.platepar_name)):
+    # Only a camera without a platepar, or one whose calibration of this night was started and isn't done (the
+    #   capture was restarted after the first platepar was installed)
+    state = readState(night_data_dir)
+    unfinished = (state.get('installed') is not None) and (not state.get('done'))
+    has_platepar = os.path.isfile(installPath(config)) \
+        or os.path.isfile(os.path.join(night_data_dir, config.platepar_name))
+    if has_platepar and (not unfinished):
         return
 
     # The calibration never stops the capture

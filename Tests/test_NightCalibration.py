@@ -428,3 +428,14 @@ def test_night_calibration_process_starts_and_stops(tmp_path):
         f.write('{}')
     sc.startNightCalibration(config, night_dir)
     assert night_dir not in sc.NIGHT_CALIBRATIONS
+
+    # Unless the calibration of the night installed it and isn't done (the capture was restarted): it resumes
+    nc.writeState(night_dir, dict(nc.readState(night_dir), installed=nc.installPath(config), done=False))
+    sc.startNightCalibration(config, night_dir)
+    assert night_dir in sc.NIGHT_CALIBRATIONS
+    sc.stopNightCalibration(night_dir)
+
+    # A finished calibration doesn't start again
+    nc.writeState(night_dir, dict(nc.readState(night_dir), done=True))
+    sc.startNightCalibration(config, night_dir)
+    assert night_dir not in sc.NIGHT_CALIBRATIONS
