@@ -806,25 +806,36 @@ REFIT_MAX_CHUNKS = 400
 REFIT_MIN_GAIN_SE = 3.0
 
 
-def _worstZone(stats, min_stars):
-    """ The largest mean residual of the zones and corners with enough stars.
+def _worstZones(before, after, min_stars):
+    """ The largest mean residual of the zones and corners before and after a fit, over the same zones: those
+        with enough stars in both.
 
     Arguments:
-        stats: [dict] Residual statistics (see JointDistortionFit.residualStats).
+        before: [dict] Residual statistics before (see JointDistortionFit.residualStats).
+        after: [dict] Residual statistics after.
         min_stars: [int] Minimum number of stars of a zone.
 
     Return:
-        (size, n): [tuple] The largest mean residual (arcsec) and the number of stars of its zone, (0, 0) without
-            a zone with enough stars.
+        (worst_before, n_before, worst_after): [tuple] The largest mean residual before (arcsec) and the number
+            of stars of its zone, and the largest after, None if no zone has enough stars in both.
     """
 
     from RMS.Astrometry.JointDistortionFit import CORNER_NAMES
 
-    zones = [zone for row in stats['zones'] for zone in row] + [stats['corners'][name] for name in CORNER_NAMES]
-    sizes = [(np.hypot(dx, dy), n) for dx, dy, n in zones
-             if (n >= max(min_stars, 1)) and np.isfinite(dx) and np.isfinite(dy)]
+    def _zones(stats):
+        """ The zones and corners of the statistics as (dx, dy, n). """
+        return [zone for row in stats['zones'] for zone in row] + [stats['corners'][name] for name in CORNER_NAMES]
 
-    return max(sizes) if sizes else (0.0, 0)
+    # Only the zones with enough stars and a mean residual in both
+    pairs = [(b, a) for b, a in zip(_zones(before), _zones(after))
+             if (min(b[2], a[2]) >= max(min_stars, 1)) and np.all(np.isfinite(list(b[:2]) + list(a[:2])))]
+    if not pairs:
+        return None
+
+    worst_before, n_before = max((np.hypot(b[0], b[1]), b[2]) for b, _ in pairs)
+    worst_after = max(np.hypot(a[0], a[1]) for _, a in pairs)
+
+    return worst_before, n_before, worst_after
 
 
 def refitNights(night_dirs, platepar, config, work_dir, max_nights=None, nproc=1):
@@ -897,8 +908,10 @@ def refitNights(night_dirs, platepar, config, work_dir, max_nights=None, nproc=1
     from RMS.Astrometry.JointDistortionFit import QC_DEFAULTS
     held = report['held_out_stats']
     min_stars = QC_DEFAULTS['min_zone_stars']
-    worst_before, n_before = _worstZone(held['start']['stats'], min_stars)
-    worst_after, _ = _worstZone(held['fitted']['stats'], min_stars)
+    worst = _worstZones(held['start']['stats'], held['fitted']['stats'], min_stars)
+    if worst is None:
+        return None, report, 'no held-out zone with enough stars to compare'
+    worst_before, n_before, worst_after = worst
     gain = worst_before - worst_after
     needed = REFIT_MIN_GAIN_SE*held['start']['stats']['rms']/np.sqrt(max(n_before, 1))
     if gain < needed:

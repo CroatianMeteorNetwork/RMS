@@ -588,3 +588,19 @@ def test_refit_off(refit):
     config.auto_calibration_refit_days = 0
     assert nc.periodicRefit(config, nproc=1) is None
     assert not plan['calls']
+
+
+def test_worst_zones_compared_over_the_same_zones():
+    """ The worst zone before and after a refit is taken over the same zones (enough stars in both): a zone which
+        loses its stars after the fit doesn't make the fit look better. """
+
+    before, after = _stats(60.0), _stats(61.0)
+    after['zones'][0][0] = (61.0, 0.0, 5)
+    worst_before, n_before, worst_after = nc._worstZones(before, after, 10)
+    assert worst_before == pytest.approx(0.1) and worst_after == pytest.approx(0.1)
+
+    # The zone with enough stars in both counts
+    assert nc._worstZones(_stats(60.0), _stats(61.0), 10) == (60.0, 100, 61.0)
+
+    # No zone with enough stars
+    assert nc._worstZones(_stats(60.0), _stats(61.0), 1000) is None
