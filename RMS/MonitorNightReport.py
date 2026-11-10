@@ -1393,7 +1393,7 @@ def nightJointFit(output_dir, night_name, config):
     """
 
     from RMS.Astrometry import AutoCalibration as ac
-    from RMS.Astrometry.NightCalibration import jointFitNight
+    from RMS.Astrometry.NightCalibration import jointFitNight, nightHoldout
     from RMS.MonitorProcessFrameInterface import plateparTime
 
     platepar_path = autoPlateparPath(output_dir, config)
@@ -1435,6 +1435,18 @@ def nightJointFit(output_dir, night_name, config):
     # The joint fit from the installed platepar (its version is kept), the report next to the night
     start_mtime = plateparTime(platepar_path)
     start = ac._platepar(platepar_path, config.use_flat)
+
+    # The vignetting of the start is refitted first if asked for (never with a flat), on the chunks the joint fit
+    #   is fitted on, so the quality control of the joint fit (which keeps the photometry of its start) judges it
+    #   on chunks which were used in neither fit
+    if clear and config.monitor_auto_calibration_fit_vignetting and (not config.use_flat):
+        joint_held = nightHoldout(clear)
+        start, info = ac.refitVignetting(start, [chunk for chunk in clear if chunk[0] not in joint_held],
+                                         ac._loadCatalog(config, clear[len(clear)//2][1]), config,
+                                         ff_frames=ff_frames, mask=mask_img)
+        log.info("Joint fit of night {:s}: {:s} the refitted vignetting ({:s})".format(
+            night_name, 'kept' if info['kept'] else 'did not keep', info['reason']))
+
     night_dir = nightDirPath(output_dir, night_name, config)
     os.makedirs(night_dir, exist_ok=True)
     fitted, report = jointFitNight(clear, start, config, night_dir, (end_jd - start_jd)*24.0, ff_frames=ff_frames,

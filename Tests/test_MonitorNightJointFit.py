@@ -163,3 +163,37 @@ def test_mask_of_the_night_is_used(monitor, tmp_path, monkeypatch):
     mnr.nightJointFit(output_dir, '20261106', config)
     assert plan['clear_mask'] is mask_img
     assert plan['fit_mask'] is mask_img
+
+
+@pytest.mark.parametrize('use_flat', [False, True])
+def test_vignetting_refitted_outside_the_joint_holdout(monitor, monkeypatch, use_flat):
+    """ With monitor_auto_calibration_fit_vignetting the vignetting of the start is refitted before the joint fit,
+        on chunks which the joint fit doesn't hold out, and the joint fit starts from the refitted platepar; never
+        with a flat. """
+
+    config, output_dir, plan = monitor
+    config.monitor_auto_calibration_fit_vignetting = True
+    config.use_flat = use_flat
+    _install(output_dir, JD0 + 0.05)
+
+    refits = []
+
+    def _refit(platepar, chunks, catalog_stars, config, **kwargs):
+        refits.append(set(chunk[0] for chunk in chunks))
+        return _platepar(5.0), {'kept': True, 'reason': 'stand-in'}
+
+    monkeypatch.setattr(ac, 'refitVignetting', _refit)
+    monkeypatch.setattr(ac, '_loadCatalog', lambda config, jd: np.zeros((0, 3)))
+
+    mnr.nightJointFit(output_dir, '20261105', config)
+
+    if use_flat:
+        assert not refits
+        assert plan['calls'][0][1] == 1.0
+    else:
+        clear = sorted(plan_chunk for plan_chunk in ('FF_{:04d}'.format(m) for m in range(300)))
+        held = nc.nightHoldout([(name, 0, None) for name in clear])
+        assert len(refits) == 1
+        assert refits[0] and not (refits[0] & held)
+        assert refits[0] | held == set(clear)
+        assert plan['calls'][0][1] == 5.0
