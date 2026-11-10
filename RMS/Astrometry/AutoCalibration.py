@@ -1392,12 +1392,16 @@ def _jsonDefault(value):
     return str(value)
 
 
-def readChunks(results_dir, config):
+def readChunks(results_dir, config, file_name=None):
     """ The chunks of a file from the CALSTARS file in its results directory.
 
     Arguments:
         results_dir: [str] Results directory of the file.
         config: [Config] Configuration.
+
+    Keyword arguments:
+        file_name: [str] Name of the CALSTARS file. None by default, in which case the first one in the directory
+            is read.
 
     Return:
         (chunks, ff_frames): [tuple] Chunks as (name, jd, stars) sorted in time, jd the middle of the chunk, and
@@ -1410,6 +1414,8 @@ def readChunks(results_dir, config):
 
     # The CALSTARS file of the file
     names = [name for name in os.listdir(results_dir) if name.startswith('CALSTARS') and name.endswith('.txt')]
+    if file_name is not None:
+        names = [file_name] if os.path.isfile(os.path.join(results_dir, file_name)) else []
     if not names:
         return [], 256
 
