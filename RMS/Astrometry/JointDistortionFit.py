@@ -384,16 +384,19 @@ def readChunks(dir_path, config):
     chunks = {}
     for file_name in names:
 
-        calstars = CALSTARS.readCALSTARS(dir_path, file_name)
+        calstars = CALSTARS.readCALSTARS(dir_path, file_name, return_fps=True)
         if not calstars:
             continue
-        star_list, ff_frames = calstars
+        star_list, ff_frames, fps = calstars
+
+        # The frame rate of the header (the measured one, e.g. of .vid files), otherwise the config's
+        fps = fps if fps else config.fps
 
         for ff_name, stars in star_list:
             if ff_name in chunks:
                 continue
             try:
-                jd = date2JD(*getMiddleTimeFF(ff_name, config.fps, ret_milliseconds=True, ff_frames=ff_frames))
+                jd = date2JD(*getMiddleTimeFF(ff_name, fps, ret_milliseconds=True, ff_frames=ff_frames))
             except Exception:
                 continue
             chunks[ff_name] = (ff_name, jd, np.array(stars, dtype=np.float64).reshape(-1, 8), ff_frames)
@@ -616,7 +619,7 @@ def _recalibrateWorker(task):
 
     # The pointing recalibrated on the stars of the chunk as the processing does
     recalibrated, ok = recalibrateSingleFF(platepar, name, stars, data['catalog_stars'], data['config'],
-                                           ff_frames=ff_frames)
+                                           ff_frames=ff_frames, jd=jd)
     if not ok:
         return key, None, None
 

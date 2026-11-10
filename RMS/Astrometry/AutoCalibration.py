@@ -293,7 +293,7 @@ def _zoneUsable(usable_px, width, height, step=4):
                      for in_zone in membership])
 
 
-def recalibrateChunk(platepar, chunk_name, stars, catalog_stars, config, ff_frames):
+def recalibrateChunk(platepar, chunk_name, stars, catalog_stars, config, ff_frames, jd=None):
     """ Recalibrate the platepar on a chunk as in the processing (only the pointing is refitted, see
         ApplyRecalibrate.recalibrateSingleFF), with the log of the recalibration kept quiet.
 
@@ -304,6 +304,9 @@ def recalibrateChunk(platepar, chunk_name, stars, catalog_stars, config, ff_fram
         catalog_stars: [ndarray] Catalog stars (ra, dec, mag).
         config: [Config] Configuration.
         ff_frames: [int] Number of frames of the chunk.
+
+    Keyword arguments:
+        jd: [float] Julian date of the middle of the chunk (see readChunks). None by default (from its name).
 
     Return:
         (platepar, ok): [tuple] The recalibrated platepar (a copy of the given one if the recalibration failed) and
@@ -317,7 +320,7 @@ def recalibrateChunk(platepar, chunk_name, stars, catalog_stars, config, ff_fram
     previous_level = rms_log.level
     rms_log.setLevel(logging.WARNING)
     try:
-        return recalibrateSingleFF(platepar, chunk_name, stars, catalog_stars, config, ff_frames=ff_frames)
+        return recalibrateSingleFF(platepar, chunk_name, stars, catalog_stars, config, ff_frames=ff_frames, jd=jd)
 
     finally:
 
@@ -503,7 +506,7 @@ def scorePlatepar(platepar, chunks, catalog_stars, config, ff_frames=256, recali
         # The pointing is refitted on the chunk as in the processing
         pp = platepar
         if recalibrate:
-            pp, ok = recalibrateChunk(platepar, name, stars, catalog_stars, config, ff_frames)
+            pp, ok = recalibrateChunk(platepar, name, stars, catalog_stars, config, ff_frames, jd=jd)
             score.recalibrated += int(ok)
 
         dist, cat_ra, cat_dec, cat_mag = matchChunk(pp, jd, stars, catalog_stars, lim_mag, match_radius)
@@ -987,7 +990,7 @@ def _jointVignetting(platepar, chunks, catalog_stars, config, ff_frames):
         if len(stars) == 0:
             continue
 
-        pp, _ = recalibrateChunk(platepar, name, stars, catalog_stars, config, ff_frames)
+        pp, _ = recalibrateChunk(platepar, name, stars, catalog_stars, config, ff_frames, jd=jd)
 
         # The matched stars which are not saturated, the chunk is used only with enough of them
         match_radius = max(1.0, MATCH_RADIUS_FWHM*np.median(stars[:, STAR_FWHM]))
@@ -1371,12 +1374,16 @@ def readChunks(results_dir, config):
     # The chunks with their times (a chunk whose name has no time is skipped). The stars are measured on the
     #   frames of a chunk stacked together, so their positions are those of the middle of the chunk: its time is
     #   the middle, the same as the recalibration of the chunk uses (recalibratePlateparsForFF)
-    calstars, ff_frames = CALSTARS.readCALSTARS(results_dir, sorted(names)[0])
+    calstars, ff_frames, fps = CALSTARS.readCALSTARS(results_dir, sorted(names)[0], return_fps=True)
     ff_frames = ff_frames if ff_frames else 256
+
+    # The frame rate of the header of the CALSTARS file (the measured one, e.g. of .vid files), otherwise the
+    #   config's
+    fps = fps if fps else config.fps
     chunks = []
     for name, stars in calstars:
         try:
-            jd = date2JD(*getMiddleTimeFF(name, config.fps, ret_milliseconds=True, ff_frames=ff_frames))
+            jd = date2JD(*getMiddleTimeFF(name, fps, ret_milliseconds=True, ff_frames=ff_frames))
         except Exception:
             continue
         chunks.append((name, jd, np.array(stars, dtype=np.float64)))

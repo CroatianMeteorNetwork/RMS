@@ -925,3 +925,34 @@ def test_chunk_read_from_its_calstars_is_scored_at_its_time(tmp_path):
 
     assert score.n_matched > 150
     assert score.dist < 0.02
+
+
+def test_chunks_timed_by_the_frame_rate_of_the_calstars_header(tmp_path, monkeypatch):
+    """ The chunks of a CALSTARS file with the measured frame rate in its header are timed with it (not with the
+        frame rate of the config), and their recalibration uses the same time. """
+
+    import RMS.Astrometry.ApplyRecalibrate as ar
+    from RMS.Astrometry.Conversions import date2JD
+    from RMS.Formats import CALSTARS
+    from RMS.Formats.FFfile import getMiddleTimeFF
+
+    config = cr.Config()
+    config.fps = 25.0
+    name = 'FF_XX0001_20261105_101112_345_0000000.fits'
+    CALSTARS.writeCALSTARS([[name, [(10.0, 20.0, 100, 10, 2.0, 5, 20.0, 0)]]], str(tmp_path), 'CALSTARS_test.txt',
+                           'XX0001', 720, 1280, chunk_frames=128, fps=10.0)
+
+    chunks, ff_frames = ac.readChunks(str(tmp_path), config)
+    assert ff_frames == 128
+    assert chunks[0][1] == pytest.approx(date2JD(*getMiddleTimeFF(name, 10.0, ret_milliseconds=True,
+                                                                  ff_frames=128)), abs=1e-9)
+
+    # The recalibration of the chunk at that time: the frame rate it is given puts the middle of the chunk there
+    seen = []
+    monkeypatch.setattr(ar, 'recalibratePlateparsForFF', lambda platepar, names, calstars, catalog, config, **kw:
+                        seen.append(config.fps) or {})
+    ac.recalibrateChunk(Platepar(), name, chunks[0][2], None, config, ff_frames, jd=chunks[0][1])
+    ac.recalibrateChunk(Platepar(), name, chunks[0][2], None, config, ff_frames)
+    assert seen[0] == pytest.approx(10.0, rel=1e-4)
+    assert seen[1] == 25.0
+    assert config.fps == 25.0

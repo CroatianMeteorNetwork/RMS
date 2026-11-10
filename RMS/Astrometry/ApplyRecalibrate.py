@@ -34,7 +34,7 @@ from RMS.Astrometry.ApplyAstrometry import (
     xyToRaDecPP,
 )
 from RMS.Astrometry.CyFunctions import subsetCatalog
-from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
+from RMS.Astrometry.Conversions import date2JD, datetime2JD, jd2Date, raDec2AltAz
 from RMS.Astrometry.NNalign import alignPlatepar
 from RMS.Formats import CALSTARS, FFfile, FTPdetectinfo, Platepar, StarCatalog
 from RMS.Formats.FTPdetectinfo import findFTPdetectinfoFile, validDefaultFTPdetectinfo
@@ -818,7 +818,7 @@ def recalibratePlateparsForFF(
     return recalibrated_platepars
 
 
-def recalibrateSingleFF(platepar, ff_name, stars, catalog_stars, config, ff_frames=256):
+def recalibrateSingleFF(platepar, ff_name, stars, catalog_stars, config, ff_frames=256, jd=None):
     """ Recalibrate the pointing of a platepar on the stars of one image (FF file or frame chunk), as the
         processing does (recalibratePlateparsForFF), starting from the given platepar alone.
 
@@ -832,11 +832,24 @@ def recalibrateSingleFF(platepar, ff_name, stars, catalog_stars, config, ff_fram
 
     Keyword arguments:
         ff_frames: [int] Number of frames in the FF file or frame chunk. 256 by default.
+        jd: [float] Julian date of the middle of the image, e.g. from the frame rate in the header of its
+            CALSTARS file. None by default, in which case it is the time of the name plus half of ff_frames at the
+            frame rate of the config.
 
     Return:
         (platepar, ok): [tuple] The recalibrated platepar (a copy of the given one if the recalibration failed)
             and whether the recalibration succeeded.
     """
+
+    # An image timed by its own frame rate is recalibrated at its time: the frame rate of a copy of the config
+    #   is set so that the middle of the image falls on it
+    if jd is not None:
+        half = (jd - datetime2JD(FFfile.filenameToDatetime(ff_name)))*86400.0
+        if half > 0:
+            fps = ff_frames/2.0/half
+            if abs(fps - config.fps) > 1e-4*config.fps:
+                config = copy.copy(config)
+                config.fps = fps
 
     # The recalibration of a list of images with only this image in it
     result = recalibratePlateparsForFF(platepar, [ff_name], {ff_name: [tuple(row) for row in stars]},
