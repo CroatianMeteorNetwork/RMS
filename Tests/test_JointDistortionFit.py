@@ -832,6 +832,24 @@ def test_held_out_chunks_of_the_nights_of_the_fit(nights, fit_held_chunks):
         jointDistortionFit(dirs, start, config, holdout_chunks=1)
 
 
+def test_chunks_held_out_by_name(nights):
+    """ The chunks named in holdout_names are held out of the nights of the fit, as every N-th chunk is. """
+
+    config, truth, start, dirs, pointings = nights
+    start = copy.deepcopy(start)
+    start.vignetting_coeff = 0.0
+    start.extinction_scale = 0.0
+
+    # The middle chunk of every night, by name
+    names = [JointDistortionFit.readChunks(dir_path, config)[N_CHUNKS//2][0] for dir_path in dirs]
+    fitted, report = jointDistortionFit(dirs, start, config, distortion_type="radial7-odd", n_iter=1, chunk_step=1,
+                                        nproc=4, holdout_names=names, qc_options=SMALL_QC)
+
+    assert report['held_out'] == []
+    assert report['chunks'] == N_NIGHTS*(N_CHUNKS - 1)
+    assert report['held_chunks'] == N_NIGHTS
+
+
 def test_quality_control_accepts_a_good_fit(fit_held_chunks):
     """ A fit which recovers the distortion meets every check of the quality control, and the report lists them;
         the mapping converged. """
