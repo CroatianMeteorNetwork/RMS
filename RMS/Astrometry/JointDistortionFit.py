@@ -107,6 +107,42 @@ CORNER_NAMES = ('TL', 'TR', 'BL', 'BR')
 #   than this share
 WORSE_SHARE = 0.02
 
+# A chunk whose median residual is more than this many times the median of the chunks (a passing cloud, dew, a
+#   chunk recalibrated to a wrong pointing) is left out of the next fit of the distortion, and so is a night whose
+#   median residual is more than this many times the median of the nights (with at least 3 nights)
+OUTLIER_CHUNK_FACTOR = 3.0
+OUTLIER_NIGHT_FACTOR = 2.0
+
+# The quality control of the fit (see qualityControl). It passes only if all of its checks pass:
+#   - enough data: chunks recalibrated in the fit, held-out chunks, and stars of the fit in every zone of the grid
+#       and in every corner (and the hours of clear sky and their span if asked for);
+#   - better on the held-out stars: their median and rms residual no larger than with the starting platepars (by
+#       at most a share), and the mean residual of no zone or corner larger by more than a fraction of a pixel;
+#   - the judgement of the automatic calibration (AutoCalibration.judgeScore) passes on the held-out chunks;
+#   - converged: the mapping of the image changed by less than a fraction of a pixel (rms) in the last fit, and
+#       few chunks were left out as outliers;
+#   - a sane model: the mapping changed from the starting platepar's by less than a share of the image diagonal,
+#       it doesn't fold over anywhere in the image, and its forward and reverse directions agree.
+QC_DEFAULTS = {
+    'min_chunks': 20,
+    'min_held_chunks': 5,
+    'min_zone_stars': 10,
+    'min_hours': None,
+    'min_span_hours': None,
+    'max_worse_share': 0.02,
+    'max_zone_worse_px': 0.05,
+    'judge': True,
+    'judge_chunks': 12,
+    'max_change_px': 0.05,
+    'max_outlier_share': 0.1,
+    'max_model_change_diag': 0.005,
+    'max_roundtrip_px': 0.5,
+}
+
+# The two directions of the mapping are compared within this share of the distance from the centre to the corners:
+#   in the outermost corners, where there are few stars, they disagree by a pixel or more also for good platepars
+ROUNDTRIP_RADIUS = 0.9
+
 
 
 def readPlatepar(path, use_flat):
@@ -229,6 +265,101 @@ def transferPointing(platepar, pointing_platepar, n_grid=TRANSFER_GRID, margin=T
     transferred.updateRefAltAz()
 
     return transferred, rms
+
+
+def mappingDifference(platepar, other, n_grid=TRANSFER_GRID, margin=TRANSFER_MARGIN):
+    """ How differently two platepars of the same camera map the image apart from the pointing: the pointing of the
+        other platepar is carried over to the first one (transferPointing), and the image positions of the sky
+        positions of a grid with the two are compared.
+
+    Arguments:
+        platepar: [Platepar] Platepar.
+        other: [Platepar] Other platepar.
+
+    Keyword arguments:
+        n_grid: [int] Number of grid points along each axis. TRANSFER_GRID by default.
+        margin: [float] Distance of the grid from the edges of the image (px). TRANSFER_MARGIN by default.
+
+    Return:
+        (rms, max): [tuple] The rms and the largest distance (px) between the image positions.
+    """
+
+    transferred, _ = transferPointing(platepar, other, n_grid=n_grid, margin=margin, max_rms=None)
+
+    # The sky positions of a grid with the other platepar, and their image positions with both
+    jd = other.JD
+    grid_x, grid_y = np.meshgrid(np.linspace(margin, other.X_res - margin, n_grid),
+                                 np.linspace(margin, other.Y_res - margin, n_grid))
+    grid_x, grid_y = grid_x.ravel(), grid_y.ravel()
+    _, ra, dec, _ = xyToRaDecPP(len(grid_x)*[jd], grid_x, grid_y, len(grid_x)*[1], other,
+                                extinction_correction=False, jd_time=True)
+    ra, dec = np.array(ra), np.array(dec)
+    x_other, y_other = raDecToXYPP(ra, dec, jd, other)
+    x, y = raDecToXYPP(ra, dec, jd, transferred)
+    dist = np.hypot(x - x_other, y - y_other)
+
+    return float(np.sqrt(np.mean(dist**2))), float(np.max(dist))
+
+
+def modelSanity(platepar, n_grid=25):
+    """ Whether the mapping of a platepar is usable over the whole image, also where it had no stars: it must not
+        fold over (the sky direction of a grid of image positions turns the same way everywhere) and its two
+        directions must agree (image to sky and back gives the same image position) within ROUNDTRIP_RADIUS.
+
+    Arguments:
+        platepar: [Platepar] Platepar.
+
+    Keyword arguments:
+        n_grid: [int] Number of grid points along each axis, from edge to edge. 25 by default.
+
+    Return:
+        (folds, roundtrip): [tuple] The number of grid cells which fold over, and the largest distance (px) between
+            an image position within ROUNDTRIP_RADIUS and the image position of its sky position.
+    """
+
+    # The sky directions of a grid of image positions, edge to edge
+    jd = platepar.JD
+    xs, ys = np.meshgrid(np.linspace(0, platepar.X_res, n_grid), np.linspace(0, platepar.Y_res, n_grid))
+    _, ra, dec, _ = xyToRaDecPP(xs.size*[jd], xs.ravel(), ys.ravel(), xs.size*[1], platepar,
+                                extinction_correction=False, jd_time=True)
+    ra, dec = np.radians(np.array(ra)), np.radians(np.array(dec))
+    v = np.column_stack([np.cos(dec)*np.cos(ra), np.cos(dec)*np.sin(ra), np.sin(dec)]).reshape(n_grid, n_grid, 3)
+
+    # The orientation of every cell: the triple product of its sides along x and y and its direction, whose sign
+    #   is the same everywhere for a mapping which doesn't fold over
+    side_x = v[:-1, 1:] - v[:-1, :-1]
+    side_y = v[1:, :-1] - v[:-1, :-1]
+    orientation = np.sum(np.cross(side_x, side_y)*v[:-1, :-1], axis=2)
+    sign = np.sign(np.median(orientation))
+    folds = int(np.count_nonzero(np.sign(orientation) != sign))
+
+    # Back from the sky to the image
+    x_back, y_back = raDecToXYPP(np.degrees(ra), np.degrees(dec), jd, platepar)
+    radius = np.hypot(xs.ravel() - platepar.X_res/2.0, ys.ravel() - platepar.Y_res/2.0) \
+        /np.hypot(platepar.X_res/2.0, platepar.Y_res/2.0)
+    inner = radius <= ROUNDTRIP_RADIUS
+    roundtrip = float(np.nanmax(np.hypot(x_back - xs.ravel(), y_back - ys.ravel())[inner]))
+    if not np.isfinite(roundtrip):
+        roundtrip = np.inf
+
+    return folds, roundtrip
+
+
+def _spreadKeys(keys, n):
+    """ At most n of the keys of chunks, spread evenly over them (they are in time order).
+
+    Arguments:
+        keys: [list] Keys of the chunks.
+        n: [int] Largest number of keys.
+
+    Return:
+        [list] The kept keys, in the same order.
+    """
+
+    if len(keys) <= n:
+        return keys
+
+    return [keys[i] for i in np.unique(np.round(np.linspace(0, len(keys) - 1, n)).astype(int))]
 
 
 def readChunks(dir_path, config):
@@ -755,7 +886,8 @@ def fitDistortion(platepars, matched_stars, jds, distortion_type, max_stars, see
 
 
 def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdout=None, n_iter=4, snr_min=10.0,
-                       max_stars=20000, chunk_step=2, match_radius=None, lim_mag=None, nproc=None, decentering=None):
+                       max_stars=20000, chunk_step=2, match_radius=None, lim_mag=None, nproc=None, decentering=None,
+                       holdout_chunks=None, max_chunks=None, qc=True, qc_options=None):
     """ Fit one distortion on the stars of many nights, with the pointing of every chunk fitted separately (see
         the description of the module).
 
@@ -782,14 +914,22 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
         decentering: [bool] Fit the decentering correction of the radial distortion types (True) or not (False).
             None by default, in which case the setting of the starting platepar is kept if the fitted type is
             radial (otherwise it is off). True with a type which isn't radial raises a ValueError.
+        holdout_chunks: [int] Also hold out every N-th chunk of every night of the fit (from the N//2-th), so the
+            fit can be checked within the nights it is fitted on (e.g. a single night). None by default.
+        max_chunks: [int] At most this many chunks in the fit and this many held out, spread evenly in time over
+            them (after chunk_step), which bounds the time of the fit. None by default (no limit).
+        qc: [bool] Run the quality control of the fit (see qualityControl), its verdict is in the report. True by
+            default.
+        qc_options: [dict] Limits of the quality control which replace those of QC_DEFAULTS. None by default.
 
     Return:
         (platepar, report): [tuple] The fitted platepar (the distortion of the last fit with the pointing of the
             reference chunk, the photometry of the starting platepar), and the report of the fit as a dictionary:
             the residual statistics (see residualStats) of the chunks of the fit after every recalibration
             ('iterations'), of every night of the fit with the final distortion ('night_stats') and of the
-            held-out nights with their own platepars and with the fitted distortion ('held_out_stats'), and the
-            matched stars behind them ('stars'). formatReport writes it as text.
+            held-out nights with their own platepars and with the fitted distortion ('held_out_stats'), the
+            matched stars behind them ('stars'), and the verdict of the quality control ('qc', see
+            qualityControl). formatReport writes it as text.
     """
 
     if n_iter < 1:
@@ -847,16 +987,27 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
                 log.warning("The platepar of {:s} is not used: {:s}".format(night['dir'], str(e)))
                 night['platepar'] = None
 
-    # Every chunk_step-th chunk of the nights of the fit, all chunks of the held-out nights. The key of a chunk
-    #   is (night index, chunk index)
+    # Every chunk_step-th chunk of the nights of the fit, all chunks of the held-out nights, and every
+    #   holdout_chunks-th chunk of the nights of the fit if asked for. The key of a chunk is (night index, chunk
+    #   index)
     usable = [(n, c) for n, night in enumerate(nights) for c in range(len(night['chunks']))]
-    train_keys = [key for key in usable if key[0] not in held][::max(1, chunk_step)]
-    held_keys = [key for key in usable if key[0] in held]
+    held_chunk_keys = set()
+    if holdout_chunks:
+        if holdout_chunks < 2:
+            raise ValueError("Every N-th chunk can be held out only with N >= 2 (holdout_chunks = {:d})".format(
+                holdout_chunks))
+        held_chunk_keys = set(key for key in usable if (key[0] not in held)
+                              and (key[1]%holdout_chunks == holdout_chunks//2))
+    train_keys = [key for key in usable if (key[0] not in held) and (key not in held_chunk_keys)][::max(1, chunk_step)]
+    held_keys = [key for key in usable if (key[0] in held) or (key in held_chunk_keys)]
+    if max_chunks:
+        train_keys, held_keys = _spreadKeys(train_keys, max_chunks), _spreadKeys(held_keys, max_chunks)
     if not train_keys:
         raise ValueError("No chunks in the nights of the fit")
 
-    log.info("Joint distortion fit: {:d} nights ({:d} held out), {:d} chunks in the fit, {:d} held out".format(
-        len(nights), len(held), len(train_keys), len(held_keys)))
+    log.info("Joint distortion fit: {:d} nights ({:d} held out), {:d} chunks in the fit, {:d} held out ({:d} of "
+             "them from the nights of the fit)".format(len(nights), len(held), len(train_keys), len(held_keys),
+                                                       len(held_chunk_keys)))
 
     def _chunk(key):
         """ The chunk of a key.
@@ -927,7 +1078,7 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
     report = {'nights': [night['dir'] for night in nights], 'held_out': sorted(nights[n]['dir'] for n in held),
               'distortion_type': distortion_type, 'decentering': decentering, 'match_radius': match_radius,
               'lim_mag': lim_mag,
-              'snr_min': snr_min, 'chunks': len(train_keys), 'iterations': []}
+              'snr_min': snr_min, 'chunks': len(train_keys), 'held_chunks': len(held_keys), 'iterations': []}
     width, height = platepar.X_res, platepar.Y_res
 
     try:
@@ -956,9 +1107,15 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
             if iteration == n_iter:
                 break
 
+            # The chunks and nights whose residuals are far larger than the others' are left out of this fit
+            outliers = _outliers(results, train_keys, snr_min)
+            entry['outlier_chunks'] = len(outliers)
+
             # The chunks with enough matched stars for the fit of the distortion
             fit_platepars, fit_stars = {}, {}
             for key in train_keys:
+                if key in outliers:
+                    continue
                 pp_chunk, stars = results[key]
                 if pp_chunk is None:
                     continue
@@ -969,13 +1126,23 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
                 raise ValueError("No recalibrated chunk has {:d} matched stars of SNR >= {:.1f} for the fit".format(
                     MIN_CHUNK_STARS, snr_min))
 
+            previous = distortion
             distortion, n_fit, reference_key = fitDistortion(fit_platepars, fit_stars, jds, distortion_type,
                                                              max_stars, decentering=decentering)
             entry['fit_chunks'], entry['fit_stars'] = len(fit_platepars), n_fit
+
+            # How much the mapping of the image changed in this fit (px), which shows whether the fit converged
+            try:
+                entry['change_px'] = mappingDifference(distortion, previous)
+            except ValueError:
+                entry['change_px'] = (np.inf, np.inf)
             report['reference'] = (nights[reference_key[0]]['dir'], _chunk(reference_key)[0])
 
         # The final distortion is kept, but a warning is given if an earlier one fitted the stars clearly better
         _warnIfWorse(report['iterations'])
+
+        # The chunks of the final distortion which are outliers
+        report['iterations'][-1]['outlier_chunks'] = len(_outliers(results, train_keys, snr_min))
 
         # The residuals of every night of the fit with the final distortion
         report['night_stats'] = []
@@ -990,7 +1157,7 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
         #   with their pointing carried over
         if held_keys:
 
-            held_nights = sorted(held)
+            held_nights = sorted(set(key[0] for key in held_keys))
             own = dict((n, nights[n]['platepar'] if nights[n]['platepar'] is not None else platepar)
                        for n in held_nights)
             fitted = dict((n, _startOf(nights[n], distortion)) for n in held_nights)
@@ -1010,6 +1177,23 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
                 report['stars']['held_out_' + label] = matched
                 log.info("Held out ({:s}): {:s}".format(label, _statsLine(
                     report['held_out_stats'][label]['stats'], n_recalibrated, len(held_keys))))
+
+        # The quality control of the fit. The judgement of the automatic calibration is made on the held-out
+        #   chunks of every night, from the fitted distortion with the pointing of the night
+        if qc:
+            options = dict(QC_DEFAULTS)
+            options.update(qc_options or {})
+            judge_groups = []
+            if options['judge'] and held_keys:
+                for n in sorted(set(key[0] for key in held_keys)):
+                    keys = [key for key in held_keys if key[0] == n]
+                    judge_groups.append((nights[n]['dir'], _startOf(nights[n], distortion),
+                                         [_chunk(key) for key in keys]))
+            chunk_hours = [len(night['chunks'])*night['chunks'][0][3]/config.fps/3600.0 for night in nights]
+            spans = [(night['chunks'][-1][1] - night['chunks'][0][1])*24.0 for night in nights]
+            report['qc'] = qualityControl(distortion, platepar, report, config, options, judge_groups=judge_groups,
+                                          clear_hours=float(np.sum(chunk_hours)), longest_span_hours=max(spans))
+            log.info("Quality control: {:s}".format(_qcLine(report['qc'])))
 
     # On an error the workers are stopped right away
     except BaseException:
@@ -1032,6 +1216,191 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
             setattr(distortion, name, copy.deepcopy(getattr(platepar, name)))
 
     return distortion, report
+
+
+def _outliers(results, keys, snr_min):
+    """ The chunks whose residuals are far larger than those of the others, and the chunks of the nights whose
+        residuals are far larger than those of the other nights (see OUTLIER_CHUNK_FACTOR, OUTLIER_NIGHT_FACTOR).
+
+    Arguments:
+        results: [dict] Results of recalibrateChunks.
+        keys: [list] Keys of the chunks (night index, chunk index).
+        snr_min: [float] Minimum SNR of the stars.
+
+    Return:
+        [set] Keys of the outlier chunks.
+    """
+
+    # The median distance (px) of the matched stars of every recalibrated chunk with enough of them
+    medians = {}
+    for key in keys:
+        platepar, stars = results.get(key, (None, None))
+        if platepar is None:
+            continue
+        stars = _goodStars(stars, snr_min)
+        if len(stars) >= MIN_CHUNK_STARS:
+            medians[key] = float(np.median(np.hypot(stars[:, 0] - stars[:, 7], stars[:, 1] - stars[:, 8])))
+
+    if len(medians) < 3:
+        return set()
+
+    # The chunks far above the median of the chunks
+    typical = np.median(list(medians.values()))
+    outliers = set(key for key, value in medians.items() if value > OUTLIER_CHUNK_FACTOR*typical)
+
+    # The nights far above the median of the nights
+    night_medians = {}
+    for n in set(key[0] for key in medians):
+        night_medians[n] = np.median([value for key, value in medians.items() if key[0] == n])
+    if len(night_medians) >= 3:
+        typical_night = np.median(list(night_medians.values()))
+        for n, value in night_medians.items():
+            if value > OUTLIER_NIGHT_FACTOR*typical_night:
+                outliers |= set(key for key in medians if key[0] == n)
+
+    return outliers
+
+
+def qualityControl(fitted, start, report, config, options, judge_groups=(), clear_hours=None,
+                   longest_span_hours=None):
+    """ The quality control of a joint fit: whether the fitted distortion can be installed (see QC_DEFAULTS for
+        the checks).
+
+    Arguments:
+        fitted: [Platepar] Fitted platepar.
+        start: [Platepar] Starting platepar.
+        report: [dict] Report of jointDistortionFit (iterations, held-out statistics).
+        config: [Config] Configuration.
+        options: [dict] Limits of the checks (see QC_DEFAULTS).
+
+    Keyword arguments:
+        judge_groups: [list] Held-out chunks to judge the fitted distortion on, as (name, platepar to start from,
+            chunks as in readChunks), e.g. one group per night. Empty by default (not judged).
+        clear_hours: [float] Hours of the chunks of the nights. None by default.
+        longest_span_hours: [float] Hours from the first to the last chunk of the longest night. None by default.
+
+    Return:
+        [dict] 'ok' (True if all checks pass), 'checks' (list of dictionaries with the 'name' of the check, whether
+            it is 'ok' and the 'value' as text) and 'failed' (names of the failed checks).
+    """
+
+    checks = []
+
+    def _check(name, ok, value):
+        checks.append({'name': name, 'ok': bool(ok), 'value': value})
+
+    last = report['iterations'][-1]
+    stats = last['stats']
+    scale = 3600.0/fitted.F_scale
+
+    # Enough data: chunks of the fit and held out, stars in every zone and corner, clear sky
+    _check('chunks of the fit', last['recalibrated'] >= options['min_chunks'],
+           '{:d} recalibrated (min {:d})'.format(last['recalibrated'], options['min_chunks']))
+    held = report.get('held_out_stats')
+    n_held = held['fitted']['recalibrated'] if held else 0
+    _check('held-out chunks', n_held >= options['min_held_chunks'],
+           '{:d} recalibrated (min {:d})'.format(n_held, options['min_held_chunks']))
+    if stats is None:
+        _check('stars in every zone and corner', False, 'no stars')
+    else:
+        zone_counts = [zone[2] for row in stats['zones'] for zone in row]
+        corner_counts = [stats['corners'][name][2] for name in CORNER_NAMES]
+        fewest = min(zone_counts + corner_counts)
+        _check('stars in every zone and corner', fewest >= options['min_zone_stars'],
+               'fewest {:d} (min {:d})'.format(fewest, options['min_zone_stars']))
+    if options['min_hours'] is not None:
+        _check('hours of clear sky', (clear_hours or 0) >= options['min_hours'],
+               '{:.1f} h (min {:.1f} h)'.format(clear_hours or 0, options['min_hours']))
+    if options['min_span_hours'] is not None:
+        _check('span of the night', (longest_span_hours or 0) >= options['min_span_hours'],
+               '{:.1f} h (min {:.1f} h)'.format(longest_span_hours or 0, options['min_span_hours']))
+
+    # Better on the held-out stars than the starting platepars: overall and in every zone and corner
+    if (not held) or (held['start']['stats'] is None) or (held['fitted']['stats'] is None):
+        _check('held-out stars not worse', False, 'no held-out stars')
+    else:
+        before, after = held['start']['stats'], held['fitted']['stats']
+        limit = 1 + options['max_worse_share']
+        _check('held-out stars not worse', (after['median'] <= limit*before['median'])
+               and (after['rms'] <= limit*before['rms']),
+               'median {:.2f}" -> {:.2f}", rms {:.2f}" -> {:.2f}"'.format(before['median'], after['median'],
+                                                                         before['rms'], after['rms']))
+        tolerance = options['max_zone_worse_px']*scale
+        worst, worst_name = -np.inf, ''
+        zones_before = [zone for row in before['zones'] for zone in row] \
+            + [before['corners'][name] for name in CORNER_NAMES]
+        zones_after = [zone for row in after['zones'] for zone in row] \
+            + [after['corners'][name] for name in CORNER_NAMES]
+        names = ['zone {:d},{:d}'.format(j, i) for j in range(ZONE_GRID) for i in range(ZONE_GRID)] \
+            + list(CORNER_NAMES)
+        for name, (bx, by, bn), (ax, ay, an) in zip(names, zones_before, zones_after):
+            if min(bn, an) < options['min_zone_stars']:
+                continue
+            change = np.hypot(ax, ay) - np.hypot(bx, by)
+            if change > worst:
+                worst, worst_name = change, name
+        _check('no held-out zone worse', worst <= tolerance,
+               'largest change of a zone {:+.2f}" in {:s} (max {:+.2f}")'.format(worst, worst_name, tolerance)
+               if np.isfinite(worst) else 'no zone with enough stars')
+
+    # The judgement of the automatic calibration on the held-out chunks of every night
+    if options['judge']:
+        from RMS.Astrometry import AutoCalibration
+
+        failed = []
+        for name, platepar, group_chunks in judge_groups:
+            chunks = AutoCalibration.spreadChunks([chunk[:3] for chunk in group_chunks], options['judge_chunks'])
+            catalog_stars = AutoCalibration._loadCatalog(config, chunks[len(chunks)//2][1])
+            score = AutoCalibration.scorePlatepar(platepar, chunks, catalog_stars, config,
+                                                  ff_frames=group_chunks[0][3])
+            ok, reasons = AutoCalibration.judgeScore(score)
+            if not ok:
+                failed.append('{:s}: {:s}'.format(os.path.basename(os.path.normpath(name)), '; '.join(reasons)))
+        _check('judged on the held-out chunks', bool(judge_groups) and not failed,
+               ('{:d} nights pass'.format(len(judge_groups)) if not failed else ' | '.join(failed))
+               if judge_groups else 'no held-out chunks')
+
+    # Converged, with few outlier chunks
+    changes = [entry['change_px'][0] for entry in report['iterations'] if 'change_px' in entry]
+    change = changes[-1] if changes else np.inf
+    _check('converged', change <= options['max_change_px'],
+           'last fit changed the mapping by {:.3f} px rms (max {:.3f})'.format(change, options['max_change_px']))
+    outlier_share = last.get('outlier_chunks', 0)/max(report['chunks'], 1)
+    _check('few outlier chunks', outlier_share <= options['max_outlier_share'],
+           '{:.0f}% (max {:.0f}%)'.format(100*outlier_share, 100*options['max_outlier_share']))
+
+    # A sane model over the whole image
+    try:
+        _, change_max = mappingDifference(fitted, start)
+    except ValueError:
+        change_max = np.inf
+    limit = options['max_model_change_diag']*np.hypot(fitted.X_res, fitted.Y_res)
+    _check('change from the starting platepar', change_max <= limit,
+           'largest {:.2f} px (max {:.2f} px)'.format(change_max, limit))
+    folds, roundtrip = modelSanity(fitted)
+    _check('no fold-over', folds == 0, '{:d} folded cells'.format(folds))
+    _check('forward and reverse agree', roundtrip <= options['max_roundtrip_px'],
+           'largest difference {:.3f} px (max {:.3f})'.format(roundtrip, options['max_roundtrip_px']))
+
+    failed_names = [check['name'] for check in checks if not check['ok']]
+
+    return {'ok': not failed_names, 'checks': checks, 'failed': failed_names}
+
+
+def _qcLine(qc):
+    """ One line of the verdict of the quality control.
+
+    Arguments:
+        qc: [dict] Verdict (see qualityControl).
+
+    Return:
+        [str] The line.
+    """
+
+    if qc['ok']:
+        return 'PASS'
+
+    return 'FAIL ({:s})'.format(', '.join(qc['failed']))
 
 
 def _warnNightsWithoutStars(nights, keys, results, snr_min):
@@ -1170,6 +1539,10 @@ def formatReport(report):
         fit = ''
         if 'fit_chunks' in entry:
             fit = ' -> fit on {:d} stars of {:d} chunks'.format(entry['fit_stars'], entry['fit_chunks'])
+            if entry.get('outlier_chunks'):
+                fit += ' ({:d} outlier chunks left out)'.format(entry['outlier_chunks'])
+            if 'change_px' in entry:
+                fit += ', mapping changed by {:.3f} px rms'.format(entry['change_px'][0])
         lines.append('  iteration {:d}: {:s}{:s}'.format(entry['iteration'], _statsLine(
             entry['stats'], entry['recalibrated'], report['chunks']), fit))
     lines.append('  final distortion:')
@@ -1192,6 +1565,14 @@ def formatReport(report):
             lines += _statsBlock(held['stats'])
             for dir_path, n_chunks, n_recalibrated, stats in held['nights']:
                 lines.append('  {:s}: {:s}'.format(dir_path, _statsLine(stats, n_recalibrated, n_chunks)))
+
+    # The quality control
+    if report.get('qc'):
+        lines.append('')
+        lines.append('Quality control: {:s}'.format(_qcLine(report['qc'])))
+        for check in report['qc']['checks']:
+            lines.append('  [{:s}] {:s}: {:s}'.format('ok' if check['ok'] else 'FAIL', check['name'],
+                                                    check['value']))
 
     return '\n'.join(lines) + '\n'
 
@@ -1250,7 +1631,8 @@ def main(argv=None):
         argv: [list] Command line arguments. None by default, in which case those of the program are used.
 
     Return:
-        [int] Exit code: 0 on success, 1 on an error (which is logged).
+        [int] Exit code: 0 on success, 1 on an error (which is logged), 2 if the fit fails its quality control (the
+            platepar and the report are written all the same).
     """
 
     import RMS.ConfigReader as cr
@@ -1286,6 +1668,17 @@ def main(argv=None):
 
     holdout_group.add_argument('--holdoutdirs', nargs='+', metavar='DIR_PATH', type=str,
                                help="Hold out the nights of these directories (some of the given ones) instead.")
+
+    arg_parser.add_argument('--holdoutchunks', metavar='N', type=int,
+                            help="Also hold out every N-th chunk of every night of the fit (N >= 2), e.g. to check a "
+                            "fit of a single night. None by default.")
+
+    arg_parser.add_argument('--maxchunks', metavar='N', type=_positiveInt,
+                            help="At most N chunks in the fit and N held out, spread evenly in time. No limit by "
+                            "default.")
+
+    arg_parser.add_argument('--noqc', action='store_true',
+                            help="Don't run the quality control of the fit.")
 
     arg_parser.add_argument('--iter', metavar='N_ITER', type=_positiveInt, default=4,
                             help="Number of fits of the distortion (at least 1). 4 by default.")
@@ -1355,7 +1748,9 @@ def main(argv=None):
                                                 match_radius=cml_args.radius, lim_mag=cml_args.limmag,
                                                 nproc=cml_args.nproc,
                                                 decentering=(None if cml_args.decentering is None
-                                                             else cml_args.decentering == 'on'))
+                                                             else cml_args.decentering == 'on'),
+                                                holdout_chunks=cml_args.holdoutchunks,
+                                                max_chunks=cml_args.maxchunks, qc=(not cml_args.noqc))
 
         # The fitted distortion with the pointing of the given platepar
         if pointing is not None:
@@ -1375,6 +1770,11 @@ def main(argv=None):
 
     print(formatReport(fit_report))
     print("Platepar written to {:s}, report to {:s}".format(cml_args.out, report_path))
+
+    # A fit which fails its quality control ends with its own exit code
+    if fit_report.get('qc') and (not fit_report['qc']['ok']):
+        log.warning("The fit fails its quality control: {:s}".format(', '.join(fit_report['qc']['failed'])))
+        return 2
 
     return 0
 
