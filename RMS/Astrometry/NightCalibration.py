@@ -617,7 +617,7 @@ class NightCalibrationProcess(object):
 
 
 def jointFitNight(clear, start, config, night_dir, night_hours, ff_frames=256, nproc=1,
-                  max_chunks=END_MAX_CHUNKS):
+                  max_chunks=END_MAX_CHUNKS, mask=None):
     """ The joint fit of the lens distortion on the clear chunks of a night, every END_HOLDOUT_CHUNKS-th chunk held
         out, with the quality control of a night (END_MIN_HOURS of clear chunks over END_MIN_SPAN_SHARE of the
         night). The report of the fit is written to the night directory (auto_calibration_joint_report.txt).
@@ -633,6 +633,7 @@ def jointFitNight(clear, start, config, night_dir, night_hours, ff_frames=256, n
         ff_frames: [int] Number of frames of a chunk. 256 by default.
         nproc: [int] Workers of the fit. 1 by default.
         max_chunks: [int] At most this many chunks in the fit and held out. END_MAX_CHUNKS by default.
+        mask: [ndarray] Mask image of the camera (0 is masked), for the quality control. None by default.
 
     Return:
         (fitted, report): [tuple] The fitted platepar and the report with the verdict of the quality control
@@ -649,7 +650,7 @@ def jointFitNight(clear, start, config, night_dir, night_hours, ff_frames=256, n
     fitted, report = _quietJointFit([fit_dir], start, config, n_iter=JOINT_ITERATIONS, chunk_step=1,
                                     holdout_chunks=END_HOLDOUT_CHUNKS, max_chunks=max_chunks, nproc=nproc,
                                     qc_options={'min_hours': END_MIN_HOURS,
-                                                'min_span_hours': END_MIN_SPAN_SHARE*night_hours})
+                                                'min_span_hours': END_MIN_SPAN_SHARE*night_hours}, mask=mask)
 
     # The report of the fit is kept with the night
     if report is not None:
@@ -737,7 +738,7 @@ def endOfNightCalibration(config, night_dir, calstars_name, platepar, platepar_p
 
     # The joint fit of the whole night
     fitted, report = jointFitNight(clear, start, config, night_dir, (chunks[-1][1] - chunks[0][1])*24.0,
-                                   ff_frames=ff_frames, nproc=nproc)
+                                   ff_frames=ff_frames, nproc=nproc, mask=mask_img)
 
     # Installed if it meets the quality control; otherwise the start is installed if it isn't yet (it was good on
     #   held-out chunks)
