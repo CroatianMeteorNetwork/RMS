@@ -155,8 +155,21 @@ def chunkName(jd):
         year, month, day, hour, minute, int(second), int(millisecond))
 
 
-def chunkStars(pp, jd, catalog_stars, rng):
-    """ The stars of a chunk as CALSTARS rows: the catalog stars on the image with the platepar, with the noise. """
+def chunkStars(pp, jd, catalog_stars, rng, noise=NOISE_PX):
+    """ The stars of a chunk as CALSTARS rows: the catalog stars on the image with the platepar, with the noise.
+
+    Arguments:
+        pp: [Platepar] Platepar of the chunk.
+        jd: [float] Julian date of the chunk.
+        catalog_stars: [ndarray] Catalog stars (ra, dec, mag).
+        rng: [Generator] Random generator of the noise.
+
+    Keyword arguments:
+        noise: [float] Noise of the positions (px). NOISE_PX by default.
+
+    Return:
+        [ndarray] The stars as CALSTARS rows.
+    """
 
     # The catalog stars near the centre of the field of view
     _, ra_c, dec_c, _ = xyToRaDecPP([jd2Date(jd)], [pp.X_res/2], [pp.Y_res/2], [1], pp, extinction_correction=False)
@@ -170,8 +183,8 @@ def chunkStars(pp, jd, catalog_stars, rng):
     x, y = raDecToXYPP(ra, dec, jd, pp)
     inside = (x > 15) & (x < pp.X_res - 15) & (y > 15) & (y < pp.Y_res - 15)
     x, y, mag = x[inside], y[inside], mag[inside]
-    x = x + rng.normal(0, NOISE_PX, x.size)
-    y = y + rng.normal(0, NOISE_PX, y.size)
+    x = x + rng.normal(0, noise, x.size)
+    y = y + rng.normal(0, noise, y.size)
 
     # The intensities follow the photometry of the platepar
     intensity = 10**((pp.mag_lev - mag)/2.5)
@@ -181,10 +194,59 @@ def chunkStars(pp, jd, catalog_stars, rng):
                             np.zeros(n)])
 
 
+def makeNights(tmp_path_factory, config, truth, start, prefix, n_nights=N_NIGHTS, n_chunks=N_CHUNKS,
+               noise=NOISE_PX):
+    """ Synthetic nights: a directory per night with a CALSTARS file of stars put on the images by the known
+        distortion with the night's pointing, and a platepar with the night's pointing on the starting distortion.
+
+    Arguments:
+        tmp_path_factory: [TempPathFactory] Factory of the directories.
+        config: [Config] Configuration.
+        truth: [Platepar] The known distortion.
+        start: [Platepar] The starting distortion.
+        prefix: [str] Prefix of the names of the directories.
+
+    Keyword arguments:
+        n_nights: [int] Number of nights. N_NIGHTS by default.
+        n_chunks: [int] Number of chunks of every night. N_CHUNKS by default.
+        noise: [float] Noise of the star positions (px). NOISE_PX by default.
+
+    Return:
+        (dirs, pointings): the directories and the true platepar of every night.
+    """
+
+    catalog_stars = loadCatalogStars(config, LIM_MAG, jd=truth.JD)
+    rng = np.random.default_rng(0)
+
+    dirs, pointings = [], []
+    for n in range(n_nights):
+
+        # The pointing of the night, a few nights apart: the camera turned and refocused a little
+        jd_night = truth.JD + 3*n
+        pointing = withPointing(truth, jd_night, 0.3*n, -0.2*n, 0.1*n, 0.0005*n)
+
+        # The chunks of the night, their stars at the middle of the chunk (the time of the recalibration)
+        star_list = []
+        for c in range(n_chunks):
+            name = chunkName(jd_night + c*CHUNK_MINUTES/1440.0)
+            jd = date2JD(*getMiddleTimeFF(name, config.fps, ret_milliseconds=True, ff_frames=256))
+            star_list.append([name, chunkStars(pointing, jd, catalog_stars, rng, noise=noise).tolist()])
+
+        # The directory of the night, with the night's pointing on the starting distortion
+        dir_path = str(tmp_path_factory.mktemp("{:s}_{:d}".format(prefix, n)))
+        CALSTARS.writeCALSTARS(star_list, dir_path, "CALSTARS_XX0001.txt", "XX0001", truth.Y_res, truth.X_res)
+        transferPointing(start, pointing)[0].write(os.path.join(dir_path, config.platepar_name))
+
+        dirs.append(dir_path)
+        pointings.append(pointing)
+
+    return dirs, pointings
+
+
 @pytest.fixture(scope="module")
 def nights(tmp_path_factory):
-    """ The synthetic nights: a directory per night with a CALSTARS file and a platepar with the night's pointing
-        and a wrong distortion.
+    """ The synthetic nights of a known distortion, with a wrong distortion in the platepars of the nights and in
+        the starting platepar (see makeNights).
 
     Return:
         (config, truth, start, dirs, pointings): the configuration, the known distortion, the starting platepar
@@ -195,30 +257,7 @@ def nights(tmp_path_factory):
     truth = makePlatepar()
     start = wrongDistortion(truth)
     start.mag_lev, start.vignetting_coeff = START_MAG_LEV, START_VIGNETTING
-    catalog_stars = loadCatalogStars(config, LIM_MAG, jd=truth.JD)
-    rng = np.random.default_rng(0)
-
-    dirs, pointings = [], []
-    for n in range(N_NIGHTS):
-
-        # The pointing of the night, a few nights apart: the camera turned and refocused a little
-        jd_night = truth.JD + 3*n
-        pointing = withPointing(truth, jd_night, 0.3*n, -0.2*n, 0.1*n, 0.0005*n)
-
-        # The chunks of the night, their stars at the middle of the chunk (the time of the recalibration)
-        star_list = []
-        for c in range(N_CHUNKS):
-            name = chunkName(jd_night + c*CHUNK_MINUTES/1440.0)
-            jd = date2JD(*getMiddleTimeFF(name, config.fps, ret_milliseconds=True, ff_frames=256))
-            star_list.append([name, chunkStars(pointing, jd, catalog_stars, rng).tolist()])
-
-        # The directory of the night, with the night's pointing on the wrong distortion
-        dir_path = str(tmp_path_factory.mktemp("night_{:d}".format(n)))
-        CALSTARS.writeCALSTARS(star_list, dir_path, "CALSTARS_XX0001.txt", "XX0001", truth.Y_res, truth.X_res)
-        transferPointing(start, pointing)[0].write(os.path.join(dir_path, config.platepar_name))
-
-        dirs.append(dir_path)
-        pointings.append(pointing)
+    dirs, pointings = makeNights(tmp_path_factory, config, truth, start, "night")
 
     return config, truth, start, dirs, pointings
 
@@ -599,3 +638,150 @@ def test_warning_when_the_fit_gets_worse(caplog):
     with caplog.at_level(logging.WARNING, logger="rmslogger"):
         assert JointDistortionFit._warnIfWorse(_iterations([5.0, 4.0, 4.5]))
         assert not JointDistortionFit._warnIfWorse(_iterations([5.0, 4.0, 4.02]))
+
+
+# The decentering of the known distortion of the decentering tests (p1, p2, p3, p4 of the sky to image mapping),
+#   which moves the stars by up to about 0.9 px after the pointing is fitted, and the nights, chunks and noise (px)
+#   of its synthetic nights (a smaller noise, as the asymmetry correction takes up a part of the decentering)
+DECENTERING = [0.0002, -0.00015, 0.0001, 0.0]
+DECENTERED_NIGHTS = 4
+DECENTERED_CHUNKS = 2
+DECENTERED_NOISE = 0.05
+
+
+@pytest.fixture(scope="module")
+def decentered_nights(tmp_path_factory):
+    """ The synthetic nights of a known distortion with the decentering correction, the platepars of the nights and
+        the starting platepar without it (the same distortion otherwise).
+
+    Return:
+        (config, truth, start, dirs, pointings): as the nights fixture.
+    """
+
+    config = makeConfig()
+    truth = makePlatepar()
+    truth.remapCoeffsForFlagChange('decentering_corr', True)
+    truth.x_poly_rev[-4:] = DECENTERING
+    start = makePlatepar()
+    dirs, pointings = makeNights(tmp_path_factory, config, truth, start, "decentered", n_nights=DECENTERED_NIGHTS,
+                                 n_chunks=DECENTERED_CHUNKS, noise=DECENTERED_NOISE)
+
+    return config, truth, start, dirs, pointings
+
+
+@pytest.fixture(scope="module")
+def decentering_on(decentered_nights):
+    """ The joint fit of the decentered nights with the decentering correction switched on. """
+
+    config, truth, start, dirs, pointings = decentered_nights
+
+    return jointDistortionFit(dirs, start, config, n_iter=2, chunk_step=1, nproc=4, decentering=True)[0]
+
+
+def decenteringCoeffsClose(coeffs):
+    """ Whether fitted decentering coefficients are those of the known distortion: p1 and p3 within 20%, p2 within
+        30%, p4 near zero (the radial terms and the asymmetry correction take up a part of the decentering, so the
+        coefficients are not exactly those of the known distortion even when the stars are fitted to the noise).
+
+    Arguments:
+        coeffs: [list] Fitted p1, p2, p3, p4.
+
+    Return:
+        [bool] True if they are close.
+    """
+
+    p1, p2, p3, p4 = coeffs
+    return (abs(p1/DECENTERING[0] - 1) < 0.2) and (abs(p3/DECENTERING[2] - 1) < 0.2) \
+        and (abs(p2/DECENTERING[1] - 1) < 0.3) and (abs(p4) < 0.1*DECENTERING[0])
+
+
+def test_decentering_switched_on_recovers_it(decentered_nights, decentering_on):
+    """ Switched on, the decentering correction is fitted: its coefficients are those of the known distortion and
+        the fitted distortion puts the stars where the known one does, much closer than the noise. """
+
+    config, truth, start, dirs, pointings = decentered_nights
+    fitted = decentering_on
+
+    assert fitted.decentering_corr and (fitted.distortion_type == "radial7-odd")
+    assert decenteringCoeffsClose(fitted.x_poly_rev[-4:])
+    for pointing in pointings:
+        assert gridDifference(pointing, transferPointing(start, pointing, max_rms=None)[0]) > 10*DECENTERED_NOISE
+        assert gridDifference(pointing, transferPointing(fitted, pointing)[0]) < 0.5*DECENTERED_NOISE
+
+
+def test_decentering_kept_off_by_default(decentered_nights, decentering_on):
+    """ Not asked for, the decentering correction stays off as in the starting platepar. Without it the radial
+        distortion and its asymmetry correction take up most of the decentering, but leave several times more
+        than the fit with it. """
+
+    config, truth, start, dirs, pointings = decentered_nights
+    fitted = jointDistortionFit(dirs, start, config, n_iter=1, chunk_step=1, nproc=4)[0]
+
+    assert not fitted.decentering_corr
+    assert fitted.poly_length == start.poly_length
+    for pointing in pointings:
+        assert gridDifference(pointing, transferPointing(fitted, pointing)[0]) \
+            > 2*gridDifference(pointing, transferPointing(decentering_on, pointing)[0])
+
+
+def test_decentering_kept_on_by_default(decentered_nights, decentering_on):
+    """ Not asked for, the decentering correction of a starting platepar which has it stays on and is refitted. """
+
+    config, truth, start, dirs, pointings = decentered_nights
+    fitted = jointDistortionFit(dirs, decentering_on, config, n_iter=1, chunk_step=1, nproc=4)[0]
+
+    assert fitted.decentering_corr
+    assert decenteringCoeffsClose(fitted.x_poly_rev[-4:])
+
+
+def test_decentering_switched_off_from_the_command_line(decentered_nights, decentering_on, tmp_path, monkeypatch):
+    """ Switched off on the command line, the decentering coefficients are dropped from the fitted platepar. """
+
+    config, truth, start, dirs, pointings = decentered_nights
+    monkeypatch.setattr(cr, "loadConfigFromDirectory", lambda *args: config)
+    start_path, out_path = str(tmp_path/"start.cal"), str(tmp_path/"joint.cal")
+    decentering_on.write(start_path)
+
+    assert JointDistortionFit.main(dirs + ['-p', start_path, '-o', out_path, '--iter', '1', '--step', '2',
+                                           '--nproc', '4', '--decentering', 'off']) == 0
+    written = readPlatepar(out_path, True)
+    assert not written.decentering_corr
+    assert written.poly_length == start.poly_length
+    assert len(written.x_poly_rev) == start.poly_length
+
+
+def test_decentering_switched_on_with_a_type_change_from_the_command_line(nights, fit_poly, tmp_path,
+                                                                         monkeypatch):
+    """ On the command line, a type change with the decentering correction switched on fits the new radial type
+        with the correction (from no distortion), from a starting platepar of a polynomial type. """
+
+    config, truth, start, dirs, pointings = nights
+    monkeypatch.setattr(cr, "loadConfigFromDirectory", lambda *args: config)
+    start_path, out_path = str(tmp_path/"start.cal"), str(tmp_path/"joint.cal")
+    fit_poly[0].write(start_path)
+
+    assert JointDistortionFit.main(dirs + ['-p', start_path, '-o', out_path, '--iter', '2', '--step', '2',
+                                           '--nproc', '4', '-t', 'radial7-odd', '--decentering', 'on']) == 0
+    written = readPlatepar(out_path, True)
+    assert written.distortion_type == "radial7-odd"
+    assert written.decentering_corr
+    assert len(written.x_poly_rev) == written.poly_length == start.poly_length + 4
+
+
+def test_decentering_with_a_polynomial_type_fails(nights, fit_poly, tmp_path, monkeypatch):
+    """ The decentering correction exists only for the radial types: switched on with a polynomial type the fit
+        fails before it starts, the command line with an error. """
+
+    config, truth, start, dirs, pointings = nights
+
+    with pytest.raises(ValueError):
+        jointDistortionFit(dirs, fit_poly[0], config, decentering=True)
+    with pytest.raises(ValueError):
+        jointDistortionFit(dirs, start, config, distortion_type="poly3+radial5", decentering=True)
+
+    monkeypatch.setattr(cr, "loadConfigFromDirectory", lambda *args: config)
+    start_path, out_path = str(tmp_path/"start.cal"), str(tmp_path/"joint.cal")
+    start.write(start_path)
+    assert JointDistortionFit.main(dirs + ['-p', start_path, '-o', out_path, '-t', 'poly3+radial5',
+                                           '--decentering', 'on']) == 1
+    assert not os.path.exists(out_path)

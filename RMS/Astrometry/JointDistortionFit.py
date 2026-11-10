@@ -17,6 +17,14 @@ The recalibration of every chunk starts from the pointing of the platepar in the
 is one, otherwise from the starting platepar), carried over to the current distortion (transferPointing). Every
 N-th night can be held out of the fit, to check the fitted distortion on stars it wasn't fitted on.
 
+The model of the fitted distortion is that of the starting platepar unless another one is asked for: another
+distortion type, and for the radial types the decentering correction (Platepar.decentering_corr) switched on or
+off. The model is applied to the platepar of the reference chunk before every fit of the distortion, as RMS sets a
+model (AutoPlatepar.applyPlateparModel): the decentering flag first (Platepar.remapCoeffsForFlagChange, which adds
+its coefficients as zeros or drops them, keeping the others), then the type. Another type is fitted from no
+distortion, with the decentering correction if it is asked for (or if the starting platepar has it and the new type
+is radial). The decentering correction applies only to the radial types.
+
 The stars are those of the CALSTARS files, which RMS measures on dark-subtracted and flat-fielded images (if the
 flat is used, see use_flat in the config). The photometry of the starting platepar (including its vignetting
 coefficient) is kept as it is, it isn't fitted here.
@@ -629,7 +637,38 @@ def _collect(results, keys, snr_min):
     return np.concatenate(matched), np.concatenate(scale), n_recalibrated
 
 
-def fitDistortion(platepars, matched_stars, jds, distortion_type, max_stars, seed=0):
+def setDistortionModel(platepar, distortion_type, decentering):
+    """ Set the distortion model of a platepar, as RMS sets a model (AutoPlatepar.applyPlateparModel): the
+        decentering flag first, which moves the coefficients to its layout, then the distortion type.
+
+        With the same type the coefficients are kept, and the coefficients of the decentering correction are added
+        as zeros or dropped. Another type starts from no distortion.
+
+    Arguments:
+        platepar: [Platepar] Platepar, changed in place.
+        distortion_type: [str] Distortion type (see Platepar.setDistortionType).
+        decentering: [bool] Decentering correction of the radial distortion types.
+
+    Return:
+        None
+    """
+
+    # The decentering correction exists only for the radial types
+    if decentering and (not distortion_type.startswith("radial")):
+        raise ValueError("The decentering correction applies only to the radial distortion types, not to "
+                         "{:s}".format(distortion_type))
+
+    # Another type from no distortion, with the flag set before the type gives the length of the coefficients
+    if platepar.distortion_type != distortion_type:
+        platepar.remapCoeffsForFlagChange('decentering_corr', decentering)
+        platepar.setDistortionType(distortion_type, reset_params=True)
+
+    # The same type with the decentering switched on or off, the other coefficients kept
+    elif bool(getattr(platepar, 'decentering_corr', False)) != bool(decentering):
+        platepar.remapCoeffsForFlagChange('decentering_corr', decentering)
+
+
+def fitDistortion(platepars, matched_stars, jds, distortion_type, max_stars, seed=0, decentering=False):
     """ Fit one distortion on the matched stars of many recalibrated chunks.
 
         Every star is moved into the image of the reference chunk (the one in the middle of the time span): its
@@ -647,6 +686,8 @@ def fitDistortion(platepars, matched_stars, jds, distortion_type, max_stars, see
 
     Keyword arguments:
         seed: [int] Seed of the random choice of the stars. 0 by default.
+        decentering: [bool] Fit the decentering correction (radial types only, see setDistortionModel). False by
+            default.
 
     Return:
         (platepar, n_stars, reference_key): [tuple] The fitted platepar with the pointing of the reference chunk,
@@ -701,11 +742,10 @@ def fitDistortion(platepars, matched_stars, jds, distortion_type, max_stars, see
     chosen = np.concatenate([rng.choice(idx[cell == c], min(per_cell, np.count_nonzero(cell == c)), replace=False)
                              for c in cells]) if len(cells) else np.zeros(0, dtype=int)
 
-    # The distortion fitted with the pointing of the reference chunk as the start. A different distortion type
-    #   starts from no distortion
+    # The distortion fitted with the pointing of the reference chunk as the start, in the asked model. A different
+    #   distortion type starts from no distortion
     platepar = copy.deepcopy(pp_ref)
-    if platepar.distortion_type != distortion_type:
-        platepar.setDistortionType(distortion_type, reset_params=True)
+    setDistortionModel(platepar, distortion_type, decentering)
     platepar.fitAstrometry(jd_ref, np.column_stack([x[chosen], y[chosen], intensity[chosen]]),
                            np.column_stack([ra[chosen], dec[chosen], mag[chosen]]))
     platepar.auto_recalibrated = False
@@ -715,7 +755,7 @@ def fitDistortion(platepars, matched_stars, jds, distortion_type, max_stars, see
 
 
 def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdout=None, n_iter=4, snr_min=10.0,
-                       max_stars=20000, chunk_step=2, match_radius=None, lim_mag=None, nproc=None):
+                       max_stars=20000, chunk_step=2, match_radius=None, lim_mag=None, nproc=None, decentering=None):
     """ Fit one distortion on the stars of many nights, with the pointing of every chunk fitted separately (see
         the description of the module).
 
@@ -739,6 +779,9 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
         lim_mag: [float] Limiting magnitude of the catalog stars which are matched (a deeper catalog leaves out
             more stars with a neighbour). None by default, in which case config.catalog_mag_limit is used.
         nproc: [int] Number of parallel workers. None by default, in which case all cores are used.
+        decentering: [bool] Fit the decentering correction of the radial distortion types (True) or not (False).
+            None by default, in which case the setting of the starting platepar is kept if the fitted type is
+            radial (otherwise it is off). True with a type which isn't radial raises a ValueError.
 
     Return:
         (platepar, report): [tuple] The fitted platepar (the distortion of the last fit with the pointing of the
@@ -759,6 +802,20 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
     if distortion_type != platepar.distortion_type:
         log.info("The distortion type changes from {:s} (starting platepar) to {:s}, which is fitted from no "
                  "distortion".format(platepar.distortion_type, distortion_type))
+
+    # The decentering correction is that of the starting platepar unless it is switched on or off, and exists only
+    #   for the radial types
+    start_decentering = bool(getattr(platepar, 'decentering_corr', False))
+    radial = distortion_type.startswith("radial")
+    if decentering is None:
+        decentering = start_decentering and radial
+    decentering = bool(decentering)
+    if decentering and (not radial):
+        raise ValueError("The decentering correction applies only to the radial distortion types, not to "
+                         "{:s}".format(distortion_type))
+    if decentering != start_decentering:
+        log.info("The decentering correction is switched {:s} for the fit (starting platepar: {:s})".format(
+            'on' if decentering else 'off', 'on' if start_decentering else 'off'))
 
     # The catalog depth and number of workers not given are those of the config and the machine
     if lim_mag is None:
@@ -868,7 +925,8 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
         _setWorkerData(*init_args)
 
     report = {'nights': [night['dir'] for night in nights], 'held_out': sorted(nights[n]['dir'] for n in held),
-              'distortion_type': distortion_type, 'match_radius': match_radius, 'lim_mag': lim_mag,
+              'distortion_type': distortion_type, 'decentering': decentering, 'match_radius': match_radius,
+              'lim_mag': lim_mag,
               'snr_min': snr_min, 'chunks': len(train_keys), 'iterations': []}
     width, height = platepar.X_res, platepar.Y_res
 
@@ -912,7 +970,7 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
                     MIN_CHUNK_STARS, snr_min))
 
             distortion, n_fit, reference_key = fitDistortion(fit_platepars, fit_stars, jds, distortion_type,
-                                                             max_stars)
+                                                             max_stars, decentering=decentering)
             entry['fit_chunks'], entry['fit_stars'] = len(fit_platepars), n_fit
             report['reference'] = (nights[reference_key[0]]['dir'], _chunk(reference_key)[0])
 
@@ -1096,7 +1154,8 @@ def formatReport(report):
         [str] The report.
     """
 
-    lines = ['Joint distortion fit, distortion type {:s}'.format(report['distortion_type'])]
+    lines = ['Joint distortion fit, distortion type {:s}{:s}'.format(
+        report['distortion_type'], ' with the decentering correction' if report.get('decentering') else '')]
     lines.append('{:d} nights, {:d} held out, {:d} chunks in the fit; match radius {:.2f} px, catalog to mag '
                  '{:.1f}, SNR >= {:.1f}'.format(len(report['nights']), len(report['held_out']), report['chunks'],
                                                 report['match_radius'], report['lim_mag'], report['snr_min']))
@@ -1252,6 +1311,13 @@ def main(argv=None):
                             help="Write the fitted distortion with the pointing of this platepar (e.g. the latest "
                             "one of the camera) instead of the pointing of the reference chunk.")
 
+    arg_parser.add_argument('--decentering', choices=('on', 'off'),
+                            help="Fit the decentering correction of the radial distortion types (on) or not (off). "
+                            "The setting of the starting platepar by default (off for a type which isn't radial). "
+                            "It applies to the fitted type, also with -t: e.g. -t radial7-odd --decentering on "
+                            "fits radial7-odd with the correction from no distortion. On with a type which isn't "
+                            "radial is an error.")
+
     arg_parser.add_argument('--nproc', metavar='N_PROC', type=_positiveInt,
                             help="Number of parallel workers. All cores by default.")
 
@@ -1287,7 +1353,9 @@ def main(argv=None):
                                                 n_iter=cml_args.iter, snr_min=cml_args.snrmin,
                                                 max_stars=cml_args.maxstars, chunk_step=cml_args.step,
                                                 match_radius=cml_args.radius, lim_mag=cml_args.limmag,
-                                                nproc=cml_args.nproc)
+                                                nproc=cml_args.nproc,
+                                                decentering=(None if cml_args.decentering is None
+                                                             else cml_args.decentering == 'on'))
 
         # The fitted distortion with the pointing of the given platepar
         if pointing is not None:
