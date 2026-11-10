@@ -623,6 +623,19 @@ class Config:
         self.mask_remote_name = 'mask_latest.bmp'
         self.remote_mask_dir = 'masks'
 
+        # Automatic calibration (see RMS.Astrometry.AutoCalibration): fit and install a platepar from the stars,
+        #   minutes between the checks whether a clearly better platepar can be fitted, fit the vignetting also when
+        #   a platepar exists, and only save the fitted platepars as candidates without installing them
+        self.auto_calibration = False
+        self.auto_calibration_interval = 30.0
+        self.auto_calibration_fit_vignetting = False
+        self.auto_calibration_dry_run = False
+
+        # Largest scatter of the photometric fits of the chunks (mag) and largest median photometric residual of a
+        #   zone of the image (mag) for a good platepar
+        self.auto_calibration_max_mag_stddev = 0.25
+        self.auto_calibration_max_zone_mag_residual = 0.3
+
 
         self.catalog_mag_limit = 5.5
 
@@ -1851,6 +1864,26 @@ def parseCalibration(config, parser):
 
     if parser.has_option(section, "remote_mask_dir"):
         config.remote_mask_dir = parser.get(section, "remote_mask_dir")
+
+    # Automatic calibration
+    if parser.has_option(section, "auto_calibration"):
+        config.auto_calibration = parser.getboolean(section, "auto_calibration")
+
+    if parser.has_option(section, "auto_calibration_interval"):
+        config.auto_calibration_interval = parser.getfloat(section, "auto_calibration_interval")
+
+    if parser.has_option(section, "auto_calibration_fit_vignetting"):
+        config.auto_calibration_fit_vignetting = parser.getboolean(section, "auto_calibration_fit_vignetting")
+
+    if parser.has_option(section, "auto_calibration_dry_run"):
+        config.auto_calibration_dry_run = parser.getboolean(section, "auto_calibration_dry_run")
+
+    if parser.has_option(section, "auto_calibration_max_mag_stddev"):
+        config.auto_calibration_max_mag_stddev = parser.getfloat(section, "auto_calibration_max_mag_stddev")
+
+    if parser.has_option(section, "auto_calibration_max_zone_mag_residual"):
+        config.auto_calibration_max_zone_mag_residual = parser.getfloat(section,
+                                                                        "auto_calibration_max_zone_mag_residual")
 
 
 
