@@ -237,6 +237,18 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
         # Get the platepar file
         platepar, platepar_path, platepar_fmt = getPlatepar(config, night_data_dir)
 
+        # Automatic calibration: the joint fit of the lens distortion on the whole night (see
+        #   RMS.Astrometry.NightCalibration), so the night is reduced with the best platepar. It never stops the
+        #   processing of the night
+        if config.auto_calibration and (calstars_name is not None):
+            try:
+                from RMS.Astrometry.NightCalibration import endOfNightCalibration
+                platepar, platepar_path, platepar_fmt = endOfNightCalibration(config, night_data_dir, calstars_name,
+                                                                              platepar, platepar_path, platepar_fmt)
+            except Exception as e:
+                log.warning("The automatic calibration at the end of the night failed: {:s}".format(repr(e)))
+                log.warning(repr(traceback.format_exception(*sys.exc_info())))
+
 
         # Run calibration check and auto astrometry refinement
         if (platepar is not None) and (calstars_name is not None):
