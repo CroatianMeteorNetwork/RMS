@@ -1404,14 +1404,14 @@ def qualityControl(fitted, start, report, config, options, judge_groups=(), clea
             chunks = AutoCalibration.spreadChunks(clear, options['judge_chunks'])
             catalog_stars = AutoCalibration._loadCatalog(config, chunks[len(chunks)//2][1])
 
-            # The fitted platepar, and if it fails, the starting platepar on the same chunks
+            # The fitted platepar, and if it fails, the starting platepar on the same chunks, both with the mask
             ok, reasons = AutoCalibration.judgeScore(AutoCalibration.scorePlatepar(
-                platepar, chunks, catalog_stars, config, ff_frames=group_chunks[0][3]))
+                platepar, chunks, catalog_stars, config, ff_frames=group_chunks[0][3], mask=mask))
             if ok:
                 good_groups.append(label)
                 continue
             start_ok, _ = AutoCalibration.judgeScore(AutoCalibration.scorePlatepar(
-                start_platepar, chunks, catalog_stars, config, ff_frames=group_chunks[0][3]))
+                start_platepar, chunks, catalog_stars, config, ff_frames=group_chunks[0][3], mask=mask))
             if start_ok:
                 failed.append('{:s}: {:s}'.format(label, '; '.join(reasons)))
             else:
