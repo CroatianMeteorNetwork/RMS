@@ -969,3 +969,37 @@ def test_median_fwhm_of_measured_widths_only():
     stars[:, ac.STAR_FWHM] = -1
     assert ac.medianFWHM([('a', 0.0, stars)]) == ac.DEFAULT_FWHM
     assert ac.medianFWHM([]) == ac.DEFAULT_FWHM
+
+
+def test_detections_next_to_the_mask_left_out_of_the_photometry(monkeypatch):
+    """ The photometry of a chunk is fitted only on the stars in the usable area of the mask, as the score is. """
+
+    seen = []
+    monkeypatch.setattr(ac, 'recalibrateChunk', lambda pp, name, stars, cat, config, ff, jd=None: (pp, True))
+    monkeypatch.setattr(ac, 'matchChunk', lambda pp, jd, stars, cat, lim, radius: (
+        np.zeros(len(stars)), np.zeros(len(stars)), np.zeros(len(stars)), np.full(len(stars), 5.0)))
+    monkeypatch.setattr(ac, 'extinctionCorrectionTrueToApparent', lambda mag, ra, dec, jd, pp: mag)
+
+    def _fit(intensity, radius, mags, fixed_vignetting=None):
+        seen.append(len(intensity))
+        return [10.0], 0.1, None, None, None, None
+
+    monkeypatch.setattr(ac, 'photometryFitRobust', _fit)
+
+    config = cr.Config()
+    config.min_matched_stars = 3
+    pp = Platepar()
+    pp.X_res, pp.Y_res = 100, 100
+    pp.vignetting_coeff = 0.0
+
+    # 10 stars on the left, 10 on the right half which is masked
+    stars = np.zeros((20, 8))
+    stars[:, ac.STAR_Y] = 50
+    stars[:10, ac.STAR_X], stars[10:, ac.STAR_X] = 20, 80
+    stars[:, ac.STAR_INTENSITY] = 1000
+    stars[:, ac.STAR_FWHM] = 2.0
+    mask = np.ones((100, 100), dtype=np.uint8)
+    mask[:, 50:] = 0
+
+    ac.scorePlatepar(pp, [('FF', 0.0, stars)], None, config, mask=mask)
+    assert seen == [10]

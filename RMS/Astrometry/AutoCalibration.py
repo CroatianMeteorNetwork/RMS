@@ -511,6 +511,27 @@ def scorePlatepar(platepar, chunks, catalog_stars, config, ff_frames=256, recali
     vignetting = platepar.vignetting_coeff if platepar.vignetting_coeff is not None else 0.0
     score.vignetting_coeff = vignetting
 
+    # With a mask, the detections next to it are not counted, also not in the photometry, and the zones which are
+    #   mostly masked are not judged
+    usable_px = _usableArea(mask, platepar, fwhm)
+
+    def _usable(stars):
+        """ Whether the stars are in the usable area (all of them without a mask).
+
+        Arguments:
+            stars: [ndarray] Stars (CALSTARS rows).
+
+        Return:
+            [ndarray] Boolean array, one value per star.
+        """
+
+        if usable_px is None:
+            return np.ones(len(stars), dtype=bool)
+
+        h, w = usable_px.shape
+        return usable_px[np.clip(stars[:, STAR_Y].astype(int), 0, h - 1), np.clip(stars[:, STAR_X].astype(int), 0,
+                                                                                  w - 1)]
+
     # Positions, matches, distances (FWHM) and photometric residuals of the stars of all chunks, and the
     #   photometry of every chunk
     xs, ys, matched, dists, mag_residuals = [], [], [], [], []
@@ -540,7 +561,7 @@ def scorePlatepar(platepar, chunks, catalog_stars, config, ff_frames=256, recali
         # Photometry on the matched, not saturated stars
         residual = np.full(len(stars), np.nan)
         saturated = stars[:, STAR_SATURATED] > 0 if stars.shape[1] > STAR_SATURATED else np.zeros(len(stars), bool)
-        good = is_matched & (~saturated) & (stars[:, STAR_INTENSITY] > 0)
+        good = is_matched & (~saturated) & (stars[:, STAR_INTENSITY] > 0) & _usable(stars)
         if np.sum(good) >= config.min_matched_stars:
 
             apparent_mags = extinctionCorrectionTrueToApparent(cat_mag[good], cat_ra[good], cat_dec[good], jd, pp)
@@ -573,8 +594,7 @@ def scorePlatepar(platepar, chunks, catalog_stars, config, ff_frames=256, recali
     matched, dists = np.concatenate(matched), np.concatenate(dists)
     mag_residuals = np.concatenate(mag_residuals)
 
-    # With a mask, the detections next to it are not counted, and the zones which are mostly masked not judged
-    usable_px = _usableArea(mask, platepar, fwhm)
+    # The detections next to the mask are left out of the score
     if usable_px is not None:
         h, w = usable_px.shape
         keep = usable_px[np.clip(ys.astype(int), 0, h - 1), np.clip(xs.astype(int), 0, w - 1)]

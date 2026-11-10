@@ -373,8 +373,9 @@ def readChunks(dir_path, config):
         config: [Config] Configuration.
 
     Return:
-        [list] Chunks as (name, jd, stars, ff_frames) sorted by time, jd the middle of the chunk (the time of the
-            recalibration) and stars an array of the CALSTARS rows.
+        [list] Chunks as (name, jd, stars, ff_frames, duration) sorted by time, jd the middle of the chunk (the
+            time of the recalibration), stars an array of the CALSTARS rows and duration the seconds the chunk
+            covers (at the frame rate of the header, otherwise of the config).
     """
 
     # The CALSTARS files of the directory
@@ -399,7 +400,8 @@ def readChunks(dir_path, config):
                 jd = date2JD(*getMiddleTimeFF(ff_name, fps, ret_milliseconds=True, ff_frames=ff_frames))
             except Exception:
                 continue
-            chunks[ff_name] = (ff_name, jd, np.array(stars, dtype=np.float64).reshape(-1, 8), ff_frames)
+            chunks[ff_name] = (ff_name, jd, np.array(stars, dtype=np.float64).reshape(-1, 8), ff_frames,
+                               ff_frames/fps)
 
     return sorted(chunks.values(), key=lambda chunk: chunk[1])
 
@@ -1208,7 +1210,7 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
                     own_platepar = own[n]
                     judge_groups.append((nights[n]['dir'], _startOf(nights[n], distortion), own_platepar,
                                          [_chunk(key) for key in keys]))
-            chunk_hours = [len(night['chunks'])*night['chunks'][0][3]/config.fps/3600.0 for night in nights]
+            chunk_hours = [sum(chunk[4] for chunk in night['chunks'])/3600.0 for night in nights]
             spans = [(night['chunks'][-1][1] - night['chunks'][0][1])*24.0 for night in nights]
             report['qc'] = qualityControl(distortion, platepar, report, config, options, judge_groups=judge_groups,
                                           clear_hours=float(np.sum(chunk_hours)), longest_span_hours=max(spans),

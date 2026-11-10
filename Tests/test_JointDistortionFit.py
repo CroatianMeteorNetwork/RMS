@@ -997,3 +997,20 @@ def test_quality_control_selects_clear_chunks_with_the_mask(nights, fit_held_chu
                         mask='mask image')
     assert masks == ['mask image']
     assert 'judged on the held-out chunks' in qc['failed']
+
+
+def test_chunks_timed_by_the_frame_rate_of_the_header(tmp_path):
+    """ The chunks of a CALSTARS file with the frame rate in its header are timed with it, and their duration
+        (for the hours of clear sky of the quality control) is that of the header's frame rate. """
+
+    config = makeConfig()
+    config.fps = 25.0
+    name = 'FF_XX0001_20261105_101112_345_0000000.fits'
+    CALSTARS.writeCALSTARS([[name, [(10.0, 20.0, 100, 10, 2.0, 5, 20.0, 0)]]], str(tmp_path), 'CALSTARS_test.txt',
+                           'XX0001', 720, 1280, chunk_frames=128, fps=10.0)
+
+    chunk = JointDistortionFit.readChunks(str(tmp_path), config)[0]
+    assert chunk[1] == pytest.approx(date2JD(*getMiddleTimeFF(name, 10.0, ret_milliseconds=True, ff_frames=128)),
+                                     abs=1e-9)
+    assert chunk[3] == 128
+    assert chunk[4] == pytest.approx(12.8)
