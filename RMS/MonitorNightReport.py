@@ -1381,7 +1381,9 @@ def scaledThumbStack(thumb_stack, chunk_frames, ff_frames=256):
 def nightJointFit(output_dir, night_name, config):
     """ Refit the platepar which the automatic calibration installed during a night on the clear chunks of the
         whole night, with the joint fit of the lens distortion (NightCalibration.jointFitNight), and install the
-        result if it meets the quality control of the fit. Runs once per night, only after an install during it.
+        result if it meets the quality control of the fit. Runs once per night, only after the night is over (not
+        at a partial report), only after an install during it, and not when a newer platepar was installed after
+        it (e.g. a backlog of old nights).
 
     Arguments:
         output_dir: [str] Output directory of the monitor.
@@ -1398,6 +1400,11 @@ def nightJointFit(output_dir, night_name, config):
 
     platepar_path = autoPlateparPath(output_dir, config)
     if not os.path.isfile(platepar_path):
+        return None
+
+    # Only once the night is over, so a partial report (or an idle moment during the night) doesn't fit, and use
+    #   up, the night before all of its data is in
+    if RmsDateTime.utcnow() < nightBoundsFromName(config, night_name)[1]:
         return None
 
     # The chunks of the night, from the CALSTARS file of every processed file
@@ -1418,12 +1425,29 @@ def nightJointFit(output_dir, night_name, config):
     if mask_paths:
         mask_img = getattr(loadMask(mask_paths[0]), 'img', None)
 
+    # The files of the night were processed with or without a flat, which decides the photometry of the fit
+    #   (the configuration of the report may differ from the one of the processing)
+    flat_flags = [info['flat_applied'] for info in results.values() if 'flat_applied' in info]
+    if flat_flags:
+        config = copy.copy(config)
+        config.use_flat = any(flat_flags)
+
     # Only after a platepar was installed during the night, and once per night
     state = ac.readState(output_dir)
     done = state.get('night_joint_fits', {})
-    installed = [entry for entry in state.get('installs', [])
-                 if (start_jd <= entry.get('jd', 0) <= end_jd) and (not entry.get('dry_run'))]
+    installs = [entry for entry in state.get('installs', []) if not entry.get('dry_run')]
+    installed = [entry for entry in installs if start_jd <= entry.get('jd', 0) <= end_jd]
     if (not installed) or (night_name in done):
+        return None
+
+    # Not when a newer platepar was installed after the night: the fit of an old night doesn't replace it
+    if any(entry.get('jd', 0) > end_jd for entry in installs):
+        log.info("Joint fit of night {:s}: skipped, a newer platepar was installed after it".format(night_name))
+        with ac._StateLock(output_dir):
+            state = ac.readState(output_dir)
+            state.setdefault('night_joint_fits', {})[night_name] = {'verdict': 'skipped (newer platepar)',
+                                                                    'clear_chunks': 0}
+            ac.writeState(output_dir, state)
         return None
 
     # The clear chunks, judged against the clearest sky seen by the camera
@@ -1509,7 +1533,8 @@ def generateNightReport(output_dir, night_name, config, results=None, archive=Tr
         from RMS.MonitorProcessFrameInterface import backfillCalibration
 
         # A platepar fitted during the night is refitted on the whole night first (the joint fit of the lens
-        #   distortion); the files calibrated with the platepar it replaces are calibrated again below
+        #   distortion); the files calibrated with the platepar it replaces are calibrated again below, also those
+        #   whose judgement passed it, as the refit refines it
         replaced_mtimes = None
         try:
             replaced_mtime = nightJointFit(output_dir, night_name, config)
@@ -1522,7 +1547,8 @@ def generateNightReport(output_dir, night_name, config, results=None, archive=Tr
             log.error("The joint fit of night {:s} failed:\n{:s}".format(night_name, traceback.format_exc()))
 
         try:
-            if backfillCalibration(output_dir, config, night_name, replaced_mtimes=replaced_mtimes):
+            if backfillCalibration(output_dir, config, night_name, replaced_mtimes=replaced_mtimes,
+                                   refine_replaced=bool(replaced_mtimes)):
                 results = None
 
         except Exception:

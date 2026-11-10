@@ -2,13 +2,17 @@
 Tests of the joint fit of the night in the monitor (MonitorNightReport.nightJointFit): a platepar which the
 automatic calibration installed during a night is refitted on the whole night at its report, installed only if the
 fit meets its quality control, once per night; nothing happens without an install during the night. The mask
-of the night is used for the clear chunks and the quality control.
+of the night is used for the clear chunks and the quality control. The fit waits for the end of the night, takes
+the flat from the processing of the files, and leaves an old night alone when a newer platepar was installed. The
+files calibrated with the replaced platepar get the refit even where their own judgement passed it.
 
 The fit itself is replaced by a stand-in whose outcome each test sets.
 """
 
 from __future__ import print_function, division, absolute_import
 
+import datetime
+import json
 import os
 
 import numpy as np
@@ -52,6 +56,7 @@ def monitor(tmp_path, monkeypatch):
 
     def _fit(clear, start, config, night_dir, night_hours, **kwargs):
         plan['calls'].append((len(clear), start.mag_lev, round(night_hours, 2)))
+        plan['fit_use_flat'] = config.use_flat
         plan['fit_mask'] = kwargs.get('mask')
         report = {'qc': {'ok': plan['qc_ok'], 'failed': [] if plan['qc_ok'] else ['converged'], 'checks': []}}
         return _platepar(plan['value']), report
@@ -65,6 +70,11 @@ def monitor(tmp_path, monkeypatch):
 
     monkeypatch.setattr(ac, 'clearChunks', _clear)
     monkeypatch.setattr(nc, 'jointFitNight', _fit)
+
+    # The night is over unless a test says otherwise
+    night_end = datetime.datetime(2026, 11, 6, 12, 0, 0)
+    monkeypatch.setattr(mnr, 'nightBoundsFromName', lambda config, name: (night_end - datetime.timedelta(hours=12),
+                                                                          plan.get('night_end', night_end)))
 
     return config, output_dir, plan
 
@@ -197,3 +207,77 @@ def test_vignetting_refitted_outside_the_joint_holdout(monitor, monkeypatch, use
         assert refits[0] and not (refits[0] & held)
         assert refits[0] | held == set(clear)
         assert plan['calls'][0][1] == 5.0
+
+
+def test_not_before_the_end_of_the_night(monitor):
+    """ A report during the night (a partial report) doesn't fit the night and doesn't use up its fit. """
+
+    config, output_dir, plan = monitor
+    _install(output_dir, JD0 + 0.05)
+    plan['night_end'] = datetime.datetime.utcnow() + datetime.timedelta(hours=3)
+
+    assert mnr.nightJointFit(output_dir, '20261105', config) is None
+    assert not plan['calls']
+    assert '20261105' not in ac.readState(output_dir).get('night_joint_fits', {})
+
+    # After the end of the night it is fitted
+    plan['night_end'] = datetime.datetime.utcnow() - datetime.timedelta(hours=1)
+    assert mnr.nightJointFit(output_dir, '20261105', config) is not None
+    assert len(plan['calls']) == 1
+
+
+def test_old_night_does_not_replace_a_newer_platepar(monitor):
+    """ An old night reported after a newer platepar was installed (e.g. a backlog) isn't fitted, and the newer
+        platepar stays. """
+
+    config, output_dir, plan = monitor
+    _install(output_dir, JD0 + 0.05)
+    _install(output_dir, JD0 + 2.0)
+
+    assert mnr.nightJointFit(output_dir, '20261105', config) is None
+    assert not plan['calls']
+    assert _installed(config, output_dir) == 1.0
+    assert ac.readState(output_dir)['night_joint_fits']['20261105']['verdict'].startswith('skipped')
+
+
+@pytest.mark.parametrize('flat_applied', [False, True])
+def test_flat_of_the_processing(monitor, monkeypatch, flat_applied):
+    """ The flat comes from how the files of the night were processed, not from the configuration of the report:
+        with a flat no vignetting is refitted, and the fit gets the flat setting of the files. """
+
+    config, output_dir, plan = monitor
+    config.use_flat = not flat_applied
+    config.monitor_auto_calibration_fit_vignetting = True
+    _install(output_dir, JD0 + 0.05)
+    monkeypatch.setattr(mnr, 'scanNights', lambda output_dir, config: {
+        '20261105': {'r1': {'flat_applied': flat_applied}, 'r2': {'flat_applied': flat_applied}}})
+
+    refits = []
+    monkeypatch.setattr(ac, 'refitVignetting', lambda platepar, chunks, *args, **kwargs:
+                        (refits.append(1) or platepar, {'kept': False, 'reason': 'stand-in'})[0:2])
+    monkeypatch.setattr(ac, '_loadCatalog', lambda config, jd: np.zeros((0, 3)))
+
+    mnr.nightJointFit(output_dir, '20261105', config)
+    assert plan['fit_use_flat'] is flat_applied
+    assert bool(refits) is (not flat_applied)
+
+    # The configuration of the caller is not changed
+    assert config.use_flat is (not flat_applied)
+
+
+def test_backfill_refines_files_whose_judgement_passed(tmp_path):
+    """ The files calibrated with a replaced platepar which their own judgement passed keep it, unless the
+        installed platepar refines it (the joint fit of the night). """
+
+    from RMS.MonitorProcessFrameInterface import _needsCalibration
+
+    results_path = str(tmp_path)
+    with open(os.path.join(results_path, ac.FILE_RESULT_NAME), 'w') as f:
+        json.dump({'current': {'ok': True}}, f)
+    info = {'calibrated': True, 'platepar_mtime': 100.0}
+
+    assert not _needsCalibration(info, results_path, 200.0, [100.0], ac.FILE_RESULT_NAME)
+    assert _needsCalibration(info, results_path, 200.0, [100.0], ac.FILE_RESULT_NAME, refine_replaced=True)
+
+    # A version which wasn't replaced stays either way
+    assert not _needsCalibration(info, results_path, 200.0, [50.0], ac.FILE_RESULT_NAME, refine_replaced=True)
