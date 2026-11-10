@@ -393,6 +393,46 @@ def reportWhiteRatioSkips(detection_results):
 
 
 
+def starRows(star_data):
+    """ The stars detected on an image as rows of a CALSTARS file.
+
+    Arguments:
+        star_data: [list] Stars of an image as given by the star extraction (extractStarsFF: the image name,
+            then x, y, amplitude, intensity, FWHM, background, SNR, saturated pixels), or older results with fewer
+            columns (x, y, background, intensity; or the image name, x, y, background, intensity, FWHM).
+
+    Return:
+        [list] Rows of the stars (y, x, intensity, amplitude, FWHM, background, SNR, saturated pixels), empty if
+            no stars were found.
+    """
+
+    if len(star_data) == 4:
+
+        x2, y2, background, intensity = star_data
+
+        amplitude = np.zeros_like(x2).tolist()
+        fwhm = (np.zeros_like(x2) - 1).tolist()
+        snr = np.ones_like(x2).tolist()
+        saturated_count = np.zeros_like(x2).tolist()
+
+    elif len(star_data) == 6:
+        _, x2, y2, background, intensity, fwhm = star_data
+
+        amplitude = np.zeros_like(x2).tolist()
+        snr = np.ones_like(x2).tolist()
+        saturated_count = np.zeros_like(x2).tolist()
+
+    else:
+        _, x2, y2, amplitude, intensity, fwhm, background, snr, saturated_count = star_data
+
+    if not len(x2):
+        return []
+
+    # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
+    # Note: intensity=IntensSum (integrated), amplitude=Ampltd (peak)
+    return list(zip(y2, x2, intensity, amplitude, fwhm, background, snr, saturated_count))
+
+
 def saveDetections(detection_results, ff_dir, config, output_suffix=''):
     """ Save detection to CALSTARS and FTPdetectinfo files. 
     
@@ -444,38 +484,13 @@ def saveDetections(detection_results, ff_dir, config, output_suffix=''):
     # Save the detections to a file
     for ff_name, star_data, meteor_data, _ in detection_results:
 
-
-        if len(star_data) == 4:
-            
-            x2, y2, background, intensity = star_data
-            
-            amplitude = np.zeros_like(x2).tolist()
-            fwhm = (np.zeros_like(x2) - 1).tolist()
-            snr = np.ones_like(x2).tolist()
-            saturated_count = np.zeros_like(x2).tolist()
-
-        elif len(star_data) == 6:
-            _, x2, y2, background, intensity, fwhm = star_data
-
-            amplitude = np.zeros_like(x2).tolist()
-            snr = np.ones_like(x2).tolist()
-            saturated_count = np.zeros_like(x2).tolist()
-
-        else:
-            _, x2, y2, amplitude, intensity, fwhm, background, snr, saturated_count = star_data
-            
-
         # Skip if no stars were found
-        if not x2:
+        star_rows = starRows(star_data)
+        if not star_rows:
             continue
 
-        # Construct the table of the star parameters
-        # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
-        # Note: intensity=IntensSum (integrated), amplitude=Ampltd (peak)
-        star_data = zip(y2, x2, intensity, amplitude, fwhm, background, snr, saturated_count)
-
         # Add star info to the star list
-        star_list.append([ff_name, star_data])
+        star_list.append([ff_name, star_rows])
 
         # Handle the detected meteors
         meteor_No = 1

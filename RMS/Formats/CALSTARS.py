@@ -39,7 +39,7 @@ def writeCALSTARS(star_list, ff_directory, file_name, cam_code, nrows, ncols, ch
         chunk_frames: [int] Number of frames in the FF file or frame chunk. Default is 256.
         fps: [float] Frames per second used to time the frame chunk. When given, it is written to the
             header (FPS field) so the time can be reconstructed without relying on a possibly-wrong config
-            fps. For inputs with real per-frame timestamps (e.g. .vid) pass the measured fps from the image
+            fps. For inputs with real per-frame timestamps (e.g. .vid) give the measured fps from the image
             handle, not the nominal config value. None by default (not written).
 
     Return:

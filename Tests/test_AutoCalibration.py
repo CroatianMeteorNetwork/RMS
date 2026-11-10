@@ -120,8 +120,8 @@ def test_clear_chunks():
 
 ### Judgement ###
 
-def test_judge_passes_a_platepar_which_fits_everywhere():
-    """ A platepar which fits the stars in all zones passes. """
+def test_judge_accepts_a_platepar_which_fits_everywhere():
+    """ A platepar which fits the stars in all zones is good. """
 
     ok, reasons = ac.judgeScore(_score([0.95]*8))
     assert ok, reasons
@@ -134,7 +134,7 @@ def test_judge_passes_a_platepar_which_fits_everywhere():
     ({'zone_share': [0.95]*8, 'dist': 0.6}, 'distance'),
     ({'zone_share': [0.95]*8, 'mag_stddev': 0.3}, 'photometric scatter'),
     ({'zone_share': [0.95]*8, 'mag_residual': 0.4}, 'photometric residual'),
-    ({'zone_share': [0.95]*8, 'mag_residual': -0.3}, 'photometric residual'),
+    ({'zone_share': [0.95]*8, 'mag_residual': -0.35}, 'photometric residual'),
 ])
 def test_judge_fails(kwargs, reason):
     """ A platepar fails if a zone, the recalibration, the distances or the photometry are bad. """
@@ -155,12 +155,12 @@ def test_zones_without_enough_stars_are_not_judged():
 
 
 def test_candidate_comparison():
-    """ A candidate is used only if it passes and is clearly better without being worse in any zone. """
+    """ A candidate is used only if it is good and is clearly better without being worse in any zone. """
 
     good = _score([0.95]*8)
     edge = _score([0.95, 0.95, 0.9, 0.3, 0.8, 0.8, 0.8, 0.8])
 
-    # Without a platepar, and against a failing platepar, a passing candidate is better
+    # Without a platepar, and against a failing platepar, a good candidate is better
     assert ac.candidateIsBetter(good, None)[0]
     assert ac.candidateIsBetter(good, edge)[0]
 
@@ -244,7 +244,7 @@ def camera(tmp_path, monkeypatch):
     # A 512x512 camera with the automatic calibration
     config = cr.parse(REPO_CONFIG)
     config.width, config.height = 512, 512
-    config.monitor_auto_calibration = True
+    config.auto_calibration = True
     output_dir = str(tmp_path/'out')
     os.makedirs(output_dir)
 
@@ -307,9 +307,9 @@ def _writePlatepar(path, share):
 
 
 def test_first_platepar_is_installed(camera):
-    """ Without a platepar, a candidate which passes is installed right away. """
+    """ Without a platepar, a candidate which is good is installed right away. """
 
-    from RMS.MonitorNightReport import autoPlateparPath
+    from RMS.Astrometry.AutoCalibration import autoPlateparPath
 
     config, output_dir, state, process = camera
 
@@ -334,7 +334,7 @@ def test_good_platepar_is_kept_and_checked_periodically(camera, tmp_path):
     # A candidate which is not better is not used
     assert process('file1', good)['action'] == 'candidate not better'
 
-    # The next files are only judged until the interval of the periodic check has passed
+    # The next files are only judged until the interval of the periodic check has elapsed
     assert process('file2', good)['action'] == 'judged'
     assert process('file3', good)['action'] == 'judged'
     assert state['fits'] == 1
@@ -346,7 +346,7 @@ def test_failing_platepar_is_replaced_after_confirmation(camera, tmp_path):
     """ A failing platepar which is not far worse than the candidate is replaced by it once it is confirmed on
         later chunks. """
 
-    from RMS.MonitorNightReport import autoPlateparPath
+    from RMS.Astrometry.AutoCalibration import autoPlateparPath
 
     config, output_dir, state, process = camera
     bad = _writePlatepar(str(tmp_path/'bad.cal'), 0.75)
@@ -396,7 +396,7 @@ def test_unconfirmed_candidate_is_dropped(camera, tmp_path, monkeypatch):
 def test_dry_run_installs_nothing(camera):
     """ A dry run saves the candidate only, the camera keeps running without a platepar. """
 
-    from RMS.MonitorNightReport import autoPlateparPath
+    from RMS.Astrometry.AutoCalibration import autoPlateparPath
 
     config, output_dir, state, process = camera
 
@@ -417,7 +417,7 @@ def test_dry_run_judges_its_candidate_as_installed(camera):
     """ A dry run takes its saved candidate as the platepar in use, so it decides as it would with the candidate
         installed, and doesn't fit a new first platepar on every file. """
 
-    from RMS.MonitorNightReport import autoPlateparPath
+    from RMS.Astrometry.AutoCalibration import autoPlateparPath
 
     config, output_dir, state, process = camera
 
@@ -436,9 +436,9 @@ def test_dry_run_judges_its_candidate_as_installed(camera):
 
 def test_terrible_platepar_is_replaced_on_trial_and_kept(camera, tmp_path):
     """ A platepar which is far worse than the candidate is replaced right away, and the new platepar is kept once
-        it passes on the chunks of the following CONFIRM_MINUTES. """
+        it is good on the chunks of the following CONFIRM_MINUTES. """
 
-    from RMS.MonitorNightReport import autoPlateparPath
+    from RMS.Astrometry.AutoCalibration import autoPlateparPath
 
     config, output_dir, state, process = camera
     bad = _writePlatepar(str(tmp_path/'bad.cal'), 0.2)
@@ -459,7 +459,7 @@ def test_terrible_platepar_is_replaced_on_trial_and_kept(camera, tmp_path):
     assert result['current']['ok'] is True
     assert state['fits'] == 1
 
-    # It passes on the chunks after the fit, so it is kept
+    # It is good on the chunks after the fit, so it is kept
     result = process('file3', autoPlateparPath(output_dir, config))
     assert result['action'] == 'kept the platepar on trial'
     assert ac.readState(output_dir)['trial'] is None
@@ -472,7 +472,7 @@ def test_failing_trial_platepar_is_rolled_back(camera, tmp_path):
     """ A platepar on trial which fails on the following chunks, where the replaced one is clearly better, is
         replaced by the previous platepar again. """
 
-    from RMS.MonitorNightReport import autoPlateparPath
+    from RMS.Astrometry.AutoCalibration import autoPlateparPath
 
     config, output_dir, state, process = camera
     bad = _writePlatepar(str(tmp_path/'bad.cal'), 0.2)
@@ -499,7 +499,7 @@ def test_failing_trial_platepar_is_rolled_back(camera, tmp_path):
 def test_failing_trial_platepar_without_a_better_previous_is_refitted(camera, tmp_path):
     """ A platepar on trial which fails, while the replaced one is no better, is replaced by a new fit. """
 
-    from RMS.MonitorNightReport import autoPlateparPath
+    from RMS.Astrometry.AutoCalibration import autoPlateparPath
 
     config, output_dir, state, process = camera
     bad = _writePlatepar(str(tmp_path/'bad.cal'), 0.2)
@@ -529,7 +529,7 @@ def test_not_enough_clear_sky(camera, monkeypatch):
 def test_installing_keeps_the_replaced_platepar(tmp_path):
     """ Installing a platepar keeps the one it replaces. """
 
-    from RMS.MonitorNightReport import autoPlateparPath
+    from RMS.Astrometry.AutoCalibration import autoPlateparPath
 
     config = cr.parse(REPO_CONFIG)
     output_dir = str(tmp_path)
@@ -614,8 +614,8 @@ def test_far_better_candidate(current_worst, current_share, far_better):
     assert ac.candidateIsFarBetter(candidate, current) is far_better
 
 
-def test_passing_platepar_is_never_replaced_on_trial():
-    """ A platepar which passes is not replaced on trial, however much better the candidate is. """
+def test_good_platepar_is_never_replaced_on_trial():
+    """ A platepar which is good is not replaced on trial, however much better the candidate is. """
 
     candidate = _score([0.95]*8)
     candidate.share = 0.95
@@ -647,8 +647,8 @@ def test_older_file_finishing_late_makes_no_decision(camera, tmp_path):
     assert ac.readState(output_dir)['last_attempt_jd'] == decided
 
 
-def test_fit_is_hinted_with_the_pointing_of_a_passing_platepar(camera, tmp_path):
-    """ The periodic fit of a camera whose platepar passes searches only around its pointing (much faster); a fit
+def test_fit_is_hinted_with_the_pointing_of_a_good_platepar(camera, tmp_path):
+    """ The periodic fit of a camera whose platepar is good searches only around its pointing (much faster); a fit
         without a platepar or for a failing one searches the whole sky, so a camera which moved is still found. """
 
     config, output_dir, state, process = camera
@@ -657,7 +657,7 @@ def test_fit_is_hinted_with_the_pointing_of_a_passing_platepar(camera, tmp_path)
     process('file0')
     assert state['fit_kwargs'].get('position_hint') is None
 
-    # A passing platepar: a hint around its pointing, with a radius of a few fields of view
+    # A good platepar: a hint around its pointing, with a radius of a few fields of view
     good = _writePlatepar(str(tmp_path/'good.cal'), 0.95)
     state['jd'] += 60/1440.0
     process('file1', good)
@@ -677,8 +677,7 @@ def test_installed_platepar_never_missing_during_an_install(tmp_path, monkeypatc
     """ While a platepar replaces the installed one, the installed path always exists (other workers read it
         without the lock). """
 
-    import RMS.MonitorNightReport as mnr
-    from RMS.MonitorNightReport import autoPlateparPath
+    from RMS.Astrometry.AutoCalibration import autoPlateparPath
 
     config = cr.parse(REPO_CONFIG)
     output_dir = str(tmp_path)
@@ -686,8 +685,8 @@ def test_installed_platepar_never_missing_during_an_install(tmp_path, monkeypatc
 
     # The write of the new platepar finds the old one still in place
     seen = []
-    real_write = mnr._writePlatepar
-    monkeypatch.setattr(mnr, '_writePlatepar', lambda pp, path: (seen.append(os.path.isfile(path)),
+    real_write = ac.writePlatepar
+    monkeypatch.setattr(ac, 'writePlatepar', lambda pp, path: (seen.append(os.path.isfile(path)),
                                                                  real_write(pp, path)))
     ac.installPlatepar(_platepar(), output_dir, config, 'second')
 
@@ -714,7 +713,7 @@ def test_reprocessing_an_older_night_still_fits(camera):
 def test_unreadable_trial_platepar_ends_the_trial(camera, tmp_path):
     """ A platepar on trial which can't be read ends the trial instead of failing every following file. """
 
-    from RMS.MonitorNightReport import autoPlateparPath
+    from RMS.Astrometry.AutoCalibration import autoPlateparPath
 
     config, output_dir, state, process = camera
     bad = _writePlatepar(str(tmp_path/'bad.cal'), 0.2)
@@ -781,7 +780,7 @@ def test_mask_drops_mostly_masked_zones_and_the_mask_edge():
 
 def test_sections_which_fail_on_held_out_chunks_are_dropped(monkeypatch):
     """ A section fitted to a wrong solution (it can pair many stars of its own chunk) fails on the held-out chunks
-        and is dropped before the agreement: two sections which pass and agree give the candidate, one wrong fit no
+        and is dropped before the agreement: two sections which are good and agree give the candidate, one wrong fit no
         longer blocks it. """
 
     import RMS.Astrometry.AutoPlatepar as ap
@@ -835,7 +834,7 @@ def test_sections_are_judged_with_their_own_photometry(monkeypatch):
 
     monkeypatch.setattr(ap, 'autoFitPlatepar', _fit)
 
-    # The fitted photometry finds the camera's coefficient, with which the photometry passes; with the default one
+    # The fitted photometry finds the camera's coefficient, with which the photometry is good; with the default one
     #   the photometric residual of the outer zone fails the judgement
     fitted = []
 
@@ -858,7 +857,7 @@ def test_sections_are_judged_with_their_own_photometry(monkeypatch):
     candidate, info = ac.fitCandidate({c[0]: '.' for c in chunks}, chunks, chunks[:2], None, config,
                                       fit_vignetting=True)
 
-    # Every section passes with its own photometry, and the candidate keeps the fitted coefficient
+    # Every section is good with its own photometry, and the candidate keeps the fitted coefficient
     assert candidate is not None, info
     assert all(s.get('held_out_ok') for s in info['sections'] if s['fitted'])
     assert candidate.vignetting_coeff == pytest.approx(0.00027)
@@ -926,3 +925,135 @@ def test_chunk_read_from_its_calstars_is_scored_at_its_time(tmp_path):
 
     assert score.n_matched > 150
     assert score.dist < 0.02
+
+
+def test_chunks_timed_by_the_frame_rate_of_the_calstars_header(tmp_path, monkeypatch):
+    """ The chunks of a CALSTARS file with the measured frame rate in its header are timed with it (not with the
+        frame rate of the config), and their recalibration uses the same time. """
+
+    import RMS.Astrometry.ApplyRecalibrate as ar
+    from RMS.Astrometry.Conversions import date2JD
+    from RMS.Formats import CALSTARS
+    from RMS.Formats.FFfile import getMiddleTimeFF
+
+    config = cr.Config()
+    config.fps = 25.0
+    name = 'FF_XX0001_20261105_101112_345_0000000.fits'
+    CALSTARS.writeCALSTARS([[name, [(10.0, 20.0, 100, 10, 2.0, 5, 20.0, 0)]]], str(tmp_path), 'CALSTARS_test.txt',
+                           'XX0001', 720, 1280, chunk_frames=128, fps=10.0)
+
+    chunks, ff_frames = ac.readChunks(str(tmp_path), config)
+    assert ff_frames == 128
+    assert chunks[0][1] == pytest.approx(date2JD(*getMiddleTimeFF(name, 10.0, ret_milliseconds=True,
+                                                                  ff_frames=128)), abs=1e-9)
+
+    # The recalibration of the chunk at that time: the frame rate it is given puts the middle of the chunk there
+    seen = []
+    monkeypatch.setattr(ar, 'recalibratePlateparsForFF', lambda platepar, names, calstars, catalog, config, **kw:
+                        seen.append(config.fps) or {})
+    ac.recalibrateChunk(Platepar(), name, chunks[0][2], None, config, ff_frames, jd=chunks[0][1])
+    ac.recalibrateChunk(Platepar(), name, chunks[0][2], None, config, ff_frames)
+    assert seen[0] == pytest.approx(10.0, rel=1e-4)
+    assert seen[1] == 25.0
+    assert config.fps == 25.0
+
+
+def test_median_fwhm_of_measured_widths_only():
+    """ The width of the stars is the median of the measured widths: the -1 of older CALSTARS files (no width)
+        is left out, and without any measured width it is the default. """
+
+    stars = np.zeros((5, 8))
+    stars[:, ac.STAR_FWHM] = [-1, -1, -1, 3.0, 3.0]
+    assert ac.medianFWHM([('a', 0.0, stars)]) == 3.0
+
+    stars[:, ac.STAR_FWHM] = -1
+    assert ac.medianFWHM([('a', 0.0, stars)]) == ac.DEFAULT_FWHM
+    assert ac.medianFWHM([]) == ac.DEFAULT_FWHM
+
+
+def test_detections_next_to_the_mask_left_out_of_the_photometry(monkeypatch):
+    """ The photometry of a chunk is fitted only on the stars in the usable area of the mask, as the score is. """
+
+    seen = []
+    monkeypatch.setattr(ac, 'recalibrateChunk', lambda pp, name, stars, cat, config, ff, jd=None: (pp, True))
+    monkeypatch.setattr(ac, 'matchChunk', lambda pp, jd, stars, cat, lim, radius: (
+        np.zeros(len(stars)), np.zeros(len(stars)), np.zeros(len(stars)), np.full(len(stars), 5.0)))
+    monkeypatch.setattr(ac, 'extinctionCorrectionTrueToApparent', lambda mag, ra, dec, jd, pp: mag)
+
+    def _fit(intensity, radius, mags, fixed_vignetting=None):
+        seen.append(len(intensity))
+        return [10.0], 0.1, None, None, None, None
+
+    monkeypatch.setattr(ac, 'photometryFitRobust', _fit)
+
+    config = cr.Config()
+    config.min_matched_stars = 3
+    pp = Platepar()
+    pp.X_res, pp.Y_res = 100, 100
+    pp.vignetting_coeff = 0.0
+
+    # 10 stars on the left, 10 on the right half which is masked
+    stars = np.zeros((20, 8))
+    stars[:, ac.STAR_Y] = 50
+    stars[:10, ac.STAR_X], stars[10:, ac.STAR_X] = 20, 80
+    stars[:, ac.STAR_INTENSITY] = 1000
+    stars[:, ac.STAR_FWHM] = 2.0
+    mask = np.ones((100, 100), dtype=np.uint8)
+    mask[:, 50:] = 0
+
+    ac.scorePlatepar(pp, [('FF', 0.0, stars)], None, config, mask=mask)
+    assert seen == [10]
+
+
+def test_fitted_vignetting_within_the_limit_of_a_platepar(monkeypatch):
+    """ The fitted vignetting coefficient is at most the one a platepar keeps when it is read, so the coefficient
+        which is judged is the one which is used: for stars whose brightness falls off far more than the limit, the
+        fit stops at it. """
+
+    from RMS.Astrometry.ApplyAstrometry import limitVignettingCoefficient
+
+    pp = Platepar()
+    pp.X_res, pp.Y_res = 1280, 720
+    pp.vignetting_coeff = 0.0
+    config = cr.Config()
+    config.min_matched_stars = 3
+
+    # Stars to the corners whose magnitudes need a coefficient beyond the limit
+    rng = np.random.default_rng(1)
+    n = 200
+    x, y = rng.uniform(0, 1280, n), rng.uniform(0, 720, n)
+    radius = np.hypot(x - 640, y - 360)
+    true_coeff = 0.0025
+    mags = rng.uniform(2, 5, n)
+    intensity = 10**(-0.4*(mags - 10.0))*np.cos(true_coeff*radius)**4
+    stars = np.zeros((n, 8))
+    stars[:, ac.STAR_X], stars[:, ac.STAR_Y], stars[:, ac.STAR_INTENSITY], stars[:, ac.STAR_FWHM] = \
+        x, y, intensity, 2.0
+
+    monkeypatch.setattr(ac, 'recalibrateChunk', lambda pp, name, stars, cat, config, ff, jd=None: (pp, True))
+    monkeypatch.setattr(ac, 'matchChunk', lambda pp, jd, s, cat, lim, radius: (np.zeros(n), np.zeros(n),
+                                                                               np.zeros(n), mags))
+    monkeypatch.setattr(ac, 'extinctionCorrectionTrueToApparent', lambda mag, ra, dec, jd, pp: mag)
+
+    coeff, reason = ac._jointVignetting(pp, [('FF', 0.0, stars)], None, config, 256)
+    limit = limitVignettingCoefficient(1280, 720, np.inf)
+    assert coeff <= limit*(1 + 1e-6)
+    assert coeff == pytest.approx(limit, rel=0.02)
+
+
+def test_default_config_turns_auto_calibration_on_and_a_missing_option_keeps_it_off(tmp_path):
+    """ The default config file turns automatic calibration on, an older config file without the option keeps
+    it off.
+    """
+
+    # The default config file has the option on
+    assert cr.parse(REPO_CONFIG).auto_calibration
+
+    # The same config file without the option keeps it off
+    with open(REPO_CONFIG) as f:
+        lines = [line for line in f if not line.startswith("auto_calibration:")]
+
+    old_config = tmp_path/".config"
+    old_config.write_text("".join(lines))
+
+    assert not cr.parse(str(old_config)).auto_calibration
