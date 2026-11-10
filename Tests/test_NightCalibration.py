@@ -512,7 +512,13 @@ def refit(tmp_path, monkeypatch):
         return fitted, report
 
     monkeypatch.setattr(ac, 'readChunks', _readChunks)
-    monkeypatch.setattr(ac, 'clearChunks', lambda chunks, *args, **kwargs: list(chunks))
+    def _clearChunks(chunks, *args, **kwargs):
+        plan['masks'].append(kwargs.get('mask'))
+        return list(chunks)
+
+    plan['masks'] = []
+    monkeypatch.setattr(ac, 'clearChunks', _clearChunks)
+    monkeypatch.setattr(nc, '_mask', lambda config, night_dir: type('Mask', (), {'img': 'mask image'})())
     monkeypatch.setattr(nc, '_quietJointFit', _jointFit)
     monkeypatch.setattr(nc, 'writeChunks', lambda chunks, dir_path, *args, **kwargs: os.makedirs(dir_path,
                                                                                                  exist_ok=True))
@@ -543,6 +549,9 @@ def test_refit_on_the_newest_clear_nights(refit):
 
     # The held-out nights are compared with the platepar of the camera, which the refit would replace
     assert baseline == 'start'
+
+    # The clear chunks are judged with the mask
+    assert plan['masks'] and all(mask == 'mask image' for mask in plan['masks'])
 
     # Not again within the interval, again after it
     assert nc.periodicRefit(config, nproc=1, now=now + datetime.timedelta(days=3)) is None

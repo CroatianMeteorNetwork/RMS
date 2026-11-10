@@ -861,8 +861,10 @@ def refitNights(night_dirs, platepar, config, work_dir, max_nights=None, nproc=1
         if (max_nights is not None) and (len(selected) >= max_nights):
             break
 
+        # The clear chunks judged with the mask of the night (or of the camera), as during the night
         chunks, ff_frames = ac.readChunks(night_dir, config)
-        clear = ac.clearChunks(chunks, int(config.width), int(config.height))
+        mask = _mask(config, night_dir)
+        clear = ac.clearChunks(chunks, int(config.width), int(config.height), mask=getattr(mask, 'img', None))
         if len(clear)*ff_frames/config.fps/3600.0 < REFIT_MIN_CLEAR_HOURS:
             continue
 
