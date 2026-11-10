@@ -1493,10 +1493,53 @@ def nightJointFit(output_dir, night_name, config):
                                       'dry_run': dry_run})
             if dry_run:
                 replaced_mtime = None
+
+            # The replaced version is kept until no file still has it, so a backfill which stops or fails on a
+            #   file is made again at the next report (see refinementBackfillPending)
+            if replaced_mtime is not None:
+                state['joint_fit_replaced'] = sorted(set(state.get('joint_fit_replaced', []) + [replaced_mtime]))
+
         state.setdefault('night_joint_fits', {})[night_name] = {'verdict': verdict, 'clear_chunks': len(clear)}
         ac.writeState(output_dir, state)
 
     return replaced_mtime
+
+
+def refinementBackfillPending(output_dir, config, night_name):
+    """ The versions of the platepars which a joint fit of a night replaced and which files of the backfill (the
+        night and the nights not reported yet) still have; the versions no file has any more are forgotten.
+
+    Arguments:
+        output_dir: [str] Output directory of the monitor.
+        config: [Config] Configuration of the camera.
+        night_name: [str] Name of the night being reported.
+
+    Return:
+        [list] Versions (modification times) still to be replaced in the files by the backfill.
+    """
+
+    from RMS.Astrometry import AutoCalibration as ac
+
+    replaced = ac.readState(output_dir).get('joint_fit_replaced', [])
+    if not replaced:
+        return []
+
+    # The versions the files of the night and of the nights not reported yet were calibrated with
+    nights = scanNights(output_dir, config)
+    reported = readReportStates(output_dir).get('nights', {})
+    names = [name for name in nights if (name == night_name) or (not (reported.get(name) or {}).get('reported_at'))]
+    used = set(info.get('platepar_mtime') for name in names for info in nights[name].values()
+               if info.get('calibrated', True))
+
+    # Forget the versions no file has any more (a version added meanwhile is kept)
+    pending = [mtime for mtime in replaced if mtime in used]
+    with ac._StateLock(output_dir):
+        state = ac.readState(output_dir)
+        state['joint_fit_replaced'] = [mtime for mtime in state.get('joint_fit_replaced', [])
+                                       if (mtime in pending) or (mtime not in replaced)]
+        ac.writeState(output_dir, state)
+
+    return pending
 
 
 def generateNightReport(output_dir, night_name, config, results=None, archive=True):
@@ -1535,11 +1578,8 @@ def generateNightReport(output_dir, night_name, config, results=None, archive=Tr
         # A platepar fitted during the night is refitted on the whole night first (the joint fit of the lens
         #   distortion); the files calibrated with the platepar it replaces are calibrated again below, also those
         #   whose judgement passed it, as the refit refines it
-        replaced_mtimes = None
         try:
-            replaced_mtime = nightJointFit(output_dir, night_name, config)
-            if replaced_mtime is not None:
-                replaced_mtimes = [replaced_mtime]
+            nightJointFit(output_dir, night_name, config)
 
         except Exception:
 
@@ -1547,6 +1587,10 @@ def generateNightReport(output_dir, night_name, config, results=None, archive=Tr
             log.error("The joint fit of night {:s} failed:\n{:s}".format(night_name, traceback.format_exc()))
 
         try:
+
+            # The replaced versions which files still have, also from the fit of an earlier report whose backfill
+            #   stopped or failed on a file
+            replaced_mtimes = refinementBackfillPending(output_dir, config, night_name)
             if backfillCalibration(output_dir, config, night_name, replaced_mtimes=replaced_mtimes,
                                    refine_replaced=bool(replaced_mtimes)):
                 results = None

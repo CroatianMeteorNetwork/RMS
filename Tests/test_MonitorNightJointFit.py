@@ -281,3 +281,31 @@ def test_backfill_refines_files_whose_judgement_passed(tmp_path):
 
     # A version which wasn't replaced stays either way
     assert not _needsCalibration(info, results_path, 200.0, [50.0], ac.FILE_RESULT_NAME, refine_replaced=True)
+
+
+def test_replaced_version_kept_until_no_file_has_it(monitor, monkeypatch):
+    """ The version an installed refit replaced is kept in the state, so a backfill which stopped or failed on a
+        file is made again at the next report; once no file of the night or of the nights not reported yet has it,
+        it is forgotten. """
+
+    config, output_dir, plan = monitor
+    _install(output_dir, JD0 + 0.05)
+
+    replaced = mnr.nightJointFit(output_dir, '20261105', config)
+    assert ac.readState(output_dir)['joint_fit_replaced'] == [replaced]
+
+    # A file still has the replaced version (e.g. its recalibration failed): the backfill gets it again
+    files = {'r1': {'calibrated': True, 'platepar_mtime': replaced}, 'r2': {'calibrated': True,
+                                                                          'platepar_mtime': replaced + 1}}
+    monkeypatch.setattr(mnr, 'scanNights', lambda output_dir, config: {'20261105': files})
+    assert mnr.refinementBackfillPending(output_dir, config, '20261105') == [replaced]
+    assert ac.readState(output_dir)['joint_fit_replaced'] == [replaced]
+
+    # A reported night doesn't count
+    monkeypatch.setattr(mnr, 'scanNights', lambda output_dir, config: {'20261105': {}, '20261104': files})
+    monkeypatch.setattr(mnr, 'readReportStates', lambda output_dir: {
+        'nights': {'20261104': {'reported_at': '2026-11-05T12:00:00'}}})
+    assert mnr.refinementBackfillPending(output_dir, config, '20261105') == []
+
+    # No file has it any more: forgotten
+    assert ac.readState(output_dir)['joint_fit_replaced'] == []
