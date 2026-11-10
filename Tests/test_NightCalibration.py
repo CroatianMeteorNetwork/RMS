@@ -439,3 +439,25 @@ def test_night_calibration_process_starts_and_stops(tmp_path):
     nc.writeState(night_dir, dict(nc.readState(night_dir), done=True))
     sc.startNightCalibration(config, night_dir)
     assert night_dir not in sc.NIGHT_CALIBRATIONS
+
+
+def test_platepar_of_the_last_attempt_is_checked(setup):
+    """ A first platepar installed by the last allowed attempt is still checked on new stars after the check time
+        (without another fit), which ends the night. """
+
+    config, night_dir, plan = setup
+    config.auto_calibration_max_fits = 1
+    plan['first'] = [2.0]
+    plan['refit'] = 3.0
+    plan['good_above'] = 1.0
+
+    calibration = nc.NightCalibration(config, night_dir)
+    actions = _run(calibration, 120)
+
+    assert 'installed the first platepar' in actions[0][1]
+    assert actions[1][0] == ac.MIN_CLEAR_CHUNKS + int(config.auto_calibration_check_min)
+    assert 'checked the platepar of the last attempt' in actions[1][1] and 'done for the night' in actions[1][1]
+    assert len(actions) == 2
+    assert not [call for call in plan['calls'] if call[0] == 'refit']
+    assert calibration.state['done'] and (calibration.state['attempts'] == 1)
+    assert _installed(config) == 2.0

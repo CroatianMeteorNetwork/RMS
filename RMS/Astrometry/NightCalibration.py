@@ -336,21 +336,25 @@ class NightCalibration(object):
         chunks = sorted(chunks, key=lambda chunk: chunk[1])
         now_jd = chunks[-1][1]
 
-        # Nothing until the time of the next attempt, nothing more after the last one
-        if state['attempts'] >= config.auto_calibration_max_fits:
+        # After the last fit of the night nothing more is fitted, but a platepar installed by it is still checked
+        #   on new stars
+        current = self._installed()
+        no_more_fits = state['attempts'] >= config.auto_calibration_max_fits
+        if no_more_fits and ((current is None) or (state['check_from_jd'] != state['installed_jd'])):
             state['done'] = True
             return self._record(now_jd, 'no more attempts tonight ({:d})'.format(state['attempts']))
+
+        # Nothing until the time of the next attempt
         if (state['next_attempt_jd'] is not None) and (now_jd < state['next_attempt_jd'] - 1.0/86400):
             return None
 
         clear = ac.clearChunks(chunks, int(config.width), int(config.height), mask=self.mask_img)
         self._chunks = chunks
 
-        current = self._installed()
         if current is None:
             return self._firstFit(clear, now_jd, ff_frames)
 
-        return self._checkAndRefit(current, clear, now_jd, ff_frames)
+        return self._checkAndRefit(current, clear, now_jd, ff_frames, refit=(not no_more_fits))
 
 
     def _firstFit(self, clear, now_jd, ff_frames):
@@ -410,7 +414,7 @@ class NightCalibration(object):
                             score=score.toDict())
 
 
-    def _checkAndRefit(self, current, clear, now_jd, ff_frames):
+    def _checkAndRefit(self, current, clear, now_jd, ff_frames, refit=True):
         """ Check the installed platepar on new stars, fit a new one on all clear chunks so far starting from it,
             and install the better of the two.
 
@@ -419,6 +423,10 @@ class NightCalibration(object):
             clear: [list] Clear chunks so far.
             now_jd: [float] Julian date of the last chunk.
             ff_frames: [int] Number of frames of a chunk.
+
+        Keyword arguments:
+            refit: [bool] Also fit a new platepar (an attempt of the night). False only checks the installed one
+                (after the last attempt), which ends the night's calibration. True by default.
 
         Return:
             [str] What was done, None if nothing.
@@ -434,14 +442,17 @@ class NightCalibration(object):
         check_names = set(name for name, _, _ in check)
 
         catalog_stars = ac._loadCatalog(config, now_jd)
-        state['attempts'] += 1
 
         # A new platepar from all clear chunks so far except the new ones it is checked on, starting from the
-        #   installed one
-        fit_dir = os.path.join(self.work_dir, 'fit')
-        writeChunks([chunk for chunk in clear if chunk[0] not in check_names], fit_dir, config, ff_frames=ff_frames)
-        candidate, _ = _quietJointFit([fit_dir], current, config, n_iter=JOINT_ITERATIONS, chunk_step=1,
-                                      max_chunks=NIGHT_REFIT_MAX_CHUNKS, nproc=1, qc=False)
+        #   installed one (an attempt of the night)
+        candidate = None
+        if refit:
+            state['attempts'] += 1
+            fit_dir = os.path.join(self.work_dir, 'fit')
+            writeChunks([chunk for chunk in clear if chunk[0] not in check_names], fit_dir, config,
+                        ff_frames=ff_frames)
+            candidate, _ = _quietJointFit([fit_dir], current, config, n_iter=JOINT_ITERATIONS, chunk_step=1,
+                                          max_chunks=NIGHT_REFIT_MAX_CHUNKS, nproc=1, qc=False)
 
         # Both scored on the same new chunks, the better one is installed
         current_score = ac.scorePlatepar(current, check, catalog_stars, config, ff_frames=ff_frames,
@@ -458,14 +469,21 @@ class NightCalibration(object):
                 best, best_score, action = candidate, candidate_score, 'installed the refit ({:s})'.format(reason)
             else:
                 action += ' (refit: {:s})'.format(reason)
-        else:
+        elif refit:
             action += ' (the refit failed)'
+        else:
+            action = 'checked the platepar of the last attempt'
 
         # The next new stars are those after this attempt
         state['check_from_jd'] = now_jd
 
-        # Done if the installed platepar is good on the new stars, otherwise the next attempt comes later
+        # Done if the installed platepar is good on the new stars (or after the check of the last attempt),
+        #   otherwise the next attempt comes later
         ok, reasons = ac.judgeScore(best_score)
+        if not refit:
+            state['done'] = True
+            return self._record(now_jd, '{:s}: it is {:s} on new stars; done for the night'.format(
+                action, 'good' if ok else 'not good ({:s})'.format('; '.join(reasons))), score=best_score.toDict())
         if ok:
             state['done'] = True
             return self._record(now_jd, 'attempt {:d}: {:s}, it is good on new stars; done for the night'.format(
