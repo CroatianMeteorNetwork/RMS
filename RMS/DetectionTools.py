@@ -92,6 +92,10 @@ def loadImageCalibration(dir_path, config, dtype=None, byteswap=False):
         if os.path.exists(os.path.join(dir_path, config.dark_file)):
             dark_path = os.path.join(dir_path, config.dark_file)
 
+        # Try the station's configuration directory, where the mask is also looked for
+        elif os.path.exists(os.path.join(config.config_file_path, config.dark_file)):
+            dark_path = os.path.join(config.config_file_path, config.dark_file)
+
         # Try loading the default dark
         elif os.path.exists(config.dark_file):
             dark_path = os.path.abspath(config.dark_file)
@@ -104,6 +108,10 @@ def loadImageCalibration(dir_path, config, dtype=None, byteswap=False):
         if dark is not None:
             print('Loaded dark:', dark_path)
             log.info('Loaded dark: {:s}'.format(dark_path))
+
+        else:
+            log.info('use_dark is set but no dark frame was found. Looked for {:s} in {:s} and {:s}'
+                     .format(config.dark_file, dir_path, config.config_file_path))
 
 
 

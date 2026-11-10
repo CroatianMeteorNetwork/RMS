@@ -9,6 +9,7 @@ import random
 import argparse
 
 import numpy as np
+import scipy.ndimage as ndimage
 
 from RMS.Astrometry.Conversions import date2JD
 import RMS.ConfigReader as cr
@@ -19,7 +20,12 @@ from RMS.Formats.FFfile import getMiddleTimeFF
 from RMS.Routines.Image import loadImage, saveImage
 
 
-def makeFlat(dir_path, config, nostars=False, use_images=False, make_dark=False):
+# Size of the median filter used to estimate the sky background under the fixed pattern. It has to be
+# larger than a hot pixel (1-2 px) and smaller than any real gradient in the sky background.
+FIXED_PATTERN_FILTER_SIZE = 5
+
+
+def makeFlat(dir_path, config, nostars=False, use_images=False, make_dark=False, fixed_pattern=False):
     """ Makes a flat field from the files in the given folder. CALSTARS file is needed to estimate the
         quality of every image by counting the number of detected stars.
 
@@ -31,11 +37,16 @@ def makeFlat(dir_path, config, nostars=False, use_images=False, make_dark=False)
         nostars: [bool] If True, all files will be taken regardless of if they have stars on them or not.
         use_images: [bool] Use image files instead of FF files. False by default.
         make_dark: [bool] If True, a dark frame will be made instead of a flat field. False by default.
+        fixed_pattern: [bool] If True, the sky background is removed from the dark frame, leaving only
+            the fixed pattern (hot pixels). Implies make_dark. False by default.
 
     Return:
         [2d ndarray] Flat field image as a numpy array. If the flat generation failed, None will be returned.
-        
+
     """
+
+    if fixed_pattern:
+        make_dark = True
 
     # If only images are used, then don't look for a CALSTARS file
     if use_images:
@@ -238,9 +249,17 @@ def makeFlat(dir_path, config, nostars=False, use_images=False, make_dark=False)
 
 
     if not make_dark:
-        
-        # Stretch flat to 0-255 
+
+        # Stretch flat to 0-255
         ff_median = ff_median/np.max(ff_median)*255
+
+    elif fixed_pattern:
+
+        # Subtract the dark's own local median, which leaves only the pixels that are brighter than
+        # their surroundings, i.e. the hot pixels. Keeping the sky pedestal instead would push faint
+        # stars below zero once the dark is subtracted from avepixel.
+        sky_background = ndimage.median_filter(ff_median, FIXED_PATTERN_FILTER_SIZE)
+        ff_median = np.clip(ff_median.astype(np.int16) - sky_background.astype(np.int16), 0, 255)
 
     # Convert the flat to 8 bits
     ff_median = ff_median.astype(np.uint8)
@@ -272,6 +291,11 @@ if __name__ == "__main__":
     arg_parser.add_argument('-d', '--dark', action="store_true",
         help="Make a dark frame instead by taking the minimum value of the images instead of the median.")
 
+    arg_parser.add_argument('-p', '--fixedpattern', action="store_true",
+        help="""Make a fixed pattern dark frame: like --dark, but with the sky background removed, so only
+        the hot pixels remain. This is the dark to use with use_dark, as it removes the hot pixels without
+        dimming faint stars.""")
+
     # Parse the command line arguments
     cml_args = arg_parser.parse_args()
 
@@ -285,15 +309,15 @@ if __name__ == "__main__":
     config = cr.loadConfigFromDirectory(cml_args.config, 'notused')
 
     # Make the flat
-    img = makeFlat(dir_path, config, nostars=cml_args.nostars, use_images=cml_args.images, 
-                         make_dark=cml_args.dark)
+    img = makeFlat(dir_path, config, nostars=cml_args.nostars, use_images=cml_args.images,
+                         make_dark=cml_args.dark, fixed_pattern=cml_args.fixedpattern)
 
     if img is not None:
 
 
         # Save the flat in the input directory
-        if cml_args.dark:
-            img_save_path = os.path.join(dir_path, "dark.png")
+        if cml_args.dark or cml_args.fixedpattern:
+            img_save_path = os.path.join(dir_path, config.dark_file)
 
         else:
             img_save_path = os.path.join(dir_path, config.flat_file)

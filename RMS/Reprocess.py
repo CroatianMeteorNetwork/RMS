@@ -561,6 +561,21 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
             extra_files.append(mask_path)
 
 
+    # Add the dark to the archive, so it is known what the night was corrected with. Looked for in the
+    # same places as in loadImageCalibration: the night directory first, then the config directory
+    if (not nodetect) and config.use_dark:
+
+        for dark_candidate in [os.path.join(night_data_dir, config.dark_file),
+                               os.path.join(config.config_file_path, config.dark_file)]:
+
+            if os.path.exists(dark_candidate):
+                extra_files.append(os.path.abspath(dark_candidate))
+                break
+
+        else:
+            log.info('use_dark is set but no dark frame was found to archive')
+
+
     # Add the platepar to the archive if it exists
     if (not nodetect):
         if os.path.exists(platepar_path):
