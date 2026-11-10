@@ -890,7 +890,7 @@ def fitDistortion(platepars, matched_stars, jds, distortion_type, max_stars, see
 
 def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdout=None, n_iter=4, snr_min=10.0,
                        max_stars=20000, chunk_step=2, match_radius=None, lim_mag=None, nproc=None, decentering=None,
-                       holdout_chunks=None, max_chunks=None, qc=True, qc_options=None):
+                       holdout_chunks=None, max_chunks=None, qc=True, qc_options=None, holdout_baseline='night'):
     """ Fit one distortion on the stars of many nights, with the pointing of every chunk fitted separately (see
         the description of the module).
 
@@ -924,6 +924,10 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
         qc: [bool] Run the quality control of the fit (see qualityControl), its verdict is in the report. True by
             default.
         qc_options: [dict] Limits of the quality control which replace those of QC_DEFAULTS. None by default.
+        holdout_baseline: [str] What the fitted distortion is compared with on the held-out chunks (in the report
+            and the quality control): 'night' for the platepar of every night as it is (the starting platepar for a
+            night without one), 'start' for the starting distortion with the pointing of every night carried over
+            (e.g. to decide whether the fit should replace the starting platepar). 'night' by default.
 
     Return:
         (platepar, report): [tuple] The fitted platepar (the distortion of the last fit with the pointing of the
@@ -937,6 +941,8 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
 
     if n_iter < 1:
         raise ValueError("At least one fit of the distortion is needed (n_iter = {:d})".format(n_iter))
+    if holdout_baseline not in ('night', 'start'):
+        raise ValueError("The held-out baseline must be 'night' or 'start', not {:s}".format(str(holdout_baseline)))
 
     # The distortion type is the one of the starting platepar unless another one is asked for, which is then fitted
     #   from no distortion
@@ -1161,8 +1167,11 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
         if held_keys:
 
             held_nights = sorted(set(key[0] for key in held_keys))
-            own = dict((n, nights[n]['platepar'] if nights[n]['platepar'] is not None else platepar)
-                       for n in held_nights)
+            if holdout_baseline == 'start':
+                own = dict((n, _startOf(nights[n], platepar)) for n in held_nights)
+            else:
+                own = dict((n, nights[n]['platepar'] if nights[n]['platepar'] is not None else platepar)
+                           for n in held_nights)
             fitted = dict((n, _startOf(nights[n], distortion)) for n in held_nights)
             report['held_out_stats'] = {}
             for label, starts in (('start', own), ('fitted', fitted)):
@@ -1190,7 +1199,7 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
             if options['judge'] and held_keys:
                 for n in sorted(set(key[0] for key in held_keys)):
                     keys = [key for key in held_keys if key[0] == n]
-                    own_platepar = nights[n]['platepar'] if nights[n]['platepar'] is not None else platepar
+                    own_platepar = own[n]
                     judge_groups.append((nights[n]['dir'], _startOf(nights[n], distortion), own_platepar,
                                          [_chunk(key) for key in keys]))
             chunk_hours = [len(night['chunks'])*night['chunks'][0][3]/config.fps/3600.0 for night in nights]
@@ -1350,19 +1359,24 @@ def qualityControl(fitted, start, report, config, options, judge_groups=(), clea
         names = ['zone {:d},{:d}'.format(j, i) for j in range(ZONE_GRID) for i in range(ZONE_GRID)] \
             + list(CORNER_NAMES)
         for name, (bx, by, bn), (ax, ay, an) in zip(names, zones_before, zones_after):
-            if min(bn, an) < options['min_zone_stars']:
+            if (min(bn, an) < max(options['min_zone_stars'], 1)):
                 continue
             change = np.hypot(ax, ay) - np.hypot(bx, by)
+            if not np.isfinite(change):
+                continue
             if change > worst:
                 worst, worst_name = change, name
             worst_before = max(worst_before, np.hypot(bx, by))
             worst_after = max(worst_after, np.hypot(ax, ay))
-        _check('no held-out zone worse', worst <= tolerance,
+        # Without a zone with enough held-out stars in both, the zones can't be compared, which fails both checks
+        compared = np.isfinite(worst)
+        _check('no held-out zone worse', compared and (worst <= tolerance),
                'largest change of a zone {:+.2f}" in {:s} (max {:+.2f}")'.format(worst, worst_name, tolerance)
-               if np.isfinite(worst) else 'no zone with enough stars')
+               if compared else 'no held-out zone with enough stars')
         _check('worst held-out zone not worse',
-               worst_after <= worst_before + options['max_worst_zone_worse_px']*scale,
-               'largest mean residual of a zone {:.2f}" -> {:.2f}"'.format(worst_before, worst_after))
+               compared and (worst_after <= worst_before + options['max_worst_zone_worse_px']*scale),
+               'largest mean residual of a zone {:.2f}" -> {:.2f}"'.format(worst_before, worst_after)
+               if compared else 'no held-out zone with enough stars')
 
     # The judgement of the automatic calibration on the held-out chunks of every night
     if options['judge']:

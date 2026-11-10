@@ -891,6 +891,10 @@ def test_quality_control_failures(nights, fit_held_chunks):
     no_held.pop('held_out_stats')
     assert set(_failed(fitted, start, no_held, config)) == {'held-out chunks', 'held-out stars not worse'}
 
+    # No held-out zone with enough stars to compare
+    failed = _failed(fitted, start, report, config, min_zone_stars=10**6)
+    assert 'no held-out zone worse' in failed and 'worst held-out zone not worse' in failed
+
     # Not converged, or many outlier chunks
     unconverged = copy.deepcopy(report)
     unconverged['iterations'][-2]['change_px'] = (1.0, 2.0)
@@ -955,3 +959,23 @@ def test_cli_exit_code_of_a_failed_quality_control(nights, fit_poly, tmp_path, m
     assert os.path.isfile(out_path)
     with open(os.path.join(str(tmp_path), "joint_report.txt")) as f:
         assert 'Quality control: FAIL (chunks of the fit' in f.read()
+
+
+def test_held_out_baseline_of_the_starting_distortion(nights):
+    """ With the held-out baseline 'start', the held-out nights are compared with the starting distortion (with
+        their pointing carried over), not with their own platepars: starting from the known distortion, its
+        held-out residuals are the noise, while the platepars of the nights (the wrong distortion) are worse. """
+
+    config, truth, start, dirs, pointings = nights
+    noise = np.sqrt(2)*NOISE_PX*3600/truth.F_scale
+
+    reports = {}
+    for baseline in ('night', 'start'):
+        reports[baseline] = jointDistortionFit(dirs, truth, config, holdout=(N_NIGHTS, HELD_OUT), n_iter=1,
+                                               chunk_step=1, nproc=4, qc=False, holdout_baseline=baseline)[1]
+
+    assert reports['start']['held_out_stats']['start']['stats']['rms'] < 1.15*noise
+    assert reports['night']['held_out_stats']['start']['stats']['rms'] > 1.3*noise
+
+    with pytest.raises(ValueError):
+        jointDistortionFit(dirs, truth, config, holdout_baseline='other')
