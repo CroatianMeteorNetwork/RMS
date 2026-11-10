@@ -28,7 +28,9 @@ import argparse
 import copy
 import logging
 import multiprocessing
+import numbers
 import os
+import sys
 
 import numpy as np
 import scipy.optimize
@@ -61,9 +63,11 @@ POINTING_PARAMETERS = ('RA_d', 'dec_d', 'JD', 'Ho', 'UT_corr', 'pos_angle_ref', 
 PHOTOMETRY_PARAMETERS = ('mag_lev', 'mag_lev_stddev', 'vignetting_coeff', 'vignetting_fixed', 'extinction_scale')
 
 # The pointing is carried over to another distortion on a grid of this many points along each axis, this far (px)
-#   from the edges of the image
+#   from the edges of the image. If the two platepars still differ by more than TRANSFER_MAX_RMS (px rms) on the
+#   grid, they don't describe the same camera (or one of them is broken) and the pointing isn't carried over
 TRANSFER_GRID = 15
 TRANSFER_MARGIN = 12
+TRANSFER_MAX_RMS = 1.0
 
 # Catalog stars are matched only within this distance (px) from the edges of the image, and only if no other
 #   catalog star is within this many match radii (a blended pair has no clean position)
@@ -91,9 +95,49 @@ RADIAL_BINS = 6
 ZONE_GRID = 3
 CORNER_NAMES = ('TL', 'TR', 'BL', 'BR')
 
+# A warning is given if the residuals of the final distortion are larger than those of the best iteration by more
+#   than this share
+WORSE_SHARE = 0.02
 
 
-def transferPointing(platepar, pointing_platepar, n_grid=TRANSFER_GRID, margin=TRANSFER_MARGIN):
+
+def readPlatepar(path, use_flat):
+    """ Read a platepar as the processing reads it, and check that it describes an image.
+
+    Arguments:
+        path: [str] Path of the platepar.
+        use_flat: [bool] Whether the images are flat fielded (then a platepar without a vignetting coefficient gets
+            none, see Platepar.addVignettingCoeff).
+
+    Return:
+        [Platepar] The platepar, None if the file doesn't exist, can't be read, or has no positive scale and image
+            size.
+    """
+
+    if (path is None) or (not os.path.isfile(path)):
+        return None
+
+    # A file which can't be parsed as a platepar is none
+    platepar = Platepar()
+    try:
+        if platepar.read(path, use_flat=use_flat) is False:
+            return None
+
+    except Exception as e:
+        log.warning("The platepar {:s} can't be read: {:s}".format(path, repr(e)))
+        return None
+
+    # A platepar without a positive scale or image size maps nothing
+    valid = [platepar.F_scale, platepar.X_res, platepar.Y_res]
+    if not all(np.isfinite(value) and (value > 0) for value in valid):
+        log.warning("The platepar {:s} has no positive scale and image size".format(path))
+        return None
+
+    return platepar
+
+
+def transferPointing(platepar, pointing_platepar, n_grid=TRANSFER_GRID, margin=TRANSFER_MARGIN,
+                     max_rms=TRANSFER_MAX_RMS):
     """ Carry the pointing of a platepar over to the distortion of another platepar of the same camera.
 
         Copying the pointing parameters is not enough: every distortion model has its own centre and offset terms,
@@ -110,12 +154,19 @@ def transferPointing(platepar, pointing_platepar, n_grid=TRANSFER_GRID, margin=T
     Keyword arguments:
         n_grid: [int] Number of grid points along each axis. TRANSFER_GRID by default.
         margin: [float] Distance of the grid from the edges of the image (px). TRANSFER_MARGIN by default.
+        max_rms: [float] Largest rms difference of the two platepars on the grid (px) after the fit; a larger one
+            raises a ValueError. TRANSFER_MAX_RMS by default, None not to check it.
 
     Return:
         (platepar, rms): [tuple] The platepar with the pointing carried over, and the rms distance (px) between
             the image positions of the grid's sky positions with the two platepars, which shows how different the
             two distortions are.
     """
+
+    # Both platepars need a positive scale, which is fitted only within a factor of 2 of the pointing platepar's
+    for pp in (platepar, pointing_platepar):
+        if not (np.isfinite(pp.F_scale) and (pp.F_scale > 0)):
+            raise ValueError("A platepar without a positive scale ({:.3f}) can't be used".format(pp.F_scale))
 
     # The distortion of the platepar with the pointing parameters of the pointing platepar
     transferred = copy.deepcopy(platepar)
@@ -137,8 +188,14 @@ def transferPointing(platepar, pointing_platepar, n_grid=TRANSFER_GRID, margin=T
     keys = ('RA_d', 'dec_d', 'pos_angle_ref', 'F_scale')
 
     def _residuals(params):
-        """ Distances (px) between the image positions of the sky positions with the two platepars, with the
-            given pointing parameters. """
+        """ Distances (px) between the image positions of the sky positions with the two platepars.
+
+        Arguments:
+            params: [list] Reference RA, Dec, position angle (deg) and scale (px/deg) of the platepar.
+
+        Return:
+            [ndarray] Differences along x, then along y (px).
+        """
 
         for key, value in zip(keys, params):
             setattr(transferred, key, value)
@@ -146,15 +203,24 @@ def transferPointing(platepar, pointing_platepar, n_grid=TRANSFER_GRID, margin=T
 
         return np.concatenate([x - x_pointing, y - y_pointing])
 
-    # Fit the pointing, with steps of a similar size in all parameters
+    # Fit the pointing, with steps of a similar size in all parameters and the scale kept positive
     p0 = [getattr(transferred, key) for key in keys]
-    fit = scipy.optimize.least_squares(_residuals, p0, x_scale=[1e-3, 1e-3, 1e-3, 1e-3*transferred.F_scale])
+    lower = [-np.inf, -np.inf, -np.inf, 0.5*p0[3]]
+    upper = [np.inf, np.inf, np.inf, 2.0*p0[3]]
+    fit = scipy.optimize.least_squares(_residuals, p0, x_scale=[1e-3, 1e-3, 1e-3, 1e-3*transferred.F_scale],
+                                       bounds=(lower, upper))
     residuals = _residuals(fit.x)
+    rms = float(np.sqrt(np.mean(residuals**2)))
+
+    # Two platepars which still differ a lot don't describe the same camera
+    if (not np.isfinite(rms)) or ((max_rms is not None) and (rms > max_rms)):
+        raise ValueError("The pointing can't be carried over: the platepars differ by {:.2f} px rms (more than "
+                         "{:.2f} px) after the fit".format(rms, max_rms if max_rms is not None else np.inf))
 
     # The reference alt/az and the rotation from the horizon follow the fitted pointing
     transferred.updateRefAltAz()
 
-    return transferred, float(np.sqrt(np.mean(residuals**2)))
+    return transferred, rms
 
 
 def readChunks(dir_path, config):
@@ -193,7 +259,7 @@ def readChunks(dir_path, config):
     return sorted(chunks.values(), key=lambda chunk: chunk[1])
 
 
-def readNights(dir_paths, config, min_stars=0):
+def readNights(dir_paths, config, min_stars=0, snr_min=0):
     """ Read the chunks and the platepar of every directory (a night) and sort the nights by time.
 
     Arguments:
@@ -202,31 +268,47 @@ def readNights(dir_paths, config, min_stars=0):
 
     Keyword arguments:
         min_stars: [int] Only the chunks with at least this many stars are kept. 0 by default.
+        snr_min: [float] If positive, only the chunks with at least MIN_CHUNK_STARS stars of at least this SNR are
+            kept. 0 by default.
 
     Return:
         [list] Nights as dictionaries with the directory ('dir'), the chunks ('chunks', see readChunks) and the
-            platepar of the directory ('platepar', None if there is none), sorted by the time of the first chunk.
-            Directories without chunks are left out.
+            platepar of the directory ('platepar', None if there is none or it can't be used), sorted by the time
+            of the first chunk. Directories without chunks are left out.
     """
 
     nights = []
     for dir_path in dir_paths:
 
         # The chunks with enough stars (a night without them doesn't count, also not among the held-out nights)
-        chunks = [chunk for chunk in readChunks(dir_path, config) if len(chunk[2]) >= min_stars]
+        all_chunks = readChunks(dir_path, config)
+        chunks = [chunk for chunk in all_chunks if len(chunk[2]) >= min_stars]
         if not chunks:
             log.warning("No chunks with at least {:d} stars in {:s}, the directory is not used".format(
                 min_stars, dir_path))
             continue
 
+        # The chunks with enough stars of the minimum SNR. The SNR of the CALSTARS files of older versions of RMS
+        #   is on another scale (much lower), so their nights may have none
+        if (snr_min is not None) and (snr_min > 0):
+            snr = np.concatenate([chunk[2][:, STAR_SNR] for chunk in chunks])
+            chunks = [chunk for chunk in chunks if np.count_nonzero(chunk[2][:, STAR_SNR] >= snr_min)
+                      >= MIN_CHUNK_STARS]
+            if not chunks:
+                log.warning("No chunks with {:d} stars of SNR >= {:.1f} in {:s} (99th percentile of the SNR of its "
+                            "stars {:.1f}; older CALSTARS files have the SNR on another scale), the directory is "
+                            "not used".format(MIN_CHUNK_STARS, snr_min, dir_path, np.percentile(snr, 99)))
+                continue
+
         # The platepar of the night, read as the processing reads it (a flat-fielded camera gets no default
-        #   vignetting coefficient)
+        #   vignetting coefficient). One which can't be read is not used
         platepar = None
         platepar_path = os.path.join(dir_path, config.platepar_name)
         if os.path.isfile(platepar_path):
-            platepar = Platepar()
-            if platepar.read(platepar_path, use_flat=config.use_flat) is False:
-                platepar = None
+            platepar = readPlatepar(platepar_path, config.use_flat)
+            if platepar is None:
+                log.warning("The platepar {:s} can't be used, the night starts from the starting platepar".format(
+                    platepar_path))
 
         nights.append({'dir': dir_path, 'chunks': chunks, 'platepar': platepar})
 
@@ -245,18 +327,35 @@ def heldOutNights(nights, holdout):
         [set] Indices of the held-out nights.
     """
 
-    if not holdout:
+    if (holdout is None) or (len(holdout) == 0):
         return set()
 
     # Every N-th night from the K-th
-    if (len(holdout) == 2) and all(isinstance(value, int) for value in holdout):
-        n, k = holdout
+    if (len(holdout) == 2) and all(isinstance(value, numbers.Integral) for value in holdout):
+        n, k = int(holdout[0]), int(holdout[1])
+        if (n < 1) or (k < 0):
+            raise ValueError("The held-out nights must be every N-th from the K-th with N >= 1 and K >= 0")
         return set(range(k, len(nights), n))
 
-    # The given directories
-    held_dirs = set(os.path.normpath(os.path.abspath(dir_path)) for dir_path in holdout)
-    return set(i for i, night in enumerate(nights)
-               if os.path.normpath(os.path.abspath(night['dir'])) in held_dirs)
+    # The given directories, those which are not among the nights are reported
+    def _norm(dir_path):
+        """ The normalized absolute path of a directory.
+
+        Arguments:
+            dir_path: [str] Directory.
+
+        Return:
+            [str] Its normalized absolute path.
+        """
+
+        return os.path.normpath(os.path.abspath(dir_path))
+
+    held_dirs = set(_norm(dir_path) for dir_path in holdout)
+    night_dirs = set(_norm(night['dir']) for night in nights)
+    for dir_path in sorted(held_dirs - night_dirs):
+        log.warning("The held-out directory {:s} is not among the nights with usable chunks".format(dir_path))
+
+    return set(i for i, night in enumerate(nights) if _norm(night['dir']) in held_dirs)
 
 
 def matchStars(platepar, jd, stars, catalog_stars, match_radius, lim_mag):
@@ -321,15 +420,41 @@ def matchStars(platepar, jd, stars, catalog_stars, match_radius, lim_mag):
                             catalog_fov[j, 1], catalog_fov[j, 2], x_cat[j], y_cat[j]])
 
 
-# The data the recalibration workers share, set once per worker (see _initWorker)
+# The data the recalibration workers share, set once per worker (see _setWorkerData)
 _worker_data = {}
 
 
-def _initWorker(catalog_stars, match_catalog_stars, config, match_radius, lim_mag):
-    """ Set the data of a recalibration worker, and keep the log of the many recalibrations quiet. """
+def _setWorkerData(catalog_stars, match_catalog_stars, config, match_radius, lim_mag):
+    """ Set the data which the recalibration of the chunks shares (see _recalibrateWorker).
 
+    Arguments:
+        catalog_stars: [ndarray] Catalog stars of the recalibration (ra, dec, mag).
+        match_catalog_stars: [ndarray] Catalog stars of the matching (ra, dec, mag).
+        config: [Config] Configuration.
+        match_radius: [float] Match radius of the stars (px).
+        lim_mag: [float] Limiting magnitude of the matched catalog stars.
+
+    Return:
+        None
+    """
+
+    _worker_data.clear()
     _worker_data.update(catalog_stars=catalog_stars, match_catalog_stars=match_catalog_stars, config=config,
                         match_radius=match_radius, lim_mag=lim_mag)
+
+
+def _initPoolWorker(*args):
+    """ Initialize a process of the pool of workers: set its data (see _setWorkerData) and keep the log of its many
+        recalibrations quiet (only in the worker process).
+
+    Arguments:
+        args: [tuple] Arguments of _setWorkerData.
+
+    Return:
+        None
+    """
+
+    _setWorkerData(*args)
     logging.getLogger("rmslogger").setLevel(logging.WARNING)
 
 
@@ -368,8 +493,8 @@ def recalibrateChunks(tasks, pool=None):
         tasks: [list] Tasks (key, platepar to start from, chunk name, jd, stars, frames of the chunk).
 
     Keyword arguments:
-        pool: [multiprocessing.Pool] Pool of workers initialized by _initWorker. None by default, in which case the
-            chunks are recalibrated here (_initWorker must have been called).
+        pool: [multiprocessing.Pool] Pool of workers initialized by _initPoolWorker. None by default, in which case
+            the chunks are recalibrated here (_setWorkerData must have been called).
 
     Return:
         [dict] For every key the recalibrated platepar and the matched stars (None, None if the recalibration
@@ -417,7 +542,15 @@ def residualStats(matched, scale, width, height):
     dist = np.hypot(dx, dy)
 
     def _mean(values, selection):
-        """ Mean of the selected values, nan if none is selected. """
+        """ Mean of the selected values.
+
+        Arguments:
+            values: [ndarray] Values.
+            selection: [ndarray] Boolean selection of the values.
+
+        Return:
+            [float] The mean, nan if none is selected.
+        """
 
         return float(np.mean(values[selection])) if np.any(selection) else np.nan
 
@@ -454,7 +587,15 @@ def residualStats(matched, scale, width, height):
 
 
 def _goodStars(matched, snr_min):
-    """ The matched stars of at least the minimum SNR (all of them if snr_min is not positive). """
+    """ The matched stars of at least the minimum SNR.
+
+    Arguments:
+        matched: [ndarray] Matched stars (see matchStars), or None.
+        snr_min: [float] Minimum SNR, not applied if not positive.
+
+    Return:
+        [ndarray] The matched stars of at least the minimum SNR (None if none were given).
+    """
 
     if (matched is None) or (not snr_min) or (snr_min <= 0):
         return matched
@@ -587,9 +728,9 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
 
     Keyword arguments:
         distortion_type: [str] Distortion type of the fit (see Platepar.setDistortionType). None by default, in
-            which case config.platepar_distortion_type is used.
+            which case the type of the starting platepar is kept. A different type is fitted from no distortion.
         holdout: [tuple or list] Nights held out of the fit (see heldOutNights). None by default.
-        n_iter: [int] Number of fits of the distortion. 4 by default.
+        n_iter: [int] Number of fits of the distortion, at least 1. 4 by default.
         snr_min: [float] Minimum SNR of the stars (not applied if not positive). 10 by default.
         max_stars: [int] Maximum number of stars in a fit of the distortion. 20000 by default.
         chunk_step: [int] Every chunk_step-th chunk of the nights of the fit is used. 2 by default.
@@ -600,18 +741,26 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
         nproc: [int] Number of parallel workers. None by default, in which case all cores are used.
 
     Return:
-        (platepar, report): [tuple] The fitted platepar (the distortion with the pointing of the reference chunk,
-            the photometry of the starting platepar), and the report of the fit as a dictionary: the residual
-            statistics (see residualStats) of the chunks of the fit after every recalibration ('iterations'), of
-            every night of the fit with the final distortion ('night_stats') and of the held-out nights with their
-            own platepars and with the fitted distortion ('held_out_stats'), and the matched stars behind them
-            ('stars'). formatReport writes it as text.
+        (platepar, report): [tuple] The fitted platepar (the distortion of the last fit with the pointing of the
+            reference chunk, the photometry of the starting platepar), and the report of the fit as a dictionary:
+            the residual statistics (see residualStats) of the chunks of the fit after every recalibration
+            ('iterations'), of every night of the fit with the final distortion ('night_stats') and of the
+            held-out nights with their own platepars and with the fitted distortion ('held_out_stats'), and the
+            matched stars behind them ('stars'). formatReport writes it as text.
     """
 
-    # The distortion type, catalog depth and number of workers not given are those of the config and the machine
-    if distortion_type is None:
-        distortion_type = config.platepar_distortion_type
+    if n_iter < 1:
+        raise ValueError("At least one fit of the distortion is needed (n_iter = {:d})".format(n_iter))
 
+    # The distortion type is the one of the starting platepar unless another one is asked for, which is then fitted
+    #   from no distortion
+    if distortion_type is None:
+        distortion_type = platepar.distortion_type
+    if distortion_type != platepar.distortion_type:
+        log.info("The distortion type changes from {:s} (starting platepar) to {:s}, which is fitted from no "
+                 "distortion".format(platepar.distortion_type, distortion_type))
+
+    # The catalog depth and number of workers not given are those of the config and the machine
     if lim_mag is None:
         lim_mag = config.catalog_mag_limit
 
@@ -622,12 +771,24 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
     if match_radius is None:
         match_radius = MATCH_RADIUS*max(1.0, np.hypot(platepar.X_res, platepar.Y_res)/np.hypot(1280, 720))
 
-    # The nights in time order, with the chunks with enough stars to be recalibrated, and the held-out nights
+    # The nights in time order, with the chunks with enough stars to be recalibrated and to be used in the fit, and
+    #   the held-out nights
     min_stars = max(config.ff_min_stars, config.min_matched_stars)
-    nights = readNights(dir_paths, config, min_stars=min_stars)
+    nights = readNights(dir_paths, config, min_stars=min_stars, snr_min=snr_min)
     if not nights:
-        raise ValueError("No chunks with at least {:d} stars in the given directories".format(min_stars))
+        raise ValueError("No chunks with at least {:d} stars (and {:d} of SNR >= {:.1f}) in the given "
+                         "directories".format(min_stars, MIN_CHUNK_STARS, snr_min))
     held = heldOutNights(nights, holdout)
+
+    # The platepars of the nights whose pointing can't be carried over to the starting distortion (another camera,
+    #   or a broken platepar) are not used
+    for night in nights:
+        if night['platepar'] is not None:
+            try:
+                transferPointing(platepar, night['platepar'])
+            except ValueError as e:
+                log.warning("The platepar of {:s} is not used: {:s}".format(night['dir'], str(e)))
+                night['platepar'] = None
 
     # Every chunk_step-th chunk of the nights of the fit, all chunks of the held-out nights. The key of a chunk
     #   is (night index, chunk index)
@@ -641,7 +802,14 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
         len(nights), len(held), len(train_keys), len(held_keys)))
 
     def _chunk(key):
-        """ The chunk of a key. """
+        """ The chunk of a key.
+
+        Arguments:
+            key: [tuple] (night index, chunk index).
+
+        Return:
+            [tuple] The chunk (see readChunks).
+        """
 
         return nights[key[0]]['chunks'][key[1]]
 
@@ -657,23 +825,47 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
 
     def _startOf(night, distortion):
         """ The start of the recalibration of the chunks of a night: the distortion with the pointing of the
-            platepar of the night, or of the starting platepar. """
+            platepar of the night, or of the starting platepar (also if the night's can't be carried over).
 
-        return transferPointing(distortion, night['platepar'] if night['platepar'] is not None else platepar)[0]
+        Arguments:
+            night: [dict] Night (see readNights).
+            distortion: [Platepar] Current distortion.
+
+        Return:
+            [Platepar] The start of the recalibration.
+        """
+
+        if night['platepar'] is not None:
+            try:
+                return transferPointing(distortion, night['platepar'])[0]
+            except ValueError as e:
+                log.warning("The pointing of the platepar of {:s} can't be carried over to the current distortion, "
+                            "the starting platepar's is used: {:s}".format(night['dir'], str(e)))
+
+        return transferPointing(distortion, platepar)[0]
 
     def _tasks(keys, starts):
-        """ The recalibration tasks of chunks, each starting from the platepar of its night. """
+        """ The recalibration tasks of chunks, each starting from the platepar of its night.
+
+        Arguments:
+            keys: [list] Keys of the chunks.
+            starts: [dict] Platepar to start from for every night index.
+
+        Return:
+            [list] Tasks of recalibrateChunks.
+        """
 
         return [(key, starts[key[0]], _chunk(key)[0], _chunk(key)[1], _chunk(key)[2], _chunk(key)[3])
                 for key in keys]
 
-    # The workers of the recalibration, which share the catalogs and the config
+    # The workers of the recalibration, which share the catalogs and the config. Without a pool the data is set
+    #   here (the log is kept quiet only while recalibrating, see recalibrateChunks)
     init_args = (catalog_stars, match_catalog_stars, config, match_radius, lim_mag)
     pool = None
     if nproc > 1:
-        pool = multiprocessing.Pool(nproc, initializer=_initWorker, initargs=init_args)
+        pool = multiprocessing.Pool(nproc, initializer=_initPoolWorker, initargs=init_args)
     else:
-        _initWorker(*init_args)
+        _setWorkerData(*init_args)
 
     report = {'nights': [night['dir'] for night in nights], 'held_out': sorted(nights[n]['dir'] for n in held),
               'distortion_type': distortion_type, 'match_radius': match_radius, 'lim_mag': lim_mag,
@@ -698,6 +890,11 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
             report['iterations'].append(entry)
             log.info("Iteration {:d}: {:s}".format(iteration, _statsLine(entry['stats'], n_recalibrated,
                                                                             len(train_keys))))
+
+            # The nights whose chunks give no stars for the fit are reported once
+            if iteration == 0:
+                _warnNightsWithoutStars(nights, train_keys, results, snr_min)
+
             if iteration == n_iter:
                 break
 
@@ -711,12 +908,16 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
                 if len(stars) >= MIN_CHUNK_STARS:
                     fit_platepars[key], fit_stars[key] = pp_chunk, stars
             if not fit_platepars:
-                raise ValueError("No chunk has {:d} matched stars for the fit".format(MIN_CHUNK_STARS))
+                raise ValueError("No recalibrated chunk has {:d} matched stars of SNR >= {:.1f} for the fit".format(
+                    MIN_CHUNK_STARS, snr_min))
 
             distortion, n_fit, reference_key = fitDistortion(fit_platepars, fit_stars, jds, distortion_type,
                                                              max_stars)
             entry['fit_chunks'], entry['fit_stars'] = len(fit_platepars), n_fit
             report['reference'] = (nights[reference_key[0]]['dir'], _chunk(reference_key)[0])
+
+        # The final distortion is kept, but a warning is given if an earlier one fitted the stars clearly better
+        _warnIfWorse(report['iterations'])
 
         # The residuals of every night of the fit with the final distortion
         report['night_stats'] = []
@@ -752,10 +953,20 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
                 log.info("Held out ({:s}): {:s}".format(label, _statsLine(
                     report['held_out_stats'][label]['stats'], n_recalibrated, len(held_keys))))
 
+    # On an error the workers are stopped right away
+    except BaseException:
+        if pool is not None:
+            pool.terminate()
+            pool.join()
+            pool = None
+        raise
+
+    # The workers are stopped and the shared data of the recalibration in this process is released
     finally:
         if pool is not None:
             pool.close()
             pool.join()
+        _worker_data.clear()
 
     # The photometry of the starting platepar is kept, it isn't fitted here
     for name in PHOTOMETRY_PARAMETERS:
@@ -765,11 +976,69 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
     return distortion, report
 
 
+def _warnNightsWithoutStars(nights, keys, results, snr_min):
+    """ Warn about the nights whose recalibrated chunks give no matched stars of the minimum SNR.
+
+    Arguments:
+        nights: [list] Nights (see readNights).
+        keys: [list] Keys of the chunks (night index, chunk index).
+        results: [dict] Results of recalibrateChunks.
+        snr_min: [float] Minimum SNR of the stars.
+
+    Return:
+        None
+    """
+
+    for n in sorted(set(key[0] for key in keys)):
+        night_keys = [key for key in keys if key[0] == n]
+        matched, _, n_recalibrated = _collect(results, night_keys, snr_min)
+        if len(matched) > 0:
+            continue
+
+        # Why the night has no stars: no chunk was recalibrated, or no matched star has the SNR
+        if n_recalibrated == 0:
+            reason = "none of its {:d} chunks was recalibrated".format(len(night_keys))
+        else:
+            reason = "no matched star of its {:d} recalibrated chunks has SNR >= {:.1f} (older CALSTARS files " \
+                "have the SNR on another scale)".format(n_recalibrated, snr_min)
+        log.warning("No usable stars in {:s}: {:s}".format(nights[n]['dir'], reason))
+
+
+def _warnIfWorse(iterations):
+    """ Warn if the residuals of the final distortion are larger than those of an earlier one by more than
+        WORSE_SHARE.
+
+    Arguments:
+        iterations: [list] Entries of the iterations of the report of jointDistortionFit.
+
+    Return:
+        [bool] True if the warning was given.
+    """
+
+    rms = [entry['stats']['rms'] if entry['stats'] is not None else np.inf for entry in iterations]
+    best = int(np.argmin(rms))
+    if rms[-1] > (1 + WORSE_SHARE)*rms[best]:
+        log.warning("The residuals of the final distortion ({:.2f}\") are larger than those of iteration {:d} "
+                    "({:.2f}\"), the fit may not converge".format(rms[-1], best, rms[best]))
+        return True
+
+    return False
+
+
 def _statsLine(stats, n_recalibrated, n_chunks):
-    """ One line of the residual statistics, for the log and the report. """
+    """ One line of the residual statistics, for the log and the report.
+
+    Arguments:
+        stats: [dict] Residual statistics (see residualStats), None without stars.
+        n_recalibrated: [int] Number of recalibrated chunks.
+        n_chunks: [int] Number of chunks.
+
+    Return:
+        [str] The line.
+    """
 
     if stats is None:
-        return "recalibrated {:d}/{:d}, no matched stars".format(n_recalibrated, n_chunks)
+        return "recalibrated {:d}/{:d}, no usable stars".format(n_recalibrated, n_chunks)
 
     return ("recalibrated {:d}/{:d}, {:d} stars, median {:.2f}\", rms {:.2f}\" (x {:.2f}\", y {:.2f}\"), corners "
             "{:s}".format(n_recalibrated, n_chunks, stats['n'], stats['median'], stats['rms'], stats['std_x'],
@@ -777,16 +1046,33 @@ def _statsLine(stats, n_recalibrated, n_chunks):
 
 
 def _cornersLine(stats):
-    """ The size of the mean residual in every corner (arcsec). """
+    """ The size of the mean residual in every corner.
+
+    Arguments:
+        stats: [dict] Residual statistics (see residualStats).
+
+    Return:
+        [str] The size of the mean residual in every corner (arcsec).
+    """
 
     return ' '.join('{:s} {:.2f}"'.format(name, np.hypot(*stats['corners'][name][:2])) for name in CORNER_NAMES)
 
 
 def _statsBlock(stats, indent='    '):
-    """ The radial profile, zones and corners of the residual statistics, as lines of text. """
+    """ The radial profile, zones and corners of the residual statistics, as lines of text.
+
+    Arguments:
+        stats: [dict] Residual statistics (see residualStats), None without stars.
+
+    Keyword arguments:
+        indent: [str] Indentation of the lines. Four spaces by default.
+
+    Return:
+        [list] The lines.
+    """
 
     if stats is None:
-        return [indent + 'no matched stars']
+        return [indent + 'no usable stars']
 
     lines = [indent + 'radial (mean, outwards +): ' + '  '.join(
         '{:.0f}-{:.0f}px {:+.2f}"'.format(inner, outer, mean) for inner, outer, mean, _ in stats['radial'])]
@@ -851,20 +1137,62 @@ def formatReport(report):
     return '\n'.join(lines) + '\n'
 
 
+
+
 def _parseHoldout(value):
-    """ The held-out nights of the command line: N:K, or none. """
+    """ The held-out nights of the command line.
+
+    Arguments:
+        value: [str] N:K (every N-th night from the K-th), or none.
+
+    Return:
+        [tuple] (N, K), None for none.
+    """
 
     if value.lower() == 'none':
         return None
 
-    n, k = (int(v) for v in value.split(':'))
+    try:
+        n, k = (int(v) for v in value.split(':'))
+    except ValueError:
+        raise argparse.ArgumentTypeError("The held-out nights must be N:K, e.g. 4:1, or none")
+
     if (n < 2) or (k < 0) or (k >= n):
         raise argparse.ArgumentTypeError("The held-out nights must be N:K with N >= 2 and 0 <= K < N")
 
     return (n, k)
 
 
-if __name__ == "__main__":
+def _positiveInt(value):
+    """ A positive integer of the command line.
+
+    Arguments:
+        value: [str] The value.
+
+    Return:
+        [int] The integer.
+    """
+
+    try:
+        number = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("{:s} is not an integer".format(value))
+
+    if number < 1:
+        raise argparse.ArgumentTypeError("{:s} must be at least 1".format(value))
+
+    return number
+
+
+def main(argv=None):
+    """ The command line interface: fit the distortion and write the platepar and the report.
+
+    Keyword arguments:
+        argv: [list] Command line arguments. None by default, in which case those of the program are used.
+
+    Return:
+        [int] Exit code: 0 on success, 1 on an error (which is logged).
+    """
 
     import RMS.ConfigReader as cr
 
@@ -885,11 +1213,11 @@ if __name__ == "__main__":
                             "without a platepar.")
 
     arg_parser.add_argument('-o', '--out', metavar='PLATEPAR_OUT', type=str, required=True,
-                            help="Path of the fitted platepar. The report is written next to it (.txt).")
+                            help="Path of the fitted platepar. The report is written next to it (_report.txt).")
 
     arg_parser.add_argument('-t', '--type', metavar='DISTORTION_TYPE', type=str,
-                            help="Distortion type of the fit, e.g. poly3+radial5. The platepar_distortion_type of "
-                            "the config by default.")
+                            help="Distortion type of the fit, e.g. poly3+radial5. The type of the starting "
+                            "platepar by default; another type is fitted from no distortion.")
 
     holdout_group = arg_parser.add_mutually_exclusive_group()
 
@@ -900,16 +1228,16 @@ if __name__ == "__main__":
     holdout_group.add_argument('--holdoutdirs', nargs='+', metavar='DIR_PATH', type=str,
                                help="Hold out the nights of these directories (some of the given ones) instead.")
 
-    arg_parser.add_argument('--iter', metavar='N_ITER', type=int, default=4,
-                            help="Number of fits of the distortion. 4 by default.")
+    arg_parser.add_argument('--iter', metavar='N_ITER', type=_positiveInt, default=4,
+                            help="Number of fits of the distortion (at least 1). 4 by default.")
 
     arg_parser.add_argument('--snrmin', metavar='SNR', type=float, default=10.0,
                             help="Minimum SNR of the stars. 10 by default.")
 
-    arg_parser.add_argument('--maxstars', metavar='N_STARS', type=int, default=20000,
+    arg_parser.add_argument('--maxstars', metavar='N_STARS', type=_positiveInt, default=20000,
                             help="Maximum number of stars in a fit of the distortion. 20000 by default.")
 
-    arg_parser.add_argument('--step', metavar='STEP', type=int, default=2,
+    arg_parser.add_argument('--step', metavar='STEP', type=_positiveInt, default=2,
                             help="Use every STEP-th chunk of the nights of the fit. 2 by default.")
 
     arg_parser.add_argument('--radius', metavar='RADIUS_PX', type=float,
@@ -924,10 +1252,10 @@ if __name__ == "__main__":
                             help="Write the fitted distortion with the pointing of this platepar (e.g. the latest "
                             "one of the camera) instead of the pointing of the reference chunk.")
 
-    arg_parser.add_argument('--nproc', metavar='N_PROC', type=int,
+    arg_parser.add_argument('--nproc', metavar='N_PROC', type=_positiveInt,
                             help="Number of parallel workers. All cores by default.")
 
-    cml_args = arg_parser.parse_args()
+    cml_args = arg_parser.parse_args(argv)
 
     #########################
 
@@ -935,25 +1263,41 @@ if __name__ == "__main__":
     config = cr.loadConfigFromDirectory(cml_args.config, cml_args.dir_paths[0])
 
     # Print the progress
-    log = getLogger("rmslogger", level="INFO")
+    getLogger("rmslogger", level="INFO")
 
-    # The starting platepar, read as the processing reads it
-    platepar = Platepar()
-    platepar.read(cml_args.platepar, use_flat=config.use_flat)
+    # The starting platepar and the platepar of the pointing, read as the processing reads them, are checked before
+    #   the fit
+    platepar = readPlatepar(cml_args.platepar, config.use_flat)
+    if platepar is None:
+        log.error("The starting platepar {:s} can't be read".format(cml_args.platepar))
+        return 1
 
-    fitted, fit_report = jointDistortionFit(cml_args.dir_paths, platepar, config, distortion_type=cml_args.type,
-                                            holdout=(cml_args.holdoutdirs or cml_args.holdout),
-                                            n_iter=cml_args.iter,
-                                            snr_min=cml_args.snrmin, max_stars=cml_args.maxstars,
-                                            chunk_step=cml_args.step, match_radius=cml_args.radius,
-                                            lim_mag=cml_args.limmag, nproc=cml_args.nproc)
-
-    # The fitted distortion with the pointing of the given platepar
+    pointing = None
     if cml_args.pointing:
-        pointing = Platepar()
-        pointing.read(cml_args.pointing, use_flat=config.use_flat)
-        fitted, rms = transferPointing(fitted, pointing)
-        print("Pointing of {:s} carried over, the two differ by {:.3f} px rms".format(cml_args.pointing, rms))
+        pointing = readPlatepar(cml_args.pointing, config.use_flat)
+        if pointing is None:
+            log.error("The platepar of the pointing {:s} can't be read".format(cml_args.pointing))
+            return 1
+
+    # The fit, whose errors (e.g. no usable stars) end the program with a message
+    try:
+        fitted, fit_report = jointDistortionFit(cml_args.dir_paths, platepar, config,
+                                                distortion_type=cml_args.type,
+                                                holdout=(cml_args.holdoutdirs or cml_args.holdout),
+                                                n_iter=cml_args.iter, snr_min=cml_args.snrmin,
+                                                max_stars=cml_args.maxstars, chunk_step=cml_args.step,
+                                                match_radius=cml_args.radius, lim_mag=cml_args.limmag,
+                                                nproc=cml_args.nproc)
+
+        # The fitted distortion with the pointing of the given platepar
+        if pointing is not None:
+            fitted, rms = transferPointing(fitted, pointing)
+            log.info("Pointing of {:s} carried over, the two differ by {:.3f} px rms".format(cml_args.pointing,
+                                                                                          rms))
+
+    except ValueError as e:
+        log.error("Joint distortion fit failed: {:s}".format(str(e)))
+        return 1
 
     # Save the platepar and the report
     fitted.write(cml_args.out)
@@ -963,3 +1307,10 @@ if __name__ == "__main__":
 
     print(formatReport(fit_report))
     print("Platepar written to {:s}, report to {:s}".format(cml_args.out, report_path))
+
+    return 0
+
+
+if __name__ == "__main__":
+
+    sys.exit(main())

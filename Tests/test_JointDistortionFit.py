@@ -12,16 +12,21 @@ The pointing transfer carries the pointing of a platepar over to another distort
 """
 
 import copy
+import json
+import logging
 import os
+import shutil
 
 import numpy as np
 import pytest
 
 import RMS.ConfigReader as cr
+from RMS.Astrometry import JointDistortionFit
 from RMS.Astrometry.ApplyAstrometry import raDecToXYPP, xyToRaDecPP
 from RMS.Astrometry.AutoPlatepar import loadCatalogStars
 from RMS.Astrometry.Conversions import date2JD, jd2Date, JD2HourAngle
-from RMS.Astrometry.JointDistortionFit import heldOutNights, jointDistortionFit, transferPointing
+from RMS.Astrometry.JointDistortionFit import (heldOutNights, jointDistortionFit, matchStars, readNights,
+                                               readPlatepar, residualStats, transferPointing)
 from RMS.Formats import CALSTARS
 from RMS.Formats.FFfile import getMiddleTimeFF
 from RMS.Formats.Platepar import Platepar
@@ -39,6 +44,11 @@ HELD_OUT = 2
 
 # The wrong distortion of the platepars of the nights: stars moved outwards by this much (px) at the corners
 WRONG_DISTORTION_PX = 1.0
+
+# The photometry of the starting platepar, which the fit has to keep (a vignetting coefficient which the fit must
+#   neither fit nor reset)
+START_MAG_LEV = 10.3
+START_VIGNETTING = 0.0012
 
 
 def makePlatepar():
@@ -184,6 +194,7 @@ def nights(tmp_path_factory):
     config = makeConfig()
     truth = makePlatepar()
     start = wrongDistortion(truth)
+    start.mag_lev, start.vignetting_coeff = START_MAG_LEV, START_VIGNETTING
     catalog_stars = loadCatalogStars(config, LIM_MAG, jd=truth.JD)
     rng = np.random.default_rng(0)
 
@@ -316,9 +327,10 @@ def test_residuals_of_the_fit(nights, fit):
     for dx, dy, n in last['stats']['corners'].values():
         assert np.hypot(dx, dy) < 0.5*noise
 
-    # The photometry of the starting platepar is kept
-    assert fitted.vignetting_coeff == start.vignetting_coeff
-    assert fitted.mag_lev == start.mag_lev
+    # The photometry of the starting platepar is kept (the recalibration of the reference chunk fitted another
+    #   zero point)
+    assert fitted.vignetting_coeff == START_VIGNETTING
+    assert fitted.mag_lev == START_MAG_LEV
 
 
 def test_held_out_night_fits(nights, fit):
@@ -334,3 +346,256 @@ def test_held_out_night_fits(nights, fit):
     assert held['fitted']['recalibrated'] == N_CHUNKS
     assert held['fitted']['stats']['rms'] < 1.15*noise
     assert held['fitted']['stats']['rms'] < held['start']['stats']['rms']
+
+
+class _Records(logging.Handler):
+    """ Keeps the messages of a logger. """
+
+    def __init__(self):
+        logging.Handler.__init__(self, level=logging.DEBUG)
+        self.messages = []
+
+    def emit(self, record):
+        self.messages.append(record.getMessage())
+
+
+@pytest.fixture(scope="module")
+def fit_poly(nights):
+    """ The joint fit of the synthetic nights with another distortion type (poly3+radial5), without workers, with
+        the messages of the log kept.
+
+    Return:
+        (fitted, report, messages, levels): the fitted platepar, the report, the messages of the log, and the level
+            of the log before and after the fit.
+    """
+
+    config, truth, start, dirs, pointings = nights
+    rms_log = logging.getLogger("rmslogger")
+    previous_level = rms_log.level
+    rms_log.setLevel(logging.INFO)
+    records = _Records()
+    rms_log.addHandler(records)
+    try:
+        fitted, report = jointDistortionFit(dirs, start, config, distortion_type="poly3+radial5", n_iter=1,
+                                            chunk_step=1, nproc=1)
+        levels = (logging.INFO, rms_log.level)
+    finally:
+        rms_log.removeHandler(records)
+        rms_log.setLevel(previous_level)
+
+    return fitted, report, records.messages, levels
+
+
+def test_type_change_without_workers(nights, fit_poly):
+    """ Another distortion type is fitted from no distortion and the change is logged; without workers the
+        log keeps its level and every iteration is logged. """
+
+    config, truth, start, dirs, pointings = nights
+    fitted, report, messages, levels = fit_poly
+
+    noise = np.sqrt(2)*NOISE_PX*3600/truth.F_scale
+
+    # The new type fits the stars nearly to the noise (it can't describe the known distortion exactly)
+    assert fitted.distortion_type == "poly3+radial5"
+    assert report['distortion_type'] == "poly3+radial5"
+    assert report['iterations'][-1]['stats']['rms'] < 1.2*noise
+    for pointing in pointings:
+        assert gridDifference(pointing, transferPointing(fitted, pointing)[0]) < 2*NOISE_PX
+
+    # The change of the type and the iterations are logged, and the level of the log is the same after the fit
+    assert any('changes from radial7-odd' in message for message in messages)
+    assert any(message.startswith('Iteration 1') for message in messages)
+    assert levels[0] == levels[1]
+
+    # No data of the recalibration stays behind in this process
+    assert not JointDistortionFit._worker_data
+
+
+def test_cli_keeps_the_type_and_carries_the_pointing(nights, fit_poly, tmp_path, monkeypatch):
+    """ The command line: without a type the one of the starting platepar is kept (not the config's), and the
+        result is written with the pointing of the given platepar. """
+
+    config, truth, start, dirs, pointings = nights
+    fitted_poly = fit_poly[0]
+
+    # The starting platepar of another type than the config's
+    config = copy.deepcopy(config)
+    config.platepar_distortion_type = "radial7-odd"
+    monkeypatch.setattr(cr, "loadConfigFromDirectory", lambda *args: config)
+    start_path = str(tmp_path/"start.cal")
+    fitted_poly.write(start_path)
+
+    out_path = str(tmp_path/"joint.cal")
+    pointing_path = os.path.join(dirs[1], config.platepar_name)
+    code = JointDistortionFit.main(dirs + ['-p', start_path, '-o', out_path, '--iter', '1', '--nproc', '2',
+                                           '--holdout', '4:3', '--pointing', pointing_path])
+    assert code == 0
+    assert os.path.isfile(os.path.join(str(tmp_path), "joint_report.txt"))
+
+    # The type is kept, and the platepar has the pointing of the night (the reference chunk is of another night)
+    written = readPlatepar(out_path, True)
+    assert written.distortion_type == "poly3+radial5"
+    assert gridDifference(pointings[1], written) < 2*NOISE_PX
+    assert written.vignetting_coeff == fitted_poly.vignetting_coeff
+
+
+def test_cli_stops_on_unreadable_platepars(nights, tmp_path, monkeypatch):
+    """ A starting platepar or a platepar of the pointing which can't be read stops the command line with an
+        error, before anything is written; so does a number of iterations below 1. """
+
+    config, truth, start, dirs, pointings = nights
+    monkeypatch.setattr(cr, "loadConfigFromDirectory", lambda *args: config)
+    start_path = str(tmp_path/"start.cal")
+    start.write(start_path)
+    out_path = str(tmp_path/"joint.cal")
+
+    assert JointDistortionFit.main(dirs + ['-p', str(tmp_path/"missing.cal"), '-o', out_path]) == 1
+    assert JointDistortionFit.main(dirs + ['-p', start_path, '-o', out_path, '--pointing',
+                                           str(tmp_path/"missing.cal")]) == 1
+    assert not os.path.exists(out_path)
+
+    with pytest.raises(SystemExit) as e:
+        JointDistortionFit.main(dirs + ['-p', start_path, '-o', out_path, '--iter', '0'])
+    assert e.value.code != 0
+
+
+def test_unreadable_platepars(nights, tmp_path):
+    """ Platepars which can't be read or describe no image are none, a night with one starts from the starting
+        platepar, and the pointing isn't carried over from a broken platepar or between different cameras. """
+
+    config, truth, start, dirs, pointings = nights
+
+    # A file which isn't a platepar, and a platepar without a scale
+    garbage = tmp_path/"garbage.cal"
+    garbage.write_text("not a platepar\n")
+    assert readPlatepar(str(garbage), True) is None
+    assert readPlatepar(str(tmp_path/"missing.cal"), True) is None
+    no_scale = json.loads(start.jsonStr())
+    no_scale['F_scale'] = -1.0
+    (tmp_path/"no_scale.cal").write_text(json.dumps(no_scale))
+    assert readPlatepar(str(tmp_path/"no_scale.cal"), True) is None
+
+    # A night with a platepar which can't be read is used without it
+    night_dir = tmp_path/"night"
+    shutil.copytree(dirs[0], str(night_dir))
+    shutil.copy(str(garbage), str(night_dir/config.platepar_name))
+    nights_read = readNights([str(night_dir)], config)
+    assert len(nights_read) == 1
+    assert nights_read[0]['platepar'] is None
+
+    # The pointing isn't carried over from a platepar without a scale, nor to a lens without the distortion
+    broken = copy.deepcopy(start)
+    broken.F_scale = -1.58
+    with pytest.raises(ValueError):
+        transferPointing(start, broken)
+    no_distortion = copy.deepcopy(truth)
+    no_distortion.resetDistortionParameters()
+    with pytest.raises(ValueError):
+        transferPointing(no_distortion, truth)
+    assert transferPointing(no_distortion, truth, max_rms=None)[1] > 1.0
+
+
+def test_failures(nights, tmp_path, caplog):
+    """ No fit without iterations or without usable chunks; the nights whose stars are all below the minimum SNR
+        are left out with a warning. """
+
+    config, truth, start, dirs, pointings = nights
+
+    with pytest.raises(ValueError):
+        jointDistortionFit(dirs, start, config, n_iter=0)
+
+    # Too few stars in every chunk
+    few = copy.deepcopy(config)
+    few.ff_min_stars = 100000
+    with pytest.raises(ValueError):
+        jointDistortionFit(dirs, start, few, n_iter=1, nproc=1)
+
+    # The SNR of all stars (50) below the minimum: no night is used, and the warning says why
+    with caplog.at_level(logging.WARNING, logger="rmslogger"):
+        assert readNights(dirs, config, snr_min=60) == []
+        with pytest.raises(ValueError):
+            jointDistortionFit(dirs, start, config, n_iter=1, snr_min=60, nproc=1)
+    assert any('SNR' in record.getMessage() and 'older CALSTARS' in record.getMessage()
+               for record in caplog.records)
+
+
+def test_held_out_numpy_and_missing_dirs(caplog):
+    """ The held-out nights take numpy integers, and directories which are not among the nights are reported. """
+
+    nights = [{'dir': 'night_{:d}'.format(n)} for n in range(10)]
+
+    assert heldOutNights(nights, (np.int64(4), np.int64(1))) == {1, 5, 9}
+    with caplog.at_level(logging.WARNING, logger="rmslogger"):
+        assert heldOutNights(nights, ['night_3', 'elsewhere']) == {3}
+    assert any('elsewhere' in record.getMessage() for record in caplog.records)
+
+
+def test_match_stars_one_to_one_and_isolated():
+    """ A star is matched only to an isolated catalog star within the match radius, which no other star matches. """
+
+    pp = makePlatepar()
+    jd = pp.JD
+
+    # Catalog stars at chosen image positions: an isolated one, a close pair, one which two stars are near, and one
+    #   too far from its star
+    cat_xy = np.array([[400.0, 300.0], [700.0, 400.0], [702.0, 400.0], [900.0, 200.0], [500.0, 500.0]])
+    _, ra, dec, _ = xyToRaDecPP(np.full(len(cat_xy), jd), cat_xy[:, 0], cat_xy[:, 1], np.ones(len(cat_xy)), pp,
+                                extinction_correction=False, jd_time=True)
+    catalog_stars = np.column_stack([ra, dec, np.full(len(cat_xy), 3.0)])
+    x_cat, y_cat = raDecToXYPP(np.array(ra), np.array(dec), jd, pp)
+
+    # The stars (CALSTARS rows: y, x, intensity, amplitude, FWHM, background, SNR, saturated)
+    star_xy = [(x_cat[0] + 0.2, y_cat[0]), (x_cat[1], y_cat[1]), (x_cat[3] + 0.2, y_cat[3]),
+               (x_cat[3] - 0.2, y_cat[3]), (x_cat[4] + 1.5, y_cat[4])]
+    stars = np.array([[y, x, 1000, 100, 2.5, 10, 50, 0] for x, y in star_xy], dtype=np.float64)
+
+    matched = matchStars(pp, jd, stars, catalog_stars, 1.0, 6.0)
+
+    # Only the isolated catalog star is matched, to its star
+    assert len(matched) == 1
+    assert np.allclose(matched[0, :2], star_xy[0])
+    assert np.allclose(matched[0, 4:6], catalog_stars[0, :2])
+    assert np.allclose(matched[0, 7:9], [x_cat[0], y_cat[0]])
+
+
+def test_residual_stats():
+    """ The residual statistics: distances, the radial component (outwards positive), zones and corners. """
+
+    # Stars (x, y) with their catalog stars (x, y) on a 100x100 image at 2 arcsec/px: one right of the centre
+    #   moved outwards, one left of the centre moved the same way (inwards), one in the top left corner moved up
+    stars = [(90, 50, 89, 50), (10, 50, 9, 50), (5, 5, 5, 6)]
+    matched = np.zeros((len(stars), 9))
+    for i, (x, y, x_cat, y_cat) in enumerate(stars):
+        matched[i, [0, 1, 7, 8]] = x, y, x_cat, y_cat
+    stats = residualStats(matched, np.full(len(stars), 2.0), 100, 100)
+
+    assert stats['n'] == 3
+    assert np.isclose(stats['median'], 2.0)
+    assert np.isclose(stats['rms'], 2.0)
+
+    # The two stars at 40 px from the centre cancel in the radial mean, the corner star is moved up, so outwards
+    #   by its share along the diagonal
+    ring = [r for r in stats['radial'] if r[0] <= 40 < r[1]][0]
+    assert ring[3] == 2 and np.isclose(ring[2], 0.0)
+    corner_ring = [r for r in stats['radial'] if r[0] <= np.hypot(45, 45) < r[1]][0]
+    assert corner_ring[3] == 1 and np.isclose(corner_ring[2], 2.0/np.sqrt(2))
+
+    # The zones (rows from the top) and the corners
+    assert stats['zones'][1][2] == (2.0, 0.0, 1)
+    assert stats['zones'][1][0] == (2.0, 0.0, 1)
+    assert stats['zones'][0][0] == (0.0, -2.0, 1)
+    assert stats['corners']['TL'] == (0.0, -2.0, 1)
+    assert stats['corners']['BR'][2] == 0 and np.isnan(stats['corners']['BR'][0])
+
+    assert residualStats(np.zeros((0, 9)), np.zeros(0), 100, 100) is None
+
+
+def test_warning_when_the_fit_gets_worse(caplog):
+    """ A final distortion whose residuals are clearly larger than an earlier one's is reported. """
+
+    def _iterations(values):
+        return [{'stats': {'rms': value}} for value in values]
+
+    with caplog.at_level(logging.WARNING, logger="rmslogger"):
+        assert JointDistortionFit._warnIfWorse(_iterations([5.0, 4.0, 4.5]))
+        assert not JointDistortionFit._warnIfWorse(_iterations([5.0, 4.0, 4.02]))
