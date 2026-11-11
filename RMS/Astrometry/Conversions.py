@@ -287,14 +287,14 @@ def JD2HourAngle(jd):
     Arguments:
         jd: [float] Julian date.
     Return:
-        hour_angle: [float] Hour angle (deg).
+        hour_angle: [float] Hour angle (deg), normalized to [0, 360).
     """
 
     T = (jd - 2451545)/36525.0
     hour_angle = 280.46061837 + 360.98564736629*(jd - 2451545.0) + 0.000387933*T**2 \
                  - (T**3)/38710000.0
 
-    return hour_angle
+    return hour_angle % 360
 
 
 ############################
@@ -460,9 +460,10 @@ def ECEF2AltAz(s_vect, p_vect):
     dz = pz - sz
 
     # Compute the elevation
-    alt = np.degrees(
-        np.pi/2 - np.arccos((sx*dx + sy*dy + sz*dz)/np.sqrt((sx**2 + sy**2 + sz**2)*(dx**2 + dy**2 + dz**2)))
-        )
+    # The normalized dot product can round just outside [-1, 1] when P is directly overhead or
+    #   directly below S, which would make arccos return NaN, so clamp it
+    cos_zenith = (sx*dx + sy*dy + sz*dz)/np.sqrt((sx**2 + sy**2 + sz**2)*(dx**2 + dy**2 + dz**2))
+    alt = np.degrees(np.pi/2 - np.arccos(np.clip(cos_zenith, -1.0, 1.0)))
 
     # Compute the azimuth
     

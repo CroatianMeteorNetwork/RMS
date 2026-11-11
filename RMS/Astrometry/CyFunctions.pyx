@@ -5,6 +5,9 @@ import numpy as np
 
 # Cython import
 cimport numpy as np
+
+# Initialize the NumPy C API (explicit for clarity: Cython 3 (required to build against NumPy 2) emits it itself)
+np.import_array()
 cimport cython
 
 # Import the Python bool type
@@ -73,6 +76,8 @@ cpdef double angularSeparation(double ra1, double dec1, double ra2, double dec2)
 
     Source of the equation: http://www.astronomycafe.net/qadir/q1890.html (May 1, 2016)
 
+    Note that RMS.Math.angularSeparation has the same name but takes and returns radians.
+
     @param ra1: [float] right ascension of the first stars (in degrees)
     @param dec1: [float] declination of the first star (in degrees)
     @param ra2: [float] right ascension of the decons stars (in degrees)
@@ -84,6 +89,7 @@ cpdef double angularSeparation(double ra1, double dec1, double ra2, double dec2)
     cdef double deldec2
     cdef double delra2
     cdef double sindis
+    cdef double cos_sep
 
     # Convert input coordinates to radians
     ra1 = radians(ra1)
@@ -93,7 +99,19 @@ cpdef double angularSeparation(double ra1, double dec1, double ra2, double dec2)
 
 
     # Classical method
-    return degrees(acos(sin(dec1)*sin(dec2) + cos(dec1)*cos(dec2)*cos(ra2 - ra1)))
+    # Rounding can push the cosine slightly above 1 for (nearly) coincident directions, which
+    # would make acos return NaN, so clamp it to the closed interval [-1, 1]. The explicit
+    # comparisons are used instead of fmax(-1.0, fmin(1.0, cos_sep)) because the C fmin/fmax
+    # return the non-NaN operand, which would silently turn a NaN input into 0 or 180 deg.
+    # Mirrors the clip in RMS.Math.angularSeparation (which takes radians, not degrees).
+    cos_sep = sin(dec1)*sin(dec2) + cos(dec1)*cos(dec2)*cos(ra2 - ra1)
+
+    if cos_sep > 1.0:
+        cos_sep = 1.0
+    elif cos_sep < -1.0:
+        cos_sep = -1.0
+
+    return degrees(acos(cos_sep))
 
 
     # # Compute the angular separation using the haversine formula
@@ -194,75 +212,6 @@ def subsetCatalog(np.ndarray[FLOAT_TYPE_t, ndim=2] catalog_list, double ra_c, do
 
 
 
-@cython.boundscheck(False)
-@cython.wraparound(False)
-def matchStars(np.ndarray[FLOAT_TYPE_t, ndim=2] stars_list, np.ndarray[FLOAT_TYPE_t, ndim=1] cat_x_array, \
-    np.ndarray[FLOAT_TYPE_t, ndim=1] cat_y_array, np.ndarray[INT_TYPE_t, ndim=1] cat_good_indices, \
-    double max_radius):
-        
-
-    cdef int i, j
-    cdef unsigned int cat_idx
-    cdef int k = 0
-    cdef double min_dist, dist
-    cdef double cat_match_indx, im_star_y, im_star_x, cat_x, cat_y
-
-    # Get the lengths of input arrays
-    cdef int stars_len = stars_list.shape[0]
-    cdef int cat_len = cat_good_indices.shape[0]
-    
-    # List for matched indices
-    cdef np.ndarray[FLOAT_TYPE_t, ndim=2] matched_indices = np.zeros(shape=(stars_list.shape[0], 3), \
-        dtype=FLOAT_TYPE)
-
-    
-    ### Match image and catalog stars ###
-
-    # Go through all image stars
-    for i in range(stars_len):
-
-        # Extract image star coordinates
-        im_star_y = stars_list[i, 0]
-        im_star_x = stars_list[i, 1]
-
-        min_dist = max_radius
-        cat_match_indx = -1
-
-        # Check for the best match among catalog stars
-        for j in range(cat_len):
-
-            cat_idx = cat_good_indices[j]
-
-            # Extract catalog coordinates
-            cat_x = cat_x_array[cat_idx]
-            cat_y = cat_y_array[cat_idx]
-
-
-            # Calculate the distance between stars
-            dist = sqrt((im_star_x - cat_x)**2 + (im_star_y - cat_y)**2)
-
-            # Set the catalog star as the best match if it is the closest to the image star than any previous
-            if (dist < min_dist):
-                min_dist = dist
-                cat_match_indx = cat_idx
-
-
-        # Take the best matched star if the distance was within the maximum radius
-        if min_dist < max_radius:
-            
-            # Add the matched indices to the output list
-            matched_indices[k, 0] = i
-            matched_indices[k, 1] = cat_match_indx
-            matched_indices[k, 2] = min_dist
-
-            k += 1
-
-
-    
-    # Cut the output list to the number of matched stars
-    matched_indices = matched_indices[:k]
-
-    return matched_indices
 
 
 
@@ -312,7 +261,7 @@ cpdef (double, double) equatorialCoordPrecession(double start_epoch, double fina
         (ra, dec): [tuple of floats] Precessed equatorial coordinates (radians).
     """
 
-    cdef double T, t, zeta, z, theta, A, B, C, ra_corr, dec_corr
+    cdef double T, t, zeta, z, theta, A, B, C, ra_corr, dec_corr, cos_pole_dist
 
 
     T = (start_epoch - J2000_DAYS )/36525.0
@@ -338,7 +287,15 @@ cpdef (double, double) equatorialCoordPrecession(double start_epoch, double fina
 
     # Calculate declination (apply a different equation if close to the pole, closer then 0.5 degrees)
     if (pi/2 - fabs(dec)) < radians(0.5):
-        dec_corr = sign(dec)*acos(sqrt(A**2 + B**2))
+
+        # A, B and C are components of a unit vector, so sqrt(A**2 + B**2) is in [0, 1], but
+        #   rounding can push it just above 1 and make acos return NaN
+        cos_pole_dist = sqrt(A**2 + B**2)
+
+        if cos_pole_dist > 1.0:
+            cos_pole_dist = 1.0
+
+        dec_corr = sign(dec)*acos(cos_pole_dist)
     else:
         dec_corr = asin(C)
 
@@ -349,16 +306,17 @@ cpdef (double, double) equatorialCoordPrecession(double start_epoch, double fina
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
-cdef np.ndarray[np.float64_t, ndim=2] precessionMatrix(double zeta, double theta, double z):
+cdef void precessionMatrix(double zeta, double theta, double z, double P[3][3]):
     """ Calculate the precession matrix based on precession angles.
 
     Arguments:
         zeta: [double] Precession angle zeta in radians.
         theta: [double] Precession angle theta in radians.
         z: [double] Precession angle z in radians.
+        P: [double[3][3]] Output: a 3x3 rotation matrix representing the precession transformation.
 
     Return:
-        [np.ndarray] A 3x3 rotation matrix representing the precession transformation.
+        None
 
     Notes:
         - This matrix is used to transform coordinates from one epoch to another, 
@@ -367,7 +325,7 @@ cdef np.ndarray[np.float64_t, ndim=2] precessionMatrix(double zeta, double theta
         - Input angles should be calculated for the time span between the initial and final epochs.
     """
 
-    cdef np.ndarray[np.float64_t, ndim=2, mode="c"] P = np.empty((3, 3), dtype=np.float64)
+    # Sines and cosines of the precession angles
     cdef double czeta = cos(zeta)
     cdef double szeta = sin(zeta)
     cdef double ctheta = cos(theta)
@@ -376,19 +334,18 @@ cdef np.ndarray[np.float64_t, ndim=2] precessionMatrix(double zeta, double theta
     cdef double sz = sin(z)
 
     # Calculate matrix elements
-    P[0, 0] = czeta*ctheta*cz - szeta*sz
-    P[0, 1] = -szeta*ctheta*cz - czeta*sz
-    P[0, 2] = -stheta*cz
+    P[0][0] = czeta*ctheta*cz - szeta*sz
+    P[0][1] = -szeta*ctheta*cz - czeta*sz
+    P[0][2] = -stheta*cz
     
-    P[1, 0] = czeta*ctheta*sz + szeta*cz
-    P[1, 1] = -szeta*ctheta*sz + czeta*cz
-    P[1, 2] = -stheta*sz
+    P[1][0] = czeta*ctheta*sz + szeta*cz
+    P[1][1] = -szeta*ctheta*sz + czeta*cz
+    P[1][2] = -stheta*sz
     
-    P[2, 0] = czeta*stheta
-    P[2, 1] = -szeta*stheta
-    P[2, 2] = ctheta
-    
-    return P
+    P[2][0] = czeta*stheta
+    P[2][1] = -szeta*stheta
+    P[2][2] = ctheta
+
 
 
 @cython.boundscheck(False)
@@ -422,6 +379,73 @@ cdef (double, double) nutationComponents(double T):
     return delta_psi, delta_eps
 
 
+cdef inline double dotProduct3(double *a, double *b):
+    """ Dot product of two 3D vectors.
+
+    Arguments:
+        a: [double[3]] First vector.
+        b: [double[3]] Second vector.
+
+    Return:
+        [double] The dot product.
+    """
+
+    return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]
+
+
+cdef inline void crossProduct3(double *a, double *b, double *out):
+    """ Cross product of two 3D vectors.
+
+    Arguments:
+        a: [double[3]] First vector.
+        b: [double[3]] Second vector.
+        out: [double[3]] Output: the cross product a x b.
+
+    Return:
+        None
+    """
+
+    out[0] = a[1]*b[2] - a[2]*b[1]
+    out[1] = a[2]*b[0] - a[0]*b[2]
+    out[2] = a[0]*b[1] - a[1]*b[0]
+
+
+cdef inline void matrixVectorProduct3(double M[3][3], double *v, double *out):
+    """ Product of a 3x3 matrix and a 3D vector.
+
+    Arguments:
+        M: [double[3][3]] Matrix.
+        v: [double[3]] Vector.
+        out: [double[3]] Output: the product M v (must not be v).
+
+    Return:
+        None
+    """
+
+    cdef int i
+
+    # Every element of the result is the dot product of a matrix row and the vector
+    for i in range(3):
+        out[i] = M[i][0]*v[0] + M[i][1]*v[1] + M[i][2]*v[2]
+
+
+cdef inline void normalizeVector3(double *v):
+    """ Normalize a 3D vector to unit length, in place.
+
+    Arguments:
+        v: [double[3]] Vector, normalized in place.
+
+    Return:
+        None
+    """
+
+    cdef double norm = sqrt(dotProduct3(v, v))
+
+    v[0] /= norm
+    v[1] /= norm
+    v[2] /= norm
+
+
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
@@ -445,12 +469,23 @@ cpdef (double, double, double) equatorialCoordAndRotPrecession(double start_epoc
     if start_epoch == final_epoch:
         return ra, dec, rot_angle
 
+    # The vectors and matrices are plain C arrays: small numpy arrays made this function, which is called for
+    #   every coordinate conversion, several times more expensive
     cdef:
-        np.ndarray[double, ndim=1] initial_vector, transformed_vector, parallel_vec, parallel_vec_precessed
-        np.ndarray[double, ndim=1] normal_vector, transformed_normal
-        np.ndarray[double, ndim=1] proj_parallel, proj_parallel_precessed
-        np.ndarray[double, ndim=2] P
-        np.ndarray[double, ndim=2] epsilon_matrix, psi_matrix
+        double initial_vector[3]
+        double transformed_vector[3]
+        double nutated_vector[3]
+        double parallel_vec[3]
+        double parallel_vec_precessed[3]
+        double normal_vector[3]
+        double transformed_normal[3]
+        double proj_parallel[3]
+        double proj_parallel_precessed[3]
+        double cross_vec[3]
+        double P[3][3]
+        double epsilon_matrix[3][3]
+        double psi_matrix[3][3]
+        double parallel_dot, distance
 
         double ra_precessed, dec_precessed, T, t, zeta, z, theta, Delta_psi, Delta_epsilon
         double new_rot_angle, angle1, angle2, rotation_change
@@ -471,13 +506,15 @@ cpdef (double, double, double) equatorialCoordAndRotPrecession(double start_epoc
     theta = radians(theta)
 
     # Calculate precession matrix
-    P = precessionMatrix(zeta, theta, z)
+    precessionMatrix(zeta, theta, z, P)
 
-    # Convert RA, Dec to cartesian coordinates
-    initial_vector = raDecToCartesian(ra, dec)
+    # Convert RA, Dec to cartesian coordinates (as raDecToCartesian)
+    initial_vector[0] = cos(dec)*cos(ra)
+    initial_vector[1] = cos(dec)*sin(ra)
+    initial_vector[2] = sin(dec)
 
     # Apply precession
-    transformed_vector = np.dot(P, initial_vector)
+    matrixVectorProduct3(P, initial_vector, transformed_vector)
 
 
 
@@ -485,43 +522,54 @@ cpdef (double, double, double) equatorialCoordAndRotPrecession(double start_epoc
     Delta_psi, Delta_epsilon = nutationComponents(T)
 
     # Construct the nutation matrices
-    epsilon_matrix = np.array([[1,                  0,                   0],
-                               [0, cos(Delta_epsilon),  sin(Delta_epsilon)],
-                               [0, -sin(Delta_epsilon),  cos(Delta_epsilon)]])
+    epsilon_matrix[0][0], epsilon_matrix[0][1], epsilon_matrix[0][2] = 1, 0, 0
+    epsilon_matrix[1][0], epsilon_matrix[1][1], epsilon_matrix[1][2] = 0, cos(Delta_epsilon), sin(Delta_epsilon)
+    epsilon_matrix[2][0], epsilon_matrix[2][1], epsilon_matrix[2][2] = 0, -sin(Delta_epsilon), cos(Delta_epsilon)
 
-    psi_matrix = np.array([[cos(Delta_psi), -sin(Delta_psi), 0],
-                           [sin(Delta_psi),  cos(Delta_psi), 0],
-                           [0,                            0, 1]])
+    psi_matrix[0][0], psi_matrix[0][1], psi_matrix[0][2] = cos(Delta_psi), -sin(Delta_psi), 0
+    psi_matrix[1][0], psi_matrix[1][1], psi_matrix[1][2] = sin(Delta_psi), cos(Delta_psi), 0
+    psi_matrix[2][0], psi_matrix[2][1], psi_matrix[2][2] = 0, 0, 1
 
-    # Apply nutation
-    transformed_vector = np.dot(epsilon_matrix, transformed_vector)
-    transformed_vector = np.dot(psi_matrix, transformed_vector)
+    # Apply nutation (obliquity first, then longitude)
+    matrixVectorProduct3(epsilon_matrix, transformed_vector, nutated_vector)
+    matrixVectorProduct3(psi_matrix, nutated_vector, transformed_vector)
 
 
     # Calculate normal vector to the plane of precession
-    normal_vector = np.cross(initial_vector, transformed_vector)
-    transformed_normal = np.dot(P, normal_vector)
+    crossProduct3(initial_vector, transformed_vector, normal_vector)
+    matrixVectorProduct3(P, normal_vector, transformed_normal)
 
     # Normalize vectors
-    initial_vector /= np.linalg.norm(initial_vector)
-    transformed_vector /= np.linalg.norm(transformed_vector)
-    normal_vector /= np.linalg.norm(normal_vector)
-    transformed_normal /= np.linalg.norm(transformed_normal)
+    normalizeVector3(initial_vector)
+    normalizeVector3(transformed_vector)
+    normalizeVector3(normal_vector)
+    normalizeVector3(transformed_normal)
 
-    # Convert precessed vector back to RA, Dec
-    ra_precessed, dec_precessed = cartesianToRaDec(transformed_vector)
+    # Convert precessed vector back to RA, Dec (as cartesianToRaDec)
+    distance = hypot(hypot(transformed_vector[0], transformed_vector[1]), transformed_vector[2])
+    if distance == 0:
+        ra_precessed, dec_precessed = 0.0, 0.0
+    else:
+        ra_precessed = fmod(atan2(transformed_vector[1], transformed_vector[0]) + 2*M_PI, 2*M_PI)
+        dec_precessed = asin(transformed_vector[2]/distance)
 
     # Calculate vector tangent to the parallel of declination
-    parallel_vec = np.array([-sin(ra), cos(ra), 0])
-    parallel_vec_precessed = np.array([-sin(ra_precessed), cos(ra_precessed), 0])
+    parallel_vec[0], parallel_vec[1], parallel_vec[2] = -sin(ra), cos(ra), 0
+    parallel_vec_precessed[0], parallel_vec_precessed[1], parallel_vec_precessed[2] = -sin(ra_precessed), \
+        cos(ra_precessed), 0
 
     # Project parallel vectors onto the plane perpendicular to the line of sight
-    proj_parallel = parallel_vec - np.dot(parallel_vec, initial_vector)*initial_vector
-    proj_parallel_precessed = parallel_vec_precessed - np.dot(parallel_vec_precessed, transformed_vector)*transformed_vector
+    parallel_dot = dotProduct3(parallel_vec, initial_vector)
+    for i in range(3):
+        proj_parallel[i] = parallel_vec[i] - parallel_dot*initial_vector[i]
+
+    parallel_dot = dotProduct3(parallel_vec_precessed, transformed_vector)
+    for i in range(3):
+        proj_parallel_precessed[i] = parallel_vec_precessed[i] - parallel_dot*transformed_vector[i]
 
     # Normalize projected vectors
-    proj_parallel /= np.linalg.norm(proj_parallel)
-    proj_parallel_precessed /= np.linalg.norm(proj_parallel_precessed)
+    normalizeVector3(proj_parallel)
+    normalizeVector3(proj_parallel_precessed)
 
     # Calculate the angles between the normal vector and projected parallels
     # in the plane perpendicular to the line of sight (sensor plane).
@@ -537,12 +585,13 @@ cpdef (double, double, double) equatorialCoordAndRotPrecession(double start_epoc
     # the change in field orientation due to precession.
 
     # Angle for the initial position
-    angle1 = atan2(np.dot(np.cross(normal_vector, proj_parallel), initial_vector), 
-                   np.dot(normal_vector, proj_parallel))
+    crossProduct3(normal_vector, proj_parallel, cross_vec)
+    angle1 = atan2(dotProduct3(cross_vec, initial_vector), dotProduct3(normal_vector, proj_parallel))
 
     # Angle for the precessed position
-    angle2 = atan2(np.dot(np.cross(transformed_normal, proj_parallel_precessed), transformed_vector), 
-                   np.dot(transformed_normal, proj_parallel_precessed))
+    crossProduct3(transformed_normal, proj_parallel_precessed, cross_vec)
+    angle2 = atan2(dotProduct3(cross_vec, transformed_vector), dotProduct3(transformed_normal,
+        proj_parallel_precessed))
 
     # Calculate the change in angle
     rotation_change = angle2 - angle1
@@ -1044,6 +1093,22 @@ cpdef (double, double) cartesianToRaDec(np.ndarray[np.float64_t, ndim=1] vec):
 
 
 
+cdef int radialTermCount(str dist_type):
+    """ Number of the radial distortion coefficients (k1, k2, ...) of a radial distortion type (see
+        Platepar.radialTermCount): the decentering coefficients follow them in the distortion arrays.
+    """
+
+    # The radial coefficients of every radial type (k1 for radial3-odd up to k1...k4 for radial9-odd and radial5-all)
+    if dist_type == "radial3-odd":
+        return 1
+    elif (dist_type == "radial5-odd") or (dist_type == "radial3-all"):
+        return 2
+    elif (dist_type == "radial7-odd") or (dist_type == "radial4-all"):
+        return 3
+    else:
+        return 4
+
+
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
@@ -1052,7 +1117,8 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
     double y_res, double h0, double jd_ref, double ra_ref, double dec_ref, double pos_angle_ref, 
     double pix_scale, np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_rev, 
     np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_rev, str dist_type, bool refraction=True, bool equal_aspect=False, 
-    bool force_distortion_centre=False, bool asymmetry_corr=True):
+    bool force_distortion_centre=False, bool asymmetry_corr=True, bool decentering_corr=False,
+    np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data=None):
     """ Convert RA, Dec to distortion corrected image coordinates. 
 
     Arguments:
@@ -1080,6 +1146,11 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
         force_distortion_centre: [bool] Force the distortion centre to the image centre. False by default.
         asymmetry_corr: [bool] Correct the distortion for asymmetry. Only for radial distortion. True by
             default.
+        decentering_corr: [bool] Correct the radial distortion for decentering (a lens element off the optical
+            axis, Brown-Conrady): the coefficients p1, p2, p3, p4 follow the radial ones. False by default.
+        jd_data: [ndarray] Julian date of every point. None by default, in which case all points are at jd. If
+            given, jd is ignored and every point is converted at its own date (the camera is fixed in the
+            horizontal frame, so the sky moves across the image), the same as one call per point.
     
     Return:
         (x, y): [tuple of ndarrays] Image X and Y coordinates.
@@ -1087,8 +1158,13 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
 
     cdef int i
     cdef double ra_centre, dec_centre, ra, dec
+
+    # The reference position angle as given (it is replaced by its value corrected for the date below), for the
+    #   correction at the date of every point
+    cdef double pos_angle_ref_in = pos_angle_ref
     cdef double radius, sin_ang, cos_ang, theta, x, y, r, dx, dy, x_img, y_img, r_corr, r_scale
     cdef double x0, y0, xy, a1, a2, k1, k2, k3, k4, k5
+    cdef double p1 = 0, p2 = 0, p3 = 0, p4 = 0, u, v, r2, q1, q2
     cdef int index_offset
 
     # Init output arrays
@@ -1188,6 +1264,13 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
         # if x_poly_rev.shape[0] > (9 - index_offset):
         #     k5 = x_poly_rev[9 - index_offset]
 
+        # Decentering coefficients, after the radial ones
+        if decentering_corr:
+            p1 = x_poly_rev[5 - index_offset + radialTermCount(dist_type)]
+            p2 = x_poly_rev[6 - index_offset + radialTermCount(dist_type)]
+            p3 = x_poly_rev[7 - index_offset + radialTermCount(dist_type)]
+            p4 = x_poly_rev[8 - index_offset + radialTermCount(dist_type)]
+
     # If the polynomial distortion was used, unpack the offsets
     else:
         x0 = x_poly_rev[0]
@@ -1196,6 +1279,15 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
 
     # Convert all equatorial coordinates to image coordinates
     for i in range(ra_data.shape[0]):
+
+        # With a date per point, correct the pointing for the date of this point
+        if jd_data is not None:
+            jd = jd_data[i]
+            ra_centre, dec_centre, pos_angle_ref = pointingCorrection(
+                    jd, radians(lat), radians(lon),
+                    radians(h0), jd_ref, radians(ra_ref), radians(dec_ref), radians(pos_angle_ref_in),
+                    refraction=refraction
+                    )
 
         ra = radians(ra_data[i])
         dec = radians(dec_data[i])
@@ -1343,6 +1435,19 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
             dx = x*r_scale - x0
             dy = y*r_scale/(1.0 + xy) - y0 + y*(1.0 - 1.0/(1.0 + xy))
 
+            # Decentering (Brown-Conrady): a lens element off the optical axis displaces the image by p1, p2 (the
+            #   amount and direction of the shift) times the square of the radius, a radial part three times the
+            #   tangential one, and by p3, p4 times its fourth power. In the normalized coordinates of the radial
+            #   distortion, converted to pixels
+            if decentering_corr:
+                u = x/(x_res/2.0)
+                v = y/(x_res/2.0)
+                r2 = u*u + v*v
+                q1 = p1 + p3*r2
+                q2 = p2 + p4*r2
+                dx += (q1*(r2 + 2*u*u) + 2*q2*u*v)*(x_res/2.0)
+                dy += (2*q1*u*v + q2*(r2 + 2*v*v))*(x_res/2.0)
+
 
 
         # Add the distortion
@@ -1424,7 +1529,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
     double h0, double jd_ref, double ra_ref, double dec_ref, double pos_angle_ref, double pix_scale, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_fwd, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_fwd, \
     str dist_type, bool refraction=True, bool equal_aspect=False, bool force_distortion_centre=False,\
-    bool asymmetry_corr=True, bool precompute_pointing_corr=False):
+    bool asymmetry_corr=True, bool precompute_pointing_corr=False, bool decentering_corr=False):
     """
     Arguments:
         jd_data: [ndarray] Julian date of each data point.
@@ -1451,6 +1556,8 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         force_distortion_centre: [bool] Force the distortion centre to the image centre. False by default.
         asymmetry_corr: [bool] Correct the distortion for asymmetry. Only for radial distortion. True by
             default.
+        decentering_corr: [bool] Correct the radial distortion for decentering (a lens element off the optical
+            axis, Brown-Conrady): the coefficients p1, p2, p3, p4 follow the radial ones. False by default.
         precompute_pointing_corr: [bool] Precompute the pointing correction. False by default. This is used
             to speed up the calculation when the input JD is the same for all data points, e.g. during
             plate solving.
@@ -1466,6 +1573,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
     cdef int i
     cdef double jd, x_img, y_img, r, dx, x_corr, dy, y_corr, r_corr, r_scale
     cdef double x0, y0, xy, a1, a2, k1, k2, k3, k4, k5
+    cdef double p1 = 0, p2 = 0, p3 = 0, p4 = 0, u, v, r2, q1, q2
     cdef int index_offset
     cdef double radius, theta, sin_t, cos_t
     cdef double ra_ref_now_corr, ra, dec, dec_ref_corr, pos_angle_ref_now_corr
@@ -1546,6 +1654,13 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
 
         # if x_poly_fwd.shape[0] > (9 - index_offset):
         #     k5 = x_poly_fwd[9 - index_offset]
+
+        # Decentering coefficients, after the radial ones
+        if decentering_corr:
+            p1 = x_poly_fwd[5 - index_offset + radialTermCount(dist_type)]
+            p2 = x_poly_fwd[6 - index_offset + radialTermCount(dist_type)]
+            p3 = x_poly_fwd[7 - index_offset + radialTermCount(dist_type)]
+            p4 = x_poly_fwd[8 - index_offset + radialTermCount(dist_type)]
 
 
     # If the polynomial distortion was used, unpack the offsets
@@ -1683,6 +1798,16 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
             # Compute offsets
             dx = (x_img - x0)*r_scale - x0
             dy = (y_img - y0)*r_scale*(1.0 + xy) - y0*(1.0 + xy) + y_img*xy
+
+            # Decentering (Brown-Conrady), see cyraDecToXY, around the distortion centre
+            if decentering_corr:
+                u = (x_img - x0)/(x_res/2.0)
+                v = (y_img - y0)/(x_res/2.0)
+                r2 = u*u + v*v
+                q1 = p1 + p3*r2
+                q2 = p2 + p4*r2
+                dx += (q1*(r2 + 2*u*u) + 2*q2*u*v)*(x_res/2.0)
+                dy += (2*q1*u*v + q2*(r2 + 2*v*v))*(x_res/2.0)
 
 
         # Correct image coordinates for distortion

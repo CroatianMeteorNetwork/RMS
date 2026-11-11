@@ -371,14 +371,19 @@ def estimateMeteorHeight(config, meteor_obj, shower):
     # Compute the distance the meteor traversed during its duration (meters)
     dist = shower.v_init*meteor_obj.duration
 
+    # The dot products of the normalized vectors can round outside [-1, 1] for (nearly) parallel
+    #   or antiparallel directions, which would make arccos return NaN, so clamp them
+
     # Compute the angle between the begin and the end point of the meteor (rad)
-    theta_met = np.arccos(np.dot(vectNorm(beg_vect_horiz), vectNorm(end_vect_horiz)))
+    theta_met = np.arccos(np.clip(np.dot(vectNorm(beg_vect_horiz), vectNorm(end_vect_horiz)), -1.0, 1.0))
 
     # Compute the angle between the radiant vector and the end point (rad)
-    theta_beg = np.arccos(np.dot(vectNorm(radiant_vector_horiz), -vectNorm(end_vect_horiz)))
+    theta_beg = np.arccos(np.clip(np.dot(vectNorm(radiant_vector_horiz), -vectNorm(end_vect_horiz)),
+        -1.0, 1.0))
 
     # Compute the angle between the radiant vector and the begin point (rad)
-    theta_end = np.arccos(np.dot(-vectNorm(radiant_vector_horiz), -vectNorm(beg_vect_horiz)))
+    theta_end = np.arccos(np.clip(np.dot(-vectNorm(radiant_vector_horiz), -vectNorm(beg_vect_horiz)),
+        -1.0, 1.0))
 
     # Compute the distance from the station to the begin point (meters)
     dist_beg = dist*np.sin(theta_beg)/np.sin(theta_met)

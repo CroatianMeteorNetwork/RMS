@@ -1,23 +1,18 @@
 from __future__ import absolute_import
 
+
 def make_ext(modname, pyxfilename):
-    
-    # Use extra compile arguments for this Cython
-    import RMS.ConfigReader as cr
+
     from distutils.extension import Extension
-    from RMS.Misc import getRmsRootDir
-    import os
+    import numpy as np
+    from RMS.CompileArgs import getExtraCompileArgs
 
-    # Load the configuration file
-    config_filename = '.config'
-    config_path = os.path.join(getRmsRootDir(), config_filename)
-    config = cr.parse(config_path)
-
-    # Use additional compile arguments
-    ext = Extension(name = modname,
+    # Platform-specific compile arguments from the [Build] section of .config,
+    # shared with setup.py
+    ext = Extension(name=modname,
         sources=[pyxfilename],
-        extra_compile_args=config.extra_compile_args,
-        extra_link_args=config.extra_compile_args)
+        include_dirs=[np.get_include()],
+        extra_compile_args=getExtraCompileArgs())
 
     return ext
 

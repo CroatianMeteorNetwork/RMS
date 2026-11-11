@@ -138,7 +138,10 @@ def fovKML(dir_path, platepar, mask=None, area_ht=100000, side_points=10, plot_s
             <LinearRing>
                 <coordinates>\n"""
 
-        # Add the polygon points to the KML
+        # KML polygon must be a closed loop with identical first and last points
+        if polygon_points[0] != polygon_points[-1]:
+            polygon_points.append(polygon_points[0])
+
         for p_lat, p_lon, p_elev in polygon_points:
             kml += "                    {:.6f},{:.6f},{:.0f}\n".format(p_lon, p_lat, p_elev)
 

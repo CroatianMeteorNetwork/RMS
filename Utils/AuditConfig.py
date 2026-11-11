@@ -53,8 +53,12 @@ def extractConfigOptions(file_path):
 
     with open(file_path, 'r') as file:
         content = file.read()
-        # Look for patterns like parser.has_option(section, "option_name")
-        matches = re.findall(r'parser\.has_option\([^,]+,\s*["\'](\w+)["\']', content)
+        # Look for patterns like parser.has_option(section, "option_name") as well as
+        # direct reads like parser.getboolean(section, "option_name", fallback=...) which
+        # are used for options that don't gate on has_option.
+        matches = re.findall(
+            r'parser\.(?:has_option|get(?:boolean|int|float)?)\([^,]+,\s*["\'](\w+)["\']',
+            content)
         options.update(match.lower() for match in matches)
     return options
 

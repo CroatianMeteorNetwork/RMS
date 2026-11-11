@@ -3,16 +3,76 @@
 
 from __future__ import print_function, division, absolute_import
 
-import os
 import datetime
+import os
 
+import cv2
 import numpy as np
 
 from RMS.Formats.FFbin import read as readFFbin
 from RMS.Formats.FFbin import write as writeFFbin
 from RMS.Formats.FFfits import read as readFFfits
 from RMS.Formats.FFfits import write as writeFFfits
+from RMS.Formats.FFStruct import FFStruct
 from RMS.Decorators import memoizeSingle
+
+
+def readFFpng(directory, filename, full_filename=False):
+    """ Read a PNG image and return it as a pseudo-FF structure.
+
+    For single images like PNG, the avepixel is set to the image data,
+    and maxpixel/stdpixel are approximated.
+
+    Arguments:
+        directory: [str] Path to the directory containing the PNG file.
+        filename: [str] Name of the PNG file.
+
+    Keyword arguments:
+        full_filename: [bool] True if the full path is given in filename.
+
+    Return:
+        ff: [FFStruct] FF structure with PNG image data.
+    """
+
+    if full_filename:
+        file_path = filename
+    else:
+        file_path = os.path.join(directory, filename)
+
+    # Read the image using OpenCV
+    img = cv2.imread(file_path, cv2.IMREAD_UNCHANGED)
+
+    if img is None:
+        return None
+
+    # Convert BGR to grayscale if needed
+    if len(img.shape) == 3:
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    # Create an FF structure
+    ff = FFStruct()
+    ff.nrows = img.shape[0]
+    ff.ncols = img.shape[1]
+    ff.nframes = 1
+    ff.fps = 25.0  # Default FPS
+
+    # Determine dtype based on image bit depth
+    if img.dtype == np.uint16:
+        # 16-bit image - keep as uint16 for avepixel
+        ff.avepixel = img.astype(np.uint16)
+        ff.maxpixel = img.astype(np.uint16)
+    else:
+        # 8-bit image - keep as uint8
+        ff.avepixel = img.astype(np.uint8)
+        ff.maxpixel = img.astype(np.uint8)
+
+    # Estimate stdpixel as zeros (no temporal variation in a single image)
+    ff.stdpixel = np.zeros_like(img, dtype=np.uint8)
+
+    # Maxframe is all zeros for a single image
+    ff.maxframe = np.zeros_like(img, dtype=np.uint8)
+
+    return ff
 
 
 #@memoizeSingle
@@ -44,6 +104,9 @@ def read(directory, filename, fmt=None, array=False, full_filename=False, verbos
         extens = os.path.splitext(filename)[1]
         if (extens.lower() == '.bin') or (extens.lower() == '.fits'):
             fmt = extens.replace('.', '')
+
+        elif extens.lower() == '.png':
+            fmt = 'png'
 
         else:
             # If the extension is not given, try to load the file in one of the formats
@@ -86,8 +149,13 @@ def read(directory, filename, fmt=None, array=False, full_filename=False, verbos
         except TypeError:
             if verbose:
                 print('File {:s} is corrupted!'.format(filename))
-                
+
             return None
+
+    elif fmt == 'png':
+
+        # Read the file as PNG
+        ff = readFFpng(directory, filename, full_filename=full_filename)
 
     else:
         ff = None
@@ -345,8 +413,8 @@ def constructFFName(station_code, beg_dt, ext='fits'):
 
 
 def validFFName(ff_file, fmt=None):
-    """ Checks if the given file is an FF file. 
-    
+    """ Checks if the given file is an FF file.
+
     Arguments:
         ff_file: [str] Name of the FF file
 
@@ -357,6 +425,9 @@ def validFFName(ff_file, fmt=None):
     if fmt is None:
         if ff_file.endswith('.bin'):
             fmt = 'bin'
+
+        elif ff_file.endswith('.png'):
+            fmt = 'png'
 
         else:
             fmt = 'fits'
@@ -370,11 +441,14 @@ def validFFName(ff_file, fmt=None):
 
         elif (fmt == 'fits') and (ff_file.endswith('.fits')):
             return True
-            
+
+        elif (fmt == 'png') and (ff_file.endswith('.png')):
+            return True
+
         else:
             return False
 
-        
+
     return False
 
 

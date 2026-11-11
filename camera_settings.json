@@ -49,6 +49,8 @@
   "day": [
     ["CameraTime", "set"],
     ["SetParam", "Camera", "DayNightColor", "1"],
+    ["SetParam", "Camera", "ExposureParam", "LeastTime", "10"],
+    ["SetParam", "Camera", "ExposureParam", "MostTime", "40000"],
     ["SetParam", "Camera", "ElecLevel", "50"],
     ["SetParam", "Camera", "BroadTrends", "AutoGain", "1"],
     ["SetParam", "Camera", "ClearFog", "enable", "1"],
@@ -59,6 +61,8 @@
   "night": [
     ["CameraTime", "set"],
     ["SetParam", "Camera", "DayNightColor", "2"],
+    ["SetParam", "Camera", "ExposureParam", "LeastTime", "40000"],
+    ["SetParam", "Camera", "ExposureParam", "MostTime", "40000"],
     ["SetParam", "Camera", "ElecLevel", "60"],
     ["SetParam", "Camera", "BroadTrends", "AutoGain", "0"],
     ["SetParam", "Camera", "ClearFog", "enable", "0"],
