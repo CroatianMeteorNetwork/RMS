@@ -1125,6 +1125,17 @@ def _nightAndResults(scheduling):
     return list(scheduling.results.items())[0]
 
 
+def _addResult(scheduling, night, name, done_time):
+    """ Add a processed file of the night, whose processing was finished at the given time (UTC). """
+
+    results_path = os.path.join(scheduling.output_dir, '2025', name)
+    os.makedirs(results_path, exist_ok=True)
+    mnr.writeDoneFlag(results_path, {'night': night})
+
+    epoch = (done_time - datetime.datetime(1970, 1, 1)).total_seconds()
+    os.utime(os.path.join(results_path, 'done.flag'), (epoch, epoch))
+
+
 def test_sunrise_mode_reports_after_the_night_without_waiting_for_idle(scheduling):
 
     reporter = _reporter(scheduling, 'sunrise')
@@ -1160,6 +1171,10 @@ def test_partial_report_while_the_night_is_processed(scheduling):
     reporter.config.monitor_partial_report_time = partial_time.strftime("%H:%M")
     reporter.states = mnr.readReportStates(scheduling.output_dir)
 
+    # The processing of the night started while it was recorded, before the partial report time
+    _addResult(scheduling, night, 'r0', partial_time - datetime.timedelta(hours=1))
+    results = mnr.scanNights(scheduling.output_dir, reporter.config)[night]
+
     def _isDue(now):
 
         # The latest result was just finished
@@ -1186,6 +1201,47 @@ def test_partial_report_while_the_night_is_processed(scheduling):
     mnr.updateReportState(scheduling.output_dir, night, reported_at=None, succeeded_at=None)
     reporter.states = mnr.readReportStates(scheduling.output_dir)
     assert _isDue(partial_time + datetime.timedelta(days=2)) is None
+
+
+def test_no_partial_report_for_a_night_processed_as_a_backlog(scheduling):
+    """ The partial report is made only for a night whose processing started while it was recorded and before
+        the partial report time, not for a night processed as a backlog (e.g. after a downtime) while its
+        partial report time is less than a day ago. """
+
+    reporter = _reporter(scheduling, 'sunrise')
+    night, _ = _nightAndResults(scheduling)
+    night_start, night_end = mnr.nightBoundsFromName(reporter.config, night)
+    reporter.states = mnr.readReportStates(scheduling.output_dir)
+
+    def _isDue(partial_time, first_done, now):
+
+        # Results of the night, the first one finished at the given time and the latest one just finished
+        shutil.rmtree(os.path.join(scheduling.output_dir, '2025'))
+        _addResult(scheduling, night, 'r0', first_done)
+        _addResult(scheduling, night, 'r1', now - datetime.timedelta(minutes=1))
+        results = mnr.scanNights(scheduling.output_dir, reporter.config)[night]
+
+        reporter.config.monitor_partial_report_time = partial_time.strftime("%H:%M")
+
+        return reporter.isDue(night, results, False, now)
+
+    # A partial report time in the morning after the end of the night, while the processing still catches up
+    partial_time = (night_end + datetime.timedelta(hours=2)).replace(second=0, microsecond=0)
+    now = partial_time + datetime.timedelta(hours=1)
+
+    # Made for a night processed since it was recorded
+    assert _isDue(partial_time, night_end - datetime.timedelta(hours=3), now) == 'partial'
+
+    # Not for a night whose processing started after it was over (a backlog after a downtime), neither
+    #   before nor after the partial report time
+    assert _isDue(partial_time, night_end + datetime.timedelta(hours=1), now) is None
+    assert _isDue(partial_time, partial_time + datetime.timedelta(minutes=30), now) is None
+
+    # A partial report time during the night: not for a night whose processing started after it
+    partial_time = (night_end - datetime.timedelta(hours=2)).replace(second=0, microsecond=0)
+    now = partial_time + datetime.timedelta(hours=1)
+    assert _isDue(partial_time, partial_time - datetime.timedelta(minutes=30), now) == 'partial'
+    assert _isDue(partial_time, partial_time + datetime.timedelta(minutes=10), now) is None
 
 
 def test_idle_mode_waits_for_idle_and_quiet_time(scheduling):

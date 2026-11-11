@@ -2425,6 +2425,12 @@ class NightReporter(object):
         return (now - last).total_seconds()
 
 
+    def _firstResultTime(self, results):
+        """ Time (UTC) when the first result of the night was finished. """
+
+        return min(doneTime(self.output_dir, results_dir) for results_dir in results)
+
+
     def _gaveUp(self, night_name, results):
         """ True if the report of the night failed twice and no new files arrived since. """
 
@@ -2458,10 +2464,14 @@ class NightReporter(object):
         if self.report_mode not in ('sunrise', 'idle'):
             return None
 
-        # Make the partial report at its time with the data processed until then, once per night. It is not
-        #   made for old nights, e.g. when a backlog is processed after a downtime
+        # Make the partial report at its time with the data processed until then, once per night. It is only
+        #   made for a night whose processing started while it was recorded and before the partial report
+        #   time, not for a night processed as a backlog (e.g. after a downtime), whose first files would
+        #   otherwise be reported as soon as they are processed if it is still inside the partial report window
         partial_time = partialReportTime(self.config, night_name)
-        if (partial_time is not None) and (partial_time <= now < partial_time + datetime.timedelta(days=1)):
+        if (partial_time is not None) and (partial_time <= now < partial_time + datetime.timedelta(days=1)) \
+                and (self._firstResultTime(results) < min(partial_time,
+                                                          nightBoundsFromName(self.config, night_name)[1])):
 
             # Only a successful report counts, so a failed partial report is made again after the wait
             night_state = self.states['nights'].get(night_name, {})
