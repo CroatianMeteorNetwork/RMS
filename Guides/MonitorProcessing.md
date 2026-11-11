@@ -256,7 +256,7 @@ monitor_status_interval: 60
 | `monitor_save_images` | Save the max pixel and average pixel image of every chunk as an image pair. The night reports need them (stacks, thumbnails, timelapse, calibration report), so keep it on unless you only want the detections. |
 | `monitor_report_mode` | When the night reports are made: `sunrise`, `idle`, `external` or `none`, see [Night reports](#night-reports). `--report_mode` overrides it. |
 | `monitor_report_quiet_min` | Minutes without new results of the night before its report is made, so a night isn't reported while its files are still coming in. |
-| `monitor_partial_report_time` | Time of day in UTC (`HH:MM`) for a partial report of the night with what was processed until then, e.g. to have the products in the morning while the processing is still catching up. Empty: no partial report. |
+| `monitor_partial_report_time` | Time of day in UTC (`HH:MM`) for a partial report of the night with what was processed until then, e.g. to have the products in the morning while the processing is still catching up. Not made for a night processed as a backlog (whose processing started after the night or after this time). Empty: no partial report. |
 | `monitor_night_cutoff_hours` | Hours after the end of the night (sunrise) after which the files of the night which were not processed yet are skipped. 0: never skip. |
 | `monitor_upload` | Upload the night archive after the report. It also needs `upload_enabled` and the usual RMS upload settings (`hostname`, `host_port`, `remote_dir`, `rsa_private_key`, `upload_mode`). |
 | `monitor_delete_images_days` | Delete the image pairs of reported nights after this many days, keeping the reports and products. 0: keep them until the night directory is deleted. |
@@ -358,7 +358,9 @@ best recalibrated platepar of each reported night (the most matched stars, then 
 as `OUTPUT/latest_<platepar name>` and used for the following files, so slow drifts of the pointing are
 followed. The platepar you gave is never overwritten, and if it is newer than the latest one (e.g. you fitted
 it again in SkyFit2), it is used instead. "Newer" is the modification time of the file, so `touch` a platepar
-copied with `cp -p`, `rsync` or `scp`, which keep the old time.
+copied with `cp -p`, `rsync` or `scp`, which keep the old time. While the automatic calibration has a newly
+installed platepar on trial, the report doesn't carry its platepar forward, so the platepar on trial stays in use
+until its test on the following data decides whether it is kept.
 
 If fewer than half of the chunks of a night could be recalibrated, the report logs a warning ("Only N of M
 chunks ... could be recalibrated"): the platepar doesn't fit the data, e.g. the platepar of another camera or

@@ -6452,21 +6452,42 @@ def processFile(file_path, config, output_dir, platepar_path=None, dark_path=Non
                                         chunk_frames=getattr(img_handle, 'chunk_frames', 128))
 
     # The done file is written last, so a file with a done file was processed completely
-    return saveSummary(output_dir, detector, input_file=os.path.abspath(file_path),
+    return saveSummary(output_dir, detector, config=config, input_file=os.path.abspath(file_path),
                        ftpdetectinfo=os.path.basename(ftp_path), detections=len(detections),
                        stars_extracted=bool(star_list), processing_time_s=round(time() - t0, 1))
 
 
 
-def saveSummary(output_dir, detector, **extra):
+def rowModel(config):
+    """ How the rows of the detections were made, with the names and the values of the options which decide it:
+        the positions of the measurements combined over the neighbouring measurements (mf_smooth_frames, 0 for
+        the measured positions), one row per frame or one per measurement (mf_per_frame_rows), and the largest
+        number of frames a measurement combines (mf_max_measure_frames). The users of the results can tell from
+        it how the rows were made, e.g. smoothed rows of every frame from raw rows of every measurement.
+
+    Arguments:
+        config: [Config] Configuration of the processing.
+
+    Return:
+        [dict] {option name: value}.
+    """
+
+    return {'mf_smooth_frames': int(config.mf_smooth_frames),
+            'mf_per_frame_rows': bool(config.mf_per_frame_rows),
+            'mf_max_measure_frames': int(config.mf_max_measure_frames)}
+
+
+def saveSummary(output_dir, detector, config=None, **extra):
     """ Save the summary of the processing of a file as its done file in the output directory: the tracks
-        with their significance, the timing, and the given items.
+        with their significance, the timing, the row model, and the given items.
 
     Arguments:
         output_dir: [str] Output directory of the file.
         detector: [MatchedFilterDetector] Detector after its run, or None.
 
     Keyword arguments:
+        config: [Config] Configuration of the processing, whose row model (see rowModel) is recorded as
+            'row_model', also without a detector. None by default (not recorded).
         Items added to the summary.
 
     Return:
@@ -6476,6 +6497,11 @@ def saveSummary(output_dir, detector, **extra):
     # The summary of the detector (its tracks, the timing, etc.) and the given items
     summary = detector.summary() if detector is not None else {}
     summary.update(extra)
+
+    # How the rows of the detections were made, so the users of the results know whether they are smoothed
+    if config is not None:
+        summary['row_model'] = rowModel(config)
+
     summary['processed_at'] = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
 
     os.makedirs(output_dir, exist_ok=True)

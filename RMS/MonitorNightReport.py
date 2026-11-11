@@ -888,8 +888,9 @@ def _writePlatepar(platepar, file_path):
 
 def saveNightPlatepar(platepar, night_dir, night_name, output_dir, config):
     """ Save the best platepar of the night to the night directory (as at the end of a normal RMS night), and
-        carry it forward to the following data if monitor_update_platepar is set and no newer night has been
-        reported (e.g. when an old night is reported again).
+        carry it forward to the following data if monitor_update_platepar is set, no newer night has been
+        reported (e.g. when an old night is reported again), and the automatic calibration has no platepar on
+        trial.
 
     Arguments:
         platepar: [Platepar instance] Best platepar of the night.
@@ -902,6 +903,20 @@ def saveNightPlatepar(platepar, night_dir, night_name, output_dir, config):
     _writePlatepar(platepar, os.path.join(night_dir, config.platepar_name))
 
     latest_night = readReportStates(output_dir)['latest_platepar_night']
+
+    # A platepar which the automatic calibration installed on trial is used until its test on the following
+    #   data decides whether it is kept. A newer carried forward platepar would be used instead, which ends the
+    #   trial before the decision, so none is carried forward meanwhile. In a dry run the installed platepars
+    #   are not used, so the trial doesn't matter
+    if config.monitor_update_platepar and config.monitor_auto_calibration \
+            and (not config.monitor_auto_calibration_dry_run):
+
+        from RMS.Astrometry.AutoCalibration import readState
+
+        if readState(output_dir).get('trial'):
+            log.info("Best platepar not carried forward to the following data, the automatic calibration has a "
+                     "platepar on trial")
+            return
 
     if config.monitor_update_platepar and ((latest_night is None) or (night_name >= latest_night)):
         _writePlatepar(platepar, latestPlateparPath(output_dir, config))
@@ -2425,6 +2440,12 @@ class NightReporter(object):
         return (now - last).total_seconds()
 
 
+    def _firstResultTime(self, results):
+        """ Time (UTC) when the first result of the night was finished. """
+
+        return min(doneTime(self.output_dir, results_dir) for results_dir in results)
+
+
     def _gaveUp(self, night_name, results):
         """ True if the report of the night failed twice and no new files arrived since. """
 
@@ -2458,10 +2479,14 @@ class NightReporter(object):
         if self.report_mode not in ('sunrise', 'idle'):
             return None
 
-        # Make the partial report at its time with the data processed until then, once per night. It is not
-        #   made for old nights, e.g. when a backlog is processed after a downtime
+        # Make the partial report at its time with the data processed until then, once per night. It is only
+        #   made for a night whose processing started while it was recorded and before the partial report
+        #   time, not for a night processed as a backlog (e.g. after a downtime), whose first files would
+        #   otherwise be reported as soon as they are processed if it is still inside the partial report window
         partial_time = partialReportTime(self.config, night_name)
-        if (partial_time is not None) and (partial_time <= now < partial_time + datetime.timedelta(days=1)):
+        if (partial_time is not None) and (partial_time <= now < partial_time + datetime.timedelta(days=1)) \
+                and (self._firstResultTime(results) < min(partial_time,
+                                                          nightBoundsFromName(self.config, night_name)[1])):
 
             # Only a successful report counts, so a failed partial report is made again after the wait
             night_state = self.states['nights'].get(night_name, {})

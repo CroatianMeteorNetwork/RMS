@@ -527,6 +527,54 @@ def test_older_night_does_not_overwrite_the_latest_platepar(tmp_path):
     assert mnr.readReportStates(output_dir)['latest_platepar_night'] == later_night
 
 
+def test_no_latest_platepar_while_a_platepar_is_on_trial(tmp_path):
+    """ While the automatic calibration has a platepar on trial, the best platepar of the night is saved in the
+        night directory only, so the platepar on trial stays in use until its test decides. """
+
+    from RMS.Astrometry import AutoCalibration as ac
+
+    config = _config()
+    config.monitor_update_platepar = True
+    config.monitor_auto_calibration = True
+    output_dir = str(tmp_path)
+    night_dir = str(tmp_path/'night')
+    os.makedirs(night_dir)
+
+    platepar = Platepar()
+    platepar.read(TEMPLATE_PLATEPAR)
+
+    # The installed platepar on trial, with the replaced one kept to be put back
+    auto_path = mnr.autoPlateparPath(output_dir, config)
+    previous_path = os.path.join(output_dir, 'auto_previous_' + config.platepar_name)
+    for path in (auto_path, previous_path):
+        platepar.write(path, fmt='json')
+        os.utime(path, (1000, 1000))
+    state = ac.readState(output_dir)
+    state['trial'] = {'path': auto_path, 'previous': previous_path, 'fitted_jd': 2461000.5, 'reason': 'test'}
+    ac.writeState(output_dir, state)
+
+    # The report saves the platepar of the night, but doesn't carry it forward
+    mnr.saveNightPlatepar(platepar, night_dir, NIGHT, output_dir, config)
+    assert os.path.isfile(os.path.join(night_dir, config.platepar_name))
+    assert not os.path.isfile(mnr.latestPlateparPath(output_dir, config))
+    assert mnr.readReportStates(output_dir)['latest_platepar_night'] is None
+    assert mnr.selectPlatepar(output_dir, config, None) == auto_path
+
+    # In a dry run the installed platepars are not used, so the platepar is carried forward
+    config.monitor_auto_calibration_dry_run = True
+    mnr.saveNightPlatepar(platepar, night_dir, NIGHT, output_dir, config)
+    assert os.path.isfile(mnr.latestPlateparPath(output_dir, config))
+    os.remove(mnr.latestPlateparPath(output_dir, config))
+    config.monitor_auto_calibration_dry_run = False
+
+    # Once the trial is decided, the platepar of the night is carried forward again
+    state['trial'] = None
+    ac.writeState(output_dir, state)
+    mnr.saveNightPlatepar(platepar, night_dir, NIGHT, output_dir, config)
+    assert mnr.selectPlatepar(output_dir, config, None) == mnr.latestPlateparPath(output_dir, config)
+    assert mnr.readReportStates(output_dir)['latest_platepar_night'] == NIGHT
+
+
 @pytest.mark.parametrize('update, auto, newest, expected', [
     (True, True, 'auto', 'auto'), (True, True, 'latest', 'latest'), (True, True, 'given', 'given'),
     (False, True, 'latest', 'auto'), (True, False, 'auto', 'latest'), (False, False, 'auto', 'given')])
@@ -1125,6 +1173,17 @@ def _nightAndResults(scheduling):
     return list(scheduling.results.items())[0]
 
 
+def _addResult(scheduling, night, name, done_time):
+    """ Add a processed file of the night, whose processing was finished at the given time (UTC). """
+
+    results_path = os.path.join(scheduling.output_dir, '2025', name)
+    os.makedirs(results_path, exist_ok=True)
+    mnr.writeDoneFlag(results_path, {'night': night})
+
+    epoch = (done_time - datetime.datetime(1970, 1, 1)).total_seconds()
+    os.utime(os.path.join(results_path, 'done.flag'), (epoch, epoch))
+
+
 def test_sunrise_mode_reports_after_the_night_without_waiting_for_idle(scheduling):
 
     reporter = _reporter(scheduling, 'sunrise')
@@ -1160,6 +1219,10 @@ def test_partial_report_while_the_night_is_processed(scheduling):
     reporter.config.monitor_partial_report_time = partial_time.strftime("%H:%M")
     reporter.states = mnr.readReportStates(scheduling.output_dir)
 
+    # The processing of the night started while it was recorded, before the partial report time
+    _addResult(scheduling, night, 'r0', partial_time - datetime.timedelta(hours=1))
+    results = mnr.scanNights(scheduling.output_dir, reporter.config)[night]
+
     def _isDue(now):
 
         # The latest result was just finished
@@ -1186,6 +1249,47 @@ def test_partial_report_while_the_night_is_processed(scheduling):
     mnr.updateReportState(scheduling.output_dir, night, reported_at=None, succeeded_at=None)
     reporter.states = mnr.readReportStates(scheduling.output_dir)
     assert _isDue(partial_time + datetime.timedelta(days=2)) is None
+
+
+def test_no_partial_report_for_a_night_processed_as_a_backlog(scheduling):
+    """ The partial report is made only for a night whose processing started while it was recorded and before
+        the partial report time, not for a night processed as a backlog (e.g. after a downtime) while its
+        partial report time is less than a day ago. """
+
+    reporter = _reporter(scheduling, 'sunrise')
+    night, _ = _nightAndResults(scheduling)
+    night_start, night_end = mnr.nightBoundsFromName(reporter.config, night)
+    reporter.states = mnr.readReportStates(scheduling.output_dir)
+
+    def _isDue(partial_time, first_done, now):
+
+        # Results of the night, the first one finished at the given time and the latest one just finished
+        shutil.rmtree(os.path.join(scheduling.output_dir, '2025'))
+        _addResult(scheduling, night, 'r0', first_done)
+        _addResult(scheduling, night, 'r1', now - datetime.timedelta(minutes=1))
+        results = mnr.scanNights(scheduling.output_dir, reporter.config)[night]
+
+        reporter.config.monitor_partial_report_time = partial_time.strftime("%H:%M")
+
+        return reporter.isDue(night, results, False, now)
+
+    # A partial report time in the morning after the end of the night, while the processing still catches up
+    partial_time = (night_end + datetime.timedelta(hours=2)).replace(second=0, microsecond=0)
+    now = partial_time + datetime.timedelta(hours=1)
+
+    # Made for a night processed since it was recorded
+    assert _isDue(partial_time, night_end - datetime.timedelta(hours=3), now) == 'partial'
+
+    # Not for a night whose processing started after it was over (a backlog after a downtime), neither
+    #   before nor after the partial report time
+    assert _isDue(partial_time, night_end + datetime.timedelta(hours=1), now) is None
+    assert _isDue(partial_time, partial_time + datetime.timedelta(minutes=30), now) is None
+
+    # A partial report time during the night: not for a night whose processing started after it
+    partial_time = (night_end - datetime.timedelta(hours=2)).replace(second=0, microsecond=0)
+    now = partial_time + datetime.timedelta(hours=1)
+    assert _isDue(partial_time, partial_time - datetime.timedelta(minutes=30), now) == 'partial'
+    assert _isDue(partial_time, partial_time + datetime.timedelta(minutes=10), now) is None
 
 
 def test_idle_mode_waits_for_idle_and_quiet_time(scheduling):

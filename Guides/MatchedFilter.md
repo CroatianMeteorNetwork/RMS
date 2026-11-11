@@ -443,7 +443,9 @@ The detections are written as an FTPdetectinfo (the suffix `mf`) with a row for 
 aperture correction of the intensities, the number of candidate tracks which were not measured
 (`tracks_dropped`, see `mf_max_tracks`), the clear fraction of the sky (`clear_sky_fraction`), the rows of the
 detections (one per frame of a detection) and the detections removed on clouded sky (`cloud_frames_removed`,
-`cloud_detections_removed`), and the processing time of every step.
+`cloud_detections_removed`), the processing time of every step, and how the rows of the detections were made
+(`row_model`: the values of `mf_smooth_frames`, `mf_per_frame_rows` and `mf_max_measure_frames`, e.g. raw rows of
+every measurement with the defaults, or smoothed rows of every frame).
 
 In the output directory of the camera (the monitor) or of the run (the command line):
 

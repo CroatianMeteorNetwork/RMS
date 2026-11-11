@@ -10,6 +10,7 @@ saving the star extraction chunks as image pairs, and assigning meteors to them.
 import collections
 import configparser
 import datetime
+import json
 import multiprocessing
 import os
 import shutil
@@ -22,7 +23,7 @@ import pytest
 import RMS.ConfigReader as cr
 import RMS.MatchedFilterDetection as mfd
 import RMS.MonitorProcessFrameInterface as mon
-from RMS.Formats import FFfile, FFpng, FTPdetectinfo
+from RMS.Formats import FFfile, FFpng, FrameBuffer, FTPdetectinfo
 
 
 REPO_CONFIG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.config')
@@ -1348,6 +1349,66 @@ def test_matched_filter_replaces_detection(config_path, tmp_path, monkeypatch, e
     # The summary of the matched filter is saved with the results, and there is no separate directory
     assert os.path.isfile(os.path.join(results_dir, mfd.DONE_NAME))
     assert not os.path.isdir(os.path.join(results_dir, mfd.MATCHED_FILTER_DIR))
+
+
+@pytest.mark.parametrize('input_type', ['video', 'fblk'])
+@pytest.mark.parametrize('replace', [True, False])
+def test_matched_filter_summary_records_the_row_model(config_path, tmp_path, monkeypatch, input_type, replace):
+    """ The summary of the matched filter records the options which decide how the rows of its detections were
+        made, with the values of the config, when it replaces the normal detection (a video read once, or a
+        frame block read in segments) and when it runs after it. """
+
+    # The config of the test with a row model other than the default, a synthetic input and no calibration
+    config = cr.parse(config_path)
+    config.monitor_save_images = False
+    config.mf_enable = True
+    config.mf_replace_detection = replace
+    config.mf_smooth_frames = 64
+    config.mf_per_frame_rows = True
+    config.mf_max_measure_frames = 16
+    monkeypatch.setattr(cr, 'parse', lambda path: config)
+
+    handle = _ProcessHandle(str(tmp_path))
+    handle.input_type = input_type
+    monkeypatch.setattr(mon, 'detectInputType', lambda *args, **kwargs: handle)
+    monkeypatch.setattr(mon, 'loadImageCalibration', lambda *args, **kwargs: (None, None, None))
+
+    # Enough stars and no detections. The frame block is read in segments held in memory
+    stars = [['FF_XX0001_20251225_030000_000_0000000.fits', [(10.0, 20.0, 100, 50, 2.0, 7, 9.0, 0)]
+              *config.ff_min_stars]]
+    monkeypatch.setattr(mon, 'detectStarsAndMeteorsFrameInterface', lambda *args, **kwargs: (stars, []))
+    monkeypatch.setattr(mon, 'extractStarsFrameInterface', lambda *args, **kwargs: stars)
+    monkeypatch.setattr(mon, 'saveResultsFrameInterface', lambda *args, **kwargs: None)
+    monkeypatch.setattr(mfd, 'detectMatchedFilter', lambda *args, **kwargs: ([], None))
+    monkeypatch.setattr(mfd, 'saveMatchedFilterResults',
+                        lambda *args, **kwargs: os.path.join(args[4], 'FTPdetectinfo_mf.txt'))
+    monkeypatch.setattr(FrameBuffer, 'segmentFrames',
+                        lambda img_handle, *args: 256 if img_handle.input_type == 'fblk' else 0)
+    segments = []
+
+    def _segments(img_handle, *args, **kwargs):
+        segments.append(img_handle.input_type)
+        return stars, [], None, img_handle
+
+    monkeypatch.setattr(mfd, 'detectMatchedFilterSegments', _segments)
+
+    given_platepar = tmp_path/'given.cal'
+    given_platepar.write_text('given')
+
+    assert mon.processFile(str(tmp_path/'dummy.vid'), config_path, str(given_platepar), str(tmp_path/'out'), 128)
+
+    # The summary is with the results when the matched filter replaces the normal detection, in its own
+    #   directory otherwise
+    results_dir = os.path.join(str(tmp_path/'out'), '2025', '202512', '20251225', 'dummy')
+    summary_dir = results_dir if replace else os.path.join(results_dir, mfd.MATCHED_FILTER_DIR)
+    with open(os.path.join(summary_dir, mfd.DONE_NAME)) as f:
+        summary = json.load(f)
+
+    assert summary['row_model'] == {'mf_smooth_frames': 64, 'mf_per_frame_rows': True,
+                                    'mf_max_measure_frames': 16}
+
+    # Only the frame block replacing the normal detection was read in segments
+    assert segments == (['fblk'] if (replace and (input_type == 'fblk')) else [])
 
 
 def test_auto_calibration_step_recalibrates_with_a_new_platepar(config_path, tmp_path, monkeypatch):

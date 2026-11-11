@@ -16,6 +16,7 @@ noise is NOISE ADU per pixel, and the brightness of an object is given as its pe
 single frame (the peak of its PSF over the noise of a pixel).
 """
 
+import json
 import os
 import math
 import datetime
@@ -942,6 +943,31 @@ def test_fits_directory_input(config, tmp_path):
 
     assert summary['detections'] == 1
     assert os.path.isfile(str(tmp_path/'out'/summary['ftpdetectinfo']))
+
+    # The done file records how the rows of the detections were made
+    with open(str(tmp_path/'out'/mfd.DONE_NAME)) as f:
+        assert json.load(f)['row_model'] == mfd.rowModel(config)
+
+
+def test_summary_records_the_row_model(config, tmp_path):
+    """ The done file records the options which decide how the rows of the detections were made, with the
+        values of the config, also without a detector (e.g. not enough stars), and nothing without a config. """
+
+    # The default rows: one per measurement, as measured
+    assert mfd.rowModel(config) == {'mf_smooth_frames': 0, 'mf_per_frame_rows': False,
+                                    'mf_max_measure_frames': 8}
+
+    # Smoothed rows of every frame
+    config.mf_smooth_frames = 64
+    config.mf_per_frame_rows = True
+    config.mf_max_measure_frames = 16
+    summary = mfd.saveSummary(str(tmp_path/'a'), None, config=config, detections=0)
+    with open(str(tmp_path/'a'/mfd.DONE_NAME)) as f:
+        saved = json.load(f)
+
+    assert summary['row_model'] == saved['row_model'] == {'mf_smooth_frames': 64, 'mf_per_frame_rows': True,
+                                                          'mf_max_measure_frames': 16}
+    assert 'row_model' not in mfd.saveSummary(str(tmp_path/'b'), None, detections=0)
 
 
 def test_process_files_resumes_and_continues_after_failure(config, tmp_path, monkeypatch):
