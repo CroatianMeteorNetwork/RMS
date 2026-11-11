@@ -1028,9 +1028,11 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
     if not train_keys:
         raise ValueError("No chunks in the nights of the fit")
 
+    # The held-out chunks of the nights of the fit are counted among the kept ones, as max_chunks may leave some out
+    n_held_fit_chunks = sum(1 for key in held_keys if key in held_chunk_keys)
     log.info("Joint distortion fit: {:d} nights ({:d} held out), {:d} chunks in the fit, {:d} held out ({:d} of "
              "them from the nights of the fit)".format(len(nights), len(held), len(train_keys), len(held_keys),
-                                                       len(held_chunk_keys)))
+                                                       n_held_fit_chunks))
 
     def _chunk(key):
         """ The chunk of a key.
