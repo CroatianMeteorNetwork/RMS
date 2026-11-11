@@ -864,6 +864,46 @@ def test_sections_are_judged_with_their_own_photometry(monkeypatch):
     assert all(fitted)
 
 
+def test_flat_fielded_camera_never_fits_vignetting(monkeypatch):
+    """ A camera with a flat (use_flat): the flat corrects the vignetting, so even when the vignetting fit is asked
+        for (e.g. a first platepar, or the vignetting option on), it isn't fitted and the coefficient stays 0. """
+
+    import RMS.Astrometry.AutoPlatepar as ap
+
+    config = cr.parse(REPO_CONFIG)
+    chunks = [('FF_XX0001_20251225_0100{:02d}_000_0000000.fits'.format(i), 2461000.5 + i/1440.0,
+               _stars(np.linspace(10, 500, 60), np.linspace(10, 500, 60))) for i in range(8)]
+
+    # The plate solver of flat fielded stars gives a coefficient of 0
+    def _fit(dir_path, config, catalog_stars, ff_name=None, use_flat=False, **kwargs):
+        pp = _platepar()
+        pp.vignetting_coeff = 0.0 if use_flat else 0.00067
+        return pp, list(range(80)), ff_name
+
+    monkeypatch.setattr(ap, 'autoFitPlatepar', _fit)
+
+    # A vignetting fit would give a coefficient
+    fitted = []
+
+    def _photometry(platepar, chunks, catalog_stars, config, ff_frames=256, fit_vignetting=False):
+        if fit_vignetting:
+            platepar.vignetting_coeff = 0.00027
+        fitted.append(fit_vignetting)
+        return {'vignetting_coeff': platepar.vignetting_coeff, 'vignetting_fitted': fit_vignetting}
+
+    monkeypatch.setattr(ac, 'fitPhotometry', _photometry)
+    monkeypatch.setattr(ac, 'scorePlatepar', lambda pp, *args, **kwargs: _score([0.95]*8))
+    monkeypatch.setattr(ac, 'sectionDifference', lambda a, b, jd, fwhm: (0.0, 0.0))
+
+    # Asked for, with a coefficient given (the one of an existing platepar): neither is used with a flat
+    candidate, info = ac.fitCandidate({c[0]: '.' for c in chunks}, chunks, chunks[:2], None, config,
+                                      use_flat=True, fit_vignetting=True, vignetting_coeff=0.00067)
+
+    assert candidate is not None, info
+    assert fitted and (not any(fitted))
+    assert candidate.vignetting_coeff == 0.0
+
+
 ### Chunk times ###
 
 def _writeChunk(dir_path, name, x, y, ff_frames):

@@ -1194,7 +1194,8 @@ def fitCandidate(chunk_dirs, section_chunks, held_out, catalog_stars, config, ma
     Keyword arguments:
         mask: [MaskStructure] Mask of the camera. None by default.
         use_flat: [bool] The stars were measured on flat fielded images. False by default.
-        fit_vignetting: [bool] Fit the vignetting coefficient. False by default.
+        fit_vignetting: [bool] Fit the vignetting coefficient. False by default. Never with use_flat: the flat
+            corrects the vignetting, so the coefficient is 0.
         vignetting_coeff: [float] Vignetting coefficient to use when it is not fitted (e.g. the one of the current
             platepar). None by default, in which case the default of AutoPlatepar is used.
         ff_frames: [int] Number of frames of a chunk. 256 by default.
@@ -1215,6 +1216,10 @@ def fitCandidate(chunk_dirs, section_chunks, held_out, catalog_stars, config, ma
     info = {'sections': []}
 
     # Fit every section independently. The plate solver prints its progress, which is not logged
+    # Flat fielded stars have no vignetting left: the coefficient is 0 and it is not fitted
+    if use_flat:
+        fit_vignetting, vignetting_coeff = False, 0.0
+
     fits = []
     for name, jd, stars in spreadChunks(section_chunks, N_SECTIONS):
 
@@ -1624,7 +1629,7 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
         mask: [MaskStructure] Mask of the camera. None by default.
         dry_run: [bool] Don't install the fitted platepars, only save them as candidates. False by default.
         fit_vignetting: [bool] Fit the vignetting coefficient also when a platepar exists (it is always fitted
-            without one). False by default.
+            without one). False by default. Never with a flat (config.use_flat), see fitCandidate.
 
     Return:
         [dict] The judgement of the file, also saved to its results directory: whether the sky was clear, the
