@@ -1467,7 +1467,7 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
 
             # The summary of the matched filter is saved as its done file in the results directory. The
             #   detections themselves are saved below with the stars, as the results of the normal detection
-            saveSummary(results_dir, mf_detector, input_file=os.path.abspath(file_path),
+            saveSummary(results_dir, mf_detector, config=config, input_file=os.path.abspath(file_path),
                         detections=len(meteor_list), max_stars=max_stars,
                         processing_time_s=round(time.time() - mf_t0, 1))
             proc_log.info("Matched filter (replacing the normal detection): {:d} detections".format(
@@ -1544,7 +1544,7 @@ def processFile(file_path, config_path, platepar_path, output_dir, chunk_frames,
                     chunk_images=(image_saver.chunk_images if image_saver is not None else None),
                     ecsv_out=config.monitor_save_ecsv)
                 # The done file is written last: the night report only merges the results which have one
-                saveSummary(mf_dir, mf_detector, input_file=os.path.abspath(file_path),
+                saveSummary(mf_dir, mf_detector, config=config, input_file=os.path.abspath(file_path),
                             ftpdetectinfo=os.path.basename(mf_ftp_path), detections=len(mf_detections),
                             processing_time_s=round(time.time() - mf_t0, 1))
                 proc_log.info("Matched filter: {:d} detections saved to: {}".format(len(mf_detections),
