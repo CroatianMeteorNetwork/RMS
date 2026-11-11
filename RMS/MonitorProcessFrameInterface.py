@@ -918,13 +918,14 @@ def _recalibrateMatchedFilter(results_dir, config, platepar_path, proc_log):
                          ecsv_out=config.monitor_save_ecsv)
 
 
-def backfillCalibration(output_dir, config, night_name, proc_log=None, replaced_mtimes=None):
+def backfillCalibration(output_dir, config, night_name, proc_log=None, replaced_mtimes=None,
+                        refine_replaced=False):
     """ Add the astrometry and the photometry of the installed automatic platepar to the files which need it (the
         detections themselves are not repeated):
           - the files of the night processed without a platepar,
           - the files of the night whose platepar failed the judgement of the automatic calibration,
           - with replaced_mtimes, the files of every night not reported yet which were calibrated with a replaced
-            version, unless their own judgement passed it.
+            version, unless their own judgement passed it (with refine_replaced, also then).
         One backfill runs at a time per camera, and it stops when another platepar is installed meanwhile (the
         backfill of that install continues).
 
@@ -938,6 +939,9 @@ def backfillCalibration(output_dir, config, night_name, proc_log=None, replaced_
         replaced_mtimes: [list] Versions (modification times, see plateparTime) of the platepars which the
             installed one replaced (e.g. a failing platepar, or a platepar on trial which was rolled back). None by
             default.
+        refine_replaced: [bool] The installed platepar refines the replaced versions (the joint fit of a night),
+            so the files calibrated with them get it even where their own judgement passed them. False by default
+            (a replaced version which passed its judgement is kept).
 
     Return:
         [list] Results directories which were calibrated.
@@ -970,7 +974,8 @@ def backfillCalibration(output_dir, config, night_name, proc_log=None, replaced_
         for name in night_names:
             for results_dir, info in sorted(nights.get(name, {}).items()):
                 results_path = os.path.join(output_dir, results_dir)
-                if not _needsCalibration(info, results_path, platepar_mtime, replaced_mtimes, FILE_RESULT_NAME):
+                if not _needsCalibration(info, results_path, platepar_mtime, replaced_mtimes, FILE_RESULT_NAME,
+                                         refine_replaced=refine_replaced):
                     continue
 
                 # Another platepar installed meanwhile: its own backfill continues
@@ -1009,7 +1014,7 @@ def backfillCalibration(output_dir, config, night_name, proc_log=None, replaced_
     return calibrated
 
 
-def _needsCalibration(info, results_path, platepar_mtime, replaced_mtimes, result_name):
+def _needsCalibration(info, results_path, platepar_mtime, replaced_mtimes, result_name, refine_replaced=False):
     """ Whether the backfill calibrates a file with the installed platepar (see backfillCalibration).
 
     Arguments:
@@ -1018,6 +1023,10 @@ def _needsCalibration(info, results_path, platepar_mtime, replaced_mtimes, resul
         platepar_mtime: [float] Version of the installed platepar.
         replaced_mtimes: [list] Versions of the platepars it replaced.
         result_name: [str] Name of the file with the judgement (see AutoCalibration.FILE_RESULT_NAME).
+
+    Keyword arguments:
+        refine_replaced: [bool] Calibrate the files of a replaced version also where their judgement passed it.
+            False by default.
 
     Return:
         [bool] True if the file is calibrated with the installed platepar.
@@ -1032,9 +1041,9 @@ def _needsCalibration(info, results_path, platepar_mtime, replaced_mtimes, resul
     if version == platepar_mtime:
         return False
 
-    # With a replaced version, unless its own judgement passed it
+    # With a replaced version, unless its own judgement passed it (a refinement of it replaces it anyway)
     if version in replaced_mtimes:
-        return not _plateparPassed(results_path, result_name)
+        return refine_replaced or (not _plateparPassed(results_path, result_name))
 
     # With a platepar which failed its judgement
     return _plateparFailed(results_path, result_name)
