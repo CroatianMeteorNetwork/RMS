@@ -527,6 +527,54 @@ def test_older_night_does_not_overwrite_the_latest_platepar(tmp_path):
     assert mnr.readReportStates(output_dir)['latest_platepar_night'] == later_night
 
 
+def test_no_latest_platepar_while_a_platepar_is_on_trial(tmp_path):
+    """ While the automatic calibration has a platepar on trial, the best platepar of the night is saved in the
+        night directory only, so the platepar on trial stays in use until its test decides. """
+
+    from RMS.Astrometry import AutoCalibration as ac
+
+    config = _config()
+    config.monitor_update_platepar = True
+    config.monitor_auto_calibration = True
+    output_dir = str(tmp_path)
+    night_dir = str(tmp_path/'night')
+    os.makedirs(night_dir)
+
+    platepar = Platepar()
+    platepar.read(TEMPLATE_PLATEPAR)
+
+    # The installed platepar on trial, with the replaced one kept to be put back
+    auto_path = mnr.autoPlateparPath(output_dir, config)
+    previous_path = os.path.join(output_dir, 'auto_previous_' + config.platepar_name)
+    for path in (auto_path, previous_path):
+        platepar.write(path, fmt='json')
+        os.utime(path, (1000, 1000))
+    state = ac.readState(output_dir)
+    state['trial'] = {'path': auto_path, 'previous': previous_path, 'fitted_jd': 2461000.5, 'reason': 'test'}
+    ac.writeState(output_dir, state)
+
+    # The report saves the platepar of the night, but doesn't carry it forward
+    mnr.saveNightPlatepar(platepar, night_dir, NIGHT, output_dir, config)
+    assert os.path.isfile(os.path.join(night_dir, config.platepar_name))
+    assert not os.path.isfile(mnr.latestPlateparPath(output_dir, config))
+    assert mnr.readReportStates(output_dir)['latest_platepar_night'] is None
+    assert mnr.selectPlatepar(output_dir, config, None) == auto_path
+
+    # In a dry run the installed platepars are not used, so the platepar is carried forward
+    config.monitor_auto_calibration_dry_run = True
+    mnr.saveNightPlatepar(platepar, night_dir, NIGHT, output_dir, config)
+    assert os.path.isfile(mnr.latestPlateparPath(output_dir, config))
+    os.remove(mnr.latestPlateparPath(output_dir, config))
+    config.monitor_auto_calibration_dry_run = False
+
+    # Once the trial is decided, the platepar of the night is carried forward again
+    state['trial'] = None
+    ac.writeState(output_dir, state)
+    mnr.saveNightPlatepar(platepar, night_dir, NIGHT, output_dir, config)
+    assert mnr.selectPlatepar(output_dir, config, None) == mnr.latestPlateparPath(output_dir, config)
+    assert mnr.readReportStates(output_dir)['latest_platepar_night'] == NIGHT
+
+
 @pytest.mark.parametrize('update, auto, newest, expected', [
     (True, True, 'auto', 'auto'), (True, True, 'latest', 'latest'), (True, True, 'given', 'given'),
     (False, True, 'latest', 'auto'), (True, False, 'auto', 'latest'), (False, False, 'auto', 'given')])

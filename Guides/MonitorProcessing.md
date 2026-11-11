@@ -358,7 +358,9 @@ best recalibrated platepar of each reported night (the most matched stars, then 
 as `OUTPUT/latest_<platepar name>` and used for the following files, so slow drifts of the pointing are
 followed. The platepar you gave is never overwritten, and if it is newer than the latest one (e.g. you fitted
 it again in SkyFit2), it is used instead. "Newer" is the modification time of the file, so `touch` a platepar
-copied with `cp -p`, `rsync` or `scp`, which keep the old time.
+copied with `cp -p`, `rsync` or `scp`, which keep the old time. While the automatic calibration has a newly
+installed platepar on trial, the report doesn't carry its platepar forward, so the platepar on trial stays in use
+until its test on the following data decides whether it is kept.
 
 If fewer than half of the chunks of a night could be recalibrated, the report logs a warning ("Only N of M
 chunks ... could be recalibrated"): the platepar doesn't fit the data, e.g. the platepar of another camera or
