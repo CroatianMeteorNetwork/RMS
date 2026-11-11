@@ -923,6 +923,10 @@ class Config:
         # Only save the fitted platepars as candidates, don't use them
         self.monitor_auto_calibration_dry_run = False
 
+        # Refit the lens distortion on the recent nights at the night report, every auto_calibration_refit_days
+        #   days on the newest auto_calibration_refit_nights nights (see MonitorNightReport.periodicRefit)
+        self.monitor_auto_calibration_periodic_refit = False
+
         # Save every calibrated detection as an ECSV file (in the ECSV directory of the night)
         self.monitor_save_ecsv = False
 
@@ -2648,6 +2652,10 @@ def parseMonitorProcessing(config, parser):
 
     if parser.has_option(section, "monitor_auto_calibration_dry_run"):
         config.monitor_auto_calibration_dry_run = parser.getboolean(section, "monitor_auto_calibration_dry_run")
+
+    if parser.has_option(section, "monitor_auto_calibration_periodic_refit"):
+        config.monitor_auto_calibration_periodic_refit = parser.getboolean(section,
+                                                                           "monitor_auto_calibration_periodic_refit")
 
     if parser.has_option(section, "monitor_save_ecsv"):
         config.monitor_save_ecsv = parser.getboolean(section, "monitor_save_ecsv")

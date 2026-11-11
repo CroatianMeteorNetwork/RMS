@@ -1557,6 +1557,257 @@ def refinementBackfillPending(output_dir, config, night_name):
     return pending
 
 
+# Directory of the star lists of the periodic refit of the lens distortion, in the output directory
+PERIODIC_REFIT_DIR_NAME = 'auto_calibration_refit'
+
+# Name of the report of the periodic refit, in the night directory
+PERIODIC_REFIT_REPORT_NAME = 'auto_calibration_refit_report.txt'
+
+# Time format of the periodic refit in the state of the automatic calibration
+PERIODIC_REFIT_TIME_FORMAT = '%Y-%m-%d %H:%M:%S'
+
+
+def _monitorPlateparInUse(output_dir, config, nights):
+    """ The platepar the monitor uses now, as selectPlatepar picks it: the newest of the automatically fitted
+        platepar, the carried forward platepar (with monitor_update_platepar) and the newest platepar any
+        calibrated file was processed with (which stands for the given platepar, whose path the report doesn't
+        know). All processed nights are searched, also those not reported yet (e.g. newer nights of a backlog
+        processed with a newer given platepar).
+
+    Arguments:
+        output_dir: [str] Output directory of the monitor.
+        config: [Config] Configuration.
+        nights: [dict] {night_name: {results_dir: info}} of all processed nights, see scanNights.
+
+    Return:
+        [str] Path of the platepar, None if there is none.
+    """
+
+    from RMS.MonitorProcessFrameInterface import plateparTime
+
+    # The automatically fitted platepar, and the carried forward one if it is enabled
+    candidates = [autoPlateparPath(output_dir, config)]
+    if config.monitor_update_platepar:
+        candidates.append(latestPlateparPath(output_dir, config))
+
+    # The newest version of the copies of the platepars of the calibrated files of all nights, which keep the
+    #   time of their version
+    copies = [os.path.join(output_dir, results_dir, config.platepar_name) for results in nights.values()
+              for results_dir, info in results.items() if info.get('calibrated', True)]
+    copies = [path for path in copies if os.path.isfile(path)]
+    if copies:
+        candidates.append(max(copies, key=plateparTime))
+
+    # The newest existing platepar
+    existing = [path for path in candidates if os.path.isfile(path)]
+    if not existing:
+        return None
+
+    return max(existing, key=plateparTime)
+
+
+def periodicRefit(output_dir, night_name, config, now=None):
+    """ The periodic refit of the lens distortion on the recent nights at the report of a night (see
+        NightCalibration.refitNights), as a classic station does it (NightCalibration.periodicRefit): every
+        auto_calibration_refit_days days, on the clear chunks of the newest auto_calibration_refit_nights nights
+        with enough clear sky (the night and the reported nights before it), starting from the platepar the
+        monitor uses. The refit is installed only if it meets the quality control of the joint fit and is clearly
+        better than that platepar on the held-out nights; the version it replaces is kept for the backfill (see
+        refinementBackfillPending), so the files of the night and of the nights not reported yet get it. Runs only
+        with monitor_auto_calibration_periodic_refit, after the night is over, and never while a platepar is on
+        trial or a candidate waits for its confirmation. The time of the refit and its verdict are kept in the
+        state of the automatic calibration ('periodic_refit'); an error is logged and recorded, never raised.
+
+    Arguments:
+        output_dir: [str] Output directory of the monitor.
+        night_name: [str] Name of the night being reported.
+        config: [Config] Configuration of the camera.
+
+    Keyword arguments:
+        now: [datetime] The time now (naive UTC). None by default (the clock).
+
+    Return:
+        [float] Version (modification time) of the replaced platepar if a refit was installed, None otherwise.
+    """
+
+    from RMS.Astrometry import AutoCalibration as ac
+    from RMS.Astrometry import NightCalibration as nc
+    from RMS.Astrometry.Conversions import datetime2JD
+    from RMS.MonitorProcessFrameInterface import plateparTime
+
+    # Only when enabled, with the automatic calibration
+    if not (config.monitor_auto_calibration and config.monitor_auto_calibration_periodic_refit) \
+            or (config.auto_calibration_refit_days <= 0):
+        return None
+    now = RmsDateTime.utcnow() if now is None else now
+
+    # Only once the night is over, so a partial report doesn't use up the refit before all of its data is in
+    if now < nightBoundsFromName(config, night_name)[1]:
+        return None
+
+    # Only every few days
+    state = ac.readState(output_dir)
+    last = (state.get('periodic_refit') or {}).get('last_utc')
+    if last is not None:
+        last = datetime.datetime.strptime(last, PERIODIC_REFIT_TIME_FORMAT)
+        if now - last < datetime.timedelta(days=config.auto_calibration_refit_days):
+            return None
+
+    # Never while the in-night calibration decides about a platepar: one on trial, or a candidate waiting for its
+    #   confirmation. The refit waits for the next report
+    if state.get('trial') or state.get('pending'):
+        log.info("Periodic refit at the report of night {:s}: skipped, a platepar is on trial or waits for its "
+                 "confirmation".format(night_name))
+        return None
+
+    # Not when an old night is reported again, the newer nights were reported with a newer platepar
+    reported = readReportStates(output_dir).get('nights', {})
+    if any((name > night_name) and (info or {}).get('reported_at') for name, info in reported.items()):
+        log.info("Periodic refit at the report of night {:s}: skipped, a newer night was reported".format(
+            night_name))
+        return None
+
+    # Any error of the refit is caught, so the report goes on
+    replaced_mtime, error = None, None
+    try:
+
+        # The nights of the refit: this one and the reported nights before it, the newest first
+        nights = scanNights(output_dir, config)
+        names = sorted((name for name in nights if (name == night_name)
+                        or ((name < night_name) and (reported.get(name) or {}).get('reported_at'))), reverse=True)
+
+        # The platepar in use is the start of the refit, and the platepar it would replace, found over all
+        #   processed nights (the nights of the refit may be older than the newest processed files)
+        start_path = _monitorPlateparInUse(output_dir, config, nights)
+        if start_path is None:
+            log.info("Periodic refit at the report of night {:s}: no platepar to refit".format(night_name))
+            return None
+        start_mtime = plateparTime(start_path)
+
+        # The files of the newest nights were processed with or without a flat, which decides the photometry of
+        #   the refit (the configuration of the report may differ from the one of the processing); the vignetting
+        #   is refitted as the automatic calibration of the monitor is configured
+        config = copy.copy(config)
+        newest = names[:max(config.auto_calibration_refit_nights, 1)]
+        flat_flags = [info['flat_applied'] for name in newest for info in nights[name].values()
+                      if 'flat_applied' in info]
+        if flat_flags:
+            config.use_flat = any(flat_flags)
+        config.auto_calibration_fit_vignetting = config.monitor_auto_calibration_fit_vignetting
+
+        # The platepar in use, read as the files were processed
+        start = ac._platepar(start_path, config.use_flat)
+        if start is None:
+            log.info("Periodic refit at the report of night {:s}: the platepar {:s} can't be read".format(
+                night_name, start_path))
+            return None
+
+        # The clear chunks are judged against the clearest sky seen by the camera
+        reference = np.percentile(state['star_counts'], ac.CLEAR_REFERENCE_PERCENTILE) \
+            if state.get('star_counts') else None
+
+        def _readNight(name, config):
+            """ The clear chunks of a night of the monitor from the CALSTARS files of its processed files, judged
+                with the mask they were processed with (see NightCalibration.refitNights). The platepar of the
+                night is its best platepar (saved by its report), otherwise the platepar of its newest calibrated
+                file. """
+
+            results = nights.get(name, {})
+
+            # The chunks of the night, from the CALSTARS file of every processed file (the results of deleted
+            #   nights are pruned and have none)
+            chunks, ff_frames = [], 256
+            for results_dir in sorted(results):
+                results_path = os.path.join(output_dir, results_dir)
+                if not os.path.isdir(results_path):
+                    continue
+                file_chunks, file_ff_frames = ac.readChunks(results_path, config)
+                if file_chunks:
+                    chunks += file_chunks
+                    ff_frames = file_ff_frames
+            chunks = sorted(chunks, key=lambda chunk: chunk[1])
+
+            # The mask the files of the night were processed with
+            mask_img = None
+            mask_paths = [results[results_dir].get('mask_path') for results_dir in sorted(results)]
+            mask_paths = [path for path in mask_paths if path and os.path.isfile(path)]
+            if mask_paths:
+                mask_img = getattr(loadMask(mask_paths[0]), 'img', None)
+
+            clear = ac.clearChunks(chunks, int(config.width), int(config.height), mask=mask_img,
+                                   reference_stars=reference)
+
+            # The platepar of the night is the start of its pointing
+            platepar_path = os.path.join(nightDirPath(output_dir, name, config), config.platepar_name)
+            if not os.path.isfile(platepar_path):
+                copies = [os.path.join(output_dir, results_dir, config.platepar_name) for results_dir in results]
+                copies = [path for path in copies if os.path.isfile(path)]
+                platepar_path = max(copies, key=plateparTime) if copies else None
+
+            return clear, ff_frames, mask_img, platepar_path
+
+        # The refit of the distortion on the newest nights with enough clear sky, and the decision whether it
+        #   replaces the platepar in use
+        fitted, report, reason = nc.refitNights(names, start, config,
+                                                os.path.join(output_dir, PERIODIC_REFIT_DIR_NAME),
+                                                max_nights=config.auto_calibration_refit_nights,
+                                                nproc=config.auto_calibration_nproc, read_night=_readNight)
+
+        # The report of the fit is kept with the night
+        if report is not None:
+            from RMS.Astrometry.JointDistortionFit import formatReport
+
+            night_dir = nightDirPath(output_dir, night_name, config)
+            os.makedirs(night_dir, exist_ok=True)
+            with open(os.path.join(night_dir, PERIODIC_REFIT_REPORT_NAME), 'w') as f:
+                f.write(formatReport(report))
+
+    except Exception as e:
+
+        # An error doesn't stop the report and is recorded, so the refit isn't tried again before the interval
+        log.error("Periodic refit at the report of night {:s} failed:\n{:s}".format(night_name,
+                                                                                    traceback.format_exc()))
+        fitted, reason, error = None, None, repr(e)
+
+    # Installed if it is clearly better, and only if the platepar in use wasn't replaced meanwhile and no
+    #   platepar went on trial. Both are checked under the lock, which a worker holds while it installs a platepar
+    with ac._StateLock(output_dir):
+        state = ac.readState(output_dir)
+        dry_run = config.monitor_auto_calibration_dry_run
+        last_utc = now.strftime(PERIODIC_REFIT_TIME_FORMAT)
+        if reason is None:
+            verdict = 'failed ({:s})'.format(error)
+        elif fitted is None:
+            verdict = 'kept the platepar ({:s})'.format(reason)
+        elif state.get('trial') or state.get('pending'):
+
+            # The refit is made again at a later report, after the decision about the platepar on trial
+            verdict = 'not installed, a platepar went on trial or waits for its confirmation ({:s})'.format(reason)
+            last_utc = (state.get('periodic_refit') or {}).get('last_utc')
+        elif plateparTime(_monitorPlateparInUse(output_dir, config, scanNights(output_dir, config))) \
+                != start_mtime:
+            verdict = 'not installed, the platepar was replaced meanwhile ({:s})'.format(reason)
+        else:
+            install_reason = 'refit on the recent nights: ' + reason
+            path = ac.installPlatepar(fitted, output_dir, config, install_reason, dry_run=dry_run)
+            state['installs'].append({'jd': datetime2JD(now), 'path': path, 'reason': install_reason,
+                                      'dry_run': dry_run})
+            verdict = '{:s} the refit ({:s})'.format('saved a candidate of' if dry_run else 'installed', reason)
+
+            # The replaced version is kept until no file still has it (see refinementBackfillPending)
+            if not dry_run:
+                replaced_mtime = start_mtime
+                state['joint_fit_replaced'] = sorted(set(state.get('joint_fit_replaced', []) + [replaced_mtime]))
+
+        # The time of this refit, also if nothing was installed
+        state['periodic_refit'] = {'last_utc': last_utc, 'night': night_name, 'verdict': verdict}
+        ac.writeState(output_dir, state)
+
+    log.info("Periodic refit at the report of night {:s}: {:s}".format(night_name, verdict))
+
+    return replaced_mtime
+
+
 def generateNightReport(output_dir, night_name, config, results=None, archive=True):
     """ Merge the results of a night and generate its report.
 
@@ -1600,6 +1851,18 @@ def generateNightReport(output_dir, night_name, config, results=None, archive=Tr
 
             # A failure doesn't stop the report, the platepar of the night stays
             log.error("The joint fit of night {:s} failed:\n{:s}".format(night_name, traceback.format_exc()))
+
+        # Every few days the lens distortion is refitted on the recent nights (if enabled), starting from the
+        #   platepar in use, also the one the joint fit of the night just installed; the files calibrated with the
+        #   platepar it replaces are calibrated again below
+        try:
+            periodicRefit(output_dir, night_name, config)
+
+        except Exception:
+
+            # A failure doesn't stop the report, the platepar in use stays
+            log.error("The periodic refit at the report of night {:s} failed:\n{:s}".format(
+                night_name, traceback.format_exc()))
 
         try:
 

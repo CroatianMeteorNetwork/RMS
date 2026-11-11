@@ -362,6 +362,17 @@ copied with `cp -p`, `rsync` or `scp`, which keep the old time. While the automa
 installed platepar on trial, the report doesn't carry its platepar forward, so the platepar on trial stays in use
 until its test on the following data decides whether it is kept.
 
+With the automatic calibration (`monitor_auto_calibration`) and `monitor_auto_calibration_periodic_refit: true`
+(off by default), the night report also refits the lens distortion of the platepar in use on the recent nights,
+as a classic station does: every `auto_calibration_refit_days` days (7 by default) on the newest
+`auto_calibration_refit_nights` nights (14 by default) with at least 1 h of clear sky, at least 4 of them. Every
+few nights are held out of the fit, and the refit is used only if it meets the quality control of the fit and is
+clearly better than the platepar in use on the held-out nights; the files of the night and of the nights not
+reported yet then get it. In a dry run (`monitor_auto_calibration_dry_run`) it is only saved as a candidate. It
+waits while a platepar is on trial. The report of the fit is saved in the night directory
+(`auto_calibration_refit_report.txt`), and the time and the verdict of the last refit are in
+`OUTPUT/auto_calibration_state.json` (`periodic_refit`).
+
 If fewer than half of the chunks of a night could be recalibrated, the report logs a warning ("Only N of M
 chunks ... could be recalibrated"): the platepar doesn't fit the data, e.g. the platepar of another camera or
 a camera which moved. `.night_reports.json` records the numbers for every night (`recalibration`).

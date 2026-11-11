@@ -942,7 +942,35 @@ def _worstZones(before, after, min_stars):
     return worst_before, n_before, worst_after
 
 
-def refitNights(night_dirs, platepar, config, work_dir, max_nights=None, nproc=1):
+def _archivedNight(night_dir, config):
+    """ The clear chunks of an archived night of a classic camera for the periodic refit (see refitNights): read
+        from the CALSTARS file of its directory and judged with the mask of the night (or of the camera), as
+        during the night.
+
+    Arguments:
+        night_dir: [str] Directory of the night with its CALSTARS file (and platepar).
+        config: [Config] Configuration.
+
+    Return:
+        (clear, ff_frames, mask_img, platepar_path): [tuple] The clear chunks as (name, jd, stars), the frames of
+            a chunk, the mask image (None without a mask) and the path of the platepar of the night (None if there
+            is none).
+    """
+
+    # The clear chunks judged with the mask of the night, against the clearest chunks of the night
+    chunks, ff_frames = ac.readChunks(night_dir, config)
+    mask_img = getattr(_mask(config, night_dir), 'img', None)
+    clear = ac.clearChunks(chunks, int(config.width), int(config.height), mask=mask_img)
+
+    # The platepar the night was reduced with is the start of its pointing
+    platepar_path = os.path.join(night_dir, config.platepar_name)
+    if not os.path.isfile(platepar_path):
+        platepar_path = None
+
+    return clear, ff_frames, mask_img, platepar_path
+
+
+def refitNights(night_dirs, platepar, config, work_dir, max_nights=None, nproc=1, read_night=None):
     """ Refit the lens distortion of a platepar on the clear chunks of many nights with the joint fit (every few
         nights held out), and decide whether it replaces the platepar: the fit has to meet its quality control,
         and the worst zone or corner of the held-out nights has to get better by REFIT_MIN_GAIN_SE standard errors
@@ -951,7 +979,8 @@ def refitNights(night_dirs, platepar, config, work_dir, max_nights=None, nproc=1
         the vignetting is also refitted on the newest night (see AutoCalibration.refitVignetting).
 
     Arguments:
-        night_dirs: [list] Directories of the nights with their CALSTARS files (and platepars), the newest first.
+        night_dirs: [list] The nights, the newest first: directories with their CALSTARS files (and platepars),
+            or anything read_night reads.
         platepar: [Platepar] The platepar of the camera.
         config: [Config] Configuration.
         work_dir: [str] Directory of the star lists of the fit (emptied first).
@@ -959,12 +988,18 @@ def refitNights(night_dirs, platepar, config, work_dir, max_nights=None, nproc=1
     Keyword arguments:
         max_nights: [int] At most this many nights (the newest with enough clear sky). None by default (all).
         nproc: [int] Workers of the fit. 1 by default.
+        read_night: [function] Reads a night as read_night(night, config) -> (clear, ff_frames, mask_img,
+            platepar_path), see _archivedNight. None by default (_archivedNight, the archived nights of a classic
+            camera). The night directories of the fit are named after the base name of the night.
 
     Return:
         (platepar, report, reason): [tuple] The platepar which replaces the given one (None if it isn't
             replaced), the report of the joint fit (None if there was no fit) and why.
     """
 
+    # The archived nights of a classic camera unless the nights are read otherwise; the star lists of an earlier
+    #   refit are removed
+    read_night = _archivedNight if read_night is None else read_night
     if os.path.isdir(work_dir):
         shutil.rmtree(work_dir)
 
@@ -975,14 +1010,12 @@ def refitNights(night_dirs, platepar, config, work_dir, max_nights=None, nproc=1
         if (max_nights is not None) and (len(selected) >= max_nights):
             break
 
-        # The clear chunks judged with the mask of the night (or of the camera), as during the night
-        chunks, ff_frames = ac.readChunks(night_dir, config)
-        mask = _mask(config, night_dir)
-        clear = ac.clearChunks(chunks, int(config.width), int(config.height), mask=getattr(mask, 'img', None))
+        # The clear chunks of the night, judged with its mask
+        clear, ff_frames, night_mask_img, night_platepar = read_night(night_dir, config)
 
         # The mask of the newest night is the one of the quality control
-        if (mask_img is None) and (mask is not None):
-            mask_img = getattr(mask, 'img', None)
+        if mask_img is None:
+            mask_img = night_mask_img
         if len(clear)*ff_frames/chunksFps(clear, config, ff_frames=ff_frames)/3600.0 < REFIT_MIN_CLEAR_HOURS:
             continue
 
@@ -992,8 +1025,7 @@ def refitNights(night_dirs, platepar, config, work_dir, max_nights=None, nproc=1
 
         fit_dir = os.path.join(work_dir, os.path.basename(os.path.normpath(night_dir)))
         writeChunks(clear, fit_dir, config, ff_frames=ff_frames)
-        night_platepar = os.path.join(night_dir, config.platepar_name)
-        if os.path.isfile(night_platepar):
+        if night_platepar is not None:
             shutil.copy2(night_platepar, os.path.join(fit_dir, config.platepar_name))
         selected.append(fit_dir)
 
