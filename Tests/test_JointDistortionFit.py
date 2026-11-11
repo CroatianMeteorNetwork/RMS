@@ -832,6 +832,26 @@ def test_held_out_chunks_of_the_nights_of_the_fit(nights, fit_held_chunks):
         jointDistortionFit(dirs, start, config, holdout_chunks=1)
 
 
+def test_held_out_chunks_logged_after_the_chunk_limit(nights, caplog):
+    """ With a limit on the number of chunks, the log counts the held-out chunks of the nights of the fit among the
+        held-out chunks which are kept, never more than the kept ones. """
+
+    config, truth, start, dirs, pointings = nights
+    start = copy.deepcopy(start)
+    start.vignetting_coeff = 0.0
+    start.extinction_scale = 0.0
+
+    # The middle chunk of every night held out (one per night), at most 2 of them kept
+    with caplog.at_level(logging.INFO, logger="rmslogger"):
+        fitted, report = jointDistortionFit(dirs, start, config, distortion_type="radial7-odd", n_iter=1,
+                                            chunk_step=1, nproc=1, holdout_chunks=N_CHUNKS, max_chunks=2,
+                                            qc_options=SMALL_QC)
+
+    assert report['held_chunks'] == 2
+    lines = [record.getMessage() for record in caplog.records if 'chunks in the fit' in record.getMessage()]
+    assert lines and lines[0].endswith("2 held out (2 of them from the nights of the fit)")
+
+
 def test_chunks_held_out_by_name(nights):
     """ The chunks named in holdout_names are held out of the nights of the fit, as every N-th chunk is. """
 
