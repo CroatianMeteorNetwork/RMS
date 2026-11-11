@@ -1567,16 +1567,17 @@ PERIODIC_REFIT_REPORT_NAME = 'auto_calibration_refit_report.txt'
 PERIODIC_REFIT_TIME_FORMAT = '%Y-%m-%d %H:%M:%S'
 
 
-def _monitorPlateparInUse(output_dir, config, nights, night_names):
+def _monitorPlateparInUse(output_dir, config, nights):
     """ The platepar the monitor uses now, as selectPlatepar picks it: the newest of the automatically fitted
-        platepar, the carried forward platepar (with monitor_update_platepar) and the platepar of the newest
-        calibrated file (which stands for the given platepar, whose path the report doesn't know).
+        platepar, the carried forward platepar (with monitor_update_platepar) and the newest platepar any
+        calibrated file was processed with (which stands for the given platepar, whose path the report doesn't
+        know). All processed nights are searched, also those not reported yet (e.g. newer nights of a backlog
+        processed with a newer given platepar).
 
     Arguments:
         output_dir: [str] Output directory of the monitor.
         config: [Config] Configuration.
-        nights: [dict] {night_name: {results_dir: info}}, see scanNights.
-        night_names: [list] Names of the nights to look for the newest calibrated file in.
+        nights: [dict] {night_name: {results_dir: info}} of all processed nights, see scanNights.
 
     Return:
         [str] Path of the platepar, None if there is none.
@@ -1589,14 +1590,13 @@ def _monitorPlateparInUse(output_dir, config, nights, night_names):
     if config.monitor_update_platepar:
         candidates.append(latestPlateparPath(output_dir, config))
 
-    # The copy of the platepar of the newest calibrated file, which keeps the time of its version
-    for name in night_names:
-        copies = [os.path.join(output_dir, results_dir, config.platepar_name)
-                  for results_dir, info in nights.get(name, {}).items() if info.get('calibrated', True)]
-        copies = [path for path in copies if os.path.isfile(path)]
-        if copies:
-            candidates.append(max(copies, key=plateparTime))
-            break
+    # The newest version of the copies of the platepars of the calibrated files of all nights, which keep the
+    #   time of their version
+    copies = [os.path.join(output_dir, results_dir, config.platepar_name) for results in nights.values()
+              for results_dir, info in results.items() if info.get('calibrated', True)]
+    copies = [path for path in copies if os.path.isfile(path)]
+    if copies:
+        candidates.append(max(copies, key=plateparTime))
 
     # The newest existing platepar
     existing = [path for path in candidates if os.path.isfile(path)]
@@ -1676,8 +1676,9 @@ def periodicRefit(output_dir, night_name, config, now=None):
         names = sorted((name for name in nights if (name == night_name)
                         or ((name < night_name) and (reported.get(name) or {}).get('reported_at'))), reverse=True)
 
-        # The platepar in use is the start of the refit, and the platepar it would replace
-        start_path = _monitorPlateparInUse(output_dir, config, nights, names)
+        # The platepar in use is the start of the refit, and the platepar it would replace, found over all
+        #   processed nights (the nights of the refit may be older than the newest processed files)
+        start_path = _monitorPlateparInUse(output_dir, config, nights)
         if start_path is None:
             log.info("Periodic refit at the report of night {:s}: no platepar to refit".format(night_name))
             return None
@@ -1768,21 +1769,23 @@ def periodicRefit(output_dir, night_name, config, now=None):
                                                                                     traceback.format_exc()))
         fitted, reason, error = None, None, repr(e)
 
-    # The version of the platepar in use now, which the refit replaces only if it didn't change during the fit
-    in_use_mtime = None
-    if fitted is not None:
-        in_use_mtime = plateparTime(_monitorPlateparInUse(output_dir, config, scanNights(output_dir, config),
-                                                          names))
-
-    # Installed if it is clearly better, and only if the platepar in use wasn't replaced meanwhile
+    # Installed if it is clearly better, and only if the platepar in use wasn't replaced meanwhile and no
+    #   platepar went on trial. Both are checked under the lock, which a worker holds while it installs a platepar
     with ac._StateLock(output_dir):
         state = ac.readState(output_dir)
         dry_run = config.monitor_auto_calibration_dry_run
+        last_utc = now.strftime(PERIODIC_REFIT_TIME_FORMAT)
         if reason is None:
             verdict = 'failed ({:s})'.format(error)
         elif fitted is None:
             verdict = 'kept the platepar ({:s})'.format(reason)
-        elif in_use_mtime != start_mtime:
+        elif state.get('trial') or state.get('pending'):
+
+            # The refit is made again at a later report, after the decision about the platepar on trial
+            verdict = 'not installed, a platepar went on trial or waits for its confirmation ({:s})'.format(reason)
+            last_utc = (state.get('periodic_refit') or {}).get('last_utc')
+        elif plateparTime(_monitorPlateparInUse(output_dir, config, scanNights(output_dir, config))) \
+                != start_mtime:
             verdict = 'not installed, the platepar was replaced meanwhile ({:s})'.format(reason)
         else:
             install_reason = 'refit on the recent nights: ' + reason
@@ -1797,8 +1800,7 @@ def periodicRefit(output_dir, night_name, config, now=None):
                 state['joint_fit_replaced'] = sorted(set(state.get('joint_fit_replaced', []) + [replaced_mtime]))
 
         # The time of this refit, also if nothing was installed
-        state['periodic_refit'] = {'last_utc': now.strftime(PERIODIC_REFIT_TIME_FORMAT), 'night': night_name,
-                                   'verdict': verdict}
+        state['periodic_refit'] = {'last_utc': last_utc, 'night': night_name, 'verdict': verdict}
         ac.writeState(output_dir, state)
 
     log.info("Periodic refit at the report of night {:s}: {:s}".format(night_name, verdict))

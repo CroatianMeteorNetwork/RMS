@@ -424,3 +424,94 @@ def test_report_continues_after_an_error(tmp_path, monkeypatch):
     night_state = mnr.generateNightReport(output_dir, REPORT_NIGHT, config)
     assert calls == [REPORT_NIGHT]
     assert 'archive' in night_state['ok_steps']
+
+
+@pytest.mark.parametrize('worker', ['install', 'trial'])
+def test_platepar_installed_while_the_refit_waits_for_the_lock(monitor, monkeypatch, worker):
+    """ A worker which installs a platepar (or puts one on trial) while it holds the lock of the state, after the
+        fit and before the refit gets the lock, keeps its platepar: the platepar in use and the trial are checked
+        under the lock. After a new trial the time isn't recorded, so the refit is made again later. """
+
+    config, output_dir, plan = monitor
+    real_lock = ac._StateLock
+
+    class _WorkerFirst(object):
+        """ The lock of the state, taken first by a worker which installs a platepar. """
+
+        def __init__(self, *args, **kwargs):
+            self.lock = real_lock(*args, **kwargs)
+
+        def __enter__(self):
+
+            # The worker installs its platepar while it holds the lock
+            with real_lock(output_dir):
+                ac.writePlatepar(_platepar(5.0), ac.autoPlateparPath(output_dir, config))
+                if worker == 'trial':
+                    state = ac.readState(output_dir)
+                    state['trial'] = {'path': ac.autoPlateparPath(output_dir, config), 'previous': 'y',
+                                      'fitted_jd': JD0}
+                    ac.writeState(output_dir, state)
+
+            return self.lock.__enter__()
+
+        def __exit__(self, *args):
+            return self.lock.__exit__(*args)
+
+    monkeypatch.setattr(ac, '_StateLock', _WorkerFirst)
+
+    assert mnr.periodicRefit(output_dir, NIGHT, config, now=NOW) is None
+    assert _installed(config, output_dir) == 5.0
+
+    state = ac.readState(output_dir)
+    assert not state.get('joint_fit_replaced')
+    assert state['periodic_refit']['verdict'].startswith('not installed')
+    if worker == 'trial':
+        assert state['periodic_refit']['last_utc'] is None
+
+
+def _backlog(config, output_dir, plan, mtime):
+    """ A backlog: the nights after NIGHTS[5] were processed, with a newer given platepar of the given version,
+        but not reported yet. """
+
+    for night in NIGHTS[6:]:
+        mnr.updateReportState(output_dir, night_name=night, reported_at=None)
+        for results_dir, info in plan['files'][night].items():
+            path = os.path.join(output_dir, results_dir, config.platepar_name)
+            ac.writePlatepar(_platepar(6.0), path)
+            os.utime(path, (mtime, mtime))
+            info['platepar_mtime'] = mtime
+
+
+def test_backlog_refit_starts_from_the_newest_given_platepar(monitor):
+    """ The report of a night of a backlog refits the platepar in use, also when it is only in the files of the
+        newer nights not reported yet (a newer given platepar), and that is the version it replaces; the refit is
+        fitted on the reported nights. """
+
+    config, output_dir, plan = monitor
+    config.auto_calibration_refit_nights = 4
+    _backlog(config, output_dir, plan, GIVEN_MTIME + 500)
+
+    assert mnr.periodicRefit(output_dir, NIGHTS[5], config, now=NOW) == GIVEN_MTIME + 500
+    assert plan['start'] == 6.0
+    assert plan['calls'] == [sorted(NIGHTS[2:6])]
+
+
+def test_backlog_newer_given_platepar_during_the_refit(monitor):
+    """ A newer given platepar first used by a file of a night not reported yet while the refit runs isn't
+        replaced by the refit. """
+
+    config, output_dir, plan = monitor
+    _backlog(config, output_dir, plan, GIVEN_MTIME)
+
+    def _newer():
+        """ A file of the newest night processed with a newer given platepar. """
+        results_dir = sorted(plan['files'][NIGHTS[-1]])[-1]
+        path = os.path.join(output_dir, results_dir, config.platepar_name)
+        os.utime(path, (GIVEN_MTIME + 900, GIVEN_MTIME + 900))
+
+    plan['during'] = _newer
+
+    assert mnr.periodicRefit(output_dir, NIGHTS[5], config, now=NOW) is None
+    assert _installed(config, output_dir) is None
+    assert ac.readState(output_dir)['periodic_refit']['verdict'].startswith('not installed, the platepar was '
+                                                                             'replaced')
