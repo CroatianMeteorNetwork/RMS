@@ -36,6 +36,7 @@ from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, correctVignetting, extin
 from matplotlib import pyplot as plt
 from RMS.Routines.MaskImage import loadMask
 from Utils.FOVSkyMap import plotFOVSkyMap
+from RMS.Formats.FRbin import validFRName
 
 if sys.version_info[0] < 3:
 
@@ -2027,7 +2028,7 @@ class EventMonitor(multiprocessing.Process):
 
         found = False
         for file_to_check in file_list:
-            if os.path.basename(file_to_check)[0:2] == "FR" and file_to_check.endswith('bin'):
+            if validFRName(os.path.basename(file_to_check)):
                 found = True
 
         return found

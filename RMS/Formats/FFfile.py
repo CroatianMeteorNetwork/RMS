@@ -15,6 +15,7 @@ from RMS.Formats.FFfits import read as readFFfits
 from RMS.Formats.FFfits import write as writeFFfits
 from RMS.Formats.FFStruct import FFStruct
 from RMS.Decorators import memoizeSingle
+from RMS.Formats.FRbin import validFRName
 
 
 def readFFpng(directory, filename, full_filename=False):
@@ -455,7 +456,7 @@ def validFFName(ff_file, fmt=None):
 def convertFRNameToFF(fr_name):
     """ Convert the FR name format to an FF format. """
 
-    if fr_name.startswith("FR_") and fr_name.endswith(".bin"):
+    if validFRName(fr_name):
         fr_name = fr_name.replace("FR_", "FF_", 1).replace(".bin", ".fits")
 
     return fr_name
