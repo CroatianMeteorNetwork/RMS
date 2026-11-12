@@ -50,7 +50,15 @@ If you want to run RMS natively on a dedicated Linux PC or configure a multi-cam
 
 **NOTE: These instructions are intended ONLY for advanced users, developers, or highly custom installations. Standard users should use the Wiki links above.**
 
-If you are using Anaconda Python on your Windows or Linux PC and want to install the libraries manually, run the following commands in your Anaconda environment:
+Windows only: First install the [Visual C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) package from Microsoft. This is required to build many of the RMS modules. 
+After launching the installer, select "Desktop development tools for C++" and then on the right, unselect Testing tools, Address Sanitiser and vcpkg (you don't need these).  
+*Note that you will need about 6GB of diskspace for the tools*. 
+
+For all platforms you will need Git. This may be preinstalled on Linux, but for Windows install it from [here](https://git-scm.com/install/windows)
+
+You will also need either Anaconda or Miniconda. The latter is simpler to install and takes up much less space and can be obtained from [here](https://www.anaconda.com/docs/getting-started/installation)
+
+Then, assuming you are have Anaconda or Miniconda Python on your Windows or Linux PC and want to install the libraries manually, run the following commands in a Conda shell:
 
 ```bash
 conda create -y -n rms -c conda-forge python==3.11.6
@@ -65,6 +73,10 @@ conda install -y -c conda-forge pygobject
 conda install -y -c conda-forge opencv
 conda install -y -c astropy astropy
 pip install rawpy'<0.22'
+```
+
+Additionally, for platforms *other than* Windows, you can install Astrometry:
+```bash
 pip install astrometry
 ```
 
@@ -82,11 +94,14 @@ cd RMS
 pip install .
 ```
 
+*NB: Whenever you want to run an RMS module you must open a Conda shell and run `conda activate RMS` first*
+
 ---
 
 ## Running the Code
 
 Once your system is fully set up and configured (via the `.config` file, as explained in the Wiki), you can run various RMS modules. 
+
 
 ### Capturing video and saving data
 To start the automated video capture, navigate to your base RMS folder in the terminal and run:
