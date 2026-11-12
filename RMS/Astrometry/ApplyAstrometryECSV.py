@@ -8,7 +8,7 @@ import numpy as np
 from astropy.table import QTable
 
 import RMS.Formats.Platepar
-from RMS.Astrometry.Conversions import trueRaDec2ApparentAltAz, raDec2AltAz
+from RMS.Astrometry.Conversions import trueOfDateRaDec2ApparentAltAz
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, computeFOVSize, rotationWrtHorizon
 
 
@@ -64,8 +64,8 @@ def applyAstrometryECSV(dir_path, ecsv_file, platepar_file, platepar=None, time_
 
 
     # Compute alt/az pointing
-    # RA_d/dec_d are epoch-of-date (see Platepar.computeRefAltAz), so convert without precession
-    azim, elev = raDec2AltAz(platepar.RA_d, platepar.dec_d, platepar.JD, platepar.lat, platepar.lon)
+    azim, elev = trueOfDateRaDec2ApparentAltAz(platepar.RA_d, platepar.dec_d, platepar.JD, \
+        platepar.lat, platepar.lon, refraction=False)
 
     # Compute FOV size
     fov_horiz, fov_vert = computeFOVSize(platepar)

@@ -45,6 +45,17 @@ class SEIBlockAccumulator(object):
         self._seq_prev = None
         self._reset()
 
+    def __getstate__(self):
+        # A lock cannot be pickled, and BufferedCapture is pickled into its process under the
+        # 'forkserver' (Linux default from Python 3.14) and 'spawn' start methods
+        state = self.__dict__.copy()
+        del state['_lock']
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._lock = threading.Lock()
+
     def _reset(self):
         self.n = 0
         self.exp_sum = 0.0; self.exp_min = None; self.exp_max = None

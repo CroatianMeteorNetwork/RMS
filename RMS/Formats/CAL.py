@@ -140,7 +140,7 @@ def writeCAL(night_dir, config, platepar):
         s +=" Plate roll wrt Std (deg) = {:8.3f}\n".format(rot_std)
         s +=" Cam tilt wrt Horiz (deg) = {:8.3f}\n".format(rot_horiz)
         s +=" Frame rate (Hz)          = {:8.3f}\n".format(config.fps)
-        s +=" Cal center RA (deg)      = {:8.3f}\n".format(platepar.RA_d)
+        s +=" Cal center RA (deg, TOD) = {:8.3f}\n".format(platepar.RA_d)
         s +=" Cal center Dec (deg)     = {:8.3f}\n".format(platepar.dec_d)
         s +=" Cal center Azim (deg)    = {:8.3f}\n".format(platepar.az_centre)
         s +=" Cal center Elev (deg)    = {:8.3f}\n".format(platepar.alt_centre)

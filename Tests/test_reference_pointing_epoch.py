@@ -15,14 +15,11 @@ import numpy as np
 from RMS.Formats.Platepar import Platepar
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP
 from RMS.Astrometry.Conversions import jd2Date
-from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz, equatorialCoordPrecession, \
-    refractionScale
+from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz, j2000FromTrueOfDate
 from RMS.Misc import getRmsRootDir
 
 
 TEMPLATE = os.path.join(getRmsRootDir(), 'share', 'platepar_templates', 'template_generic_720p_4mm.cal')
-J2000_JD = 2451545.0
-
 
 def separationArcmin(az1, alt1, az2, alt2):
     cos_sep = np.sin(alt1)*np.sin(alt2) + np.cos(alt1)*np.cos(alt2)*np.cos(az1 - az2)
@@ -44,13 +41,12 @@ class TestReferencePointingEpoch(unittest.TestCase):
 
             # Pixel of the reference direction (raDecToXYPP takes J2000), then back through the calibrated
             # path to apparent alt/az
-            ra_j, dec_j = equatorialCoordPrecession(pp.JD, J2000_JD, np.radians(pp.RA_d), np.radians(pp.dec_d))
+            ra_j, dec_j = j2000FromTrueOfDate(pp.JD, np.radians(pp.RA_d), np.radians(pp.dec_d))
             xc, yc = raDecToXYPP(np.array([np.degrees(ra_j)]), np.array([np.degrees(dec_j)]), pp.JD, pp)
             jd_arr, ra, dec, _ = xyToRaDecPP([jd2Date(pp.JD)], [xc[0]], [yc[0]], [1], pp,
                 extinction_correction=False)
-            # The calibrated path scales the refraction with the station height, so check at that scale too
             az, alt = cyTrueRaDec2ApparentAltAz(np.radians(ra[0]), np.radians(dec[0]), jd_arr[0],
-                np.radians(pp.lat), np.radians(pp.lon), refraction, refractionScale(pp.elev))
+                np.radians(pp.lat), np.radians(pp.lon), refraction)
 
             self.assertLess(separationArcmin(az, alt, np.radians(200.0), np.radians(45.0)), 0.1,
                 "refraction={}".format(refraction))
