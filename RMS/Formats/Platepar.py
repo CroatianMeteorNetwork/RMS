@@ -232,6 +232,12 @@ class Platepar(object):
         # Refraction on/off
         self.refraction = True
 
+        # Annual aberration of light modelled in the fit. If True, the plate maps the apparent directions of
+        #   the stars and the aberration is applied to (or removed from) catalog directions explicitly. If
+        #   False, the plate was fitted to catalog directions as they are and has absorbed the aberration of
+        #   the fit epoch in its pointing, scale and distortion
+        self.aberration = True
+
         # If the calibration was done without then refraction and points on the sky are measured, then they
         #   need to be corrected for refraction. WARNING: This should not be used if the distortion model
         #   itself compensates for the refraction (e.g. the polynomial model)
@@ -1089,6 +1095,13 @@ class Platepar(object):
         # print('DIS_Y', _calcImageResidualsDistortion(self.y_poly_rev,  catalog_stars, \
         #     img_stars, 'y'))
 
+        # A fit of the pointing, the scale and the distortion is made with the aberration modelled, whatever
+        #   the plate had absorbed before. A fit of the pointing alone keeps the scale and the distortion of
+        #   the original fit, so it leaves the plate as it was
+        aberration_prev = self.aberration
+        if (len(img_stars) >= self.poly_length + 1) and (not fit_only_pointing):
+            self.aberration = True
+
         ### ASTROMETRIC PARAMETERS FIT ###
 
         # Fit the pointing parameters (RA, Dec, rotation, scale)
@@ -1256,10 +1269,12 @@ class Platepar(object):
                     if len(img_stars) < min_stars_required:
                         print("    -> Not enough detected stars ({} < {}), skipping NN fit".format(
                             len(img_stars), min_stars_required))
+                        self.aberration = aberration_prev
                         return None
                     if n_catalog_fov < min_stars_required:
                         print("    -> Not enough catalog stars in FOV ({} < {}), skipping NN fit".format(
                             n_catalog_fov, min_stars_required))
+                        self.aberration = aberration_prev
                         return None
 
                     print("    RANSAC outlier detection: 21 iterations")
@@ -1596,6 +1611,7 @@ class Platepar(object):
                     if best_cost > max_rmsd_arcmin:
                         print("    -> RMSD too large ({:.2f}' > {:.0f}'), skipping final fit".format(
                             best_cost, max_rmsd_arcmin))
+                        self.aberration = aberration_prev
                         return None
 
                     # Apply best RANSAC params to platepar
@@ -2065,6 +2081,10 @@ class Platepar(object):
         # If the refraction was not used for the fit, assume it is disabled
         if not 'refraction' in self.__dict__:
             self.refraction = False
+
+        # A platepar without the flag was fitted before the aberration was modelled, so it has absorbed it
+        if not 'aberration' in self.__dict__:
+            self.aberration = False
 
         # If the measurement correction for refraction (if it was not taken into account during calibration)
         #   is not present, assume it's false

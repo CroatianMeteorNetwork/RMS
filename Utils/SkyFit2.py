@@ -9589,6 +9589,9 @@ class PlateTool(QtWidgets.QMainWindow):
             if not hasattr(self.platepar, "measurement_apparent_to_true_refraction"):
                 self.platepar.measurement_apparent_to_true_refraction = False
 
+            if not hasattr(self.platepar, "aberration"):
+                self.platepar.aberration = False
+
 
             # Update platepar distortion indices
             self.platepar.setDistortionType(self.platepar.distortion_type, reset_params=False)
