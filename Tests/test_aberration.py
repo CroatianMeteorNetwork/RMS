@@ -2,6 +2,7 @@
 
 from __future__ import print_function, division, absolute_import
 
+import json
 import os
 import unittest
 
@@ -76,6 +77,8 @@ class TestAberration(unittest.TestCase):
 
         pp = Platepar()
         pp.read(TEMPLATE)
+        # The template carries no aberration flag; these plates are used with it modelled
+        pp.aberration = True
         pp.lat, pp.lon, pp.elev = 40.0, -100.0, 300.0
         # High enough that the whole 82 x 46 deg field is above the horizon (the refraction functions are
         # only inverses of each other above it)
@@ -114,6 +117,62 @@ class TestAberration(unittest.TestCase):
 
 
     @unittest.skipIf(erfa is None, "pyerfa not installed")
+    def testPlateparFlag(self):
+        """ A platepar without the flag has absorbed the aberration, so none is applied to it; a full fit
+            turns the flag on and it survives a write and read. """
+
+        # New platepars model it, platepars read without the flag do not
+        self.assertTrue(Platepar().aberration)
+        pp = Platepar()
+        pp.read(TEMPLATE)
+        self.assertFalse(pp.aberration)
+
+        pp.lat, pp.lon, pp.elev = 40.0, -100.0, 300.0
+        pp.alt_centre, pp.az_centre, pp.pos_angle_ref = 50.0, 0.0, 15.0
+        pp.updateRefRADec(skip_rot_update=True)
+        pp.resetDistortionParameters()
+
+        x = np.linspace(30, pp.X_res - 30, 7)
+        y = np.linspace(30, pp.Y_res - 30, 5)
+        X, Y = [a.ravel() for a in np.meshgrid(x, y)]
+        time_data = len(X)*[jd2Date(pp.JD)]
+        ones = np.ones(len(X))
+
+        # Without the flag a star and a measurement at the same pixel are the same direction
+        _, ra_cat, dec_cat, _ = xyToRaDecPP(time_data, X, Y, ones, pp, extinction_correction=False)
+        _, ra_geo, dec_geo, _ = xyToRaDecPP(time_data, X, Y, ones, pp, extinction_correction=False,
+            measurement=True)
+        np.testing.assert_array_equal(ra_cat, ra_geo)
+        np.testing.assert_array_equal(dec_cat, dec_geo)
+        x_star, y_star = raDecToXYPP(ra_cat, dec_cat, pp.JD, pp)
+        x_meas, y_meas = raDecToXYPP(ra_cat, dec_cat, pp.JD, pp, measurement=True)
+        np.testing.assert_array_equal(x_star, x_meas)
+        np.testing.assert_array_equal(y_star, y_meas)
+
+        # A fit of the pointing alone leaves the plate as it was
+        img_stars = np.c_[X, Y, ones]
+        catalog_stars = np.c_[ra_cat, dec_cat, ones]
+        pp.fitAstrometry(pp.JD, img_stars, catalog_stars, fit_only_pointing=True)
+        self.assertFalse(pp.aberration)
+
+        # A full fit models the aberration
+        pp.fitAstrometry(pp.JD, img_stars, catalog_stars)
+        self.assertTrue(pp.aberration)
+
+        # With the flag on, the two differ by the aberration
+        _, ra_cat, dec_cat, _ = xyToRaDecPP(time_data, X, Y, ones, pp, extinction_correction=False)
+        _, ra_geo, dec_geo, _ = xyToRaDecPP(time_data, X, Y, ones, pp, extinction_correction=False,
+            measurement=True)
+        sep = [separationArcsec(np.radians(a), np.radians(b), np.radians(c), np.radians(d)) \
+            for a, b, c, d in zip(ra_cat, dec_cat, ra_geo, dec_geo)]
+        self.assertGreater(min(sep), 1.0)
+
+        # The flag is written to the file and read back
+        pp_read = Platepar()
+        pp_read.loadFromDict(json.loads(pp.jsonStr()))
+        self.assertTrue(pp_read.aberration)
+
+
     def testStarGridOverNight(self):
         """ The star fit as in real life, on a distortion-free camera fixed in alt/az and referenced at the start of
             the night: a star's catalog direction (erfa: velocity aberration removed) projects through xyToRaDecPP

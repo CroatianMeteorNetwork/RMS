@@ -955,6 +955,8 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
             (a ground reference, a landmark, a satellite position in the Earth's frame): its light is not
             aberrated, and the measurement flag must not be used for that, since on an unrefracted plate
             measurement=True also triggers the post-hoc refraction correction.
+            Never done for a plate fitted without the aberration modelled (platepar.aberration False),
+            which has absorbed it.
 
     Return:
         (JD_data, RA_data, dec_data, magnitude_data): [tuple of ndarrays]
@@ -980,7 +982,7 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
         equal_aspect=platepar.equal_aspect, force_distortion_centre=platepar.force_distortion_centre, \
         asymmetry_corr=platepar.asymmetry_corr, precompute_pointing_corr=precompute_pointing_corr, \
         refraction_scale=refractionScale(platepar.elev), \
-        aberration=(not measurement) if aberration is None else aberration)
+        aberration=platepar.aberration and ((not measurement) if aberration is None else aberration))
 
     # Correct the coordinates for refraction if it wasn't taken into account during the astrometry calibration
     #   procedure
@@ -1030,6 +1032,8 @@ def raDecToXYPP(RA_data, dec_data, jd, platepar, measurement=False, aberration=N
         aberration: [bool or None] Apply the annual aberration before projecting. None (default) means
             "not measurement". Pass False explicitly for a direction fixed to the Earth (ground reference,
             landmark), see xyToRaDecPP.
+            Never done for a plate fitted without the aberration modelled (platepar.aberration False),
+            which has absorbed it.
 
     Return:
         (x, y): [tuple of ndarrays] Image X and Y coordinates.
@@ -1043,7 +1047,7 @@ def raDecToXYPP(RA_data, dec_data, jd, platepar, measurement=False, aberration=N
         refraction=platepar.refraction, equal_aspect=platepar.equal_aspect, 
         force_distortion_centre=platepar.force_distortion_centre, asymmetry_corr=platepar.asymmetry_corr,
         refraction_scale=refractionScale(platepar.elev), \
-        aberration=(not measurement) if aberration is None else aberration)
+        aberration=platepar.aberration and ((not measurement) if aberration is None else aberration))
     return X_data, Y_data
 
 
@@ -1074,7 +1078,8 @@ def raDecToXYPP_iter(RA_data, dec_data, jd, platepar, measurement=False):
         refraction=platepar.refraction, equal_aspect=platepar.equal_aspect,
         force_distortion_centre=platepar.force_distortion_centre,
         asymmetry_corr=platepar.asymmetry_corr,
-        aberration=not measurement, refraction_scale=refractionScale(platepar.elev))
+        aberration=platepar.aberration and (not measurement),
+        refraction_scale=refractionScale(platepar.elev))
 
     return X_data, Y_data
 
@@ -1437,6 +1442,9 @@ def targetRaDecToPlateRaDec(ra_data, dec_data, jd, platepar, refraction_fraction
 
     lat = np.radians(platepar.lat)
     lon = np.radians(platepar.lon)
+
+    # A plate fitted without the aberration modelled does not apply it, so there is nothing to take out
+    aberration = aberration and platepar.aberration
 
     # A plate fitted without refraction maps the arrival direction directly, so only the aberration has to
     #   be undone
