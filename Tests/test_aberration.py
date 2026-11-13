@@ -149,15 +149,13 @@ class TestAberration(unittest.TestCase):
         np.testing.assert_array_equal(x_star, x_meas)
         np.testing.assert_array_equal(y_star, y_meas)
 
-        # A fit of the pointing alone leaves the plate as it was
+        # A fit models the aberration, whether of the pointing alone or of the distortion as well
         img_stars = np.c_[X, Y, ones]
         catalog_stars = np.c_[ra_cat, dec_cat, ones]
-        pp.fitAstrometry(pp.JD, img_stars, catalog_stars, fit_only_pointing=True)
-        self.assertFalse(pp.aberration)
-
-        # A full fit models the aberration
-        pp.fitAstrometry(pp.JD, img_stars, catalog_stars)
-        self.assertTrue(pp.aberration)
+        for fit_only_pointing in (True, False):
+            pp.aberration = False
+            pp.fitAstrometry(pp.JD, img_stars, catalog_stars, fit_only_pointing=fit_only_pointing)
+            self.assertTrue(pp.aberration)
 
         # With the flag on, the two differ by the aberration
         _, ra_cat, dec_cat, _ = xyToRaDecPP(time_data, X, Y, ones, pp, extinction_correction=False)
