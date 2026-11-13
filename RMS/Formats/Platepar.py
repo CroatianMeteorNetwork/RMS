@@ -1598,11 +1598,11 @@ class Platepar(object):
         # print('DIS_Y', _calcImageResidualsDistortion(self.y_poly_rev,  catalog_stars, \
         #     img_stars, 'y'))
 
-        # A fit of the pointing, the scale and the distortion is made with the aberration modelled, whatever
-        #   the plate had absorbed before. A fit of the pointing alone keeps the scale and the distortion of
-        #   the original fit, so it leaves the plate as it was
+        # The fit is made with the aberration modelled, whatever the plate had absorbed before, provided that
+        #   at least the pointing is going to be fitted
         aberration_prev = self.aberration
-        if (len(img_stars) >= self.poly_length + 1) and (not fit_only_pointing):
+        if (fit_only_pointing and not use_nn_cost) or \
+            ((len(img_stars) >= self.poly_length + 1) and (not fit_only_pointing)):
             self.aberration = True
 
         ### ASTROMETRIC PARAMETERS FIT ###
