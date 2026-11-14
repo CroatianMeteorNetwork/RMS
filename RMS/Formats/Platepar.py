@@ -791,7 +791,9 @@ class Platepar(object):
         """Fit astrometric parameters to the list of star image and celestial catalog coordinates.
         At least 4 stars are needed to fit the rigid body parameters.
 
-        New parameters are saved to the given object (self).
+        New parameters are saved to the given object (self). The fit models the annual aberration: the
+        aberration flag is turned on where the pointing is fitted. A fit that stops without a result or fails
+        with an exception leaves the flag as it was.
 
         Arguments:
             jd: [float] Julian date of the image.
@@ -802,11 +804,43 @@ class Platepar(object):
             first_platepar_fit: [bool] Fit a platepar from scratch. False by default.
             fit_only_pointing: [bool] Only fit the pointing parameters, and not distortion.
             fixed_scale: [bool] Keep the scale fixed. False by default.
+            use_nn_cost: [bool] Fit on the nearest catalog neighbours of the stars (RANSAC) instead of given
+                pairs. False by default.
             final_catalog_stars: [list] Optional deeper catalog to use for final radial7 fitting.
                                  If provided, switches to this catalog after radial7 switch.
             iteration_callback: [callable] Optional callback called after each RANSAC iteration.
                                 Signature: callback(iteration, platepar_copy, outlier_mask, rmsd_arcmin)
                                 Used for visual debugging of the fitting process.
+
+        Return:
+            None, or with use_nn_cost the matched pairs (img_stars, catalog_stars) of the RANSAC fit (None if
+                it stopped without a result).
+
+        """
+
+        # The aberration flag of the plate before the fit, restored if the fit fails with an exception (a fit
+        #   that stops without a result restores it itself)
+        aberration_prev = self.aberration
+        completed = False
+
+        try:
+            result = self._fitAstrometry(jd, img_stars, catalog_stars, first_platepar_fit=first_platepar_fit,
+                fit_only_pointing=fit_only_pointing, fixed_scale=fixed_scale, use_nn_cost=use_nn_cost,
+                final_catalog_stars=final_catalog_stars, iteration_callback=iteration_callback)
+            completed = True
+
+        finally:
+            if not completed:
+                self.aberration = aberration_prev
+
+        return result
+
+    def _fitAstrometry(self, jd, img_stars, catalog_stars, first_platepar_fit=False, fit_only_pointing=False,
+        fixed_scale=False, use_nn_cost=False, final_catalog_stars=None, iteration_callback=None):
+        """ The fit of fitAstrometry, which has the description and the arguments.
+
+        Return:
+            See fitAstrometry.
 
         """
 
@@ -1125,12 +1159,9 @@ class Platepar(object):
         # print('DIS_Y', _calcImageResidualsDistortion(self.y_poly_rev,  catalog_stars, \
         #     img_stars, 'y'))
 
-        # The fit is made with the aberration modelled, whatever the plate had absorbed before, provided that
-        #   at least the pointing is going to be fitted
+        # The fit models the aberration, whatever the plate had absorbed before: the flag is turned on below
+        #   where the pointing is fitted. The flag before the fit is kept for the fits that stop without a result
         aberration_prev = self.aberration
-        if (fit_only_pointing and not use_nn_cost) or \
-            ((len(img_stars) >= self.poly_length + 1) and (not fit_only_pointing)):
-            self.aberration = True
 
         ### ASTROMETRIC PARAMETERS FIT ###
 
@@ -1142,6 +1173,9 @@ class Platepar(object):
             or fit_only_pointing
         ) and not use_nn_cost:
 
+            # The pointing is fitted with the aberration modelled
+            self.aberration = True
+
             self.fitPointing(jd, img_stars, catalog_stars, fixed_scale=fixed_scale)
 
         ### ###
@@ -1152,6 +1186,10 @@ class Platepar(object):
         min_fit_stars = self.poly_length + 1
 
         if (len(img_stars) >= min_fit_stars) and (not fit_only_pointing):
+
+            # The distortion, and with the radial models the pointing as well, is fitted with the aberration
+            #   modelled
+            self.aberration = True
 
             # Fit the polynomial distortion
             if self.distortion_type.startswith("poly"):
