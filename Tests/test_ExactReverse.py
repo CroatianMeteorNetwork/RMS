@@ -6,8 +6,8 @@ back. Without refraction the round trip has to close to 1e-9 px. With refraction
 sky -> image refraction is the exact inverse of the image -> sky one; where it is not, that test is skipped.
 
 Also tested: a sky point the forward distortion cannot reach comes back as NaN, such a point does not throw the
-pointing fit off, and fitAstrometry with the option returns the platepar that generated noise-free stars, through its
-forward mapping.
+pointing fit off, the centre of the projection has an image, and fitAstrometry with the option returns the
+platepar that generated noise-free stars, through its forward mapping.
 
 Run with pytest:
     python -m pytest Tests/test_ExactReverse.py -v
@@ -161,6 +161,27 @@ def test_a_point_beyond_the_reach_of_the_distortion_is_nan():
 
     assert np.isfinite(x[0]) and np.isfinite(y[0])
     assert np.isnan(x[1]) and np.isnan(y[1])
+
+
+def test_the_centre_of_the_projection_has_an_image():
+    """ A sky point at the centre of the projection has no direction from it (0/0), but still an image: the
+        point the forward distortion takes to that centre. Several pointings, as rounding puts the point exactly
+        on the centre for only some of them. """
+
+    for exact_reverse in (True, False):
+        for dec_offset in np.linspace(-80.0, 30.0, 12):
+            pp = _platepar("radial3-odd", force_centre=True, refraction=False)
+            pp.dec_d = pp.lat + dec_offset
+            pp.exact_reverse = exact_reverse
+
+            # The forced distortion centre, half a pixel off the image centre, is the image of the centre of
+            #   the projection
+            x_c, y_c = pp.X_res/2.0 + 0.5, pp.Y_res/2.0 + 0.5
+            _, ra, dec, _ = astrometry.xyToRaDecPP(np.full(1, JD), np.array([x_c]), np.array([y_c]),
+                np.ones(1), pp, extinction_correction=False, jd_time=True)
+            x, y = astrometry.raDecToXYPP(np.array(ra), np.array(dec), JD, pp)
+
+            assert np.hypot(x[0] - x_c, y[0] - y_c) < 1e-4
 
 
 def test_a_star_without_image_does_not_throw_off_the_pointing_fit():
