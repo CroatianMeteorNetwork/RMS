@@ -1037,6 +1037,14 @@ class Config:
         #   disables it
         self.mf_trail_level = 25.0
 
+        # The noise of every pixel, which the frames are divided by, is estimated from few samples (64 per block,
+        #   15% error, different in every pixel); dividing by it multiplies the image of an object by a fixed pixel
+        #   pattern, which shifts its measured position the same way in every frame. With this option the noise of
+        #   a pixel is never taken below the local noise of the sky, which removes the part of the pattern below
+        #   it; pixels which are noisier than the sky (stars, hot pixels, the rows of bright moving objects) keep
+        #   their own noise, so no pixel becomes more significant than it was
+        self.mf_noise_sky_floor = True
+
         # Pixels above the threshold in more than this fraction of all runs of the input are masked as static
         self.mf_persistence = 0.2
 
@@ -2555,7 +2563,7 @@ def parseMatchedFilter(config, parser):
         return
 
     for name in ("mf_enable", "mf_velocity_search", "mf_replace_detection", "mf_cloud_filter", "mf_streak_search",
-                 "mf_per_frame_rows"):
+                 "mf_per_frame_rows", "mf_noise_sky_floor"):
         if parser.has_option(section, name):
             setattr(config, name, parser.getboolean(section, name))
 
