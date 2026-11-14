@@ -21,9 +21,20 @@ from RMS.Misc import getRmsRootDir
 
 TEMPLATE = os.path.join(getRmsRootDir(), 'share', 'platepar_templates', 'template_generic_720p_4mm.cal')
 
-def separationArcmin(az1, alt1, az2, alt2):
-    cos_sep = np.sin(alt1)*np.sin(alt2) + np.cos(alt1)*np.cos(alt2)*np.cos(az1 - az2)
-    return np.degrees(np.arccos(np.clip(cos_sep, -1, 1)))*60
+# Refraction apparent -> true and true -> apparent are two different approximations (Bennett and
+#   Saemundsson), which disagree by about 1.1 arcsec at 45 deg: a round trip through both directions closes to
+#   this level, without refraction to rounding
+REFRACTION_ROUND_TRIP = {True: 1.5, False: 1.0e-3}
+
+
+def separationArcsec(az1, alt1, az2, alt2):
+    """ Helper: angular separation (arcsec) of two alt/az directions (radians), from atan2 so that it resolves
+        below a milliarcsecond. """
+
+    v1 = np.array([np.cos(alt1)*np.sin(az1), np.cos(alt1)*np.cos(az1), np.sin(alt1)])
+    v2 = np.array([np.cos(alt2)*np.sin(az2), np.cos(alt2)*np.cos(az2), np.sin(alt2)])
+
+    return np.degrees(np.arctan2(np.linalg.norm(np.cross(v1, v2)), v1.dot(v2)))*3600
 
 
 class TestReferencePointingEpoch(unittest.TestCase):
@@ -36,6 +47,10 @@ class TestReferencePointingEpoch(unittest.TestCase):
             pp.read(TEMPLATE)
             pp.lat, pp.lon, pp.elev = 45.0, 15.0, 300.0
             pp.refraction = refraction
+
+            # Distortion-free, so that the pixel round trip is exact and only the frames are tested
+            pp.resetDistortionParameters()
+            pp.x_poly_fwd[0] = pp.x_poly_fwd[1] = pp.x_poly_rev[0] = pp.x_poly_rev[1] = 0.0
             pp.alt_centre, pp.az_centre, pp.pos_angle_ref = 45.0, 200.0, 20.0
             pp.updateRefRADec(skip_rot_update=True)
 
@@ -48,13 +63,14 @@ class TestReferencePointingEpoch(unittest.TestCase):
             az, alt = cyTrueRaDec2ApparentAltAz(np.radians(ra[0]), np.radians(dec[0]), jd_arr[0],
                 np.radians(pp.lat), np.radians(pp.lon), refraction)
 
-            self.assertLess(separationArcmin(az, alt, np.radians(200.0), np.radians(45.0)), 0.1,
-                "refraction={}".format(refraction))
+            # Two refraction round trips: the pointing set from alt/az, and the pixel back to alt/az
+            self.assertLess(separationArcsec(az, alt, np.radians(200.0), np.radians(45.0)),
+                2*REFRACTION_ROUND_TRIP[refraction] + 0.01, "refraction={}".format(refraction))
 
-            # The inverse helper recovers the alt/az the pointing was set from
+            # The inverse helper recovers the alt/az the pointing was set from (the azimuth is not refracted)
             pp.updateRefAltAz()
-            self.assertAlmostEqual(pp.az_centre, 200.0, places=3)
-            self.assertAlmostEqual(pp.alt_centre, 45.0, places=3)
+            self.assertLess(abs(pp.az_centre - 200.0)*3600, 1.0e-3)
+            self.assertLess(abs(pp.alt_centre - 45.0)*3600, REFRACTION_ROUND_TRIP[refraction])
 
             # computeRefAltAz has no side effects and agrees with updateRefAltAz
             az_c, alt_c = pp.computeRefAltAz()
