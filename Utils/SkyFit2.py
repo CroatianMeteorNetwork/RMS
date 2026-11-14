@@ -6074,8 +6074,13 @@ class PlateTool(QtWidgets.QMainWindow):
             catalog_dec = test_catalog[:, 1]
             ra_rad = np.radians(catalog_ra)
             dec_rad = np.radians(catalog_dec)
-            ra_center = np.radians(self.platepar.RA_d)
-            dec_center = np.radians(self.platepar.dec_d)
+
+            # J2000 direction of the image centre at the time of this image, the frame of the catalog
+            #   (RA_d/dec_d are true of date at the platepar reference time)
+            _, ra_c, dec_c, _ = xyToRaDecPP([jd], [self.platepar.X_res/2], [self.platepar.Y_res/2], [1],
+                self.platepar, extinction_correction=False, jd_time=True)
+            ra_center = np.radians(ra_c[0])
+            dec_center = np.radians(dec_c[0])
 
             # Spherical angular distance from camera pointing to each catalog star
             cos_ang_dist = (np.sin(dec_center) * np.sin(dec_rad) +
@@ -14624,9 +14629,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.lenses
             ) = self.getFOVcentre()
 
-            # Recalculate reference alt/az
-            self.platepar.az_centre, self.platepar.alt_centre = trueOfDateRaDec2ApparentAltAz(self.platepar.RA_d, \
-                self.platepar.dec_d, self.platepar.JD, self.platepar.lat, self.platepar.lon)
+            # Recalculate reference alt/az, with the refraction setting of the platepar as getFOVcentre
+            self.platepar.az_centre, self.platepar.alt_centre = self.platepar.computeRefAltAz()
 
 
         # Check that the calibration parameters are within the nominal range
