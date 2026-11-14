@@ -17,6 +17,8 @@ from RMS.Astrometry.CyFunctions import refractionScale
 
 import os
 
+# The template carries no aberration flag, so a platepar read from it does not model the aberration; the
+#   tests that use it as a plate fitted with the aberration modelled turn the flag on
 TEMPLATE = os.path.join(getRmsRootDir(), 'share', 'platepar_templates', 'template_generic_720p_4mm.cal')
 
 # A station on high ground, so that targets both above and below it are realistic
@@ -105,7 +107,6 @@ def test_ground_projection_round_trips(target_height):
 
     pp = Platepar()
     pp.read(TEMPLATE)
-    # The template carries no aberration flag; these plates are used with it modelled
     pp.aberration = True
     pp.lat, pp.lon, pp.elev = LAT, LON, ALT
     pp.JD = 2460000.5

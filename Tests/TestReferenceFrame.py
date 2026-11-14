@@ -20,6 +20,8 @@ from RMS.Astrometry.CyFunctions import pointingCorrection, trueOfDateFromJ2000, 
     refractionScale, removeAberration
 from RMS.EventMonitor import platepar2AltAz
 
+# The template carries no aberration flag, so a platepar read from it does not model the aberration; the
+#   tests that use it as a plate fitted with the aberration modelled turn the flag on
 TEMPLATE = os.path.join(getRmsRootDir(), 'share', 'platepar_templates', 'template_generic_720p_4mm.cal')
 LAT, LON, ELEV = 31.69, -110.9, 2610.0
 JD = date2JD(2026, 9, 5, 6, 0, 0)
@@ -43,7 +45,6 @@ def _templatePlatepar(refraction):
 
     pp = Platepar()
     pp.read(TEMPLATE)
-    # The template carries no aberration flag; these plates are used with it modelled
     pp.aberration = True
     pp.lat, pp.lon, pp.elev = LAT, LON, ELEV
     pp.resetDistortionParameters()

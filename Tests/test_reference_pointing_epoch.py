@@ -19,6 +19,8 @@ from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz, j2000FromTrueO
 from RMS.Misc import getRmsRootDir
 
 
+# The template carries no aberration flag, so a platepar read from it does not model the aberration; the
+#   tests that use it as a plate fitted with the aberration modelled turn the flag on
 TEMPLATE = os.path.join(getRmsRootDir(), 'share', 'platepar_templates', 'template_generic_720p_4mm.cal')
 
 # The two refraction directions are exact inverses, so the round trips close to rounding with and without
@@ -44,7 +46,6 @@ class TestReferencePointingEpoch(unittest.TestCase):
 
             pp = Platepar()
             pp.read(TEMPLATE)
-            # The template carries no aberration flag; these plates are used with it modelled
             pp.aberration = True
             pp.lat, pp.lon, pp.elev = 45.0, 15.0, 300.0
             pp.refraction = refraction
