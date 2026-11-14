@@ -20,7 +20,7 @@ import RMS.ConfigReader as cr
 import scipy.optimize
 from RMS.Astrometry.ApplyAstrometry import (getFOVSelectionRadius, raDecToXYPP,
                                             rotationWrtHorizon, xyToRaDecPP)
-from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz, trueOfDateRaDec2ApparentAltAz
+from RMS.Astrometry.Conversions import date2JD, jd2Date, trueOfDateRaDec2ApparentAltAz
 from RMS.Astrometry.NNalign import alignPlatepar
 from RMS.Formats import CALSTARS, FFfile, Platepar, StarCatalog
 from RMS.Math import angularSeparation
