@@ -219,7 +219,6 @@ def subsetCatalog(np.ndarray[FLOAT_TYPE_t, ndim=2] catalog_list, double ra_c, do
 
 
 @cython.cdivision(True)
-@cython.cdivision(True)
 cpdef (double, double) equatorialCoordPrecession(double start_epoch, double final_epoch, double ra, \
     double dec):
     """ Corrects Right Ascension and Declination from one epoch to another, taking only precession into 
@@ -549,7 +548,17 @@ cdef (double, double, double) frameRotateVector(FrameRotation f, double x, doubl
 
 
 cdef (double, double) frameRotateRaDec(FrameRotation f, double ra, double dec):
-    """ frameRotateVector for a direction given as right ascension and declination (radians). """
+    """ frameRotateVector for a direction given as right ascension and declination.
+
+    Arguments:
+        f: [FrameRotation] Parameters from frameRotation().
+        ra: [float] Right ascension in the start frame (radians).
+        dec: [float] Declination in the start frame (radians).
+
+    Return:
+        (ra, dec): [tuple of floats] Right ascension and declination in the final frame (radians).
+
+    """
 
     cdef double x, y, z
 
@@ -891,8 +900,15 @@ cpdef (double, double) cyraDec2AltAz(double ra, double dec, double jd, double la
 def cyraDec2AltAz_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_arr, np.ndarray[FLOAT_TYPE_t, ndim=1] dec_arr, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] jd_arr, np.ndarray[FLOAT_TYPE_t, ndim=1] lat_arr, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] lon_arr):
-    """ cyraDec2AltAz for arrays of the same length (radians). The sidereal time is evaluated only when the
-        time or the longitude changes.
+    """ cyraDec2AltAz for arrays of the same length. The sidereal time is evaluated only when the time or
+        the longitude changes.
+
+    Arguments:
+        ra_arr: [ndarray] Right ascension of every point (radians).
+        dec_arr: [ndarray] Declination of every point (radians).
+        jd_arr: [ndarray] Julian date of every point.
+        lat_arr: [ndarray] Latitude of the observer of every point (radians).
+        lon_arr: [ndarray] Longitude of the observer of every point (radians).
 
     Return:
         (azim_arr, elev_arr): [tuple of ndarrays] Azimuth (+east of due north) and elevation in radians.
@@ -919,7 +935,18 @@ def cyraDec2AltAz_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_arr, np.ndarray[FLOAT
 
 @cython.cdivision(True)
 cdef (double, double) raDec2AltAzLST(double ra, double dec, double lst, double lat):
-    """ cyraDec2AltAz with the local sidereal time (radians) given instead of the time and longitude. """
+    """ cyraDec2AltAz with the local sidereal time given instead of the time and longitude.
+
+    Arguments:
+        ra: [float] Right ascension (radians), in the frame of the sidereal time (true of date).
+        dec: [float] Declination (radians).
+        lst: [float] Local apparent sidereal time (radians).
+        lat: [float] Latitude of the observer (radians).
+
+    Return:
+        (azim, elev): [tuple of floats] Azimuth (+east of due north) and elevation (radians).
+
+    """
 
     cdef double ha, azim, sin_elev, elev
 
@@ -974,8 +1001,20 @@ cpdef (double, double) cyTrueRaDec2ApparentAltAz(double ra, double dec, double j
 cdef (double, double) trueRaDec2ApparentAltAzOfDate(FrameRotation to_date, double lst, double ra, double dec, \
     double lat, bint refraction):
     """ cyTrueRaDec2ApparentAltAz with the J2000 -> true of date rotation (frameRotation) and the local
-        sidereal time (radians) given instead of the time and longitude, so that they are evaluated once
-        for all points of the same time.
+        sidereal time given instead of the time and longitude, so that they are evaluated once for all
+        points of the same time.
+
+    Arguments:
+        to_date: [FrameRotation] J2000 -> true of date rotation, frameRotation(J2000_DAYS, jd).
+        lst: [float] Local apparent sidereal time (radians).
+        ra: [float] Right ascension (radians, J2000).
+        dec: [float] Declination (radians, J2000).
+        lat: [float] Latitude of the observer (radians).
+        refraction: [bool] Apply the refraction (true -> apparent elevation).
+
+    Return:
+        (azim, elev): [tuple of floats] Azimuth (+east of due north) and elevation (radians).
+
     """
 
     cdef double azim, elev
@@ -1072,8 +1111,15 @@ cpdef (double, double) cyaltAz2RADec(double azim, double elev, double jd, double
 def cyaltAz2RADec_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] azim_arr, np.ndarray[FLOAT_TYPE_t, ndim=1] elev_arr, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] jd_arr, np.ndarray[FLOAT_TYPE_t, ndim=1] lat_arr, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] lon_arr):
-    """ cyaltAz2RADec for arrays of the same length (radians). The sidereal time is evaluated only when the
-        time or the longitude changes.
+    """ cyaltAz2RADec for arrays of the same length. The sidereal time is evaluated only when the time or
+        the longitude changes.
+
+    Arguments:
+        azim_arr: [ndarray] Azimuth (+east of due north) of every point (radians).
+        elev_arr: [ndarray] Elevation of every point (radians).
+        jd_arr: [ndarray] Julian date of every point.
+        lat_arr: [ndarray] Latitude of the observer of every point (radians).
+        lon_arr: [ndarray] Longitude of the observer of every point (radians).
 
     Return:
         (ra_arr, dec_arr): [tuple of ndarrays] Right ascension and declination in radians.
@@ -1100,7 +1146,19 @@ def cyaltAz2RADec_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] azim_arr, np.ndarray[FLO
 
 @cython.cdivision(True)
 cdef (double, double) altAz2RADecLST(double azim, double elev, double lst, double lat):
-    """ cyaltAz2RADec with the local sidereal time (radians) given instead of the time and longitude. """
+    """ cyaltAz2RADec with the local sidereal time given instead of the time and longitude.
+
+    Arguments:
+        azim: [float] Azimuth (+east of due north) (radians).
+        elev: [float] Elevation (radians).
+        lst: [float] Local apparent sidereal time (radians).
+        lat: [float] Latitude of the observer (radians).
+
+    Return:
+        (ra, dec): [tuple of floats] Right ascension and declination (radians), in the frame of the
+            sidereal time (true of date).
+
+    """
 
     cdef double ha, ra, dec
 
@@ -1146,8 +1204,20 @@ cpdef (double, double) cyApparentAltAz2TrueRADec(double azim, double elev, doubl
 cdef (double, double) apparentAltAz2TrueRADecOfDate(FrameRotation to_j2000, double lst, double azim, \
     double elev, double lat, bint refraction):
     """ cyApparentAltAz2TrueRADec with the true of date -> J2000 rotation (frameRotation) and the local
-        sidereal time (radians) given instead of the time and longitude, so that they are evaluated once
-        for all points of the same time.
+        sidereal time given instead of the time and longitude, so that they are evaluated once for all
+        points of the same time.
+
+    Arguments:
+        to_j2000: [FrameRotation] True of date -> J2000 rotation, frameRotation(jd, J2000_DAYS).
+        lst: [float] Local apparent sidereal time (radians).
+        azim: [float] Azimuth (+east of due north) (radians).
+        elev: [float] Elevation (radians).
+        lat: [float] Latitude of the observer (radians).
+        refraction: [bool] Remove the refraction (apparent -> true elevation).
+
+    Return:
+        (ra, dec): [tuple of floats] Right ascension and declination (radians, J2000).
+
     """
 
     cdef double ra, dec

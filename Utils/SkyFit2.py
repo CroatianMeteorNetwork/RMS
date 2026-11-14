@@ -181,7 +181,7 @@ from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
 from RMS.Astrometry.StarClasses import CatalogStar, GeoPoint, PlanetPoint, PairedStars
 from RMS.Astrometry.StarFilters import filterPhotometricOutliers, filterBlendedStars
 from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, trueRaDec2ApparentAltAz, \
-    apparentAltAz2TrueRADec, J2000_JD, jd2Date, datetime2JD, JD2LST, geo2Cartesian, vector2RaDec, raDec2Vector
+    apparentAltAz2TrueRADec, jd2Date, datetime2JD, JD2LST, geo2Cartesian, vector2RaDec, raDec2Vector
 from RMS.Astrometry.AstrometryNet import astrometryNetSolve
 from RMS.Astrometry.ApplyRecalibrate import recalibrateFF
 from RMS.Astrometry.AutoPlatepar import selectBestFrame, autoFitPlatepar, plateparModel, applyPlateparModel
