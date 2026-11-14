@@ -117,6 +117,11 @@ class EARTH_CONSTANTS(object):
 EARTH = EARTH_CONSTANTS()
 
 
+# Types taken as a single number by the geodetic conversions, which then use the math module: numpy costs
+#   several times the arithmetic itself on one number
+SCALAR_TYPES = (float, int, np.number)
+
+
 #################
 
 
@@ -400,13 +405,19 @@ def latLonAlt2ECEF(lat, lon, h):
 
     """
 
+    # A single point with the math module, arrays with numpy
+    if isinstance(lat, SCALAR_TYPES) and isinstance(lon, SCALAR_TYPES) and isinstance(h, SCALAR_TYPES):
+        sin, cos, sqrt = math.sin, math.cos, math.sqrt
+    else:
+        sin, cos, sqrt = np.sin, np.cos, np.sqrt
+
     # Get distance from Earth centre to the position given by geographical coordinates, in WGS84
-    N = EARTH.EQUATORIAL_RADIUS/np.sqrt(1.0 - (EARTH.E**2)*np.sin(lat)**2)
+    N = EARTH.EQUATORIAL_RADIUS/sqrt(1.0 - (EARTH.E**2)*sin(lat)**2)
 
     # Calculate ECEF coordinates
-    ecef_x = (N + h)*np.cos(lat)*np.cos(lon)
-    ecef_y = (N + h)*np.cos(lat)*np.sin(lon)
-    ecef_z = ((1 - EARTH.E**2)*N + h)*np.sin(lat)
+    ecef_x = (N + h)*cos(lat)*cos(lon)
+    ecef_y = (N + h)*cos(lat)*sin(lon)
+    ecef_z = ((1 - EARTH.E**2)*N + h)*sin(lat)
 
     return ecef_x, ecef_y, ecef_z
 
@@ -467,7 +478,11 @@ def ecef2LatLonAlt(x, y, z):
 
     """
 
-    scalar_input = (np.ndim(x) == 0) and (np.ndim(y) == 0) and (np.ndim(z) == 0)
+    # A single point with the math module, the same steps as for arrays below
+    if isinstance(x, SCALAR_TYPES) and isinstance(y, SCALAR_TYPES) and isinstance(z, SCALAR_TYPES):
+        return ecef2LatLonAltScalar(float(x), float(y), float(z))
+
+    # Arrays with numpy, every point the same as one call
     x, y, z = np.asarray(x, dtype=np.float64), np.asarray(y, dtype=np.float64), \
         np.asarray(z, dtype=np.float64)
 
@@ -496,8 +511,50 @@ def ecef2LatLonAlt(x, y, z):
     with np.errstate(divide='ignore', invalid='ignore'):
         alt = np.where(near_pole, np.abs(z) - EARTH.POLAR_RADIUS, p/np.cos(lat) - N)
 
-    if scalar_input:
+    # A 0-d array in gives floats out
+    if np.ndim(lat) == 0:
         return float(lat), float(lon), float(alt)
+
+    return lat, lon, alt
+
+
+
+def ecef2LatLonAltScalar(x, y, z):
+    """ ecef2LatLonAlt for a single point, with the math module.
+
+    Arguments:
+        x: [float] ECEF x coordinate
+        y: [float] ECEF y coordinate
+        z: [float] ECEF z coordinate
+
+    Return:
+        (lat, lon, alt): [tuple of floats] latitude and longitude in radians, WGS84 elevation in meters
+
+    """
+
+    # Calculate the polar eccentricity
+    ep = math.sqrt((EARTH.EQUATORIAL_RADIUS**2 - EARTH.POLAR_RADIUS**2)/(EARTH.POLAR_RADIUS**2))
+
+    # Calculate the longitude
+    lon = math.atan2(y, x)
+
+    p = math.sqrt(x**2  +  y**2)
+
+    theta = math.atan2(z*EARTH.EQUATORIAL_RADIUS, p*EARTH.POLAR_RADIUS)
+
+    # Calculate the latitude
+    lat = math.atan2(z + (ep**2)*EARTH.POLAR_RADIUS*math.sin(theta)**3, \
+        p - (EARTH.E**2)*EARTH.EQUATORIAL_RADIUS*math.cos(theta)**3)
+
+    # Get distance from Earth centre to the position given by geographical coordinates, in WGS84
+    N = EARTH.EQUATORIAL_RADIUS/math.sqrt(1.0 - (EARTH.E**2)*math.sin(lat)**2)
+
+    # Calculate the height in meters. Near the exact poles cos(lat) vanishes, so the height is taken
+    #   from the polar axis there instead.
+    if (abs(x) < 1000) and (abs(y) < 1000):
+        alt = abs(z) - EARTH.POLAR_RADIUS
+    else:
+        alt = p/math.cos(lat) - N
 
     return lat, lon, alt
 
