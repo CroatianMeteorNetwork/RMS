@@ -117,8 +117,12 @@ def test_target_fraction_edge_cases():
         between match the ones quoted in the docstring. """
 
     assert refractionTargetFraction(0.0, float('inf')) == 1.0
-    assert refractionTargetFraction(0.0, 1.0e7) == 1.0
     assert refractionTargetFraction(1000.0, 1000.0) == 0.0
+
+    # Beyond the atmosphere the fraction approaches 1 without a jump (it was set to 1 above 1000 km, a step
+    #   of 0.0084 of the refraction)
+    assert abs(refractionTargetFraction(0.0, 999.9e3) - refractionTargetFraction(0.0, 1000.1e3)) < 1.0e-5
+    assert 0.999 < refractionTargetFraction(0.0, 1.0e7) < 1.0
 
     # The closed form is only valid for a target above the observer
     assert refractionTargetFraction(1000.0, 500.0) == 0.0

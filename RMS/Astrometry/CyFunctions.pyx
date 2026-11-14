@@ -863,16 +863,19 @@ cpdef double refractionScale(double elev_obs):
 
 
 cpdef double refractionTargetFraction(double elev_obs, double target_height):
-    """ Fraction of the refraction of a star that applies to a target at a finite height, e.g. a meteor or
-        a contrail. The light from a target inside or just above the atmosphere is bent only by the air
-        between the target and the observer, and the straight line to the target differs from the arrival
-        direction of the light by the path average of the bending accumulated along the way. With the ISA
-        refractivity profile this gives, seen from sea level: 1 for a star, 0.92 for a meteor at 100 km,
-        0.72 for a target at 30 km and 0.38 for a contrail at 10 km.
+    """ Fraction of the refraction of a star that applies to a target at a finite height, e.g. a meteor.
+        The light from a target inside or just above the atmosphere is bent only by the air between the
+        target and the observer, and the straight line to the target differs from the arrival direction of
+        the light by the path average of the bending accumulated along the way. With the ISA refractivity
+        profile this gives, seen from sea level: 1 for a star, 0.92 for a meteor at 100 km, 0.72 for a
+        target at 30 km and 0.38 for a target at 10 km. Beyond the atmosphere the fraction keeps growing
+        towards 1 as 1 - 8.4 km/height, without a jump, and is exactly 1 for an infinite height.
 
-        Flat-atmosphere approximation, independent of the elevation angle: within 2% of the star refraction
-        for targets below 30 km at any elevation, and within 2% (6 arcsec) of it above 10 deg elevation for
-        a target at 100 km, where the curvature of the Earth starts to matter.
+        Flat-atmosphere approximation, independent of the elevation angle. Compared with a ray trace
+        through the US Standard Atmosphere, it is within 2% of the star refraction for targets below
+        30 km at any elevation; for targets at 100 km and higher it is within 0.6 arcsec at 20 deg elevation
+        and above, 1.5-4 arcsec at 10 deg and up to 17 arcsec at 5 deg, where the curvature of the Earth
+        starts to matter. For such targets it should not be used much below 15-20 deg elevation.
 
         Only valid for a target above the observer. The closed form breaks down for a target below the
         observer, where the mean refractivity along the path exceeds the one at the observer and the
@@ -880,8 +883,7 @@ cpdef double refractionTargetFraction(double elev_obs, double target_height):
 
     Arguments:
         elev_obs: [float] Height of the observer above sea level (m).
-        target_height: [float] Height of the target above sea level (m). Infinity, or anything above
-            1000 km, means a star.
+        target_height: [float] Height of the target above sea level (m). Infinity means a star.
 
     Return:
         [float] Factor in [0, 1] to multiply the star refraction with (on top of refractionScale).
@@ -889,10 +891,6 @@ cpdef double refractionTargetFraction(double elev_obs, double target_height):
     """
 
     cdef double height_diff, path_integral
-
-    # Anything beyond the atmosphere, infinity included, gets the full star refraction
-    if target_height > 1.0e6:
-        return 1.0
 
     # Clamp to the tropopause, above which the ground-observer model no longer applies
     if elev_obs > ISA_TROPOPAUSE:
@@ -904,7 +902,8 @@ cpdef double refractionTargetFraction(double elev_obs, double target_height):
     if height_diff <= 1.0:
         return 0.0
 
-    # Refractivity integrated over the path, relative to the refractivity at the observer
+    # Refractivity integrated over the path, relative to the refractivity at the observer. It is finite
+    #   for an infinite height, so a star comes out with exactly the full refraction
     path_integral = isaRefractivityIntegral(target_height) - isaRefractivityIntegral(elev_obs)
 
     return 1.0 - path_integral/(height_diff*isaRefractivity(elev_obs))
