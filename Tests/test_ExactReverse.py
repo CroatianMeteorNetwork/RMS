@@ -171,11 +171,14 @@ def test_the_option_is_saved_and_older_platepars_load_it_off(tmp_path):
     assert loaded.exact_reverse is False
 
 
-def test_a_point_beyond_the_reach_of_the_distortion_is_nan():
-    """ A strong barrel distortion folds back past the frame: sky beyond its first maximum has no image. """
+@pytest.mark.parametrize("decentering", [False, True])
+def test_a_point_beyond_the_reach_of_the_distortion_is_nan(decentering):
+    """ A strong barrel distortion folds back past the frame: sky beyond its first maximum has no image, also
+        with decentering (where the model, folded twice, would put it on the far side of the frame). """
 
-    pp = _platepar("radial3-odd", refraction=False)
-    pp.x_poly_fwd[-1] = -0.3
+    # The radial coefficient, before the decentering ones
+    pp = _platepar("radial3-odd", decentering=decentering, refraction=False)
+    pp.x_poly_fwd[-5 if decentering else -1] = -0.3
 
     # Far outside the field, and the field centre for comparison
     _, ra, dec, _ = astrometry.xyToRaDecPP(np.full(1, JD), np.array([pp.X_res/2.0]), np.array([pp.Y_res/2.0]),

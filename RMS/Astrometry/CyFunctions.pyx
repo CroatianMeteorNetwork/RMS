@@ -1350,6 +1350,48 @@ cdef double radialRoot(double target, int kind, double k1, double k2, double k3,
 
 
 @cython.cdivision(True)
+cdef double radialInverse(ForwardModel *m, double x_corr, double y_corr, double r_end, double f_end,
+    double *img):
+    """ The inverse of the radial part of a radial model (its decentering left out): the direction from the
+        distortion centre is kept and only the radius is rescaled, on the rising branch of the model.
+
+    Arguments:
+        m: [ForwardModel pointer] The distortion model.
+        x_corr: [float] Corrected X coordinate (px).
+        y_corr: [float] Corrected Y coordinate (px).
+        r_end: [float] End of the rising branch (radialBranchEnd).
+        f_end: [float] Corrected radius at the end of the rising branch.
+        img: [double pointer] The image coordinates relative to the image centre are written to img[0] and
+            img[1], NaN beyond the reach of the branch.
+
+    Return:
+        0: [float] Always zero.
+    """
+
+    cdef double radius_corr, cos_phi, sin_phi, asym, rho, q
+
+    # The distortion centre is its own image
+    radius_corr = sqrt(x_corr*x_corr + y_corr*y_corr)
+    if radius_corr == 0:
+        img[0] = m.x0
+        img[1] = m.y0
+        return 0
+
+    # The radius of the image point, in the direction of the corrected one, which the asymmetry stretches
+    cos_phi = x_corr/radius_corr
+    sin_phi = y_corr/radius_corr
+    asym = 1.0 + m.a1*(sin_phi*m.cos_a2 - cos_phi*m.sin_a2)
+    rho = radialRoot(radius_corr*asym/m.half_width, m.kind, m.k1, m.k2, m.k3, m.k4, r_end, f_end) \
+        if asym > 0 else NAN_VALUE
+    q = rho*m.half_width/asym
+
+    img[0] = q*cos_phi + m.x0
+    img[1] = q*sin_phi/(1.0 + m.xy) + m.y0
+
+    return 0
+
+
+@cython.cdivision(True)
 cdef double forwardJacobian(ForwardModel *m, double x_img, double y_img, double *out):
     """ The distortion of cyXYToRADec, image coordinates relative to the image centre to corrected ones (both
         in pixels), and its Jacobian. The same expressions as the block in cyXYToRADec, which the round-trip
@@ -1635,7 +1677,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
     cdef double pos_angle_ref_in = pos_angle_ref
     cdef double radius, sin_ang, cos_ang, theta, x, y, r, dx, dy, x_img, y_img, r_corr, r_scale
     cdef double x0, y0, xy, a1, a2, k1 = 0, k2 = 0, k3 = 0, k4 = 0, k5 = 0
-    cdef double radius_corr, cos_phi, sin_phi, asym, rho, q, r_end = 0, f_end = 0
+    cdef double r_end = 0, f_end = 0
     cdef double lin_xx = 1, lin_xy = 0, lin_yx = 0, lin_yy = 1, lin_det = 1
     cdef double img[2]
     cdef bint radial_root = False
@@ -1804,9 +1846,9 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
             lin_yy = 1.0 + model.cy[2]
             lin_det = lin_xx*lin_yy - lin_xy*lin_yx
 
-        # The rising branch of a radial model, for its inverse
-        if (model.poly_radial < 0) and (not decentering_corr):
-            radial_root = True
+        # The rising branch of a radial model, for its inverse (which with decentering starts Newton's method)
+        if model.poly_radial < 0:
+            radial_root = not decentering_corr
             r_end = radialBranchEnd(model.kind, model.k1, model.k2, model.k3, model.k4, &f_end)
 
     # Convert all equatorial coordinates to image coordinates
@@ -1853,33 +1895,16 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
         # Invert the forward distortion: (x, y) are the corrected coordinates the forward distortion produces
         if invert_forward:
 
+            # Radial models: the direction from the distortion centre is kept; only the radius is rescaled
             if radial_root:
+                radialInverse(&model, x, y, r_end, f_end, img)
 
-                # Direction from the distortion centre is kept; only the radius is rescaled. The distortion
-                #   centre itself is its own image
-                radius_corr = sqrt(x*x + y*y)
-                if radius_corr == 0:
-                    x_img = x0
-                    y_img = y0
-
-                else:
-                    cos_phi = x/radius_corr
-                    sin_phi = y/radius_corr
-                    asym = 1.0 + model.a1*(sin_phi*model.cos_a2 - cos_phi*model.sin_a2)
-                    rho = radialRoot(radius_corr*asym/model.half_width, model.kind, model.k1, model.k2,
-                        model.k3, model.k4, r_end, f_end) if asym > 0 else NAN_VALUE
-                    q = rho*model.half_width/asym
-                    x_img = q*cos_phi + x0
-                    y_img = q*sin_phi/(1.0 + xy) + y0
-
+            # Polynomial models and decentering: Newton's method in the image plane. A polynomial starts from
+            #   the corrected position with its linear part undone; a radial model with decentering from the
+            #   inverse of its radial part, which keeps the solution on the rising branch (NaN beyond it)
             else:
-
-                # Polynomial models and decentering: Newton's method in the image plane, from the corrected
-                #   position with the linear part of the distortion undone (for a radial model, its centre and
-                #   aspect)
                 if model.poly_radial < 0:
-                    img[0] = x + x0
-                    img[1] = y/(1.0 + xy) + y0
+                    radialInverse(&model, x, y, r_end, f_end, img)
                 elif lin_det > 0:
                     img[0] = (lin_yy*(x - x0) - lin_xy*(y - y0))/lin_det
                     img[1] = (lin_xx*(y - y0) - lin_yx*(x - x0))/lin_det
@@ -1887,9 +1912,11 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
                     img[0] = x
                     img[1] = y
 
-                invertDistortionNewton(&model, x, y, img)
-                x_img = img[0]
-                y_img = img[1]
+                if img[0] == img[0]:
+                    invertDistortionNewton(&model, x, y, img)
+
+            x_img = img[0]
+            y_img = img[1]
 
             x_array[i] = x_img + x_res/2.0
             y_array[i] = y_img + y_res/2.0
