@@ -2120,6 +2120,11 @@ class Platepar(object):
         if 'decentering_corr' not in self.__dict__:
             self.decentering_corr = False
 
+        # The aberration flag: a platepar pickled before it existed was fitted without the aberration modelled
+        #   and has absorbed it, as when a platepar file without the flag is loaded
+        if 'aberration' not in self.__dict__:
+            self.aberration = False
+
     def loadFromDict(self, platepar_dict, use_flat=None):
         """Load the platepar from a dictionary."""
 
@@ -2336,6 +2341,10 @@ class Platepar(object):
 
                 # Read station code
                 self.station_code = f.readline().replace('\r', '').replace('\n', '')
+
+                # The CMN format has no aberration flag: such a plate was fitted to the catalog directions as
+                #   they are and has absorbed the aberration
+                self.aberration = False
 
         # Add a default vignetting coefficient if it already doesn't exist
         self.addVignettingCoeff(use_flat)

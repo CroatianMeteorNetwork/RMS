@@ -982,7 +982,7 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
         asymmetry_corr=platepar.asymmetry_corr, precompute_pointing_corr=precompute_pointing_corr,
         decentering_corr=getattr(platepar, "decentering_corr", False),
         refraction_scale=refractionScale(platepar.elev), \
-        aberration=platepar.aberration and ((not measurement) if aberration is None else aberration))
+        aberration=plateAberration(platepar, measurement, aberration))
 
     # Correct the coordinates for refraction if it wasn't taken into account during the astrometry calibration
     #   procedure
@@ -1057,9 +1057,36 @@ def raDecToXYPP(RA_data, dec_data, jd, platepar, measurement=False, aberration=N
         force_distortion_centre=platepar.force_distortion_centre, asymmetry_corr=platepar.asymmetry_corr,
         decentering_corr=getattr(platepar, "decentering_corr", False), jd_data=jd_data,
         refraction_scale=refractionScale(platepar.elev), \
-        aberration=platepar.aberration and ((not measurement) if aberration is None else aberration))
+        aberration=plateAberration(platepar, measurement, aberration))
 
     return X_data, Y_data
+
+
+
+def plateAberration(platepar, measurement, aberration):
+    """ Whether the kernels have to model the annual aberration for the given plate and directions (see
+        xyToRaDecPP and raDecToXYPP).
+
+    Arguments:
+        platepar: [Platepar] Astrometry parameters.
+        measurement: [bool] The directions are measurements of an object in the atmosphere, not stars.
+        aberration: [bool or None] Choice of the caller, None to decide from measurement.
+
+    Return:
+        [bool] True if the aberration is applied (raDecToXYPP) or removed (xyToRaDecPP).
+    """
+
+    # A plate fitted without the aberration modelled has absorbed it, so it is never applied to it. Plates
+    #   older than the flag (e.g. pickled ones) are such plates
+    if not getattr(platepar, 'aberration', False):
+        return False
+
+    # Catalog directions of stars are aberrated, measurements of an object in the atmosphere are not,
+    #   unless the caller says otherwise
+    if aberration is None:
+        return not measurement
+
+    return bool(aberration)
 
 
 
@@ -1428,8 +1455,9 @@ def targetRaDecToPlateRaDec(ra_data, dec_data, jd, platepar, refraction_fraction
     lat = np.radians(platepar.lat)
     lon = np.radians(platepar.lon)
 
-    # A plate fitted without the aberration modelled does not apply it, so there is nothing to take out
-    aberration = aberration and platepar.aberration
+    # A plate fitted without the aberration modelled (or older than the flag) does not apply it, so there is
+    #   nothing to take out
+    aberration = aberration and getattr(platepar, 'aberration', False)
 
     # A plate fitted without refraction maps the arrival direction directly, so only the aberration has to
     #   be undone
