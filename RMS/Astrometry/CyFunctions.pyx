@@ -1105,7 +1105,9 @@ cdef double refractionTrueToApparent(double elev, double refraction_scale=1.0):
         step = (elev + refraction - elev_app)/(1.0 - derivative)
         elev_app += step
 
-        if fabs(step) < 1e-11:
+        # Newton converges quadratically: after a step below 1e-8 rad the error left is of the order of
+        #   1e-15 rad (1e-10 arcsec), so another evaluation would not change the result in practice
+        if fabs(step) < 1e-8:
             break
 
     return elev_app
