@@ -15,16 +15,15 @@ import numpy as np
 from RMS.Formats.Platepar import Platepar
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP
 from RMS.Astrometry.Conversions import jd2Date
-from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz, j2000FromTrueOfDate
+from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz, j2000FromTrueOfDate, refractionScale
 from RMS.Misc import getRmsRootDir
 
 
 TEMPLATE = os.path.join(getRmsRootDir(), 'share', 'platepar_templates', 'template_generic_720p_4mm.cal')
 
-# Refraction apparent -> true and true -> apparent are two different approximations (Bennett and
-#   Saemundsson), which disagree by about 1.1 arcsec at 45 deg: a round trip through both directions closes to
-#   this level, without refraction to rounding
-REFRACTION_ROUND_TRIP = {True: 1.5, False: 1.0e-3}
+# The two refraction directions are exact inverses, so the round trips close to rounding with and without
+#   the refraction
+REFRACTION_ROUND_TRIP = {True: 1.0e-3, False: 1.0e-3}
 
 
 def separationArcsec(az1, alt1, az2, alt2):
@@ -61,7 +60,7 @@ class TestReferencePointingEpoch(unittest.TestCase):
             jd_arr, ra, dec, _ = xyToRaDecPP([jd2Date(pp.JD)], [xc[0]], [yc[0]], [1], pp,
                 extinction_correction=False)
             az, alt = cyTrueRaDec2ApparentAltAz(np.radians(ra[0]), np.radians(dec[0]), jd_arr[0],
-                np.radians(pp.lat), np.radians(pp.lon), refraction)
+                np.radians(pp.lat), np.radians(pp.lon), refraction, refractionScale(pp.elev))
 
             # Two refraction round trips: the pointing set from alt/az, and the pixel back to alt/az
             self.assertLess(separationArcsec(az, alt, np.radians(200.0), np.radians(45.0)),
