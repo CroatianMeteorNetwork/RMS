@@ -781,6 +781,18 @@ def AEH2Range(azim, elev, h, lat, lon, alt, accurate=False):
 
     """
 
+    # Solve on the ellipsoid if the approximation is not good enough, or if the target is below the
+    #   observer, where the law of sines below returns the far intersection instead of the near one
+    if accurate:
+
+        r = rangeToHeightWGS84(azim, elev, h, lat, lon, alt)
+
+        # Scalar in, scalar out
+        if (np.ndim(azim) == 0) and (np.ndim(elev) == 0) and (np.ndim(h) == 0):
+            return float(r[0])
+
+        return r
+
 
     ### Law of sines solution ###
 
@@ -800,17 +812,6 @@ def AEH2Range(azim, elev, h, lat, lon, alt, accurate=False):
     r = rm*np.cos(beta)/np.cos(np.radians(elev))
 
     ### ###
-
-
-    # Solve on the ellipsoid if the approximation is not good enough, or if the target is below the
-    #   observer, where the law of sines above returns the far intersection instead of the near one
-    if accurate:
-
-        r = rangeToHeightWGS84(azim, elev, h, lat, lon, alt)
-
-        # Scalar in, scalar out
-        if (np.ndim(azim) == 0) and (np.ndim(elev) == 0) and (np.ndim(h) == 0):
-            return float(r[0])
 
 
     return r
@@ -847,12 +848,12 @@ def rangeToHeightWGS84(azim, elev, h, lat, lon, alt, max_iter=20, height_tol=1.0
 
     """
 
+    # Every line of sight and height as arrays of one shape
     azim, elev, h = np.broadcast_arrays(np.atleast_1d(azim).astype(np.float64), \
         np.atleast_1d(elev).astype(np.float64), np.atleast_1d(h).astype(np.float64))
 
-    lat_rad, lon_rad = np.radians(lat), np.radians(lon)
-
     # Observer position and the unit line of sight, both in ECEF
+    lat_rad, lon_rad = np.radians(lat), np.radians(lon)
     obs = np.array(latLonAlt2ECEF(lat_rad, lon_rad, alt), dtype=np.float64)
     los = np.stack(AER2ECEF(azim, elev, 1.0, lat, lon, alt), axis=-1) - obs
 
@@ -990,6 +991,7 @@ def AEGeoidH2LatLonAlt(azim, elev, h, lat, lon, alt):
 
     """
 
+    # Every line of sight and height as arrays of one shape; scalars in give scalars out
     scalar_input = (np.ndim(azim) == 0) and (np.ndim(elev) == 0) and (np.ndim(h) == 0)
     azim, elev, h = np.broadcast_arrays(np.atleast_1d(azim).astype(np.float64), \
         np.atleast_1d(elev).astype(np.float64), np.atleast_1d(h).astype(np.float64))
@@ -1006,6 +1008,7 @@ def AEGeoidH2LatLonAlt(azim, elev, h, lat, lon, alt):
 
     target_lat, target_lon = np.degrees(target_lat), np.degrees(target_lon)
 
+    # Scalars in, scalars out
     if scalar_input:
         return float(target_lat[0]), float(target_lon[0])
 

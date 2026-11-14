@@ -1075,8 +1075,9 @@ cdef double refractionTrueToApparent(double elev, double refraction_scale=1.0):
         refractionApparentToTrue, so that the two directions close on each other.
 
         Solves elev_app - refraction(elev_app) = elev for elev_app by Newton's method on Bennett's formula.
-        The refraction is smooth and its derivative never exceeds 0.22 in magnitude, so two or three steps
-        reach double precision at any elevation, the horizon included.
+        The refraction is smooth and its derivative is at most 0.263 in magnitude at sea level (at -0.5 deg,
+        the lowest elevation the formula is evaluated at), so two or three steps reach double precision at
+        any elevation, the horizon included.
 
     Arguments:
         elev: [float] True elevation (radians).

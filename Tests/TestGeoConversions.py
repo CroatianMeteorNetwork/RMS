@@ -100,9 +100,7 @@ def test_ground_projection_round_trips(target_height):
     """ xyHt2Geo() and geoHt2XY() have to be inverses of each other. They were not: xyHt2Geo() placed the
         target at the flat-Earth range while geoHt2XY() places it at exactly the given height, which on
         this platepar put the round trip about 3900 px away from where it started. The residual left is
-        the epoch convention of geoHt2XY(), which evaluates the plate at J2000 so that the RA/Dec of date
-        it computes may be taken as J2000, plus the forward/reverse polynomial mismatch of the plate
-        itself. """
+        the forward/reverse polynomial mismatch of the plate itself. """
 
     pp = Platepar()
     pp.read(TEMPLATE)
