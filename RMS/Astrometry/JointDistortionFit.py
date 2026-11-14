@@ -833,8 +833,20 @@ def fitDistortion(platepars, matched_stars, jds, distortion_type, max_stars, see
             the number of fitted stars and the key of the reference chunk.
     """
 
+    # Only plates that treat the annual aberration the same way are combined: with and without it modelled
+    #   the same star maps to positions that differ by a pattern no pointing absorbs (up to ~6 arcsec over a
+    #   wide field). The recalibrated chunks all model it, so a chunk with the other setting (the minority) is
+    #   left out
+    aberration = {key: bool(getattr(platepars[key], 'aberration', False)) for key in platepars}
+    aberration_used = 2*sum(aberration.values()) >= len(aberration)
+    left_out = [key for key in platepars if aberration[key] != aberration_used]
+    if left_out:
+        log.warning("Joint distortion fit: {:d} chunks left out, their platepars {:s} the aberration while the "
+                    "others {:s}".format(len(left_out), "model" if not aberration_used else "don't model",
+                                         "do" if aberration_used else "don't"))
+
     # The reference chunk is the one in the middle of the time span
-    keys = sorted(platepars, key=lambda key: jds[key])
+    keys = sorted((key for key in platepars if aberration[key] == aberration_used), key=lambda key: jds[key])
     reference_key = keys[len(keys)//2]
     pp_ref, jd_ref = platepars[reference_key], jds[reference_key]
     lst_ref = JD2LST(jd_ref, pp_ref.lon)[0]
