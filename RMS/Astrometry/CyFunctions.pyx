@@ -1279,6 +1279,22 @@ cpdef (double, double) cartesianToRaDec(np.ndarray[np.float64_t, ndim=1] vec):
 
 
 
+cdef int radialTermCount(str dist_type):
+    """ Number of the radial distortion coefficients (k1, k2, ...) of a radial distortion type (see
+        Platepar.radialTermCount): the decentering coefficients follow them in the distortion arrays.
+    """
+
+    # The radial coefficients of every radial type (k1 for radial3-odd up to k1...k4 for radial9-odd and radial5-all)
+    if dist_type == "radial3-odd":
+        return 1
+    elif (dist_type == "radial5-odd") or (dist_type == "radial3-all"):
+        return 2
+    elif (dist_type == "radial7-odd") or (dist_type == "radial4-all"):
+        return 3
+    else:
+        return 4
+
+
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
@@ -1287,7 +1303,8 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
     double y_res, double h0, double jd_ref, double ra_ref, double dec_ref, double pos_angle_ref, 
     double pix_scale, np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_rev, 
     np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_rev, str dist_type, bool refraction=True, bool equal_aspect=False, 
-    bool force_distortion_centre=False, bool asymmetry_corr=True):
+    bool force_distortion_centre=False, bool asymmetry_corr=True, bool decentering_corr=False,
+    np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data=None):
     """ Convert RA, Dec to distortion corrected image coordinates. 
 
     Arguments:
@@ -1315,6 +1332,11 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
         force_distortion_centre: [bool] Force the distortion centre to the image centre. False by default.
         asymmetry_corr: [bool] Correct the distortion for asymmetry. Only for radial distortion. True by
             default.
+        decentering_corr: [bool] Correct the radial distortion for decentering (a lens element off the optical
+            axis, Brown-Conrady): the coefficients p1, p2, p3, p4 follow the radial ones. False by default.
+        jd_data: [ndarray] Julian date of every point. None by default, in which case all points are at jd. If
+            given, jd is ignored and every point is converted at its own date (the camera is fixed in the
+            horizontal frame, so the sky moves across the image), the same as one call per point.
     
     Return:
         (x, y): [tuple of ndarrays] Image X and Y coordinates.
@@ -1322,8 +1344,13 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
 
     cdef int i
     cdef double ra_centre, dec_centre, ra, dec
+
+    # The reference position angle as given (it is replaced by its value corrected for the date below), for the
+    #   correction at the date of every point
+    cdef double pos_angle_ref_in = pos_angle_ref
     cdef double radius, sin_ang, cos_ang, theta, x, y, r, dx, dy, x_img, y_img, r_corr, r_scale
     cdef double x0, y0, xy, a1, a2, k1, k2, k3, k4, k5
+    cdef double p1 = 0, p2 = 0, p3 = 0, p4 = 0, u, v, r2, q1, q2
     cdef int index_offset
     cdef DateFrame date_frame
 
@@ -1428,6 +1455,13 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
         # if x_poly_rev.shape[0] > (9 - index_offset):
         #     k5 = x_poly_rev[9 - index_offset]
 
+        # Decentering coefficients, after the radial ones
+        if decentering_corr:
+            p1 = x_poly_rev[5 - index_offset + radialTermCount(dist_type)]
+            p2 = x_poly_rev[6 - index_offset + radialTermCount(dist_type)]
+            p3 = x_poly_rev[7 - index_offset + radialTermCount(dist_type)]
+            p4 = x_poly_rev[8 - index_offset + radialTermCount(dist_type)]
+
     # If the polynomial distortion was used, unpack the offsets
     else:
         x0 = x_poly_rev[0]
@@ -1436,6 +1470,19 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
 
     # Convert all equatorial coordinates to image coordinates
     for i in range(ra_data.shape[0]):
+
+        # With a date per point, correct the pointing for the date of this point
+        if jd_data is not None:
+            jd = jd_data[i]
+            ra_centre, dec_centre, pos_angle_ref = pointingCorrection(
+                    jd, radians(lat), radians(lon),
+                    radians(h0), jd_ref, radians(ra_ref), radians(dec_ref), radians(pos_angle_ref_in),
+                    refraction=refraction
+                    )
+
+            # The refraction of the point is computed at its own date too
+            if refraction:
+                date_frame = dateFrame(jd, radians(lon))
 
         ra = radians(ra_data[i])
         dec = radians(dec_data[i])
@@ -1587,6 +1634,19 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
             dx = x*r_scale - x0
             dy = y*r_scale/(1.0 + xy) - y0 + y*(1.0 - 1.0/(1.0 + xy))
 
+            # Decentering (Brown-Conrady): a lens element off the optical axis displaces the image by p1, p2 (the
+            #   amount and direction of the shift) times the square of the radius, a radial part three times the
+            #   tangential one, and by p3, p4 times its fourth power. In the normalized coordinates of the radial
+            #   distortion, converted to pixels
+            if decentering_corr:
+                u = x/(x_res/2.0)
+                v = y/(x_res/2.0)
+                r2 = u*u + v*v
+                q1 = p1 + p3*r2
+                q2 = p2 + p4*r2
+                dx += (q1*(r2 + 2*u*u) + 2*q2*u*v)*(x_res/2.0)
+                dy += (2*q1*u*v + q2*(r2 + 2*v*v))*(x_res/2.0)
+
 
 
         # Add the distortion
@@ -1672,7 +1732,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
     double h0, double jd_ref, double ra_ref, double dec_ref, double pos_angle_ref, double pix_scale, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_fwd, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_fwd, \
     str dist_type, bool refraction=True, bool equal_aspect=False, bool force_distortion_centre=False,\
-    bool asymmetry_corr=True, bool precompute_pointing_corr=False):
+    bool asymmetry_corr=True, bool precompute_pointing_corr=False, bool decentering_corr=False):
     """
     Arguments:
         jd_data: [ndarray] Julian date of each data point.
@@ -1699,6 +1759,8 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         force_distortion_centre: [bool] Force the distortion centre to the image centre. False by default.
         asymmetry_corr: [bool] Correct the distortion for asymmetry. Only for radial distortion. True by
             default.
+        decentering_corr: [bool] Correct the radial distortion for decentering (a lens element off the optical
+            axis, Brown-Conrady): the coefficients p1, p2, p3, p4 follow the radial ones. False by default.
         precompute_pointing_corr: [bool] Precompute the pointing correction. False by default. This is used
             to speed up the calculation when the input JD is the same for all data points, e.g. during
             plate solving.
@@ -1714,6 +1776,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
     cdef int i
     cdef double jd, x_img, y_img, r, dx, x_corr, dy, y_corr, r_corr, r_scale
     cdef double x0, y0, xy, a1, a2, k1, k2, k3, k4, k5
+    cdef double p1 = 0, p2 = 0, p3 = 0, p4 = 0, u, v, r2, q1, q2
     cdef int index_offset
     cdef double radius, theta, sin_t, cos_t
     cdef double ra_ref_now_corr, ra, dec, dec_ref_corr, pos_angle_ref_now_corr
@@ -1795,6 +1858,13 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
 
         # if x_poly_fwd.shape[0] > (9 - index_offset):
         #     k5 = x_poly_fwd[9 - index_offset]
+
+        # Decentering coefficients, after the radial ones
+        if decentering_corr:
+            p1 = x_poly_fwd[5 - index_offset + radialTermCount(dist_type)]
+            p2 = x_poly_fwd[6 - index_offset + radialTermCount(dist_type)]
+            p3 = x_poly_fwd[7 - index_offset + radialTermCount(dist_type)]
+            p4 = x_poly_fwd[8 - index_offset + radialTermCount(dist_type)]
 
 
     # If the polynomial distortion was used, unpack the offsets
@@ -1949,6 +2019,16 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
             # Compute offsets
             dx = (x_img - x0)*r_scale - x0
             dy = (y_img - y0)*r_scale*(1.0 + xy) - y0*(1.0 + xy) + y_img*xy
+
+            # Decentering (Brown-Conrady), see cyraDecToXY, around the distortion centre
+            if decentering_corr:
+                u = (x_img - x0)/(x_res/2.0)
+                v = (y_img - y0)/(x_res/2.0)
+                r2 = u*u + v*v
+                q1 = p1 + p3*r2
+                q2 = p2 + p4*r2
+                dx += (q1*(r2 + 2*u*u) + 2*q2*u*v)*(x_res/2.0)
+                dy += (2*q1*u*v + q2*(r2 + 2*v*v))*(x_res/2.0)
 
 
         # Correct image coordinates for distortion
