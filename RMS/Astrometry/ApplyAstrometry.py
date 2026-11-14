@@ -39,7 +39,7 @@ import numpy as np
 import RMS.Formats.Platepar
 import scipy.optimize
 from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
-from RMS.Astrometry.Conversions import (J2000_JD, trueOfDateRaDec2J2000,
+from RMS.Astrometry.Conversions import (trueOfDateRaDec2J2000,
                                         date2JD, 
                                         jd2Date, 
                                         raDec2AltAz,
@@ -979,7 +979,8 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
         float(platepar.dec_d), float(platepar.pos_angle_ref), float(platepar.F_scale), platepar.x_poly_fwd, 
         platepar.y_poly_fwd, unicode(platepar.distortion_type), refraction=platepar.refraction, \
         equal_aspect=platepar.equal_aspect, force_distortion_centre=platepar.force_distortion_centre, \
-        asymmetry_corr=platepar.asymmetry_corr, precompute_pointing_corr=precompute_pointing_corr, \
+        asymmetry_corr=platepar.asymmetry_corr, precompute_pointing_corr=precompute_pointing_corr,
+        decentering_corr=getattr(platepar, "decentering_corr", False),
         refraction_scale=refractionScale(platepar.elev), \
         aberration=platepar.aberration and ((not measurement) if aberration is None else aberration))
 
@@ -1021,7 +1022,8 @@ def raDecToXYPP(RA_data, dec_data, jd, platepar, measurement=False, aberration=N
     Arguments:
         RA: [ndarray] Array of right ascensions (degrees).
         dec: [ndarray] Array of declinations (degrees).
-        jd: [float] Julian date.
+        jd: [float or ndarray] Julian date, or the Julian date of every point (an array of the same length as
+            RA), which gives the same coordinates as a call per point at its own date.
         platepar: [Platepar structure] Astrometry parameters.
 
     Keyword arguments:
@@ -1038,6 +1040,14 @@ def raDecToXYPP(RA_data, dec_data, jd, platepar, measurement=False, aberration=N
         (x, y): [tuple of ndarrays] Image X and Y coordinates.
     """
 
+    # A date per point
+    jd_data = None
+    if np.ndim(jd) > 0:
+        jd_data = np.ascontiguousarray(jd, dtype=np.float64)
+        if len(jd_data) != len(RA_data):
+            raise ValueError("raDecToXYPP: {:d} dates for {:d} points".format(len(jd_data), len(RA_data)))
+        jd = jd_data[0] if len(jd_data) else 0.0
+
     # Use the cythonized function instead of the Python function
     X_data, Y_data = cyraDecToXY(RA_data, dec_data, float(jd), float(platepar.lat), float(platepar.lon),
         float(platepar.X_res), float(platepar.Y_res), float(platepar.Ho), float(platepar.JD),  
@@ -1045,6 +1055,7 @@ def raDecToXYPP(RA_data, dec_data, jd, platepar, measurement=False, aberration=N
         platepar.x_poly_rev, platepar.y_poly_rev, unicode(platepar.distortion_type), 
         refraction=platepar.refraction, equal_aspect=platepar.equal_aspect, 
         force_distortion_centre=platepar.force_distortion_centre, asymmetry_corr=platepar.asymmetry_corr,
+        decentering_corr=getattr(platepar, "decentering_corr", False), jd_data=jd_data,
         refraction_scale=refractionScale(platepar.elev), \
         aberration=platepar.aberration and ((not measurement) if aberration is None else aberration))
 
@@ -1250,16 +1261,19 @@ def applyPlateparToRaDecCentroids(ff_name, fps, meteor_meas, platepar, add_calst
 def xyHt2Geo(platepar, x, y, h):
     """ Given pixel coordinates on the image and a height of the target above sea level,
         compute geo coordinates of the point. The assumption is that the target is close enough for the
-        refraction not to be needed to be applied.
+        refraction not to be needed to be applied: the point is placed along the arrival direction of the
+        light at the pixel.
 
     Arguments:
         platepar: [Platepar object]
-        x: [float] Image X coordinate
-        y: [float] Image Y coordinate
-        h: [float] elevation of the target in meters (WGS84)
+        x: [float or ndarray] Image X coordinate
+        y: [float or ndarray] Image Y coordinate
+        h: [float or ndarray] elevation of the target in meters (WGS84)
 
     Return:
-        (lat, lon): [tuple of floats] latitude in degrees (+north), longitude in degrees (+east), 
+        (lat, lon): [tuple of ndarrays] latitude in degrees (+north), longitude in degrees (+east), one
+            element per pixel (also for scalar inputs). NaN where the line of sight never reaches the
+            height h.
 
     """
 
@@ -1268,7 +1282,7 @@ def xyHt2Geo(platepar, x, y, h):
     #   camera actually looks along the apparent one, which offsets the whole field by the refraction at
     #   the FOV centre. switchToGroundPicks() re-derives the reference pointing from the apparent alt/az,
     #   so the plate maps a pixel straight onto the arrival direction of the light, which for a target on
-    #   the ground is its true direction.
+    #   the ground is taken as its true direction (its terrestrial refraction is not modelled).
     platepar = copy.deepcopy(platepar)
     platepar.updateRefAltAz()
     platepar.switchToGroundPicks()
@@ -1363,7 +1377,8 @@ def targetRaDecToPlateRaDec(ra_data, dec_data, jd, platepar, refraction_fraction
 
         The plate maps a catalog direction to an image position by first refracting it as if it were a
         star, which is correct for a star and for anything else outside the atmosphere. A target inside or
-        below the atmosphere is bent by less than that: a ground reference is not bent at all, and a target
+        below the atmosphere is bent by less than that: a ground reference only by the terrestrial
+        refraction along its low path (tens of arcsec over 10 km and more, not modelled here), and a target
         at a finite height only by the fraction returned by refractionTargetFraction(). Handing the plate
         the true direction of such a target therefore places it where a star in that direction would be
         seen, not where the target is seen, and a fit made against it absorbs the difference into the
@@ -1393,8 +1408,8 @@ def targetRaDecToPlateRaDec(ra_data, dec_data, jd, platepar, refraction_fraction
 
     Keyword arguments:
         refraction_fraction: [float] Fraction of a star's refraction that the target's light undergoes,
-            from RMS.Astrometry.CyFunctions.refractionTargetFraction(). 0.0 by default, which is the value
-            for a ground reference, close enough that no measurable refraction accumulates along the way.
+            from RMS.Astrometry.CyFunctions.refractionTargetFraction(). 0.0 by default, the value used for
+            a ground reference, whose terrestrial refraction is not modelled.
         aberration: [bool] The plate will be used through the star path, which aberrates its input, so the
             aberration is taken out of the plate coordinates. True by default. False if the plate is used
             with aberration=False.
@@ -1404,9 +1419,11 @@ def targetRaDecToPlateRaDec(ra_data, dec_data, jd, platepar, refraction_fraction
 
     """
 
+    # The directions as arrays
     ra_data = np.atleast_1d(np.array(ra_data, dtype=np.float64))
     dec_data = np.atleast_1d(np.array(dec_data, dtype=np.float64))
 
+    # Station
     lat = np.radians(platepar.lat)
     lon = np.radians(platepar.lon)
 
@@ -1422,8 +1439,10 @@ def targetRaDecToPlateRaDec(ra_data, dec_data, jd, platepar, refraction_fraction
             for r, d in zip(ra_data, dec_data)])
         return np.degrees(out[:, 0])%360, np.degrees(out[:, 1])
 
+    # The refraction scale of the station height, the same as the plate uses
     refr_scale = refractionScale(platepar.elev)
 
+    # Every target converted on its own
     ra_plate = np.zeros_like(ra_data)
     dec_plate = np.zeros_like(dec_data)
 
@@ -1472,7 +1491,7 @@ def geoHt2XY(platepar, lat, lon, h):
     #   camera actually looks along the apparent one, which offsets the whole field by the refraction at
     #   the FOV centre. switchToGroundPicks() re-derives the reference pointing from the apparent alt/az,
     #   so the plate maps a pixel straight onto the arrival direction of the light, which for a target on
-    #   the ground is its true direction.
+    #   the ground is taken as its true direction (its terrestrial refraction is not modelled).
     platepar = copy.deepcopy(platepar)
     platepar.updateRefAltAz()
     platepar.switchToGroundPicks()
@@ -1577,7 +1596,7 @@ def geoHt2XYInsideFOV(platepar, lat_arr, lon_arr, h_att, side_sample=10):
     #   camera actually looks along the apparent one, which offsets the whole field by the refraction at
     #   the FOV centre. switchToGroundPicks() re-derives the reference pointing from the apparent alt/az,
     #   so the plate maps a pixel straight onto the arrival direction of the light, which for a target on
-    #   the ground is its true direction.
+    #   the ground is taken as its true direction (its terrestrial refraction is not modelled).
     platepar = copy.deepcopy(platepar)
     platepar.updateRefAltAz()
     platepar.switchToGroundPicks()

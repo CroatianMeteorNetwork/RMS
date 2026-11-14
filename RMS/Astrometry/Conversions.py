@@ -56,11 +56,34 @@ def broadcastVect(cy_vect):
     """ Vectorize a CyFunctions array conversion taking (two coordinates, jd, lat, lon), broadcasting the
         arguments against each other as np.vectorize does. The Cython loop evaluates the sidereal time once
         per time instead of once per point.
+
+    Arguments:
+        cy_vect: [function] CyFunctions conversion of 1D arrays of the same length (e.g.
+            cyraDec2AltAz_vect), returning two arrays.
+
+    Return:
+        vect: [function] The conversion for scalars or arrays of any shape that broadcast together.
     """
 
     def vect(a, b, jd, lat, lon):
+        """ Convert the broadcast arguments with cy_vect.
+
+        Arguments:
+            a: [float or ndarray] First coordinate (radians).
+            b: [float or ndarray] Second coordinate (radians).
+            jd: [float or ndarray] Julian date.
+            lat: [float or ndarray] Latitude of the observer (radians).
+            lon: [float or ndarray] Longitude of the observer (radians).
+
+        Return:
+            (out_a, out_b): [tuple of ndarrays] The two converted coordinates, in the broadcast shape.
+        """
+
+        # Broadcast all arguments to one shape and give the Cython loop flat contiguous arrays
         args = np.broadcast_arrays(*[np.asarray(v, dtype=np.float64) for v in (a, b, jd, lat, lon)])
         out_a, out_b = cy_vect(*[np.ascontiguousarray(v).ravel() for v in args])
+
+        # Back to the broadcast shape
         return out_a.reshape(args[0].shape), out_b.reshape(args[0].shape)
 
     return vect
@@ -92,6 +115,11 @@ class EARTH_CONSTANTS(object):
 
 # Initialize Earth shape constants object
 EARTH = EARTH_CONSTANTS()
+
+
+# Types taken as a single number by the geodetic conversions, which then use the math module: numpy costs
+#   several times the arithmetic itself on one number
+SCALAR_TYPES = (float, int, np.number)
 
 
 #################
@@ -377,13 +405,19 @@ def latLonAlt2ECEF(lat, lon, h):
 
     """
 
+    # A single point with the math module, arrays with numpy
+    if isinstance(lat, SCALAR_TYPES) and isinstance(lon, SCALAR_TYPES) and isinstance(h, SCALAR_TYPES):
+        sin, cos, sqrt = math.sin, math.cos, math.sqrt
+    else:
+        sin, cos, sqrt = np.sin, np.cos, np.sqrt
+
     # Get distance from Earth centre to the position given by geographical coordinates, in WGS84
-    N = EARTH.EQUATORIAL_RADIUS/np.sqrt(1.0 - (EARTH.E**2)*np.sin(lat)**2)
+    N = EARTH.EQUATORIAL_RADIUS/sqrt(1.0 - (EARTH.E**2)*sin(lat)**2)
 
     # Calculate ECEF coordinates
-    ecef_x = (N + h)*np.cos(lat)*np.cos(lon)
-    ecef_y = (N + h)*np.cos(lat)*np.sin(lon)
-    ecef_z = ((1 - EARTH.E**2)*N + h)*np.sin(lat)
+    ecef_x = (N + h)*cos(lat)*cos(lon)
+    ecef_y = (N + h)*cos(lat)*sin(lon)
+    ecef_z = ((1 - EARTH.E**2)*N + h)*sin(lat)
 
     return ecef_x, ecef_y, ecef_z
 
@@ -444,7 +478,11 @@ def ecef2LatLonAlt(x, y, z):
 
     """
 
-    scalar_input = (np.ndim(x) == 0) and (np.ndim(y) == 0) and (np.ndim(z) == 0)
+    # A single point with the math module, the same steps as for arrays below
+    if isinstance(x, SCALAR_TYPES) and isinstance(y, SCALAR_TYPES) and isinstance(z, SCALAR_TYPES):
+        return ecef2LatLonAltScalar(float(x), float(y), float(z))
+
+    # Arrays with numpy, every point the same as one call
     x, y, z = np.asarray(x, dtype=np.float64), np.asarray(y, dtype=np.float64), \
         np.asarray(z, dtype=np.float64)
 
@@ -473,8 +511,50 @@ def ecef2LatLonAlt(x, y, z):
     with np.errstate(divide='ignore', invalid='ignore'):
         alt = np.where(near_pole, np.abs(z) - EARTH.POLAR_RADIUS, p/np.cos(lat) - N)
 
-    if scalar_input:
+    # A 0-d array in gives floats out
+    if np.ndim(lat) == 0:
         return float(lat), float(lon), float(alt)
+
+    return lat, lon, alt
+
+
+
+def ecef2LatLonAltScalar(x, y, z):
+    """ ecef2LatLonAlt for a single point, with the math module.
+
+    Arguments:
+        x: [float] ECEF x coordinate
+        y: [float] ECEF y coordinate
+        z: [float] ECEF z coordinate
+
+    Return:
+        (lat, lon, alt): [tuple of floats] latitude and longitude in radians, WGS84 elevation in meters
+
+    """
+
+    # Calculate the polar eccentricity
+    ep = math.sqrt((EARTH.EQUATORIAL_RADIUS**2 - EARTH.POLAR_RADIUS**2)/(EARTH.POLAR_RADIUS**2))
+
+    # Calculate the longitude
+    lon = math.atan2(y, x)
+
+    p = math.sqrt(x**2  +  y**2)
+
+    theta = math.atan2(z*EARTH.EQUATORIAL_RADIUS, p*EARTH.POLAR_RADIUS)
+
+    # Calculate the latitude
+    lat = math.atan2(z + (ep**2)*EARTH.POLAR_RADIUS*math.sin(theta)**3, \
+        p - (EARTH.E**2)*EARTH.EQUATORIAL_RADIUS*math.cos(theta)**3)
+
+    # Get distance from Earth centre to the position given by geographical coordinates, in WGS84
+    N = EARTH.EQUATORIAL_RADIUS/math.sqrt(1.0 - (EARTH.E**2)*math.sin(lat)**2)
+
+    # Calculate the height in meters. Near the exact poles cos(lat) vanishes, so the height is taken
+    #   from the polar axis there instead.
+    if (abs(x) < 1000) and (abs(y) < 1000):
+        alt = abs(z) - EARTH.POLAR_RADIUS
+    else:
+        alt = p/math.cos(lat) - N
 
     return lat, lon, alt
 
@@ -701,6 +781,18 @@ def AEH2Range(azim, elev, h, lat, lon, alt, accurate=False):
 
     """
 
+    # Solve on the ellipsoid if the approximation is not good enough, or if the target is below the
+    #   observer, where the law of sines below returns the far intersection instead of the near one
+    if accurate:
+
+        r = rangeToHeightWGS84(azim, elev, h, lat, lon, alt)
+
+        # Scalar in, scalar out
+        if (np.ndim(azim) == 0) and (np.ndim(elev) == 0) and (np.ndim(h) == 0):
+            return float(r[0])
+
+        return r
+
 
     ### Law of sines solution ###
 
@@ -720,17 +812,6 @@ def AEH2Range(azim, elev, h, lat, lon, alt, accurate=False):
     r = rm*np.cos(beta)/np.cos(np.radians(elev))
 
     ### ###
-
-
-    # Solve on the ellipsoid if the approximation is not good enough, or if the target is below the
-    #   observer, where the law of sines above returns the far intersection instead of the near one
-    if accurate:
-
-        r = rangeToHeightWGS84(azim, elev, h, lat, lon, alt)
-
-        # Scalar in, scalar out
-        if (np.ndim(azim) == 0) and (np.ndim(elev) == 0) and (np.ndim(h) == 0):
-            return float(r[0])
 
 
     return r
@@ -767,12 +848,12 @@ def rangeToHeightWGS84(azim, elev, h, lat, lon, alt, max_iter=20, height_tol=1.0
 
     """
 
+    # Every line of sight and height as arrays of one shape
     azim, elev, h = np.broadcast_arrays(np.atleast_1d(azim).astype(np.float64), \
         np.atleast_1d(elev).astype(np.float64), np.atleast_1d(h).astype(np.float64))
 
-    lat_rad, lon_rad = np.radians(lat), np.radians(lon)
-
     # Observer position and the unit line of sight, both in ECEF
+    lat_rad, lon_rad = np.radians(lat), np.radians(lon)
     obs = np.array(latLonAlt2ECEF(lat_rad, lon_rad, alt), dtype=np.float64)
     los = np.stack(AER2ECEF(azim, elev, 1.0, lat, lon, alt), axis=-1) - obs
 
@@ -910,6 +991,7 @@ def AEGeoidH2LatLonAlt(azim, elev, h, lat, lon, alt):
 
     """
 
+    # Every line of sight and height as arrays of one shape; scalars in give scalars out
     scalar_input = (np.ndim(azim) == 0) and (np.ndim(elev) == 0) and (np.ndim(h) == 0)
     azim, elev, h = np.broadcast_arrays(np.atleast_1d(azim).astype(np.float64), \
         np.atleast_1d(elev).astype(np.float64), np.atleast_1d(h).astype(np.float64))
@@ -926,6 +1008,7 @@ def AEGeoidH2LatLonAlt(azim, elev, h, lat, lon, alt):
 
     target_lat, target_lon = np.degrees(target_lat), np.degrees(target_lon)
 
+    # Scalars in, scalars out
     if scalar_input:
         return float(target_lat[0]), float(target_lon[0])
 
@@ -1203,14 +1286,25 @@ def trueRaDec2ApparentAltAz(ra, dec, jd, lat, lon, refraction=True, refraction_s
 
 def _perPoint(func, *args):
     """ Helper: apply a scalar (ra, dec)-style function to scalars or to arrays of the first two arguments,
-        returning floats for scalars and arrays otherwise. """
+        returning floats for scalars and arrays otherwise.
+
+    Arguments:
+        func: [function] Function of two floats (and the rest of the arguments) returning two floats.
+        *args: The two coordinates (floats or arrays that broadcast together), then the arguments given to
+            func unchanged.
+
+    Return:
+        (a, b): [tuple of floats or ndarrays] The two outputs of func, in the broadcast shape of the inputs.
+    """
 
     a, b = args[0], args[1]
     rest = args[2:]
 
+    # Scalars go straight through
     if np.ndim(a) == 0 and np.ndim(b) == 0:
         return func(float(a), float(b), *rest)
 
+    # Arrays: one call per point, the outputs in the shape of the inputs
     a, b = np.broadcast_arrays(np.atleast_1d(a).astype(np.float64), np.atleast_1d(b).astype(np.float64))
     out = np.array([func(float(x), float(y), *rest) for x, y in zip(a.ravel(), b.ravel())])
 
@@ -1246,6 +1340,15 @@ def trueOfDateRaDec2ApparentAltAz(ra, dec, jd, lat, lon, refraction=True, refrac
     """
 
     def one(ra_i, dec_i):
+        """ One point: true-of-date RA, Dec (deg) -> apparent azimuth, altitude (deg).
+
+        Arguments:
+            ra_i: [float] Right ascension (deg, true of date).
+            dec_i: [float] Declination (deg, true of date).
+
+        Return:
+            (azim, elev): [tuple of floats] Azimuth (+east of due north) and apparent altitude (deg).
+        """
 
         azim, elev = cyraDec2AltAz(np.radians(ra_i), np.radians(dec_i), jd, np.radians(lat), np.radians(lon))
 
@@ -1279,6 +1382,15 @@ def apparentAltAz2TrueOfDateRaDec(azim, elev, jd, lat, lon, refraction=True, ref
     """
 
     def one(azim_i, elev_i):
+        """ One point: apparent azimuth, altitude (deg) -> true-of-date RA, Dec (deg).
+
+        Arguments:
+            azim_i: [float] Azimuth (+east of due north) (deg).
+            elev_i: [float] Apparent altitude (deg).
+
+        Return:
+            (ra, dec): [tuple of floats] Right ascension and declination (deg, true of date).
+        """
 
         elev_i = np.radians(elev_i)
 
@@ -1306,6 +1418,16 @@ def trueOfDateRaDec2J2000(ra, dec, jd):
     """
 
     def one(ra_i, dec_i):
+        """ One point: true-of-date RA, Dec (deg) -> J2000 RA, Dec (deg).
+
+        Arguments:
+            ra_i: [float] Right ascension (deg, true of date).
+            dec_i: [float] Declination (deg, true of date).
+
+        Return:
+            (ra, dec): [tuple of floats] Right ascension and declination (deg, J2000).
+        """
+
         ra_j, dec_j = j2000FromTrueOfDate(jd, np.radians(ra_i), np.radians(dec_i))
         return np.degrees(ra_j), np.degrees(dec_j)
 
@@ -1326,6 +1448,16 @@ def j2000RaDec2TrueOfDate(ra, dec, jd):
     """
 
     def one(ra_i, dec_i):
+        """ One point: J2000 RA, Dec (deg) -> true-of-date RA, Dec (deg).
+
+        Arguments:
+            ra_i: [float] Right ascension (deg, J2000).
+            dec_i: [float] Declination (deg, J2000).
+
+        Return:
+            (ra, dec): [tuple of floats] Right ascension and declination (deg, true of date).
+        """
+
         ra_t, dec_t = trueOfDateFromJ2000(jd, np.radians(ra_i), np.radians(dec_i))
         return np.degrees(ra_t), np.degrees(dec_t)
 

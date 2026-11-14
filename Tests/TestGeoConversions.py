@@ -10,9 +10,10 @@ np = pytest.importorskip("numpy")
 
 from RMS.Formats.Platepar import Platepar
 from RMS.Misc import getRmsRootDir
-from RMS.Astrometry.ApplyAstrometry import xyHt2Geo, geoHt2XY
+from RMS.Astrometry.ApplyAstrometry import xyHt2Geo, geoHt2XY, xyToRaDecPP
 from RMS.Astrometry.Conversions import AEH2Range, AEGeoidH2LatLonAlt, AER2ECEF, ecef2LatLonAlt, \
-    latLonAlt2ECEF
+    latLonAlt2ECEF, JD2HourAngle, trueRaDec2ApparentAltAz
+from RMS.Astrometry.CyFunctions import refractionScale
 
 import os
 
@@ -100,9 +101,7 @@ def test_ground_projection_round_trips(target_height):
     """ xyHt2Geo() and geoHt2XY() have to be inverses of each other. They were not: xyHt2Geo() placed the
         target at the flat-Earth range while geoHt2XY() places it at exactly the given height, which on
         this platepar put the round trip about 3900 px away from where it started. The residual left is
-        the epoch convention of geoHt2XY(), which evaluates the plate at J2000 so that the RA/Dec of date
-        it computes may be taken as J2000, plus the forward/reverse polynomial mismatch of the plate
-        itself. """
+        the forward/reverse polynomial mismatch of the plate itself. """
 
     pp = Platepar()
     pp.read(TEMPLATE)
@@ -123,6 +122,53 @@ def test_ground_projection_round_trips(target_height):
     for i in range(len(x)):
         x_back, y_back = geoHt2XY(pp, lat_t[i], lon_t[i], target_height)
         assert np.hypot(x_back[0] - x[i], y_back[0] - y[i]) < 0.5, (x[i], y[i], x_back, y_back)
+
+
+@pytest.mark.parametrize("alt_centre", [25.0, 45.0])
+def test_ground_point_is_on_the_line_of_sight_of_the_pixel(alt_centre):
+    """ xyHt2Geo() has to place the target on the line along which the light arrives at the pixel: the
+        apparent direction of a star seen at that pixel, from the refraction-on plate. Clearing the
+        refraction flag on its own, as the ground helpers did, left the reference pointing at the true
+        direction of the camera axis and moved every point by about the refraction at the FOV centre: 2 to
+        100 m on this plate, the most for the pixels close to the horizon. """
+
+    pp = Platepar()
+    pp.read(TEMPLATE)
+    pp.lat, pp.lon, pp.elev = LAT, LON, ALT
+    pp.JD = 2460000.5
+    pp.Ho = JD2HourAngle(pp.JD)
+    pp.resetDistortionParameters()
+    pp.x_poly_fwd[0] = pp.x_poly_fwd[1] = pp.x_poly_rev[0] = pp.x_poly_rev[1] = 0.0
+    pp.refraction = True
+    pp.az_centre, pp.alt_centre = 150.0, alt_centre
+    pp.updateRefRADec()
+
+    # A grid of pixels over the frame
+    xs, ys = np.meshgrid(np.linspace(40, pp.X_res - 40, 7), np.linspace(40, pp.Y_res - 40, 5))
+    x, y = xs.ravel(), ys.ravel()
+    h = np.full(len(x), ALT + 3000.0)
+
+    # The line of sight of every pixel: the apparent direction of a star seen there, refracted for the
+    #   station height as the plate does
+    jd, ra, dec, _ = xyToRaDecPP(len(x)*[pp.JD], x, y, np.ones(len(x)), pp, extinction_correction=False,
+        jd_time=True)
+    azim, elev = trueRaDec2ApparentAltAz(np.array(ra), np.array(dec), np.array(jd), LAT, LON,
+        refraction=True, refraction_scale=refractionScale(ALT))
+
+    # Only the pixels looking well above the horizon, where the height is reached
+    up = elev > 5.0
+    assert np.count_nonzero(up) >= 10
+    x, y, h, azim, elev = x[up], y[up], h[up], azim[up], elev[up]
+    lat_los, lon_los = AEGeoidH2LatLonAlt(azim, elev, h, LAT, LON, ALT)
+
+    # The ground projection of the same pixels
+    lat_g, lon_g = xyHt2Geo(pp, x, y, h)
+    assert np.all(np.isfinite(lat_g))
+
+    # Distance between the two points (metres)
+    p_los = np.array(latLonAlt2ECEF(np.radians(lat_los), np.radians(lon_los), h))
+    p_geo = np.array(latLonAlt2ECEF(np.radians(lat_g), np.radians(lon_g), h))
+    assert np.max(np.linalg.norm(p_los - p_geo, axis=0)) < 1.0e-3
 
 
 @pytest.mark.parametrize("elev, h", [
