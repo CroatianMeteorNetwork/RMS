@@ -448,6 +448,7 @@ class MatchedFilterOptions(object):
         self.persistence = config.mf_persistence
         self.clip = config.mf_clip
         self.trail_level = config.mf_trail_level
+        self.noise_sky_floor = config.mf_noise_sky_floor
         self.min_displacement = config.mf_min_displacement
         self.min_frames = config.mf_min_frames
         self.sigma_scale = config.mf_sigma_scale
@@ -934,9 +935,10 @@ class MatchedFilterDetector(object):
                     M = np.float32([[1, 0, dx], [0, 1, dy]])
                     near.append(cv2.warpAffine(raw[j].median, M, (self.width, self.height), flags=cv2.INTER_CUBIC,
                                                borderMode=cv2.BORDER_REPLICATE))
-            # The mean of the aligned medians, with the noise of the block alone
+            # The mean of the aligned medians, with the noise of the block alone (never below the noise of the
+            #   sky, see noiseFloor)
             median = np.mean(near, axis=0).astype(np.float32)
-            noise = raw[k].noise
+            noise = self.noiseFloor(raw[k].noise)
             n_samples = sum(raw[j].n_samples for j in range(max(k - 1, 0), min(k + 2, len(raw))))
             bg = BlockBackground(median, noise, n_samples)
             bg.raw_median = raw[k].median
@@ -975,6 +977,38 @@ class MatchedFilterDetector(object):
         #   pixels for the fit of its scale in every frame (see normalize)
         bg.star_idx = np.flatnonzero(star_px)
         bg.stars = np.where(star_px, stars, 0).astype(np.float32)
+
+
+    def noiseFloor(self, noise, sky_noise=None):
+        """ The noise which the frames are divided by. The noise of a pixel estimated from 64 samples has an error
+            of about 15%, different in every pixel. Dividing the frames by it multiplies the image of an object by
+            a fixed pixel pattern, which shifts its measured position by the same amount in every frame in which
+            the object covers those pixels (about 0.06 px, whatever its brightness), so it does not average out
+            along the track. The noise of a pixel is therefore never taken below the local noise of the sky: the
+            pixels whose noise came out lower by chance get the noise of the sky, which removes most of the
+            pattern. The pixels which are noisier than the sky keep their own noise, as they may really be (stars,
+            hot pixels, the rows and columns of a bright moving object), so no pixel becomes more significant than
+            it measured.
+
+        Arguments:
+            noise: [ndarray] Noise of every pixel.
+
+        Keyword arguments:
+            sky_noise: [ndarray] Local noise of the sky at the same pixels. None by default (from the noise, as in
+                starTemplate).
+
+        Return:
+            [ndarray] The noise (float32), the input as it is without mf_noise_sky_floor.
+        """
+
+        if not self.opts.noise_sky_floor:
+            return noise
+
+        # The local noise of the sky, never below 1 ADU (as the noise itself)
+        if sky_noise is None:
+            sky_noise = np.maximum(self.skyLevel(noise), 1.0)
+
+        return np.maximum(noise, sky_noise).astype(np.float32)
 
 
     @staticmethod
@@ -3321,6 +3355,10 @@ class MatchedFilterDetector(object):
                 bg.median[y0:y1, x0:x1] = np.where(np.isfinite(masked), masked, region).astype(np.float32)
                 region = bg.noise[y0:y1, x0:x1]
                 bg.noise[y0:y1, x0:x1] = np.where(np.isfinite(mad), np.maximum(mad, 1.0), region).astype(np.float32)
+
+                # The noise of the remaining samples has the same pixel pattern, so it is not taken below the noise
+                #   of the sky either (see noiseFloor)
+                bg.noise[y0:y1, x0:x1] = self.noiseFloor(bg.noise[y0:y1, x0:x1], bg.sky_noise[y0:y1, x0:x1])
                 touched.add(k)
 
             # Drop the samples which are not needed any more

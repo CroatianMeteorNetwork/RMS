@@ -147,6 +147,12 @@ The saturated pixels of the raw frames (above `mf_saturation_level`, or 98% of t
   every 4th frame. The median of one block has a noise of about 0.15 of the noise of a frame, which would make faint
   static patterns when summed over many frames, so it is averaged over the neighbouring blocks (three blocks), and
   the background of every frame is interpolated linearly in time between the middles of the blocks.
+- **Noise floor.** With 64 samples the noise of a pixel has an error of about 15%, different in every pixel.
+  Dividing the frames by it multiplies the image of an object by a fixed pixel pattern, so its measured position
+  moves by about 0.06 px in every frame, the same way, and slow objects do not average it out. With
+  `mf_noise_sky_floor` (on) the noise of a pixel is never taken below the local noise of the sky, which removes the
+  part of the pattern below it. Pixels noisier than the sky keep their own noise (stars, hot pixels, the rows and
+  columns of a bright moving object), so no pixel becomes more significant than it measured.
 - **Transparency.** The brightness of the stars changes with the transparency of the sky (by several times within
   a minute in thin clouds). The stars of the median above the local sky are a *star template*; in every frame, the
   change of the template which fits the frame best is subtracted, so the stars don't leave residuals when the sky
@@ -592,6 +598,7 @@ All settings are in the `[MatchedFilter]` section, see the comments in `.config`
 | `mf_clip` | 10 | The normalized frames are clipped to +- this before the search |
 | `mf_link_max_gap` | 96 | Largest gap (frames) between strong hits of a track |
 | `mf_tier_speed`, `mf_max_bin` | 2.0, 8 | Tiers of the search: larger motions on coarser bins (the motions per tier in binned px per frame), 0 disables them |
+| `mf_noise_sky_floor` | true | The noise of a pixel is never taken below the local noise of the sky (removes most of the fixed pattern of the noise estimate) |
 | `mf_trail_level` | 25 | Rows and columns of sources brighter than this in a frame (in the noise of a pixel) are left out of the search, 0 disables it |
 | `mf_max_tracks` | 1000 | Most candidate tracks measured per file or segment (the strongest), bounds the time in bad conditions |
 | `mf_cloud_filter` | true | Leave out the clouded sky (needs the stars and the platepar) |
