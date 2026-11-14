@@ -300,6 +300,7 @@ class TestAberration(unittest.TestCase):
             np.testing.assert_allclose(y, y_before, rtol=0, atol=1e-8)
 
 
+    @unittest.skipIf(erfa is None, "pyerfa not installed")
     def testStarGridOverNight(self):
         """ The star fit as in real life, on a distortion-free camera fixed in alt/az and referenced at the start of
             the night: a star's catalog direction (erfa: velocity aberration removed) projects through xyToRaDecPP
