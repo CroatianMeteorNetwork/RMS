@@ -39,7 +39,7 @@ import numpy as np
 import RMS.Formats.Platepar
 import scipy.optimize
 from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
-from RMS.Astrometry.Conversions import (J2000_JD, trueOfDateRaDec2J2000,
+from RMS.Astrometry.Conversions import (trueOfDateRaDec2J2000,
                                         date2JD, 
                                         jd2Date, 
                                         raDec2AltAz,
