@@ -12,7 +12,8 @@ from RMS.Astrometry.CyFunctions import (equatorialCoordAndRotPrecession, equator
     trueOfDateFromJ2000, j2000FromTrueOfDate, cyTrueRaDec2ApparentAltAz, pointingCorrection, cyjd2GST,
     cyaltAz2RADec, pyRefractionTrueToApparent, pyRefractionApparentToTrue, eqRefractionTrueToApparent,
     eqRefractionApparentToTrue)
-from RMS.Astrometry.Conversions import date2JD, jd2Date, JD2HourAngle, JD2LST
+from RMS.Astrometry.Conversions import date2JD, jd2Date, JD2HourAngle, JD2LST, trueOfDateRaDec2J2000, \
+    j2000RaDec2TrueOfDate
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, applyPlateparToCentroids, \
     applyPlateparToRaDecCentroids
 from RMS.Formats.Platepar import Platepar
@@ -95,14 +96,46 @@ class TestPrecessionNutation(unittest.TestCase):
                 self.assertLess(separationArcsec(ra, dec, r3, d3), 0.01)
 
 
-    def testKernelAndConvertersAgree(self):
-        """ The kernel transform and the scalar converters implement the same frame. """
+    @unittest.skipIf(erfa is None, "pyerfa not installed")
+    def testKernelAndConvertersAgainstTheSameModel(self):
+        """ The kernel transform and the converters (scalar and in degrees) implement the model they claim:
+            IAU 1976 precession followed by the nutation of the 4-term series, rotated about the IAU 1980 mean
+            obliquity. The reference is built independently from erfa's matrices of the same model, so it
+            checks the composition of the rotations to rounding, not only to the 0.5 arcsec of the series. """
 
-        for jd in DATES:
+        for jd in DATES + [date2JD(1990, 1, 1, 0, 0, 0), date2JD(2050, 1, 1, 0, 0, 0)]:
+
+            # The 4-term nutation series (Meeus, Astronomical Algorithms, ch. 22)
+            T = (jd - J2000)/36525.0
+            omega = np.radians(125.04452 - 1934.136261*T)
+            sun_lon = np.radians(280.4665 + 36000.7698*T)
+            moon_lon = np.radians(218.3165 + 481267.8813*T)
+            dpsi = np.radians((-17.2*np.sin(omega) - 1.32*np.sin(2*sun_lon) - 0.23*np.sin(2*moon_lon)
+                + 0.21*np.sin(2*omega))/3600)
+            deps = np.radians((9.2*np.cos(omega) + 0.57*np.cos(2*sun_lon) + 0.1*np.cos(2*moon_lon)
+                - 0.09*np.cos(2*omega))/3600)
+
+            # J2000 -> true of date: erfa's IAU 1976 precession matrix, then its nutation matrix built from
+            #   the series above and the IAU 1980 mean obliquity
+            to_date = erfa.numat(erfa.obl80(jd, 0.0), dpsi, deps).dot(erfa.pmat76(jd, 0.0))
+
             for ra, dec in randomDirections(50, 2):
-                r1, d1, _ = equatorialCoordAndRotPrecession(jd, J2000, ra, dec, 0.0)
-                r2, d2 = j2000FromTrueOfDate(jd, ra, dec)
-                self.assertLess(separationArcsec(r1, d1, r2, d2), 0.001)
+
+                ra_t, dec_t = raDec(to_date.dot(unitVector(ra, dec)))
+
+                # J2000 -> true of date
+                self.assertLess(separationArcsec(*trueOfDateFromJ2000(jd, ra, dec), ra_t, dec_t), 1e-5)
+                r1, d1, _ = equatorialCoordAndRotPrecession(J2000, jd, ra, dec, 0.0)
+                self.assertLess(separationArcsec(r1, d1, ra_t, dec_t), 1e-5)
+                r2, d2 = j2000RaDec2TrueOfDate(np.degrees(ra), np.degrees(dec), jd)
+                self.assertLess(separationArcsec(np.radians(r2), np.radians(d2), ra_t, dec_t), 1e-5)
+
+                # True of date -> J2000
+                self.assertLess(separationArcsec(*j2000FromTrueOfDate(jd, ra_t, dec_t), ra, dec), 1e-5)
+                r1, d1, _ = equatorialCoordAndRotPrecession(jd, J2000, ra_t, dec_t, 0.0)
+                self.assertLess(separationArcsec(r1, d1, ra, dec), 1e-5)
+                r2, d2 = trueOfDateRaDec2J2000(np.degrees(ra_t), np.degrees(dec_t), jd)
+                self.assertLess(separationArcsec(np.radians(r2), np.radians(d2), ra, dec), 1e-5)
 
 
     def testNutationIsPresent(self):
