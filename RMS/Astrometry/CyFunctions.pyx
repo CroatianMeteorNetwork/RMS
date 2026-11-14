@@ -1117,12 +1117,66 @@ cdef int radialTermCount(str dist_type):
 #   keeps the direction from the distortion centre and only rescales the radius, which makes its inverse one root
 #   in one variable; the polynomial models and the decentering correction are inverted by Newton's method in the
 #   image plane.
+#
+# Every catalog star of a pointing fit or of the star matching goes through the inverse, so its work per point
+#   is kept to plain arithmetic: the model is unpacked once per call into a C structure, the radial functions
+#   are evaluated by Horner's rule, Newton's method takes the Jacobian of the distortion analytically and
+#   starts with the linear part of the distortion already undone, and the rising branch of a radial model is
+#   kept between calls.
 
-# Not-a-number, for points the forward distortion cannot reach
+# Not-a-number and infinity, for points the forward distortion cannot reach and for the first error of a
+#   search
 cdef double NAN_VALUE = float("nan")
+cdef double INF_VALUE = float("inf")
 
 # Upper end, in radius normalized to half the image width, of the search for the rising branch of a radial model
 cdef double RADIAL_BRANCH_LIMIT = 4.0
+
+# Newton's method in the image plane stops once its step is shorter than this (px). The error it leaves is of
+#   the order of the square of the last step times the curvature of the distortion (below 1e-3 /px even for a
+#   strong lens), so below 1e-13 px
+cdef double NEWTON_STEP_TOL = 1e-5
+
+# The root of a radial model stops once its step is shorter than this, in radius normalized to half the image
+#   width
+cdef double RADIAL_STEP_TOL = 1e-10
+
+
+# A distortion model of cyXYToRADec, unpacked for the exact inverse
+cdef struct ForwardModel:
+
+    # -1 for a radial model; for poly3+radial, the number of its higher radial terms (0, 1 for +radial3, 2 for
+    #   +radial5)
+    int poly_radial
+
+    # The polynomial coefficients in X and Y
+    double cx[14]
+    double cy[14]
+
+    # Distortion centre (px), aspect and asymmetry of a radial model
+    double x0
+    double y0
+    double xy
+    double a1
+    double sin_a2
+    double cos_a2
+
+    # Radial type (radialKind) and coefficients, the ones the type does not have set to zero
+    int kind
+    double k1
+    double k2
+    double k3
+    double k4
+
+    # Decentering of a radial model
+    int decentering
+    double p1
+    double p2
+    double p3
+    double p4
+
+    # Half the image width (px), the unit of the radius of a radial model
+    double half_width
 
 
 cdef int radialKind(str dist_type):
@@ -1144,239 +1198,377 @@ cdef int radialKind(str dist_type):
         return 6
 
 
-cdef (double, double) radialFunction(double r, int kind, double k1, double k2, double k3, double k4):
-    """ The corrected radius f(r) of a radial model, as cyXYToRADec computes it, and its derivative f'(r). """
+@cython.cdivision(True)
+cdef double radialRatio(double r, int kind, double k1, double k2, double k3, double k4, double *dg):
+    """ The ratio f(r)/r of the corrected radius of a radial model, as cyXYToRADec computes it, to the radius,
+        by Horner's rule. The coefficients the type does not have must be zero.
 
-    if kind == 0:
-        return r + k1*r**2 + k2*r**3, 1.0 + 2*k1*r + 3*k2*r**2
-    elif kind == 1:
-        return r + k1*r**2 + k2*r**3 + k3*r**4, 1.0 + 2*k1*r + 3*k2*r**2 + 4*k3*r**3
-    elif kind == 2:
-        return r + k1*r**2 + k2*r**3 + k3*r**4 + k4*r**5, 1.0 + 2*k1*r + 3*k2*r**2 + 4*k3*r**3 + 5*k4*r**4
-    elif kind == 3:
-        return r + k1*r**3, 1.0 + 3*k1*r**2
-    elif kind == 4:
-        return r + k1*r**3 + k2*r**5, 1.0 + 3*k1*r**2 + 5*k2*r**4
-    elif kind == 5:
-        return r + k1*r**3 + k2*r**5 + k3*r**7, 1.0 + 3*k1*r**2 + 5*k2*r**4 + 7*k3*r**6
-    else:
-        return (r + k1*r**3 + k2*r**5 + k3*r**7 + k4*r**9,
-            1.0 + 3*k1*r**2 + 5*k2*r**4 + 7*k3*r**6 + 9*k4*r**8)
+    Arguments:
+        r: [float] Radius, normalized to half the image width.
+        kind: [int] Radial distortion type (radialKind).
+        k1: [float] First radial coefficient.
+        k2: [float] Second radial coefficient.
+        k3: [float] Third radial coefficient.
+        k4: [float] Fourth radial coefficient.
+        dg: [double pointer] The derivative of the ratio in r is written to dg[0].
 
-
-cdef double radialBranchEnd(int kind, double k1, double k2, double k3, double k4):
-    """ Where the rising branch of f, starting at f(0) = 0, ends: the first point where f' falls to zero. Beyond
-        it the model folds back and has no inverse.
+    Return:
+        g: [float] The ratio f(r)/r, 1 at r = 0.
     """
 
-    cdef int i, n = 4000
-    cdef double r, lo, hi, mid, f, df
+    cdef double t
 
+    # Odd powers: f(r) = r + k1*r^3 + k2*r^5 + k3*r^7 + k4*r^9
+    if kind >= 3:
+        t = r*r
+        dg[0] = r*(2*k1 + t*(4*k2 + t*(6*k3 + t*8*k4)))
+        return 1.0 + t*(k1 + t*(k2 + t*(k3 + t*k4)))
+
+    # All powers: f(r) = r + k1*r^2 + k2*r^3 + k3*r^4 + k4*r^5
+    dg[0] = k1 + r*(2*k2 + r*(3*k3 + r*4*k4))
+    return 1.0 + r*(k1 + r*(k2 + r*(k3 + r*k4)))
+
+
+# The rising branch of the last radial model, kept between calls: the pointing fits and the star matching take
+#   the same model to the image many times
+cdef int branch_kind = -1
+cdef double branch_k1 = 0, branch_k2 = 0, branch_k3 = 0, branch_k4 = 0, branch_r_end = 0, branch_f_end = 0
+
+
+@cython.cdivision(True)
+cdef double radialBranchEnd(int kind, double k1, double k2, double k3, double k4, double *f_end):
+    """ Where the rising branch of f, starting at f(0) = 0, ends: the first point where f' falls to zero. Beyond
+        it the model folds back and has no inverse.
+
+    Arguments:
+        kind: [int] Radial distortion type (radialKind).
+        k1: [float] First radial coefficient.
+        k2: [float] Second radial coefficient.
+        k3: [float] Third radial coefficient.
+        k4: [float] Fourth radial coefficient.
+        f_end: [double pointer] The corrected radius at the end of the branch is written to f_end[0].
+
+    Return:
+        r_end: [float] The radius at the end of the branch, normalized to half the image width.
+    """
+
+    global branch_kind, branch_k1, branch_k2, branch_k3, branch_k4, branch_r_end, branch_f_end
+
+    cdef int i, j, n = 4000
+    cdef double r, lo, hi, mid, g, dg
+
+    # The same model as the last call
+    if (kind == branch_kind) and (k1 == branch_k1) and (k2 == branch_k2) and (k3 == branch_k3) \
+        and (k4 == branch_k4):
+
+        f_end[0] = branch_f_end
+        return branch_r_end
+
+    # Scan f' = g + r*g' outward from the centre for its first zero
+    lo = RADIAL_BRANCH_LIMIT
     for i in range(1, n + 1):
         r = RADIAL_BRANCH_LIMIT*i/n
-        f, df = radialFunction(r, kind, k1, k2, k3, k4)
-        if df <= 0:
+        g = radialRatio(r, kind, k1, k2, k3, k4, &dg)
+        if g + r*dg <= 0:
 
             # Refine the turning point by bisection
             lo = RADIAL_BRANCH_LIMIT*(i - 1)/n
             hi = r
-            for _ in range(60):
+            for j in range(60):
                 mid = 0.5*(lo + hi)
-                f, df = radialFunction(mid, kind, k1, k2, k3, k4)
-                if df > 0:
+                g = radialRatio(mid, kind, k1, k2, k3, k4, &dg)
+                if g + mid*dg > 0:
                     lo = mid
                 else:
                     hi = mid
-            return lo
 
-    return RADIAL_BRANCH_LIMIT
+            break
+
+    # Keep the branch for the next call
+    branch_kind = kind
+    branch_k1, branch_k2, branch_k3, branch_k4 = k1, k2, k3, k4
+    branch_r_end = lo
+    branch_f_end = lo*radialRatio(lo, kind, k1, k2, k3, k4, &dg)
+
+    f_end[0] = branch_f_end
+    return branch_r_end
 
 
+@cython.cdivision(True)
 cdef double radialRoot(double target, int kind, double k1, double k2, double k3, double k4, double r_end,
     double f_end):
     """ The radius r >= 0 on the rising branch of f with f(r) = target, by Newton's method kept inside a
-        bisection bracket. NaN if the target lies beyond the branch.
+        bisection bracket.
+
+    Arguments:
+        target: [float] Corrected radius, normalized to half the image width.
+        kind: [int] Radial distortion type (radialKind).
+        k1: [float] First radial coefficient.
+        k2: [float] Second radial coefficient.
+        k3: [float] Third radial coefficient.
+        k4: [float] Fourth radial coefficient.
+        r_end: [float] End of the rising branch (radialBranchEnd).
+        f_end: [float] Corrected radius at the end of the rising branch.
+
+    Return:
+        r: [float] The radius, NaN if the target lies beyond the branch.
     """
 
     cdef int i
-    cdef double lo = 0.0, hi = r_end, r, f, df, g, nxt
+    cdef double lo = 0.0, hi = r_end, r, g, dg, f, df, res, nxt
 
     if (target < 0) or (target > f_end):
         return NAN_VALUE
 
+    # Newton's method from the target itself (the distortion is small next to the radius), falling back to
+    #   bisection whenever its step leaves the bracket
     r = target if target < r_end else r_end
     for i in range(100):
-        f, df = radialFunction(r, kind, k1, k2, k3, k4)
-        g = f - target
-        if g == 0:
+        g = radialRatio(r, kind, k1, k2, k3, k4, &dg)
+        f = r*g
+        df = g + r*dg
+        res = f - target
+        if res == 0:
             return r
-        elif g < 0:
+        elif res < 0:
             lo = r
         else:
             hi = r
 
-        nxt = r - g/df if df > 0 else 0.5*(lo + hi)
+        nxt = r - res/df if df > 0 else 0.5*(lo + hi)
         if not ((nxt > lo) and (nxt < hi)):
             nxt = 0.5*(lo + hi)
 
-        if fabs(nxt - r) <= 1e-15*(1.0 + r):
+        # A step this short leaves an error of the order of its square
+        if fabs(nxt - r) <= RADIAL_STEP_TOL:
             return nxt
+
         r = nxt
 
     return r
 
 
-cdef (double, double) forwardDistortion(double x_img, double y_img, str dist_type, double[:] x_poly,
-    double[:] y_poly, double x0, double y0, double xy, double a1, double a2, double k1, double k2, double k3,
-    double k4, bint decentering_corr, double p1, double p2, double p3, double p4, double x_res):
-    """ The distortion of cyXYToRADec: image coordinates relative to the image centre to corrected ones, both in
-        pixels. Kept identical to the block in cyXYToRADec, which the round-trip tests check.
+@cython.cdivision(True)
+cdef double forwardJacobian(ForwardModel *m, double x_img, double y_img, double *out):
+    """ The distortion of cyXYToRADec, image coordinates relative to the image centre to corrected ones (both
+        in pixels), and its Jacobian. The same expressions as the block in cyXYToRADec, which the round-trip
+        tests check.
+
+    Arguments:
+        m: [ForwardModel pointer] The distortion model.
+        x_img: [float] Image X coordinate relative to the image centre (px).
+        y_img: [float] Image Y coordinate relative to the image centre (px).
+        out: [double pointer] Six values are written to it: the corrected X and Y, and the derivatives
+            dX/dx, dX/dy, dY/dx, dY/dy.
+
+    Return:
+        0: [float] Always zero.
     """
 
-    cdef double r, dx = 0, dy = 0, r_corr, r_scale, u, v, r2, q1, q2
+    cdef double *c
+    cdef double *d
+    cdef double x2, y2, xy2, r, rx, ry, r2, r3, r4, r5, fx, fy, jxx, jxy, jyx, jyy
+    cdef double u, w, rho, rn, drx, dry, g, dg, uu, vv, q1, q2
 
-    if dist_type.startswith("poly3+radial"):
+    # Polynomial with radial terms
+    if m.poly_radial >= 0:
 
-        r = sqrt((x_img - x0)**2 + (y_img - y0)**2)
+        c = m.cx
+        d = m.cy
 
-        dx = (x0
-            + x_poly[1]*x_img
-            + x_poly[2]*y_img
-            + x_poly[3]*x_img**2
-            + x_poly[4]*x_img*y_img
-            + x_poly[5]*y_img**2
-            + x_poly[6]*x_img**3
-            + x_poly[7]*x_img**2*y_img
-            + x_poly[8]*x_img*y_img**2
-            + x_poly[9]*y_img**3
-            + x_poly[10]*x_img*r
-            + x_poly[11]*y_img*r)
-
-        dy = (y0
-            + y_poly[1]*x_img
-            + y_poly[2]*y_img
-            + y_poly[3]*x_img**2
-            + y_poly[4]*x_img*y_img
-            + y_poly[5]*y_img**2
-            + y_poly[6]*x_img**3
-            + y_poly[7]*x_img**2*y_img
-            + y_poly[8]*x_img*y_img**2
-            + y_poly[9]*y_img**3
-            + y_poly[10]*y_img*r
-            + y_poly[11]*x_img*r)
-
-        if dist_type.endswith("+radial3") or dist_type.endswith("+radial5"):
-            dx += x_poly[12]*x_img*r**3
-            dy += y_poly[12]*y_img*r**3
-
-        if dist_type.endswith("+radial5"):
-            dx += x_poly[13]*x_img*r**5
-            dy += y_poly[13]*y_img*r**5
-
-    elif dist_type.startswith("radial"):
-
-        r = sqrt((x_img - x0)**2 + ((1.0 + xy)*(y_img - y0))**2)
-        r = r + a1*(1.0 + xy)*(y_img - y0)*cos(a2) - a1*(x_img - x0)*sin(a2)
-        r = r/(x_res/2.0)
-
-        r_corr, _ = radialFunction(r, radialKind(dist_type), k1, k2, k3, k4)
-
-        if r == 0:
-            r_scale = 0
+        # Radius from the distortion centre and its derivatives (none at the centre itself)
+        r = sqrt((x_img - m.x0)*(x_img - m.x0) + (y_img - m.y0)*(y_img - m.y0))
+        if r > 0:
+            rx = (x_img - m.x0)/r
+            ry = (y_img - m.y0)/r
         else:
-            r_scale = (r_corr/r - 1)
+            rx = 0
+            ry = 0
 
-        dx = (x_img - x0)*r_scale - x0
-        dy = (y_img - y0)*r_scale*(1.0 + xy) - y0*(1.0 + xy) + y_img*xy
+        x2 = x_img*x_img
+        y2 = y_img*y_img
+        xy2 = x_img*y_img
 
-        if decentering_corr:
-            u = (x_img - x0)/(x_res/2.0)
-            v = (y_img - y0)/(x_res/2.0)
-            r2 = u*u + v*v
-            q1 = p1 + p3*r2
-            q2 = p2 + p4*r2
-            dx += (q1*(r2 + 2*u*u) + 2*q2*u*v)*(x_res/2.0)
-            dy += (2*q1*u*v + q2*(r2 + 2*v*v))*(x_res/2.0)
+        # The third order polynomial and the first radial terms, in X and Y
+        fx = (x_img + m.x0 + c[1]*x_img + c[2]*y_img + c[3]*x2 + c[4]*xy2 + c[5]*y2 + c[6]*x2*x_img
+            + c[7]*x2*y_img + c[8]*x_img*y2 + c[9]*y2*y_img + c[10]*x_img*r + c[11]*y_img*r)
+        jxx = (1.0 + c[1] + 2*c[3]*x_img + c[4]*y_img + 3*c[6]*x2 + 2*c[7]*xy2 + c[8]*y2
+            + c[10]*(r + x_img*rx) + c[11]*y_img*rx)
+        jxy = (c[2] + c[4]*x_img + 2*c[5]*y_img + c[7]*x2 + 2*c[8]*xy2 + 3*c[9]*y2 + c[10]*x_img*ry
+            + c[11]*(r + y_img*ry))
 
-    return x_img + dx, y_img + dy
+        fy = (y_img + m.y0 + d[1]*x_img + d[2]*y_img + d[3]*x2 + d[4]*xy2 + d[5]*y2 + d[6]*x2*x_img
+            + d[7]*x2*y_img + d[8]*x_img*y2 + d[9]*y2*y_img + d[10]*y_img*r + d[11]*x_img*r)
+        jyx = (d[1] + 2*d[3]*x_img + d[4]*y_img + 3*d[6]*x2 + 2*d[7]*xy2 + d[8]*y2 + d[10]*y_img*rx
+            + d[11]*(r + x_img*rx))
+        jyy = (1.0 + d[2] + d[4]*x_img + 2*d[5]*y_img + d[7]*x2 + 2*d[8]*xy2 + 3*d[9]*y2
+            + d[10]*(r + y_img*ry) + d[11]*x_img*ry)
+
+        # The third order radial term
+        if m.poly_radial >= 1:
+            r2 = r*r
+            r3 = r2*r
+            fx += c[12]*x_img*r3
+            jxx += c[12]*(r3 + 3*x_img*r2*rx)
+            jxy += 3*c[12]*x_img*r2*ry
+            fy += d[12]*y_img*r3
+            jyx += 3*d[12]*y_img*r2*rx
+            jyy += d[12]*(r3 + 3*y_img*r2*ry)
+
+        # The fifth order radial term
+        if m.poly_radial >= 2:
+            r4 = r2*r2
+            r5 = r4*r
+            fx += c[13]*x_img*r5
+            jxx += c[13]*(r5 + 5*x_img*r4*rx)
+            jxy += 5*c[13]*x_img*r4*ry
+            fy += d[13]*y_img*r5
+            jyx += 5*d[13]*y_img*r4*rx
+            jyy += d[13]*(r5 + 5*y_img*r4*ry)
+
+    # Radial model: the offsets from the distortion centre are scaled by g = f(r)/r of the normalized radius,
+    #   which the asymmetry stretches in one direction
+    else:
+
+        u = x_img - m.x0
+        w = (1.0 + m.xy)*(y_img - m.y0)
+        rho = sqrt(u*u + w*w)
+        rn = (rho + m.a1*(w*m.cos_a2 - u*m.sin_a2))/m.half_width
+
+        # Derivatives of the normalized radius (only the asymmetry part at the centre itself)
+        if rho > 0:
+            drx = (u/rho - m.a1*m.sin_a2)/m.half_width
+            dry = (1.0 + m.xy)*(w/rho + m.a1*m.cos_a2)/m.half_width
+        else:
+            drx = -m.a1*m.sin_a2/m.half_width
+            dry = (1.0 + m.xy)*m.a1*m.cos_a2/m.half_width
+
+        g = radialRatio(rn, m.kind, m.k1, m.k2, m.k3, m.k4, &dg)
+
+        fx = u*g
+        fy = w*g
+        jxx = g + u*dg*drx
+        jxy = u*dg*dry
+        jyx = w*dg*drx
+        jyy = (1.0 + m.xy)*g + w*dg*dry
+
+        # Decentering, in the normalized coordinates of the radial distortion
+        if m.decentering:
+            uu = u/m.half_width
+            vv = (y_img - m.y0)/m.half_width
+            r2 = uu*uu + vv*vv
+            q1 = m.p1 + m.p3*r2
+            q2 = m.p2 + m.p4*r2
+            fx += (q1*(r2 + 2*uu*uu) + 2*q2*uu*vv)*m.half_width
+            fy += (2*q1*uu*vv + q2*(r2 + 2*vv*vv))*m.half_width
+            jxx += 2*m.p3*uu*(r2 + 2*uu*uu) + 6*q1*uu + 4*m.p4*uu*uu*vv + 2*q2*vv
+            jxy += 2*m.p3*vv*(r2 + 2*uu*uu) + 2*q1*vv + 4*m.p4*uu*vv*vv + 2*q2*uu
+            jyx += 4*m.p3*uu*uu*vv + 2*q1*vv + 2*m.p4*uu*(r2 + 2*vv*vv) + 2*q2*uu
+            jyy += 4*m.p3*uu*vv*vv + 2*q1*uu + 2*m.p4*vv*(r2 + 2*vv*vv) + 6*q2*vv
+
+    out[0] = fx
+    out[1] = fy
+    out[2] = jxx
+    out[3] = jxy
+    out[4] = jyx
+    out[5] = jyy
+
+    return 0
 
 
-cdef (double, double) invertDistortionNewton(double x_corr, double y_corr, double x_img, double y_img,
-    str dist_type, double[:] x_poly, double[:] y_poly, double x0, double y0, double xy, double a1, double a2,
-    double k1, double k2, double k3, double k4, bint decentering_corr, double p1, double p2, double p3,
-    double p4, double x_res):
-    """ The image coordinates (relative to the image centre) that forwardDistortion takes to (x_corr, y_corr), by
-        Newton's method from (x_img, y_img), with a central-difference Jacobian and the step halved whenever it
-        would not reduce the error.
+@cython.cdivision(True)
+cdef double invertDistortionNewton(ForwardModel *m, double x_corr, double y_corr, double *img):
+    """ The image coordinates (relative to the image centre) that the forward distortion takes to
+        (x_corr, y_corr), by Newton's method with the analytic Jacobian, the step halved whenever it would not
+        reduce the error.
+
+    Arguments:
+        m: [ForwardModel pointer] The distortion model.
+        x_corr: [float] Corrected X coordinate (px).
+        y_corr: [float] Corrected Y coordinate (px).
+        img: [double pointer] The start, img[0] and img[1]; the image coordinates are written back to it, NaN
+            if the search does not converge or ends beyond a fold of the distortion.
+
+    Return:
+        n_eval: [float] The number of evaluations of the distortion.
     """
 
-    cdef int i, j
-    cdef double h = 1e-4, fx, fy, gx, gy, err, ax, ay, bx, by, cx, cy, ex, ey, j11, j12, j21, j22, det
-    cdef double sx, sy, scale, tx, ty, err_new
+    cdef int n_eval = 0, n_steps = 0, n_halvings = 0
+    cdef double out[6]
+    cdef double x = img[0], y = img[1], x_prev = img[0], y_prev = img[1], sx = 0, sy = 0
+    cdef double gx, gy, err, det, err_prev = INF_VALUE, det_prev = 0
 
-    for i in range(50):
+    while True:
 
-        fx, fy = forwardDistortion(x_img, y_img, dist_type, x_poly, y_poly, x0, y0, xy, a1, a2, k1, k2, k3, k4,
-            decentering_corr, p1, p2, p3, p4, x_res)
-        gx = fx - x_corr
-        gy = fy - y_corr
-        err = sqrt(gx*gx + gy*gy)
-        if err < 1e-10:
-            break
+        forwardJacobian(m, x, y, out)
+        n_eval += 1
+        gx = out[0] - x_corr
+        gy = out[1] - y_corr
+        err = gx*gx + gy*gy
 
-        ax, ay = forwardDistortion(x_img + h, y_img, dist_type, x_poly, y_poly, x0, y0, xy, a1, a2, k1, k2, k3,
-            k4, decentering_corr, p1, p2, p3, p4, x_res)
-        bx, by = forwardDistortion(x_img - h, y_img, dist_type, x_poly, y_poly, x0, y0, xy, a1, a2, k1, k2, k3,
-            k4, decentering_corr, p1, p2, p3, p4, x_res)
-        cx, cy = forwardDistortion(x_img, y_img + h, dist_type, x_poly, y_poly, x0, y0, xy, a1, a2, k1, k2, k3,
-            k4, decentering_corr, p1, p2, p3, p4, x_res)
-        ex, ey = forwardDistortion(x_img, y_img - h, dist_type, x_poly, y_poly, x0, y0, xy, a1, a2, k1, k2, k3,
-            k4, decentering_corr, p1, p2, p3, p4, x_res)
-        j11 = (ax - bx)/(2*h)
-        j21 = (ay - by)/(2*h)
-        j12 = (cx - ex)/(2*h)
-        j22 = (cy - ey)/(2*h)
-        det = j11*j22 - j12*j21
-        if det == 0:
-            return NAN_VALUE, NAN_VALUE
-
-        sx = -(gx*j22 - gy*j12)/det
-        sy = -(gy*j11 - gx*j21)/det
-
-        scale = 1.0
-        for j in range(30):
-            tx = x_img + scale*sx
-            ty = y_img + scale*sy
-            fx, fy = forwardDistortion(tx, ty, dist_type, x_poly, y_poly, x0, y0, xy, a1, a2, k1, k2, k3, k4,
-                decentering_corr, p1, p2, p3, p4, x_res)
-            err_new = sqrt((fx - x_corr)**2 + (fy - y_corr)**2)
-            if err_new < err:
+        # A step that did not reduce the error is halved, from where it started. After 30 halvings the search
+        #   ends at that start
+        if not (err < err_prev):
+            n_halvings += 1
+            if n_halvings > 30:
+                x = x_prev
+                y = y_prev
+                err = err_prev
+                det = det_prev
                 break
-            scale *= 0.5
 
-        if not (err_new < err):
+            sx *= 0.5
+            sy *= 0.5
+            x = x_prev + sx
+            y = y_prev + sy
+            continue
+
+        n_halvings = 0
+        det = out[2]*out[5] - out[3]*out[4]
+
+        # Converged, or out of steps
+        if (err < 1e-20) or (n_steps >= 50):
             break
 
-        x_img = tx
-        y_img = ty
+        if det == 0:
+            img[0] = NAN_VALUE
+            img[1] = NAN_VALUE
+            return n_eval
 
-    if err > 1e-6:
-        return NAN_VALUE, NAN_VALUE
+        # The Newton step
+        sx = -(gx*out[5] - gy*out[3])/det
+        sy = -(gy*out[2] - gx*out[4])/det
+        x_prev = x
+        y_prev = y
+        err_prev = err
+        det_prev = det
+        x += sx
+        y += sy
+        n_steps += 1
+
+        # A step this short leaves an error of the order of its square: done, without evaluating there. The
+        #   Jacobian of its start stands for the one at its end
+        if sx*sx + sy*sy < NEWTON_STEP_TOL*NEWTON_STEP_TOL:
+            err = 0
+            break
+
+    # Not converged (the error is squared)
+    if err > 1e-12:
+        img[0] = NAN_VALUE
+        img[1] = NAN_VALUE
+        return n_eval
 
     # A solution where the distortion reverses the orientation of the image (it does not at the image centre)
     #   lies beyond a fold of the polynomial, on a second sheet that is not the image of the sky: no inverse
-    ax, ay = forwardDistortion(x_img + h, y_img, dist_type, x_poly, y_poly, x0, y0, xy, a1, a2, k1, k2, k3, k4,
-        decentering_corr, p1, p2, p3, p4, x_res)
-    bx, by = forwardDistortion(x_img - h, y_img, dist_type, x_poly, y_poly, x0, y0, xy, a1, a2, k1, k2, k3, k4,
-        decentering_corr, p1, p2, p3, p4, x_res)
-    cx, cy = forwardDistortion(x_img, y_img + h, dist_type, x_poly, y_poly, x0, y0, xy, a1, a2, k1, k2, k3, k4,
-        decentering_corr, p1, p2, p3, p4, x_res)
-    ex, ey = forwardDistortion(x_img, y_img - h, dist_type, x_poly, y_poly, x0, y0, xy, a1, a2, k1, k2, k3, k4,
-        decentering_corr, p1, p2, p3, p4, x_res)
-    if ((ax - bx)*(cy - ey) - (cx - ex)*(ay - by)) <= 0:
-        return NAN_VALUE, NAN_VALUE
+    if det <= 0:
+        img[0] = NAN_VALUE
+        img[1] = NAN_VALUE
+        return n_eval
 
-    return x_img, y_img
+    img[0] = x
+    img[1] = y
+
+    return n_eval
 
 ### ###
 
@@ -1440,9 +1632,12 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
     cdef double pos_angle_ref_in = pos_angle_ref
     cdef double radius, sin_ang, cos_ang, theta, x, y, r, dx, dy, x_img, y_img, r_corr, r_scale
     cdef double x0, y0, xy, a1, a2, k1 = 0, k2 = 0, k3 = 0, k4 = 0, k5 = 0
-    cdef double radius_corr, phi, asym, rho, q, r_end = 0, f_end = 0
-    cdef int kind = 6
+    cdef double radius_corr, cos_phi, sin_phi, asym, rho, q, r_end = 0, f_end = 0
+    cdef double lin_xx = 1, lin_xy = 0, lin_yx = 0, lin_yy = 1, lin_det = 1
+    cdef double img[2]
     cdef bint radial_root = False
+    cdef int j, n_k
+    cdef ForwardModel model
     cdef double p1 = 0, p2 = 0, p3 = 0, p4 = 0, u, v, r2, q1, q2
     cdef int index_offset
 
@@ -1556,16 +1751,56 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
         y0 = y_poly_rev[0]
 
 
-    # The distortion arrays as memory views, for the inverse's per-point calls
-    cdef double[:] x_poly_view = x_poly_rev
-    cdef double[:] y_poly_view = y_poly_rev
+    # The forward distortion unpacked for its inverse
+    if invert_forward:
 
-    # The rising branch of a radial model, for its inverse
-    if invert_forward and dist_type.startswith("radial") and (not decentering_corr):
-        radial_root = True
-        kind = radialKind(dist_type)
-        r_end = radialBranchEnd(kind, k1, k2, k3, k4)
-        f_end, _ = radialFunction(r_end, kind, k1, k2, k3, k4)
+        # The polynomial with its higher radial terms, or a radial model
+        if dist_type.startswith("radial"):
+            model.poly_radial = -1
+        elif dist_type.endswith("+radial5"):
+            model.poly_radial = 2
+        elif dist_type.endswith("+radial3"):
+            model.poly_radial = 1
+        else:
+            model.poly_radial = 0
+
+        for j in range(14):
+            model.cx[j] = x_poly_rev[j] if j < x_poly_rev.shape[0] else 0.0
+            model.cy[j] = y_poly_rev[j] if j < y_poly_rev.shape[0] else 0.0
+
+        # The parameters of a radial model, with zeros for the radial coefficients its type does not have
+        model.x0 = x0
+        model.y0 = y0
+        model.half_width = x_res/2.0
+        model.kind = radialKind(dist_type)
+        model.decentering = decentering_corr
+        if model.poly_radial < 0:
+            n_k = radialTermCount(dist_type)
+            model.xy = xy
+            model.a1 = a1
+            model.sin_a2 = sin(a2)
+            model.cos_a2 = cos(a2)
+            model.k1 = k1
+            model.k2 = k2 if n_k >= 2 else 0.0
+            model.k3 = k3 if n_k >= 3 else 0.0
+            model.k4 = k4 if n_k >= 4 else 0.0
+            model.p1, model.p2, model.p3, model.p4 = p1, p2, p3, p4
+        else:
+            model.xy = model.a1 = model.sin_a2 = model.k1 = model.k2 = model.k3 = model.k4 = 0.0
+            model.cos_a2 = 1.0
+            model.p1 = model.p2 = model.p3 = model.p4 = 0.0
+
+            # The linear part of the polynomial, whose inverse starts Newton's method
+            lin_xx = 1.0 + model.cx[1]
+            lin_xy = model.cx[2]
+            lin_yx = model.cy[1]
+            lin_yy = 1.0 + model.cy[2]
+            lin_det = lin_xx*lin_yy - lin_xy*lin_yx
+
+        # The rising branch of a radial model, for its inverse
+        if (model.poly_radial < 0) and (not decentering_corr):
+            radial_root = True
+            r_end = radialBranchEnd(model.kind, model.k1, model.k2, model.k3, model.k4, &f_end)
 
     # Convert all equatorial coordinates to image coordinates
     for i in range(ra_data.shape[0]):
@@ -1609,24 +1844,41 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
 
             if radial_root:
 
-                # Direction from the distortion centre is kept; only the radius is rescaled
+                # Direction from the distortion centre is kept; only the radius is rescaled. The distortion
+                #   centre itself is its own image
                 radius_corr = sqrt(x*x + y*y)
-                phi = atan2(y, x)
-                asym = 1.0 + a1*sin(phi - a2)
-                rho = radialRoot(radius_corr*asym/(x_res/2.0), kind, k1, k2, k3, k4, r_end, f_end) \
-                    if asym > 0 else NAN_VALUE
-                q = rho*(x_res/2.0)/asym
-                x_img = q*cos(phi) + x0
-                y_img = q*sin(phi)/(1.0 + xy) + y0
+                if radius_corr == 0:
+                    x_img = x0
+                    y_img = y0
+
+                else:
+                    cos_phi = x/radius_corr
+                    sin_phi = y/radius_corr
+                    asym = 1.0 + model.a1*(sin_phi*model.cos_a2 - cos_phi*model.sin_a2)
+                    rho = radialRoot(radius_corr*asym/model.half_width, model.kind, model.k1, model.k2,
+                        model.k3, model.k4, r_end, f_end) if asym > 0 else NAN_VALUE
+                    q = rho*model.half_width/asym
+                    x_img = q*cos_phi + x0
+                    y_img = q*sin_phi/(1.0 + xy) + y0
 
             else:
 
-                # Polynomial models and decentering: Newton's method in the image plane, from the undistorted
-                #   position
-                x_img, y_img = invertDistortionNewton(x, y, x, y, dist_type, x_poly_view, y_poly_view, x0, y0,
-                    xy if dist_type.startswith("radial") else 0.0, a1 if dist_type.startswith("radial") else 0.0,
-                    a2 if dist_type.startswith("radial") else 0.0, k1, k2, k3, k4, decentering_corr, p1, p2, p3, p4,
-                    x_res)
+                # Polynomial models and decentering: Newton's method in the image plane, from the corrected
+                #   position with the linear part of the distortion undone (for a radial model, its centre and
+                #   aspect)
+                if model.poly_radial < 0:
+                    img[0] = x + x0
+                    img[1] = y/(1.0 + xy) + y0
+                elif lin_det > 0:
+                    img[0] = (lin_yy*(x - x0) - lin_xy*(y - y0))/lin_det
+                    img[1] = (lin_xx*(y - y0) - lin_yx*(x - x0))/lin_det
+                else:
+                    img[0] = x
+                    img[1] = y
+
+                invertDistortionNewton(&model, x, y, img)
+                x_img = img[0]
+                y_img = img[1]
 
             x_array[i] = x_img + x_res/2.0
             y_array[i] = y_img + y_res/2.0
