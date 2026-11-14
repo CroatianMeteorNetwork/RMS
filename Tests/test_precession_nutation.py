@@ -347,6 +347,37 @@ class TestPrecessionNutation(unittest.TestCase):
             self.assertLess(np.hypot(x[0] - x[1], y[0] - y[1]), 1e-4)
 
 
+    def testDatePerPointEqualsOneCallPerPoint(self):
+        """ raDecToXYPP with a Julian date per point gives the same pixels as one call per point at its own
+            date, with the refraction on: the pointing and the refraction of every point are both computed at
+            the date of that point. """
+
+        pp = Platepar()
+        pp.read(TEMPLATE)
+        pp.lat, pp.lon = 43.2, -81.3
+        pp.refraction = True
+
+        # A low pointing, so the refraction changes a lot across the field and through the night
+        pp.az_centre, pp.alt_centre = 120.0, 20.0
+        pp.updateRefRADec(skip_rot_update=True)
+
+        # Sky directions of a pixel grid, every point at its own date over 4 hours
+        xs, ys = np.meshgrid(np.linspace(50, pp.X_res - 50, 7), np.linspace(50, pp.Y_res - 50, 5))
+        X, Y = xs.ravel(), ys.ravel()
+        jds = pp.JD + np.linspace(0, 4/24, len(X))
+        _, ra, dec, _ = xyToRaDecPP(jds, X, Y, np.ones(len(X)), pp, extinction_correction=False, jd_time=True)
+
+        # All points in one call, and one call per point
+        x_arr, y_arr = raDecToXYPP(ra, dec, jds, pp)
+        x_one = np.zeros_like(x_arr)
+        y_one = np.zeros_like(y_arr)
+        for i in range(len(X)):
+            x_i, y_i = raDecToXYPP(ra[i:i + 1], dec[i:i + 1], jds[i], pp)
+            x_one[i], y_one[i] = x_i[0], y_i[0]
+
+        self.assertLess(np.max(np.hypot(x_arr - x_one, y_arr - y_one)), 1e-6)
+
+
 # ---- A distortion-free synthetic camera, fixed in alt/az, checked at off-centre pixels ----------------------------
 
 SITE = (32.2, -110.9, 700.0)       # lat, lon (deg), elevation (m)

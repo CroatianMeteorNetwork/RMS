@@ -57,11 +57,34 @@ def broadcastVect(cy_vect):
     """ Vectorize a CyFunctions array conversion taking (two coordinates, jd, lat, lon), broadcasting the
         arguments against each other as np.vectorize does. The Cython loop evaluates the sidereal time once
         per time instead of once per point.
+
+    Arguments:
+        cy_vect: [function] CyFunctions conversion of 1D arrays of the same length (e.g.
+            cyraDec2AltAz_vect), returning two arrays.
+
+    Return:
+        vect: [function] The conversion for scalars or arrays of any shape that broadcast together.
     """
 
     def vect(a, b, jd, lat, lon):
+        """ Convert the broadcast arguments with cy_vect.
+
+        Arguments:
+            a: [float or ndarray] First coordinate (radians).
+            b: [float or ndarray] Second coordinate (radians).
+            jd: [float or ndarray] Julian date.
+            lat: [float or ndarray] Latitude of the observer (radians).
+            lon: [float or ndarray] Longitude of the observer (radians).
+
+        Return:
+            (out_a, out_b): [tuple of ndarrays] The two converted coordinates, in the broadcast shape.
+        """
+
+        # Broadcast all arguments to one shape and give the Cython loop flat contiguous arrays
         args = np.broadcast_arrays(*[np.asarray(v, dtype=np.float64) for v in (a, b, jd, lat, lon)])
         out_a, out_b = cy_vect(*[np.ascontiguousarray(v).ravel() for v in args])
+
+        # Back to the broadcast shape
         return out_a.reshape(args[0].shape), out_b.reshape(args[0].shape)
 
     return vect

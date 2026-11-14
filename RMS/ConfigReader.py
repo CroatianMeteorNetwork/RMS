@@ -38,6 +38,11 @@ else:
 log = logging.getLogger(__name__)
 
 
+# Distortion types of a platepar (see Platepar.setDistortionType), the options of platepar_distortion_type
+PLATEPAR_DISTORTION_TYPES = ("poly3+radial", "poly3+radial3", "poly3+radial5", "radial3-all", "radial4-all",
+                             "radial5-all", "radial3-odd", "radial5-odd", "radial7-odd", "radial9-odd")
+
+
 # Used to determine if ML filtering is available
 TFLITE_AVAILABLE = False
 
@@ -269,6 +274,15 @@ class Config:
         self.fov_w = 64.0
         self.fov_h = 35.0
         self.deinterlace_order = -2
+
+        # Rolling shutter (deinterlace_order -1): the measured time in which the sensor reads all its rows (s), 0
+        #   for no correction (see RMS.Routines.RollingShutterCorrection)
+        self.rolling_shutter_readout = 0.0
+
+        # Correction of the timestamps of the frames (s), added when the frames of a recording are read for
+        #   processing (true time = timestamp + correction), see .config
+        self.frame_time_offset = 0.0
+
         self.mask_file = "mask.bmp"
 
         self.data_dir = "~/RMS_data"
@@ -596,10 +610,45 @@ class Config:
         self.platepar_remote_name = 'platepar_latest.cal'
         self.remote_platepar_dir = 'platepars'
 
+        # Model of a platepar fitted from scratch by AutoPlatepar, of a new platepar in SkyFit2 and of its default
+        #   settings: the distortion type and the flags of the radial distortion types
+        self.platepar_distortion_type = 'radial7-odd'
+        self.platepar_equal_aspect = True
+        self.platepar_asymmetry_corr = True
+        self.platepar_decentering_corr = False
+        self.platepar_force_distortion_centre = False
+
         # Download remote mask
         self.mask_download_permissive = True
         self.mask_remote_name = 'mask_latest.bmp'
         self.remote_mask_dir = 'masks'
+
+        # Automatic calibration (see RMS.Astrometry.AutoCalibration): fit and install a platepar from the stars,
+        #   minutes between the checks whether a clearly better platepar can be fitted, fit the vignetting also when
+        #   a platepar exists, and only save the fitted platepars as candidates without installing them. The
+        #   default config file turns it on; a config file without the option keeps it off
+        self.auto_calibration = False
+        self.auto_calibration_interval = 30.0
+        self.auto_calibration_fit_vignetting = False
+        self.auto_calibration_dry_run = False
+
+        # Largest scatter of the photometric fits of the chunks (mag) and largest median photometric residual of a
+        #   zone of the image (mag) for a good platepar
+        self.auto_calibration_max_mag_stddev = 0.25
+        self.auto_calibration_max_zone_mag_residual = 0.3
+
+        # Automatic calibration of a classic camera without a platepar during the night: minutes after the first
+        #   platepar before it is checked on new stars and refitted, minutes before the next attempt after a failed
+        #   one, attempts per night, and workers of the joint fit at the end of the night
+        self.auto_calibration_check_min = 30.0
+        self.auto_calibration_retry_min = 10.0
+        self.auto_calibration_max_fits = 5
+        self.auto_calibration_nproc = 2
+
+        # Periodic refit of the lens distortion on the recent nights: days between the refits (0 turns them off)
+        #   and the number of nights
+        self.auto_calibration_refit_days = 7.0
+        self.auto_calibration_refit_nights = 14
 
 
         self.catalog_mag_limit = 5.5
@@ -623,6 +672,10 @@ class Config:
         #   must match to be accepted (guards against sparse spurious fits
         #   chaining forward on cloudy nights)
         self.recalibration_min_match_fraction = 0.6
+
+        # Refine the pointing of every per-FF recalibration by least squares on the matched stars (the search
+        #   alone stops within its tolerance, about dist_check_threshold)
+        self.recalibration_lsq_refine = True
 
         ##### Thumbnails
         self.thumb_bin = 4
@@ -1191,6 +1244,12 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "deinterlace_order"):
         config.deinterlace_order = parser.getint(section, "deinterlace_order")
+
+    if parser.has_option(section, "rolling_shutter_readout"):
+        config.rolling_shutter_readout = parser.getfloat(section, "rolling_shutter_readout")
+
+    if parser.has_option(section, "frame_time_offset"):
+        config.frame_time_offset = parser.getfloat(section, "frame_time_offset")
 
     if parser.has_option(section, "mask"):
         config.mask_file = os.path.basename(parser.get(section, "mask"))
@@ -1761,6 +1820,28 @@ def parseCalibration(config, parser):
     if parser.has_option(section, "remote_platepar_dir"):
         config.remote_platepar_dir = parser.get(section, "remote_platepar_dir")
 
+    # The model of a platepar fitted from scratch. An unknown distortion type keeps the default, as every fit would
+    #   fail with it
+    if parser.has_option(section, "platepar_distortion_type"):
+        distortion_type = parser.get(section, "platepar_distortion_type").strip()
+        if distortion_type in PLATEPAR_DISTORTION_TYPES:
+            config.platepar_distortion_type = distortion_type
+        else:
+            log.warning("Unknown platepar_distortion_type '{:s}', using {:s}. Options: {:s}".format(
+                distortion_type, config.platepar_distortion_type, ", ".join(PLATEPAR_DISTORTION_TYPES)))
+
+    if parser.has_option(section, "platepar_equal_aspect"):
+        config.platepar_equal_aspect = parser.getboolean(section, "platepar_equal_aspect")
+
+    if parser.has_option(section, "platepar_asymmetry_corr"):
+        config.platepar_asymmetry_corr = parser.getboolean(section, "platepar_asymmetry_corr")
+
+    if parser.has_option(section, "platepar_decentering_corr"):
+        config.platepar_decentering_corr = parser.getboolean(section, "platepar_decentering_corr")
+
+    if parser.has_option(section, "platepar_force_distortion_centre"):
+        config.platepar_force_distortion_centre = parser.getboolean(section, "platepar_force_distortion_centre")
+
     if parser.has_option(section, "catalog_mag_limit"):
         config.catalog_mag_limit = parser.getfloat(section, "catalog_mag_limit")
 
@@ -1786,6 +1867,9 @@ def parseCalibration(config, parser):
         config.recalibration_min_match_fraction = parser.getfloat(
             section, "recalibration_min_match_fraction")
 
+    if parser.has_option(section, "recalibration_lsq_refine"):
+        config.recalibration_lsq_refine = parser.getboolean(section, "recalibration_lsq_refine")
+
     if parser.has_option(section, "mask_download_permissive"):
         config.mask_download_permissive = parser.getboolean(section, "mask_download_permissive")
 
@@ -1794,6 +1878,44 @@ def parseCalibration(config, parser):
 
     if parser.has_option(section, "remote_mask_dir"):
         config.remote_mask_dir = parser.get(section, "remote_mask_dir")
+
+    # Automatic calibration
+    if parser.has_option(section, "auto_calibration"):
+        config.auto_calibration = parser.getboolean(section, "auto_calibration")
+
+    if parser.has_option(section, "auto_calibration_interval"):
+        config.auto_calibration_interval = parser.getfloat(section, "auto_calibration_interval")
+
+    if parser.has_option(section, "auto_calibration_fit_vignetting"):
+        config.auto_calibration_fit_vignetting = parser.getboolean(section, "auto_calibration_fit_vignetting")
+
+    if parser.has_option(section, "auto_calibration_dry_run"):
+        config.auto_calibration_dry_run = parser.getboolean(section, "auto_calibration_dry_run")
+
+    if parser.has_option(section, "auto_calibration_max_mag_stddev"):
+        config.auto_calibration_max_mag_stddev = parser.getfloat(section, "auto_calibration_max_mag_stddev")
+
+    if parser.has_option(section, "auto_calibration_max_zone_mag_residual"):
+        config.auto_calibration_max_zone_mag_residual = parser.getfloat(section,
+                                                                        "auto_calibration_max_zone_mag_residual")
+
+    if parser.has_option(section, "auto_calibration_check_min"):
+        config.auto_calibration_check_min = parser.getfloat(section, "auto_calibration_check_min")
+
+    if parser.has_option(section, "auto_calibration_retry_min"):
+        config.auto_calibration_retry_min = parser.getfloat(section, "auto_calibration_retry_min")
+
+    if parser.has_option(section, "auto_calibration_max_fits"):
+        config.auto_calibration_max_fits = parser.getint(section, "auto_calibration_max_fits")
+
+    if parser.has_option(section, "auto_calibration_nproc"):
+        config.auto_calibration_nproc = parser.getint(section, "auto_calibration_nproc")
+
+    if parser.has_option(section, "auto_calibration_refit_days"):
+        config.auto_calibration_refit_days = parser.getfloat(section, "auto_calibration_refit_days")
+
+    if parser.has_option(section, "auto_calibration_refit_nights"):
+        config.auto_calibration_refit_nights = parser.getint(section, "auto_calibration_refit_nights")
 
 
 

@@ -15,7 +15,7 @@ requirements:
     - scipy
     - matplotlib
     - paramiko
-    - pyephem
+    - ephem >=4.2
     - astropy
     - opencv
     - setuptools
@@ -27,7 +27,7 @@ requirements:
     - scipy
     - matplotlib
     - paramiko
-    - pyephem
+    - ephem >=4.2
     - astropy
     - opencv
 
