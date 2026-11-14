@@ -12,7 +12,8 @@ from RMS.Astrometry.CyFunctions import (equatorialCoordAndRotPrecession, equator
     trueOfDateFromJ2000, j2000FromTrueOfDate, cyTrueRaDec2ApparentAltAz, pointingCorrection, cyjd2GST,
     cyaltAz2RADec, pyRefractionTrueToApparent, pyRefractionApparentToTrue, eqRefractionTrueToApparent,
     eqRefractionApparentToTrue)
-from RMS.Astrometry.Conversions import date2JD, jd2Date, JD2HourAngle, JD2LST
+from RMS.Astrometry.Conversions import date2JD, jd2Date, JD2HourAngle, JD2LST, trueOfDateRaDec2J2000, \
+    j2000RaDec2TrueOfDate
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP, applyPlateparToCentroids, \
     applyPlateparToRaDecCentroids
 from RMS.Formats.Platepar import Platepar
@@ -95,14 +96,46 @@ class TestPrecessionNutation(unittest.TestCase):
                 self.assertLess(separationArcsec(ra, dec, r3, d3), 0.01)
 
 
-    def testKernelAndConvertersAgree(self):
-        """ The kernel transform and the scalar converters implement the same frame. """
+    @unittest.skipIf(erfa is None, "pyerfa not installed")
+    def testKernelAndConvertersAgainstTheSameModel(self):
+        """ The kernel transform and the converters (scalar and in degrees) implement the model they claim:
+            IAU 1976 precession followed by the nutation of the 4-term series, rotated about the IAU 1980 mean
+            obliquity. The reference is built independently from erfa's matrices of the same model, so it
+            checks the composition of the rotations to rounding, not only to the 0.5 arcsec of the series. """
 
-        for jd in DATES:
+        for jd in DATES + [date2JD(1990, 1, 1, 0, 0, 0), date2JD(2050, 1, 1, 0, 0, 0)]:
+
+            # The 4-term nutation series (Meeus, Astronomical Algorithms, ch. 22)
+            T = (jd - J2000)/36525.0
+            omega = np.radians(125.04452 - 1934.136261*T)
+            sun_lon = np.radians(280.4665 + 36000.7698*T)
+            moon_lon = np.radians(218.3165 + 481267.8813*T)
+            dpsi = np.radians((-17.2*np.sin(omega) - 1.32*np.sin(2*sun_lon) - 0.23*np.sin(2*moon_lon)
+                + 0.21*np.sin(2*omega))/3600)
+            deps = np.radians((9.2*np.cos(omega) + 0.57*np.cos(2*sun_lon) + 0.1*np.cos(2*moon_lon)
+                - 0.09*np.cos(2*omega))/3600)
+
+            # J2000 -> true of date: erfa's IAU 1976 precession matrix, then its nutation matrix built from
+            #   the series above and the IAU 1980 mean obliquity
+            to_date = erfa.numat(erfa.obl80(jd, 0.0), dpsi, deps).dot(erfa.pmat76(jd, 0.0))
+
             for ra, dec in randomDirections(50, 2):
-                r1, d1, _ = equatorialCoordAndRotPrecession(jd, J2000, ra, dec, 0.0)
-                r2, d2 = j2000FromTrueOfDate(jd, ra, dec)
-                self.assertLess(separationArcsec(r1, d1, r2, d2), 0.001)
+
+                ra_t, dec_t = raDec(to_date.dot(unitVector(ra, dec)))
+
+                # J2000 -> true of date
+                self.assertLess(separationArcsec(*trueOfDateFromJ2000(jd, ra, dec), ra_t, dec_t), 1e-5)
+                r1, d1, _ = equatorialCoordAndRotPrecession(J2000, jd, ra, dec, 0.0)
+                self.assertLess(separationArcsec(r1, d1, ra_t, dec_t), 1e-5)
+                r2, d2 = j2000RaDec2TrueOfDate(np.degrees(ra), np.degrees(dec), jd)
+                self.assertLess(separationArcsec(np.radians(r2), np.radians(d2), ra_t, dec_t), 1e-5)
+
+                # True of date -> J2000
+                self.assertLess(separationArcsec(*j2000FromTrueOfDate(jd, ra_t, dec_t), ra, dec), 1e-5)
+                r1, d1, _ = equatorialCoordAndRotPrecession(jd, J2000, ra_t, dec_t, 0.0)
+                self.assertLess(separationArcsec(r1, d1, ra, dec), 1e-5)
+                r2, d2 = trueOfDateRaDec2J2000(np.degrees(ra_t), np.degrees(dec_t), jd)
+                self.assertLess(separationArcsec(np.radians(r2), np.radians(d2), ra, dec), 1e-5)
 
 
     def testNutationIsPresent(self):
@@ -345,6 +378,37 @@ class TestPrecessionNutation(unittest.TestCase):
             self.assertTrue(np.all(np.isfinite(x)) and np.all(np.isfinite(y)), "refraction={}".format(refraction))
             # Within ~1e-9 rad of the centre the direction angle is poorly conditioned, at the micropixel level
             self.assertLess(np.hypot(x[0] - x[1], y[0] - y[1]), 1e-4)
+
+
+    def testDatePerPointEqualsOneCallPerPoint(self):
+        """ raDecToXYPP with a Julian date per point gives the same pixels as one call per point at its own
+            date, with the refraction on: the pointing and the refraction of every point are both computed at
+            the date of that point. """
+
+        pp = Platepar()
+        pp.read(TEMPLATE)
+        pp.lat, pp.lon = 43.2, -81.3
+        pp.refraction = True
+
+        # A low pointing, so the refraction changes a lot across the field and through the night
+        pp.az_centre, pp.alt_centre = 120.0, 20.0
+        pp.updateRefRADec(skip_rot_update=True)
+
+        # Sky directions of a pixel grid, every point at its own date over 4 hours
+        xs, ys = np.meshgrid(np.linspace(50, pp.X_res - 50, 7), np.linspace(50, pp.Y_res - 50, 5))
+        X, Y = xs.ravel(), ys.ravel()
+        jds = pp.JD + np.linspace(0, 4/24, len(X))
+        _, ra, dec, _ = xyToRaDecPP(jds, X, Y, np.ones(len(X)), pp, extinction_correction=False, jd_time=True)
+
+        # All points in one call, and one call per point
+        x_arr, y_arr = raDecToXYPP(ra, dec, jds, pp)
+        x_one = np.zeros_like(x_arr)
+        y_one = np.zeros_like(y_arr)
+        for i in range(len(X)):
+            x_i, y_i = raDecToXYPP(ra[i:i + 1], dec[i:i + 1], jds[i], pp)
+            x_one[i], y_one[i] = x_i[0], y_i[0]
+
+        self.assertLess(np.max(np.hypot(x_arr - x_one, y_arr - y_one)), 1e-6)
 
 
 # ---- A distortion-free synthetic camera, fixed in alt/az, checked at off-centre pixels ----------------------------

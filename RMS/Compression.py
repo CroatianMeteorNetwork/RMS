@@ -45,6 +45,73 @@ from RMS.CompressionCy import compressFrames
 log = getLogger("rmslogger")
 
 
+def blockToCompress(start_time1, start_time2, exit_time=None):
+    """ Choose the frame buffer to compress next.
+
+    Arguments:
+        start_time1: [float] Start time of the block in the first buffer: > 0 when the block is ready, 0 while
+            the buffer is being filled, -1 while it is being compressed.
+        start_time2: [float] Same for the second buffer.
+
+    Keyword arguments:
+        exit_time: [float] Time of the stop request, None (by default) if the compression is not stopping. When
+            stopping, only the blocks which started before the request are compressed, the oldest first.
+
+    Return:
+        [int] 1 or 2 for the buffer to compress, None if no block is to be compressed.
+    """
+
+    # Normal operation: take whichever block is ready
+    if exit_time is None:
+
+        if start_time1 > 0:
+            return 1
+
+        if start_time2 > 0:
+            return 2
+
+        return None
+
+    # Stopping: only the blocks captured before the stop request belong to this compressor, a newer one is
+    #   left for the compressor which takes over
+    candidates = [(start_time, buffer_index) for buffer_index, start_time
+        in ((1, start_time1), (2, start_time2)) if 0 < start_time < exit_time]
+
+    if not candidates:
+        return None
+
+    return min(candidates)[1]
+
+
+def stopAction(start_time1, start_time2, exit_time):
+    """ Decide what the compression does after it was asked to stop.
+
+    The capture may keep running (e.g. when the next night is started right away), so the buffers are not
+    expected to both become empty: a block which started before the stop request is compressed, and the
+    compression exits as soon as nothing older than the request is waiting.
+
+    Arguments:
+        start_time1: [float] Start time of the block in the first buffer (see blockToCompress).
+        start_time2: [float] Same for the second buffer.
+        exit_time: [float] Time of the stop request.
+
+    Return:
+        [str] 'compress' to compress a waiting block first, 'exit' if nothing is left to compress, 'wait' if
+            a block is still being compressed.
+    """
+
+    # A block from before the stop request is still waiting
+    if blockToCompress(start_time1, start_time2, exit_time=exit_time) is not None:
+        return 'compress'
+
+    # Nothing is waiting (buffers being filled), or only newer blocks which the next compressor takes
+    if (start_time1 >= 0) and (start_time2 >= 0):
+        return 'exit'
+
+    return 'wait'
+
+
+
 class Compressor(multiprocessing.Process):
     """Compress list of numpy arrays (video frames).
 
@@ -91,6 +158,10 @@ class Compressor(multiprocessing.Process):
         # Lock-free flags: these are set/polled across processes and must never be able to
         # deadlock, even if a process sharing them is killed (see AtomicFlag)
         self.exit = AtomicFlag()
+
+        # Time of the stop request, set before the exit flag. The blocks which started before it are still
+        #   compressed by this compressor, the newer ones are left to the next one
+        self.exit_time = multiprocessing.Value('d', 0.0, lock=False)
 
         # Lock-free flag: an mp.Event deadlocks if a process sharing it is OOM-killed while
         # holding its internal semaphore (see AtomicFlag). Only .set()/.is_set() are used here.
@@ -203,8 +274,9 @@ class Compressor(multiprocessing.Process):
     def stop(self):
         """ Stop compression.
         """
-        
 
+        # Remember when the stop was requested, then ask the compression to stop
+        self.exit_time.value = time.time()
         self.exit.set()
         log.debug('Compression exit flag set')
 
@@ -300,21 +372,32 @@ class Compressor(multiprocessing.Process):
         
         # Repeat until the compressor is killed from the outside
         while True:
-            # graceful-exit check
-            if self.exit.is_set():
-                if self.start_time1.value == 0 and self.start_time2.value == 0:
-                    break
+
+            # Graceful exit: the blocks captured before the stop request are compressed first, then the loop
+            #   exits without waiting for the capture to stop (it may go on into the next night)
+            stopping = self.exit.is_set()
+            if stopping:
+
                 # Start timeout counter on first exit request
                 if exit_wait_start is None:
                     exit_wait_start = time.time()
-                    log.info("Waiting for compression to finish before exit...")
+                    log.info("Finishing the compression before exit...")
+
                 # Force exit after 30 seconds
                 elif time.time() - exit_wait_start > 30:
                     log.warning("Forced exit after 30s timeout - frames may be lost")
                     break
-                # Sleep briefly to avoid busy-waiting
-                time.sleep(0.1)
-                continue
+
+                action = stopAction(stableDoubleRead(self.start_time1), stableDoubleRead(self.start_time2),
+                    stableDoubleRead(self.exit_time))
+
+                if action == 'exit':
+                    break
+
+                # Sleep briefly to avoid busy-waiting while a block is still being compressed
+                if action == 'wait':
+                    time.sleep(0.1)
+                    continue
 
             # Block until frames are available
             while (self.start_time1.value == 0) and (self.start_time2.value == 0):
@@ -342,7 +425,11 @@ class Compressor(multiprocessing.Process):
             start_time1_val = stableDoubleRead(self.start_time1)
             start_time2_val = stableDoubleRead(self.start_time2)
 
-            if start_time1_val > 0:
+            # Pick the block to compress, when stopping only one which started before the stop request
+            buffer_index = blockToCompress(start_time1_val, start_time2_val,
+                exit_time=(stableDoubleRead(self.exit_time) if stopping else None))
+
+            if buffer_index == 1:
 
                 # Retrieve time of first frame
                 startTime = float(start_time1_val)
@@ -354,7 +441,7 @@ class Compressor(multiprocessing.Process):
                 self.start_time1.value = -1
                 buffer_one = True
 
-            elif start_time2_val > 0:
+            elif buffer_index == 2:
 
                 # Retrieve time of first frame
                 startTime = float(start_time2_val)

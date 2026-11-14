@@ -182,7 +182,7 @@ def test_ground_reference_direction_against_erfa():
 
 
 def test_ground_projection_is_consistent_at_any_time():
-    """ geoHt2XY() used to evaluate the plate at J2000 so that of-date coordinates could pass as J2000. Now
+    """ geoHt2XY() used to evaluate the plate at J2000 so that of-date coordinates were taken as J2000. Now
         geoHt2RaDec() returns J2000 and the plate is evaluated at the same time, so the pixel is the same
         whichever time is used, and the direction repeats after one sidereal day. """
 

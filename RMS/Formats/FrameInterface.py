@@ -197,6 +197,42 @@ class InputType(object):
     def currentFrameTime(self, frame_no=None, dt_obj=False):
         pass
 
+    def frameTimeOffset(self):
+        """ The correction added to the timestamps of the frames when they are read (s), frame_time_offset of the
+            config, 0 without a config. It is applied where an input gets its times (the time of its beginning, or
+            the timestamps of its frames), so the names of the frames and the times of everything measured on
+            them follow.
+
+        Return:
+            [float] The correction (s).
+        """
+
+        return float(getattr(getattr(self, 'config', None), 'frame_time_offset', 0.0))
+
+    def offsetDatetime(self, dt):
+        """ A time of the input (datetime) corrected by frame_time_offset, None stays None. """
+
+        if (dt is None) or (self.frameTimeOffset() == 0):
+            return dt
+
+        return dt + datetime.timedelta(seconds=self.frameTimeOffset())
+
+    def offsetUnixTime(self, ts, tu):
+        """ A time of the input as Unix seconds and microseconds, corrected by frame_time_offset (in integer
+            microseconds, so the times stay exact).
+
+        Arguments:
+            ts: [int] Unix time, seconds.
+            tu: [int] Microseconds.
+
+        Return:
+            (ts, tu): [tuple of int] The corrected time.
+        """
+
+        total = int(ts)*1000000 + int(tu) + int(round(self.frameTimeOffset()*1e6))
+
+        return total//1000000, total%1000000
+
     def getTargetDtype(self, first_frame_data=None):
         """ Determine the target dtype based on the target bit depth of the input images and the 
             processing configuration.
@@ -244,6 +280,13 @@ class InputTypeFRFF(InputType):
 
         self.dir_path = dir_path
         self.config = config
+
+        # The time of an FF file is its name, which the results of its detections refer to (e.g. the FTPdetectinfo
+        #   files), so it can't be corrected when the file is read: the timestamps of FF files are corrected when
+        #   they are recorded (camera_latency)
+        if self.frameTimeOffset() != 0:
+            log.warning('frame_time_offset ({:.4f} s) is not applied to FF files, whose times are their names: '
+                        'use camera_latency in the capture'.format(self.frameTimeOffset()))
 
         self.use_fr_files = use_fr_files
 
@@ -865,6 +908,9 @@ class InputTypeVideo(InputType):
         else:
             self.beginning_datetime = beginning_time
 
+        # The timestamps of the frames corrected by frame_time_offset (the frames are timed from the beginning)
+        self.beginning_datetime = self.offsetDatetime(self.beginning_datetime)
+
         self.detection = detection
 
         print('Using video file:', self.file_path)
@@ -1170,6 +1216,20 @@ class InputTypeVideo(InputType):
 
 
 class InputTypeUWOVid(InputType):
+    def readNextFrame(self):
+        """ Read the next frame of the vid file into self.vid, with its timestamp corrected by frame_time_offset
+            (every time of the input comes from the timestamps of its frames).
+
+        Return:
+            [ndarray] The frame, as from Vid.readFrame.
+        """
+
+        frame = readVidFrame(self.vid, self.vid_file)
+        self.vid.ts, self.vid.tu = self.offsetUnixTime(self.vid.ts, self.vid.tu)
+
+        return frame
+
+
     def __init__(self, file_path, config, detection=False, chunk_frames=128, flipud=False):
         """ Input file type handle for UWO .vid files.
         
@@ -1215,7 +1275,7 @@ class InputTypeUWOVid(InputType):
         self.vid_file = open(self.vid_path, 'rb', buffering=65536)
 
         # Read one video frame and rewind to beginning
-        readVidFrame(self.vid, self.vid_file)
+        self.readNextFrame()
         self.vidinfo = copy.deepcopy(self.vid)
         self.vid_file.seek(0)
 
@@ -1324,7 +1384,7 @@ class InputTypeUWOVid(InputType):
         for i in range(frames_to_read):
 
             try:
-                frame = readVidFrame(self.vid, self.vid_file)
+                frame = self.readNextFrame()
             except:
                 frame = None
 
@@ -1424,7 +1484,7 @@ class InputTypeUWOVid(InputType):
         self.vid_file.seek(self.current_frame*self.vidinfo.seqlen)
 
         # Load a frame
-        frame = readVidFrame(self.vid, self.vid_file)
+        frame = self.readNextFrame()
 
         # Bin the frame
         if self.detection and (self.config.detection_binning_factor > 1):
@@ -1479,7 +1539,7 @@ class InputTypeUWOVid(InputType):
                 self.vid_file.seek(frame_no*self.vidinfo.seqlen)
 
                 # Read the vid file metadata
-                readVidFrame(self.vid, self.vid_file)
+                self.readNextFrame()
 
                 # Store the current time to the dictionary
                 unix_time_lst = (self.vid.ts, self.vid.tu)
@@ -1608,6 +1668,9 @@ class InputTypeImages(InputType):
 
 
 
+        # Whether the time of the beginning is the time of the first frame from its header (see below)
+        beginning_from_frames = False
+
         ### Try to detect if the given images are UWO-style PNGs ###
 
         self.uwo_png_mode = False
@@ -1625,6 +1688,7 @@ class InputTypeImages(InputType):
             # Get the beginning time
             self.loadFrame(fr_no=0)
             beginning_time = self.dt_frame_time
+            beginning_from_frames = True
 
             print('UWO PNG mode')
 
@@ -1672,6 +1736,7 @@ class InputTypeImages(InputType):
 
             # Set the begin time if in the FRIPON mode
             beginning_time = self.dt_frame_time
+            beginning_from_frames = True
 
             # Load info for CABERNET
             if self.cabernet_status:
@@ -1757,6 +1822,11 @@ class InputTypeImages(InputType):
 
         else:
             self.beginning_datetime = beginning_time
+
+        # The time of the beginning corrected by frame_time_offset, unless it is the time of the first frame read
+        #   from its header, which was corrected when the frame was read
+        if not beginning_from_frames:
+            self.beginning_datetime = self.offsetDatetime(self.beginning_datetime)
 
 
 
@@ -2062,6 +2132,7 @@ class InputTypeImages(InputType):
                     self.dt_frame_time = datetime.datetime.strptime(timestamp_stripped, "%Y-%m-%dT%H:%M:%S.%f")
                 except ValueError:
                     self.dt_frame_time = datetime.datetime.strptime(timestamp_stripped, "%Y-%m-%dT%H:%M:%S")
+                self.dt_frame_time = self.offsetDatetime(self.dt_frame_time)
 
                 # If CABERNET is used, set a fixed FPS
                 if "COMMENT" in head:
@@ -2166,7 +2237,7 @@ class InputTypeImages(InputType):
                     tu = frame[0][12] + (frame[0][13] << 16)
 
 
-            frame_dt = unixTime2Date(ts, tu, dt_obj=True)
+            frame_dt = unixTime2Date(*self.offsetUnixTime(ts, tu), dt_obj=True)
 
             self.dt_frame_time = frame_dt
 
@@ -2391,6 +2462,9 @@ class InputTypeDFN(InputType):
                 messagebox(title='Input error', \
                     message="Can't parse given DFN file name!")
                 sys.exit()
+
+        # The time of the beginning corrected by frame_time_offset
+        self.beginning_datetime = self.offsetDatetime(self.beginning_datetime)
 
         print('Using folder:', self.dir_path)
 

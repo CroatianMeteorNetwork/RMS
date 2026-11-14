@@ -56,11 +56,34 @@ def broadcastVect(cy_vect):
     """ Vectorize a CyFunctions array conversion taking (two coordinates, jd, lat, lon), broadcasting the
         arguments against each other as np.vectorize does. The Cython loop evaluates the sidereal time once
         per time instead of once per point.
+
+    Arguments:
+        cy_vect: [function] CyFunctions conversion of 1D arrays of the same length (e.g.
+            cyraDec2AltAz_vect), returning two arrays.
+
+    Return:
+        vect: [function] The conversion for scalars or arrays of any shape that broadcast together.
     """
 
     def vect(a, b, jd, lat, lon):
+        """ Convert the broadcast arguments with cy_vect.
+
+        Arguments:
+            a: [float or ndarray] First coordinate (radians).
+            b: [float or ndarray] Second coordinate (radians).
+            jd: [float or ndarray] Julian date.
+            lat: [float or ndarray] Latitude of the observer (radians).
+            lon: [float or ndarray] Longitude of the observer (radians).
+
+        Return:
+            (out_a, out_b): [tuple of ndarrays] The two converted coordinates, in the broadcast shape.
+        """
+
+        # Broadcast all arguments to one shape and give the Cython loop flat contiguous arrays
         args = np.broadcast_arrays(*[np.asarray(v, dtype=np.float64) for v in (a, b, jd, lat, lon)])
         out_a, out_b = cy_vect(*[np.ascontiguousarray(v).ravel() for v in args])
+
+        # Back to the broadcast shape
         return out_a.reshape(args[0].shape), out_b.reshape(args[0].shape)
 
     return vect
@@ -1203,14 +1226,25 @@ def trueRaDec2ApparentAltAz(ra, dec, jd, lat, lon, refraction=True, refraction_s
 
 def _perPoint(func, *args):
     """ Helper: apply a scalar (ra, dec)-style function to scalars or to arrays of the first two arguments,
-        returning floats for scalars and arrays otherwise. """
+        returning floats for scalars and arrays otherwise.
+
+    Arguments:
+        func: [function] Function of two floats (and the rest of the arguments) returning two floats.
+        *args: The two coordinates (floats or arrays that broadcast together), then the arguments given to
+            func unchanged.
+
+    Return:
+        (a, b): [tuple of floats or ndarrays] The two outputs of func, in the broadcast shape of the inputs.
+    """
 
     a, b = args[0], args[1]
     rest = args[2:]
 
+    # Scalars go straight through
     if np.ndim(a) == 0 and np.ndim(b) == 0:
         return func(float(a), float(b), *rest)
 
+    # Arrays: one call per point, the outputs in the shape of the inputs
     a, b = np.broadcast_arrays(np.atleast_1d(a).astype(np.float64), np.atleast_1d(b).astype(np.float64))
     out = np.array([func(float(x), float(y), *rest) for x, y in zip(a.ravel(), b.ravel())])
 
@@ -1246,6 +1280,15 @@ def trueOfDateRaDec2ApparentAltAz(ra, dec, jd, lat, lon, refraction=True, refrac
     """
 
     def one(ra_i, dec_i):
+        """ One point: true-of-date RA, Dec (deg) -> apparent azimuth, altitude (deg).
+
+        Arguments:
+            ra_i: [float] Right ascension (deg, true of date).
+            dec_i: [float] Declination (deg, true of date).
+
+        Return:
+            (azim, elev): [tuple of floats] Azimuth (+east of due north) and apparent altitude (deg).
+        """
 
         azim, elev = cyraDec2AltAz(np.radians(ra_i), np.radians(dec_i), jd, np.radians(lat), np.radians(lon))
 
@@ -1279,6 +1322,15 @@ def apparentAltAz2TrueOfDateRaDec(azim, elev, jd, lat, lon, refraction=True, ref
     """
 
     def one(azim_i, elev_i):
+        """ One point: apparent azimuth, altitude (deg) -> true-of-date RA, Dec (deg).
+
+        Arguments:
+            azim_i: [float] Azimuth (+east of due north) (deg).
+            elev_i: [float] Apparent altitude (deg).
+
+        Return:
+            (ra, dec): [tuple of floats] Right ascension and declination (deg, true of date).
+        """
 
         elev_i = np.radians(elev_i)
 
@@ -1306,6 +1358,16 @@ def trueOfDateRaDec2J2000(ra, dec, jd):
     """
 
     def one(ra_i, dec_i):
+        """ One point: true-of-date RA, Dec (deg) -> J2000 RA, Dec (deg).
+
+        Arguments:
+            ra_i: [float] Right ascension (deg, true of date).
+            dec_i: [float] Declination (deg, true of date).
+
+        Return:
+            (ra, dec): [tuple of floats] Right ascension and declination (deg, J2000).
+        """
+
         ra_j, dec_j = j2000FromTrueOfDate(jd, np.radians(ra_i), np.radians(dec_i))
         return np.degrees(ra_j), np.degrees(dec_j)
 
@@ -1326,6 +1388,16 @@ def j2000RaDec2TrueOfDate(ra, dec, jd):
     """
 
     def one(ra_i, dec_i):
+        """ One point: J2000 RA, Dec (deg) -> true-of-date RA, Dec (deg).
+
+        Arguments:
+            ra_i: [float] Right ascension (deg, J2000).
+            dec_i: [float] Declination (deg, J2000).
+
+        Return:
+            (ra, dec): [tuple of floats] Right ascension and declination (deg, true of date).
+        """
+
         ra_t, dec_t = trueOfDateFromJ2000(jd, np.radians(ra_i), np.radians(dec_i))
         return np.degrees(ra_t), np.degrees(dec_t)
 

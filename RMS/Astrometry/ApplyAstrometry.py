@@ -39,7 +39,7 @@ import numpy as np
 import RMS.Formats.Platepar
 import scipy.optimize
 from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
-from RMS.Astrometry.Conversions import (J2000_JD, trueOfDateRaDec2J2000,
+from RMS.Astrometry.Conversions import (trueOfDateRaDec2J2000,
                                         date2JD, 
                                         jd2Date, 
                                         raDec2AltAz,
@@ -970,7 +970,8 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
         float(platepar.dec_d), float(platepar.pos_angle_ref), float(platepar.F_scale), platepar.x_poly_fwd, 
         platepar.y_poly_fwd, unicode(platepar.distortion_type), refraction=platepar.refraction, \
         equal_aspect=platepar.equal_aspect, force_distortion_centre=platepar.force_distortion_centre, \
-        asymmetry_corr=platepar.asymmetry_corr, precompute_pointing_corr=precompute_pointing_corr, \
+        asymmetry_corr=platepar.asymmetry_corr, precompute_pointing_corr=precompute_pointing_corr,
+        decentering_corr=getattr(platepar, "decentering_corr", False),
         refraction_scale=refractionScale(platepar.elev))
 
     # Correct the coordinates for refraction if it wasn't taken into account during the astrometry calibration
@@ -1011,11 +1012,20 @@ def raDecToXYPP(RA_data, dec_data, jd, platepar):
     Arguments:
         RA: [ndarray] Array of right ascensions (degrees).
         dec: [ndarray] Array of declinations (degrees).
-        jd: [float] Julian date.
+        jd: [float or ndarray] Julian date, or the Julian date of every point (an array of the same length as
+            RA), which gives the same coordinates as a call per point at its own date.
         platepar: [Platepar structure] Astrometry parameters.
     Return:
         (x, y): [tuple of ndarrays] Image X and Y coordinates.
     """
+
+    # A date per point
+    jd_data = None
+    if np.ndim(jd) > 0:
+        jd_data = np.ascontiguousarray(jd, dtype=np.float64)
+        if len(jd_data) != len(RA_data):
+            raise ValueError("raDecToXYPP: {:d} dates for {:d} points".format(len(jd_data), len(RA_data)))
+        jd = jd_data[0] if len(jd_data) else 0.0
 
     # Use the cythonized function instead of the Python function
     X_data, Y_data = cyraDecToXY(RA_data, dec_data, float(jd), float(platepar.lat), float(platepar.lon),
@@ -1024,6 +1034,7 @@ def raDecToXYPP(RA_data, dec_data, jd, platepar):
         platepar.x_poly_rev, platepar.y_poly_rev, unicode(platepar.distortion_type), 
         refraction=platepar.refraction, equal_aspect=platepar.equal_aspect, 
         force_distortion_centre=platepar.force_distortion_centre, asymmetry_corr=platepar.asymmetry_corr,
+        decentering_corr=getattr(platepar, "decentering_corr", False), jd_data=jd_data,
         refraction_scale=refractionScale(platepar.elev))
 
     return X_data, Y_data

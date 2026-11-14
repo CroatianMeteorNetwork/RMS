@@ -108,7 +108,9 @@ class FluxConfig(object):
         self.meteors_min = 3
 
         # Default star FWHM, it it's not available (pz)
-        self.default_fwhm = 3
+        # FWHM of the stars (px) for old data without FWHM in the CALSTARS files (3 px in the definition of the
+        #   FWHM of older CALSTARS files, which was larger by sqrt(2))
+        self.default_fwhm = 2.1
 
         # Filter out nights which have too many detections - it is assumed that the false positives are
         #   present if there are too many sporadic meteors
@@ -1082,16 +1084,12 @@ def detectMoon(file_list, platepar, config):
         angular_distance = np.degrees(angularSeparation(ra_mid, dec_mid, float(m.ra), float(m.dec)))
 
 
-        # Determine if the Moon is above or below the horizon
-        moon_below_horizon = True
-        try:
-            # Compute the Moon rising and setting time - if it's setting next, it's up
-            moon_below_horizon = o.next_rising(m) < o.next_setting(m)
-        except ephem.AlwaysUpError:
-            moon_below_horizon = False
-
-        except ephem.NeverUpError:
-            moon_below_horizon = True
+        # Determine if the Moon is above or below the horizon from the current altitude of its upper limb
+        #   (with refraction, the same definition ephem uses for the rising and setting times). Don't
+        #   compare the next rising and setting times: in ephem < 4.2 the rising/setting search can loop
+        #   forever for the Moon at high latitudes (e.g. Arrival Heights, Antarctica, on 2026-09-13),
+        #   which hung the night processing
+        moon_below_horizon = (float(m.alt) + float(m.radius)) < float(o.horizon)
 
 
         # Always take observations if the Moon is at less than 25% illumination, regardless of where it is
@@ -1899,6 +1897,15 @@ def getSensorCharacterization(dir_path, config, flux_config, meteor_data, defaul
             if '-1' in sensor_data:
                 del sensor_data['-1']
 
+            # The FWHM of files saved before the definition of the FWHM was stored is the FWHM of older CALSTARS
+            #   files, larger by sqrt(2) (see CALSTARS.writeCALSTARS): it is converted, so the flux doesn't
+            #   depend on whether this file existed
+            fwhm_definition = sensor_data.pop('fwhm_definition', None)
+            if fwhm_definition is None:
+                for key in sensor_data:
+                    if sensor_data[key][0] > 0:
+                        sensor_data[key][0] /= np.sqrt(2)
+
             # If file FWHM is -1 and the default FWHM is not, override it
             for key in sensor_data:
                 fwhm = sensor_data[key][0]
@@ -1921,6 +1928,9 @@ def getSensorCharacterization(dir_path, config, flux_config, meteor_data, defaul
             # Add an explanation what each entry means
             sensor_data_save = dict(sensor_data)
             sensor_data_save['-1'] = {"FF file name": ['median star FWHM']}
+
+            # The definition of the FWHM, so files of an older definition can be told apart
+            sensor_data_save['fwhm_definition'] = "2.355*sqrt((sigma_x^2 + sigma_y^2)/2)"
 
             # Convert collection areas to JSON
             out_str = json.dumps(sensor_data_save, indent=4, sort_keys=True)
