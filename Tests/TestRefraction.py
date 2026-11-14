@@ -531,3 +531,37 @@ def test_ground_projection_uses_the_apparent_pointing():
         extinction_correction=False, measurement=False, jd_time=True)
 
     assert _separation(ra_b, dec_b, ra_ground, dec_ground).max() > 100.0
+
+
+def test_date_per_point_uses_the_station_height_scale():
+    """ raDecToXYPP with a Julian date per point gives the pixels of one call per point at a high station:
+        the pointing of every date is refracted with the station-height scale, as on the path with one date
+        for all points. With the sea-level default in the per-point path the pixels were up to 0.17 px
+        off at 2610 m. """
+
+    pp = Platepar()
+    pp.read(TEMPLATE)
+    pp.lat, pp.lon, pp.elev = 31.69, -110.9, 2610.0
+    pp.JD = date2JD(2026, 9, 5, 4, 0, 0)
+    pp.Ho = JD2HourAngle(pp.JD)
+    pp.refraction = True
+
+    # A low pointing, where the refraction of the pointing is large
+    pp.az_centre, pp.alt_centre = 150.0, 20.0
+    pp.updateRefRADec()
+
+    # Sky directions of a pixel grid, every point at its own date over 4 hours
+    xs, ys = np.meshgrid(np.linspace(50, pp.X_res - 50, 7), np.linspace(50, pp.Y_res - 50, 5))
+    x, y = xs.ravel(), ys.ravel()
+    jds = pp.JD + np.linspace(0, 4/24, len(x))
+    _, ra, dec, _ = xyToRaDecPP(jds, x, y, np.ones(len(x)), pp, extinction_correction=False, jd_time=True)
+
+    # All points in one call, and one call per point
+    x_arr, y_arr = raDecToXYPP(ra, dec, jds, pp)
+    x_one = np.zeros_like(x_arr)
+    y_one = np.zeros_like(y_arr)
+    for i in range(len(x)):
+        x_i, y_i = raDecToXYPP(ra[i:i + 1], dec[i:i + 1], jds[i], pp)
+        x_one[i], y_one[i] = x_i[0], y_i[0]
+
+    assert np.max(np.hypot(x_arr - x_one, y_arr - y_one)) < 1.0e-6
