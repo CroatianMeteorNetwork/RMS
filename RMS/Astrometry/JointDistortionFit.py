@@ -841,8 +841,8 @@ def fitDistortion(platepars, matched_stars, jds, distortion_type, max_stars, see
     aberration_used = 2*sum(aberration.values()) >= len(aberration)
     left_out = [key for key in platepars if aberration[key] != aberration_used]
     if left_out:
-        log.warning("Joint distortion fit: {:d} chunks left out, their platepars {:s} the aberration while the "
-                    "others {:s}".format(len(left_out), "model" if not aberration_used else "don't model",
+        log.warning("Joint distortion fit: {:d} chunks left out, their platepars {:s} the aberration while "
+                    "the others {:s}".format(len(left_out), "model" if not aberration_used else "don't model",
                                          "do" if aberration_used else "don't"))
 
     # The reference chunk is the one in the middle of the time span

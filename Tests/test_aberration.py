@@ -75,8 +75,8 @@ class TestAberration(unittest.TestCase):
 
     @unittest.skipIf(erfa is None, "pyerfa not installed")
     def testAgainstErfa(self):
-        """ Within 0.03 arcsec of the IAU 2006 barycentric velocity (erfa.epv00 + erfa.ab); 0.020 arcsec is the
-            worst case found over 2020-2030. """
+        """ Within 0.03 arcsec of the IAU 2006 barycentric velocity (erfa.epv00 + erfa.ab); 0.020 arcsec is
+            the worst case found over 2020-2030. """
 
         rng = np.random.default_rng(1)
         for (y, m, d) in ((2026, 9, 4), (2026, 12, 1), (2027, 3, 15), (2027, 6, 20)):
@@ -225,9 +225,10 @@ class TestAberration(unittest.TestCase):
     @unittest.skipIf(erfa is None, "pyerfa not installed")
     def testFittedPlateMeasuresTheGeometricDirection(self):
         """ The star fit, then a measurement: a plate fitted to the catalog directions of the stars of a
-            distortion-free camera fixed in alt/az (erfa: aberration removed from the lines of sight), starting
-            from a pointing 0.1 deg off and without the aberration flag, measures a meteor at any pixel along the
-            geometric line of sight of that pixel (measurement=True), which is not aberrated. """
+            distortion-free camera fixed in alt/az (erfa: aberration removed from the lines of sight),
+            starting from a pointing 0.1 deg off and without the aberration flag, measures a meteor at any
+            pixel along the geometric line of sight of that pixel (measurement=True), which is not
+            aberrated. """
 
         X, Y, d_ecef, f_scale = syntheticCamera(150.0, 40.0, 10.0)
         jd = DATES[2]
@@ -238,7 +239,7 @@ class TestAberration(unittest.TestCase):
         ra_cat = np.degrees(np.arctan2(catalog[:, 1], catalog[:, 0]))%360
         dec_cat = np.degrees(np.arcsin(catalog[:, 2]))
 
-        # A plate of the camera with the pointing 0.1 deg off and the rotation 0.1 deg off, fitted to the stars
+        # A plate of the camera with the pointing and the rotation 0.1 deg off, fitted to the stars
         pp = syntheticPlatepar(jd, X, Y, f_scale, lines_of_sight)
 
         # The fit goes through the reverse mapping, so its distortion-centre offset is taken off as well
@@ -252,8 +253,8 @@ class TestAberration(unittest.TestCase):
         self.assertTrue(pp.aberration)
 
         # A meteor at every pixel is measured along the line of sight of the pixel
-        _, ra, dec, _ = xyToRaDecPP(len(X)*[jd], X, Y, ones, pp, extinction_correction=False, measurement=True,
-            jd_time=True)
+        _, ra, dec, _ = xyToRaDecPP(len(X)*[jd], X, Y, ones, pp, extinction_correction=False,
+            measurement=True, jd_time=True)
         sep = separationArcsec(np.radians(ra), np.radians(dec),
             np.arctan2(lines_of_sight[:, 1], lines_of_sight[:, 0]), np.arcsin(lines_of_sight[:, 2]))
         self.assertLess(np.max(sep), 0.02)

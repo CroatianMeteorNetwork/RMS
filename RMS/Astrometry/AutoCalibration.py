@@ -1290,8 +1290,8 @@ def fitCandidate(chunk_dirs, section_chunks, held_out, catalog_stars, config, ma
     aberration_used = 2*sum(aberration) >= len(aberration)
     fits = [fit for fit, flag in zip(good, aberration) if flag == aberration_used]
     if len(fits) < len(good):
-        log.warning("Auto calibration: {:d} sections left out, they treat the aberration differently from the "
-                    "others".format(len(good) - len(fits)))
+        log.warning("Auto calibration: {:d} sections left out, they treat the aberration differently from "
+                    "the others".format(len(good) - len(fits)))
     if len(fits) < MIN_SECTIONS:
         info['reason'] = 'only {:d} sections treat the aberration the same way'.format(len(fits))
         return None, info

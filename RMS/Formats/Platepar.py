@@ -1160,7 +1160,8 @@ class Platepar(object):
         #     img_stars, 'y'))
 
         # The fit models the aberration, whatever the plate had absorbed before: the flag is turned on below
-        #   where the pointing is fitted. The flag before the fit is kept for the fits that stop without a result
+        #   where the pointing is fitted. The flag before the fit is kept for the fits that stop without a
+        #   result
         aberration_prev = self.aberration
 
         ### ASTROMETRIC PARAMETERS FIT ###
