@@ -1184,7 +1184,8 @@ def _agreeingSubset(n, agree):
 
 
 def fitCandidate(chunk_dirs, section_chunks, held_out, catalog_stars, config, mask=None, use_flat=False,
-                 fit_vignetting=False, vignetting_coeff=None, ff_frames=256, position_hint=None):
+                 fit_vignetting=False, vignetting_coeff=None, ff_frames=256, position_hint=None,
+                 fit_by='AutoCalibration'):
     """ Fit a platepar from scratch (blind plate solve and distortion fit, see AutoPlatepar) independently on
         several sections (chunks spread in time), keep the sections which agree with each other apart from the
         pointing, take the one which scores best on the held-out chunks, and fit its photometry.
@@ -1207,6 +1208,8 @@ def fitCandidate(chunk_dirs, section_chunks, held_out, catalog_stars, config, ma
         ff_frames: [int] Number of frames of a chunk. 256 by default.
         position_hint: [tuple] (ra, dec, radius) in degrees: the plate solver only searches within the radius of
             this pointing. None by default (the whole sky).
+        fit_by: [str] Short label of what made the fit, for the fit record of the candidate.
+            'AutoCalibration' by default.
 
     Return:
         (platepar, info): [tuple] The candidate platepar (None if it could not be fitted) and a dictionary which
@@ -1328,6 +1331,11 @@ def fitCandidate(chunk_dirs, section_chunks, held_out, catalog_stars, config, ma
     info['photometry'] = section['photometry']
 
     platepar.auto_recalibrated = False
+
+    # The fit record names the automatic calibration, which fitted the section with the plate solver
+    for entry in (getattr(platepar, 'fit_record', None) or {}).values():
+        if isinstance(entry, dict):
+            entry['by'] = fit_by
 
     return platepar, info
 

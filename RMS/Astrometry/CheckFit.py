@@ -707,6 +707,9 @@ def autoCheckFit(config, platepar, calstars_data, _nn_refinement=False):
             platepar.F_scale = F_scale
             aberration_refit = False
 
+            # Record the pointing fit
+            platepar.recordFit(pointing=True, fit_by='autoCheckFit')
+
 
 
         # Check if the platepar is good enough and do not estimate further parameters

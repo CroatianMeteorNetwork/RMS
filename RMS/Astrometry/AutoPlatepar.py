@@ -684,7 +684,8 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
             jd, img_stars_arr, catalog_stars,
             first_platepar_fit=True,
             use_nn_cost=True,
-            final_catalog_stars=final_catalog_stars
+            final_catalog_stars=final_catalog_stars,
+            fit_by='AutoPlatepar'
         )
 
         if verbose:
@@ -769,7 +770,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
 
     # Do the final fit
     try:
-        platepar.fitAstrometry(jd, img_coords, sky_coords, first_platepar_fit=True)
+        platepar.fitAstrometry(jd, img_coords, sky_coords, first_platepar_fit=True, fit_by='AutoPlatepar')
     except Exception as e:
         if verbose:
             print("ERROR: Final fit failed: {:s}".format(str(e)))

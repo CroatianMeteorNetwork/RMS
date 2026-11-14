@@ -51,7 +51,7 @@ from RMS.Astrometry.Conversions import date2JD, jd2Date, JD2LST
 from RMS.Astrometry.CyFunctions import subsetCatalog
 from RMS.Formats import CALSTARS
 from RMS.Formats.FFfile import getMiddleTimeFF
-from RMS.Formats.Platepar import Platepar
+from RMS.Formats.Platepar import Platepar, normalFitRecord
 from RMS.Logger import getLogger
 from RMS.Math import angularSeparation
 
@@ -192,7 +192,8 @@ def transferPointing(platepar, pointing_platepar, n_grid=TRANSFER_GRID, margin=T
         reference RA, Dec, position angle and scale are fitted by least squares, so that the platepar puts the sky
         positions of a grid of image points at the same image positions as the pointing platepar does at its
         reference time. Both directions are those from the sky to the image (which the recalibration and the
-        matching of the stars use), so a platepar carried over to itself doesn't change.
+        matching of the stars use), so a platepar carried over to itself doesn't change. The record of the
+        pointing fit (Platepar.fit_record) is carried over with the pointing.
 
     Arguments:
         platepar: [Platepar] Platepar with the distortion to keep (it is not changed).
@@ -266,6 +267,12 @@ def transferPointing(platepar, pointing_platepar, n_grid=TRANSFER_GRID, margin=T
 
     # The reference alt/az and the rotation from the horizon follow the fitted pointing
     transferred.updateRefAltAz()
+
+    # The pointing is the one of the pointing platepar fitted to another distortion, so the record of its fit
+    #   (and so its astrometric model) comes along
+    transferred.fit_record = normalFitRecord(getattr(transferred, 'fit_record', None))
+    transferred.fit_record['pointing'] = copy.deepcopy(
+        normalFitRecord(getattr(pointing_platepar, 'fit_record', None))['pointing'])
 
     return transferred, rms
 
@@ -807,7 +814,8 @@ def setDistortionModel(platepar, distortion_type, decentering):
         platepar.remapCoeffsForFlagChange('decentering_corr', decentering)
 
 
-def fitDistortion(platepars, matched_stars, jds, distortion_type, max_stars, seed=0, decentering=False):
+def fitDistortion(platepars, matched_stars, jds, distortion_type, max_stars, seed=0, decentering=False,
+                  fit_by='JointDistortionFit'):
     """ Fit one distortion on the matched stars of many recalibrated chunks.
 
         Every star is moved into the image of the reference chunk (the one in the middle of the time span): its
@@ -827,6 +835,8 @@ def fitDistortion(platepars, matched_stars, jds, distortion_type, max_stars, see
         seed: [int] Seed of the random choice of the stars. 0 by default.
         decentering: [bool] Fit the decentering correction (radial types only, see setDistortionModel). False by
             default.
+        fit_by: [str] Short label of what made the fit, for the fit record of the platepar.
+            'JointDistortionFit' by default.
 
     Return:
         (platepar, n_stars, reference_key): [tuple] The fitted platepar with the pointing of the reference chunk,
@@ -898,7 +908,7 @@ def fitDistortion(platepars, matched_stars, jds, distortion_type, max_stars, see
     platepar = copy.deepcopy(pp_ref)
     setDistortionModel(platepar, distortion_type, decentering)
     platepar.fitAstrometry(jd_ref, np.column_stack([x[chosen], y[chosen], intensity[chosen]]),
-                           np.column_stack([ra[chosen], dec[chosen], mag[chosen]]))
+                           np.column_stack([ra[chosen], dec[chosen], mag[chosen]]), fit_by=fit_by)
     platepar.auto_recalibrated = False
     platepar.star_list = []
 
@@ -908,7 +918,7 @@ def fitDistortion(platepars, matched_stars, jds, distortion_type, max_stars, see
 def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdout=None, n_iter=4, snr_min=10.0,
                        max_stars=20000, chunk_step=2, match_radius=None, lim_mag=None, nproc=None, decentering=None,
                        holdout_chunks=None, holdout_names=None, max_chunks=None, qc=True, qc_options=None,
-                       holdout_baseline='night', mask=None):
+                       holdout_baseline='night', mask=None, fit_by='JointDistortionFit'):
     """ Fit one distortion on the stars of many nights, with the pointing of every chunk fitted separately (see
         the description of the module).
 
@@ -950,6 +960,8 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
             (e.g. to decide whether the fit should replace the starting platepar). 'night' by default.
         mask: [ndarray] Mask image of the camera (0 is masked), with which the quality control selects the clear
             held-out chunks it judges. None by default (no mask).
+        fit_by: [str] Short label of what made the fit, for the fit record of the fitted platepar.
+            'JointDistortionFit' by default.
 
     Return:
         (platepar, report): [tuple] The fitted platepar (the distortion of the last fit with the pointing of the
@@ -1165,7 +1177,7 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
 
             previous = distortion
             distortion, n_fit, reference_key = fitDistortion(fit_platepars, fit_stars, jds, distortion_type,
-                                                             max_stars, decentering=decentering)
+                                                             max_stars, decentering=decentering, fit_by=fit_by)
             entry['fit_chunks'], entry['fit_stars'] = len(fit_platepars), n_fit
 
             # How much the mapping of the image changed in this fit (px), which shows whether the fit converged

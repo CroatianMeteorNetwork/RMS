@@ -41,12 +41,80 @@ from scipy.spatial import cKDTree
 from RMS.Astrometry.Conversions import date2JD, jd2Date, JD2HourAngle, trueOfDateRaDec2ApparentAltAz, \
     apparentAltAz2TrueOfDateRaDec
 from RMS.Math import angularSeparation, sphericalPointFromHeadingAndDistance
+from RMS.Misc import RmsDateTime, rmsCommit
 
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
 from RMS.Astrometry.CyFunctions import (
     pyRefractionTrueToApparent,
     refractionScale,
 )
+
+
+# Version of the astrometric model of the kernels. The fitted pointing, scale and distortion take up
+#   whatever the model leaves out, so their meaning depends on it. Increment it whenever a change of the
+#   kernels alters what the fitted coefficients mean, and add it to the history below. The model a platepar
+#   was fitted with is kept in its fit record (Platepar.fit_record, Platepar.astrometryModel). History:
+#   1 - Platepars fitted before the fit record existed: the reference hour angle from the mean sidereal
+#       time, the reference pointing taken as a J2000 direction by the refraction, the Bennett/Saemundsson
+#       refraction pair without a scale for the station height, and the annual aberration absorbed by the fit.
+#   2 - True-of-date frames with the apparent sidereal time, the exact inverse of the refraction scaled with
+#       the station height, and the annual aberration modelled.
+ASTROMETRY_MODEL = 2
+
+# The fits kept in the fit record of a platepar: the distortion (with the scale and the rest of the lens
+#   model) and the pointing
+FIT_RECORD_KEYS = ('distortion', 'pointing')
+
+
+def fitRecordEntry(fit_by):
+    """ The record of a fit made now by this code.
+
+    Arguments:
+        fit_by: [str] Short label of what made the fit, e.g. 'SkyFit2' or 'recalibrateFF'.
+
+    Return:
+        [dict] 'model': the astrometric model (ASTROMETRY_MODEL), 'commit': the commit of the RMS code (see
+            RMS.Misc.gitCommit), 'utc': the time of the fit (ISO 8601, UTC) and 'by': the label.
+    """
+
+    # The model and the code of this process, and the time now
+    return {
+        'model': ASTROMETRY_MODEL,
+        'commit': rmsCommit(),
+        'utc': RmsDateTime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
+        'by': str(fit_by),
+    }
+
+
+def emptyFitRecord():
+    """ The fit record of a platepar with no recorded fit (e.g. fitted before the record existed).
+
+    Return:
+        [dict] None for every fit of FIT_RECORD_KEYS.
+    """
+
+    return {key: None for key in FIT_RECORD_KEYS}
+
+
+def normalFitRecord(fit_record):
+    """ A fit record as read from a file or a pickle, with an entry for every fit (None if it is missing or
+        is not a record).
+
+    Arguments:
+        fit_record: [dict] Fit record, or None.
+
+    Return:
+        [dict] The fit record with only the keys of FIT_RECORD_KEYS.
+    """
+
+    # Only the entries which are records are kept, the others are not known
+    record = emptyFitRecord()
+    if isinstance(fit_record, dict):
+        for key in FIT_RECORD_KEYS:
+            if isinstance(fit_record.get(key), dict):
+                record[key] = fit_record[key]
+
+    return record
 
 
 class stationData(object):
@@ -190,7 +258,8 @@ class Platepar(object):
             self: [object] Instance of this class with loaded platepar parameters.
         """
 
-        self.version = 2
+        # Version of the file format: 1 had none, 2 added the forward and reverse distortion, 3 the fit record
+        self.version = 3
 
         # Store distortion type for later initialization
         self._init_distortion_type = distortion_type
@@ -276,6 +345,10 @@ class Platepar(object):
 
         # Flag to indicate that the platepar was successfully auto recalibrated on an individual FF files
         self.auto_recalibrated = False
+
+        # What made the last fit of the distortion and of the pointing, when, and with which astrometric
+        #   model (see fitRecordEntry and recordFit). None for a fit that is not known
+        self.fit_record = emptyFitRecord()
 
         # Initialize distortion type (must be done before resetDistortionParameters)
         # First set a placeholder value so setDistortionType can compare against it
@@ -500,11 +573,53 @@ class Platepar(object):
         # Return center in pixel coordinates (image center + offset)
         return self.X_res / 2.0 + x0, self.Y_res / 2.0 + y0
 
-    def fitPointing(self, jd, img_stars, catalog_stars, fixed_scale=False, final_catalog_stars=None):
+    def recordFit(self, pointing=True, distortion=False, fit_by='fitAstrometry'):
+        """ Record a fit made now by this code in the fit record (see fitRecordEntry).
+
+        Keyword arguments:
+            pointing: [bool] The pointing was fitted. True by default.
+            distortion: [bool] The distortion was fitted. False by default.
+            fit_by: [str] Short label of what made the fit. 'fitAstrometry' by default.
+        """
+
+        # A platepar made without the constructor (e.g. from an old pickle) may not have the record yet
+        self.fit_record = normalFitRecord(getattr(self, 'fit_record', None))
+
+        # One entry for the fit, the same for the distortion and the pointing if both were fitted
+        entry = fitRecordEntry(fit_by)
+        if distortion:
+            self.fit_record['distortion'] = dict(entry)
+        if pointing:
+            self.fit_record['pointing'] = dict(entry)
+
+    def astrometryModel(self):
+        """ The astrometric model the distortion of the platepar was fitted with (see ASTROMETRY_MODEL).
+            The pointing is refitted on every image, the distortion is what ties a platepar to the model of
+            its fit.
+
+        Return:
+            [int] The model of the distortion fit, 1 if it is not known (a platepar fitted before the fit
+                record existed).
+        """
+
+        # The record of the distortion fit, if there is one
+        entry = normalFitRecord(getattr(self, 'fit_record', None))['distortion']
+        if entry is None:
+            return 1
+
+        # A record without a valid model is taken as the oldest model
+        try:
+            return int(entry.get('model', 1))
+        except (TypeError, ValueError):
+            return 1
+
+    def fitPointing(self, jd, img_stars, catalog_stars, fixed_scale=False, final_catalog_stars=None,
+                    fit_by='fitPointing'):
         """Fit pointing parameters to the list of star image and celestial catalog coordinates.
         At least 4 stars are needed to fit the rigid body parameters.
 
-        New parameters are saved to the given object (self).
+        New parameters are saved to the given object (self), and the pointing fit is recorded in the fit
+        record.
 
         Arguments:
             jd: [float] Julian date of the image.
@@ -515,6 +630,7 @@ class Platepar(object):
             fixed_scale: [bool] Keep the scale fixed. False by default.
             final_catalog_stars: [list] Optional deeper catalog to use for final radial7 fitting.
                                  If provided, switches to this catalog after radial7 switch.
+            fit_by: [str] Short label of what made the fit, for the fit record. 'fitPointing' by default.
 
         """
 
@@ -618,7 +734,10 @@ class Platepar(object):
         # Update alt/az of pointing
         self.updateRefAltAz()
 
-    def fitPointingNN(self, jd, img_stars, catalog_stars, fixed_scale=True):
+        # Record the pointing fit
+        self.recordFit(pointing=True, fit_by=fit_by)
+
+    def fitPointingNN(self, jd, img_stars, catalog_stars, fixed_scale=True, fit_by='fitPointingNN'):
         """Fit pointing parameters using nearest-neighbor cost function in pixel space.
 
         Unlike fitPointing() which requires pre-matched star pairs, this method finds the
@@ -639,6 +758,7 @@ class Platepar(object):
 
         Keyword arguments:
             fixed_scale: [bool] Keep scale fixed. True by default (for camera drift correction).
+            fit_by: [str] Short label of what made the fit, for the fit record. 'fitPointingNN' by default.
 
         """
         # Import here to avoid circular import (ApplyAstrometry imports Platepar)
@@ -774,6 +894,9 @@ class Platepar(object):
         # Update alt/az of pointing
         self.updateRefAltAz()
 
+        # Record the pointing fit
+        self.recordFit(pointing=True, fit_by=fit_by)
+
         return res.success, res.fun, inlier_fraction, inlier_rmsd
 
     def fitAstrometry(
@@ -787,13 +910,15 @@ class Platepar(object):
         use_nn_cost=False,
         final_catalog_stars=None,
         iteration_callback=None,
+        fit_by='fitAstrometry',
     ):
         """Fit astrometric parameters to the list of star image and celestial catalog coordinates.
         At least 4 stars are needed to fit the rigid body parameters.
 
         New parameters are saved to the given object (self). The fit models the annual aberration: the
         aberration flag is turned on where the pointing is fitted. A fit that stops without a result or fails
-        with an exception leaves the flag as it was.
+        with an exception leaves the flag as it was. What was fitted (the pointing, and the distortion unless
+        only the pointing is fitted) is recorded in the fit record.
 
         Arguments:
             jd: [float] Julian date of the image.
@@ -811,6 +936,8 @@ class Platepar(object):
             iteration_callback: [callable] Optional callback called after each RANSAC iteration.
                                 Signature: callback(iteration, platepar_copy, outlier_mask, rmsd_arcmin)
                                 Used for visual debugging of the fitting process.
+            fit_by: [str] Short label of what made the fit, for the fit record (e.g. 'SkyFit2').
+                'fitAstrometry' by default.
 
         Return:
             None, or with use_nn_cost the matched pairs (img_stars, catalog_stars) of the RANSAC fit (None if
@@ -826,7 +953,7 @@ class Platepar(object):
         try:
             result = self._fitAstrometry(jd, img_stars, catalog_stars, first_platepar_fit=first_platepar_fit,
                 fit_only_pointing=fit_only_pointing, fixed_scale=fixed_scale, use_nn_cost=use_nn_cost,
-                final_catalog_stars=final_catalog_stars, iteration_callback=iteration_callback)
+                final_catalog_stars=final_catalog_stars, iteration_callback=iteration_callback, fit_by=fit_by)
             completed = True
 
         finally:
@@ -836,7 +963,8 @@ class Platepar(object):
         return result
 
     def _fitAstrometry(self, jd, img_stars, catalog_stars, first_platepar_fit=False, fit_only_pointing=False,
-        fixed_scale=False, use_nn_cost=False, final_catalog_stars=None, iteration_callback=None):
+        fixed_scale=False, use_nn_cost=False, final_catalog_stars=None, iteration_callback=None,
+        fit_by='fitAstrometry'):
         """ The fit of fitAstrometry, which has the description and the arguments.
 
         Return:
@@ -1164,6 +1292,10 @@ class Platepar(object):
         #   result
         aberration_prev = self.aberration
 
+        # What this fit changes, for the fit record at the end (the RANSAC fit records it in its final fit)
+        pointing_fitted = False
+        distortion_fitted = False
+
         ### ASTROMETRIC PARAMETERS FIT ###
 
         # Fit the pointing parameters (RA, Dec, rotation, scale)
@@ -1177,7 +1309,8 @@ class Platepar(object):
             # The pointing is fitted with the aberration modelled
             self.aberration = True
 
-            self.fitPointing(jd, img_stars, catalog_stars, fixed_scale=fixed_scale)
+            self.fitPointing(jd, img_stars, catalog_stars, fixed_scale=fixed_scale, fit_by=fit_by)
+            pointing_fitted = True
 
         ### ###
 
@@ -1191,6 +1324,9 @@ class Platepar(object):
             # The distortion, and with the radial models the pointing as well, is fitted with the aberration
             #   modelled
             self.aberration = True
+            distortion_fitted = True
+            if not self.distortion_type.startswith("poly"):
+                pointing_fitted = True
 
             # Fit the polynomial distortion
             if self.distortion_type.startswith("poly"):
@@ -1745,7 +1881,8 @@ class Platepar(object):
                     print("    Final fit on {} matched stars with {} (recursive call)...".format(
                         len(img_stars_clean), original_dist_type))
                     self.fitAstrometry(jd, img_stars_clean, matched_catalog,
-                                       first_platepar_fit=False, use_nn_cost=False, fixed_scale=fixed_scale)
+                                       first_platepar_fit=False, use_nn_cost=False, fixed_scale=fixed_scale,
+                                       fit_by=fit_by)
 
                     # Return the actual matched pairs from RANSAC
                     return (img_stars_clean, matched_catalog)
@@ -1871,6 +2008,10 @@ class Platepar(object):
         # Set the flag to indicate that the platepar was manually fitted
         self.auto_check_fit_refined = False
         self.auto_recalibrated = False
+
+        # Record what was fitted (one entry for the distortion and the pointing of a full fit)
+        if pointing_fitted or distortion_fitted:
+            self.recordFit(pointing=pointing_fitted, distortion=distortion_fitted, fit_by=fit_by)
 
         ### ###
 
@@ -2164,6 +2305,9 @@ class Platepar(object):
         if 'aberration' not in self.__dict__:
             self.aberration = False
 
+        # The fit record: a platepar pickled before it existed has none, its fits are not known
+        self.fit_record = normalFitRecord(self.__dict__.get('fit_record'))
+
     def loadFromDict(self, platepar_dict, use_flat=None):
         """Load the platepar from a dictionary."""
 
@@ -2187,6 +2331,10 @@ class Platepar(object):
         # A platepar without the flag was fitted before the aberration was modelled, so it has absorbed it
         if not 'aberration' in self.__dict__:
             self.aberration = False
+
+        # The fit record: a platepar from before it existed has none, its fits are not known and it was
+        #   fitted with the astrometric model 1 (see astrometryModel)
+        self.fit_record = normalFitRecord(self.__dict__.get('fit_record'))
 
         # If the measurement correction for refraction (if it was not taken into account during calibration)
         #   is not present, assume it's false
@@ -2384,6 +2532,9 @@ class Platepar(object):
                 # The CMN format has no aberration flag: such a plate was fitted to the catalog directions as
                 #   they are and has absorbed the aberration
                 self.aberration = False
+
+                # Nor a fit record: its fits are not known
+                self.fit_record = emptyFitRecord()
 
         # Add a default vignetting coefficient if it already doesn't exist
         self.addVignettingCoeff(use_flat)
