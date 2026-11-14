@@ -116,6 +116,36 @@ class TestAberration(unittest.TestCase):
         self.assertLess(np.max(shift), 21.0)
 
 
+    def testDatePerPointEqualsOneCallPerPoint(self):
+        """ raDecToXYPP with a Julian date per point gives the pixels of one call per point at its own date
+            with the aberration modelled: the Earth velocity is taken at the date of every point. The dates
+            span 30 days, over which the aberration of a star changes by up to 10 arcsec. """
+
+        pp = Platepar()
+        pp.read(TEMPLATE)
+        pp.aberration = True
+        pp.lat, pp.lon, pp.elev = 40.0, -100.0, 300.0
+        pp.alt_centre, pp.az_centre, pp.pos_angle_ref = 50.0, 0.0, 15.0
+        pp.updateRefRADec(skip_rot_update=True)
+
+        # Catalog directions of the stars seen at a pixel grid, every point at its own date
+        x = np.linspace(30, pp.X_res - 30, 7)
+        y = np.linspace(30, pp.Y_res - 30, 5)
+        X, Y = [a.ravel() for a in np.meshgrid(x, y)]
+        jds = pp.JD + np.linspace(0, 30, len(X))
+        _, ra, dec, _ = xyToRaDecPP(jds, X, Y, np.ones(len(X)), pp, extinction_correction=False, jd_time=True)
+
+        # All points in one call, and one call per point
+        x_arr, y_arr = raDecToXYPP(ra, dec, jds, pp)
+        x_one = np.zeros_like(x_arr)
+        y_one = np.zeros_like(y_arr)
+        for i in range(len(X)):
+            x_i, y_i = raDecToXYPP(ra[i:i + 1], dec[i:i + 1], jds[i], pp)
+            x_one[i], y_one[i] = x_i[0], y_i[0]
+
+        self.assertLess(np.max(np.hypot(x_arr - x_one, y_arr - y_one)), 1e-6)
+
+
     @unittest.skipIf(erfa is None, "pyerfa not installed")
     def testPlateparFlag(self):
         """ A platepar without the flag has absorbed the aberration, so none is applied to it; a full fit

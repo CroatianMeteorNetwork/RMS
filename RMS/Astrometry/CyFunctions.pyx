@@ -1948,22 +1948,25 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
         y0 = y_poly_rev[0]
 
 
-    # Convert all equatorial coordinates to image coordinates
     # Earth velocity for the annual aberration of the catalog directions
     vx = vy = vz = 0.0
     if aberration:
         vx, vy, vz = earthVelocityJ2000(jd)
 
+    # Convert all equatorial coordinates to image coordinates
     for i in range(ra_data.shape[0]):
 
-        # With a date per point, the pointing and the refraction are computed at the date of this point,
-        #   when it differs from the date they were last computed at
+        # With a date per point, the pointing, the refraction and the aberration are computed at the date of
+        #   this point, when it differs from the date they were last computed at
         if (jd_data is not None) and (jd_data[i] != jd):
             jd = jd_data[i]
             date_frame = dateFrame(jd, radians(lon))
             ra_centre, dec_centre, pos_angle_ref = pointingCorrectionOfDate(date_frame, jd, radians(lat),
                 radians(h0), radians(ra_ref), radians(dec_ref), radians(pos_angle_ref_in), refraction,
                 refraction_scale)
+
+            if aberration:
+                vx, vy, vz = earthVelocityJ2000(jd)
 
         ra = radians(ra_data[i])
         dec = radians(dec_data[i])
