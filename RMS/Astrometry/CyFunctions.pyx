@@ -1654,7 +1654,7 @@ cpdef (double, double) cartesianToRaDec(np.ndarray[np.float64_t, ndim=1] vec):
 
 ### Annual aberration ###
 
-# Constant of aberration kappa = n*a / (c*sqrt(1 - e^2)), the mean orbital speed of the Earth in units of c
+# Constant of aberration kappa = n*a / (c*sqrt(1 - e^2)), the Earth's mean speed around the Sun in units of c
 cdef double ABERRATION_CONSTANT = radians(20.49552/3600.0)
 
 # Mean obliquity of the ecliptic at J2000
@@ -1680,7 +1680,7 @@ cdef (double, double, double) earthVelocityJ2000(double jd):
 
     T = (jd - J2000_DAYS)/36525.0
 
-    # Geometric mean longitude and mean anomaly of the Sun, eccentricity of the Earth's orbit
+    # Geometric mean longitude and mean anomaly of the Sun, eccentricity of the Earth's path around the Sun
     L0 = radians((280.46646 + 36000.76983*T + 0.0003032*T*T)%360.0)
     M = radians((357.52911 + 35999.05029*T - 0.0001537*T*T)%360.0)
     e = 0.016708634 - 0.000042037*T - 0.0000001267*T*T
@@ -1709,6 +1709,14 @@ cdef (double, double, double) earthVelocityJ2000(double jd):
 cdef (double, double) shiftDirection(double ra, double dec, double vx, double vy, double vz):
     """ Direction (ra, dec) shifted by a small velocity vector: the first-order aberration formula
         p' = (p + v/c)/|p + v/c|.
+
+    Arguments:
+        ra: [float] Right ascension (radians).
+        dec: [float] Declination (radians).
+        vx, vy, vz: [float] Velocity in units of c, in the axes of ra and dec (see earthVelocityJ2000).
+
+    Return:
+        (ra, dec): [tuple of floats] Shifted direction (radians).
     """
 
     cdef double x, y, z, n
@@ -1744,6 +1752,14 @@ cpdef (double, double) applyAberration(double ra, double dec, double jd):
 cpdef (double, double) removeAberration(double ra, double dec, double jd):
     """ Inverse of applyAberration: apparent direction -> catalog direction. First-order inverse, exact to
         ~0.002 arcsec.
+
+    Arguments:
+        ra: [float] Right ascension (radians, J2000 axes), apparent direction.
+        dec: [float] Declination (radians, J2000 axes), apparent direction.
+        jd: [float] Julian date.
+
+    Return:
+        (ra, dec): [tuple of floats] Catalog direction (radians, J2000).
     """
 
     cdef double vx, vy, vz

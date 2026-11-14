@@ -482,8 +482,9 @@ class SatellitePredictor:
                     
                     # Compute XY coordinates for all points
                     # Use the first timestamp for all points as raDecToXYPP expects a scalar JD
-                    # The direction from the station to a satellite is already in the Earth's frame, so
-                    #   it is not displaced by the annual aberration the way a catalog star is
+                    # The direction from the station to an object at a finite distance that moves with
+                    #   the Earth is a geometric direction in the Earth's frame, so it is not displaced by
+                    #   the annual aberration the way a catalog star is
                     x_all, y_all = raDecToXYPP(ra_degs, dec_degs, float(jds_utc_subset[0]), platepar,
                         aberration=False)
                     ra_all = ra_degs

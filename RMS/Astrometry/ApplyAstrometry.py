@@ -950,10 +950,10 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
             to speed up the calculation when the input JD is the same for all data points, e.g. during
             plate solving.
         aberration: [bool or None] Remove the annual aberration so the output is a catalog direction. None
-            (default) means "not measurement". Pass False explicitly for a direction fixed to the Earth
-            (a ground reference, a landmark, a satellite position in the Earth's frame): its light is not
-            aberrated, and the measurement flag must not be used for that, since on an unrefracted plate
-            measurement=True also triggers the post-hoc refraction correction.
+            (default) means "not measurement". Set it to False for a direction fixed to the Earth (a
+            ground reference, a landmark, an object at a finite distance that moves with the Earth): its
+            light is not aberrated, and the measurement flag must not be used for that, since on an
+            unrefracted plate measurement=True also triggers the post-hoc refraction correction.
             Never done for a plate fitted without the aberration modelled (platepar.aberration False),
             which has absorbed it.
 
@@ -1031,7 +1031,7 @@ def raDecToXYPP(RA_data, dec_data, jd, platepar, measurement=False, aberration=N
             aberration before projection. True for directions in the Earth's frame (e.g. a meteor position
             from a trajectory), which are not aberrated.
         aberration: [bool or None] Apply the annual aberration before projecting. None (default) means
-            "not measurement". Pass False explicitly for a direction fixed to the Earth (ground reference,
+            "not measurement". Set it to False for a direction fixed to the Earth (ground reference,
             landmark), see xyToRaDecPP.
             Never done for a plate fitted without the aberration modelled (platepar.aberration False),
             which has absorbed it.
