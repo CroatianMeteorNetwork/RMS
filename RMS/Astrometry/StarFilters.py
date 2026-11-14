@@ -15,6 +15,7 @@ import numpy as np
 
 from RMS.Astrometry.StarClasses import PairedStars
 from RMS.Astrometry.ApplyAstrometry import extinctionCorrectionTrueToApparent, raDecToXYPP
+from RMS.Astrometry.Conversions import trueOfDateRaDec2J2000
 
 
 # Default filtering parameters
@@ -152,8 +153,9 @@ def filterBlendedStars(paired_stars, catalog_stars, platepar, jd, lim_mag,
     # project to valid-looking pixel coordinates
     ra_rad = np.radians(catalog_ra)
     dec_rad = np.radians(catalog_dec)
-    ra_center = np.radians(platepar.RA_d)
-    dec_center = np.radians(platepar.dec_d)
+    # RA_d/dec_d are true of date; the catalog is J2000
+    ra_center, dec_center = trueOfDateRaDec2J2000(platepar.RA_d, platepar.dec_d, platepar.JD)
+    ra_center, dec_center = np.radians(ra_center), np.radians(dec_center)
 
     # Spherical angular distance from camera pointing to each catalog star
     cos_ang_dist = (np.sin(dec_center) * np.sin(dec_rad) +

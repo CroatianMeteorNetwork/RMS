@@ -9,7 +9,7 @@ import math
 
 
 from RMS.GeoidHeightEGM96 import mslToWGS84Height
-from RMS.Astrometry.Conversions import jd2Date
+from RMS.Astrometry.Conversions import jd2Date, trueOfDateRaDec2J2000
 from RMS.Astrometry.ApplyAstrometry import rotationWrtHorizon, rotationWrtStandard
 
 
@@ -129,6 +129,10 @@ def writeCAL(night_dir, config, platepar):
         calib_date = calib_dt.strftime("%m/%d/%Y")
         calib_time = calib_dt.strftime("%H:%M:%S.%f")[:-3]
 
+        # The CAL centre has always been written as a J2000 direction under these labels, which the parsers
+        #   of CAMS files rely on. RA_d/dec_d are true of date at the platepar time, so they are converted
+        ra_centre, dec_centre = trueOfDateRaDec2J2000(platepar.RA_d, platepar.dec_d, platepar.JD)
+
         s  =" Camera number            = {:d}\n".format(config.cams_code)
         s +=" Calibration date         = {:s}\n".format(calib_date)
         s +=" Calibration time (UT)    = {:s}\n".format(calib_time)
@@ -140,8 +144,8 @@ def writeCAL(night_dir, config, platepar):
         s +=" Plate roll wrt Std (deg) = {:8.3f}\n".format(rot_std)
         s +=" Cam tilt wrt Horiz (deg) = {:8.3f}\n".format(rot_horiz)
         s +=" Frame rate (Hz)          = {:8.3f}\n".format(config.fps)
-        s +=" Cal center RA (deg)      = {:8.3f}\n".format(platepar.RA_d)
-        s +=" Cal center Dec (deg)     = {:8.3f}\n".format(platepar.dec_d)
+        s +=" Cal center RA (deg)      = {:8.3f}\n".format(ra_centre)
+        s +=" Cal center Dec (deg)     = {:8.3f}\n".format(dec_centre)
         s +=" Cal center Azim (deg)    = {:8.3f}\n".format(platepar.az_centre)
         s +=" Cal center Elev (deg)    = {:8.3f}\n".format(platepar.alt_centre)
         s +=" Cal center col (colcen)  = {:8.3f}\n".format(platepar.X_res/2)

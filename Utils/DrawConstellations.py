@@ -8,7 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
-from RMS.Astrometry.Conversions import date2JD
+from RMS.Astrometry.Conversions import date2JD, trueOfDateRaDec2J2000
 from RMS.Formats.FFfile import getMiddleTimeFF
 from RMS.Formats.Platepar import Platepar
 from RMS.Math import angularSeparation
@@ -26,7 +26,9 @@ def drawConstellations(platepar, ff_file, separation_deg=90, color_bgra=None):
     from_ra, from_dec = lines[:, 0], lines[:, 1]
     to_ra, to_dec = lines[:, 2], lines[:, 3]
     from_x, from_y = raDecToXYPP(np.array(from_ra), np.array(from_dec), fftime_jd, platepar)
-    ang_sep = np.rad2deg(angularSeparation(np.deg2rad(platepar.RA_d), np.deg2rad(platepar.dec_d), np.deg2rad(from_ra), np.deg2rad(from_dec)))
+    # RA_d/dec_d are true of date; the constellation lines are J2000
+    ra_c, dec_c = trueOfDateRaDec2J2000(platepar.RA_d, platepar.dec_d, platepar.JD)
+    ang_sep = np.rad2deg(angularSeparation(np.deg2rad(ra_c), np.deg2rad(dec_c), np.deg2rad(from_ra), np.deg2rad(from_dec)))
     to_x, to_y = raDecToXYPP(np.array(to_ra), to_dec, fftime_jd, platepar)
     for i in range(len(to_x)):
         if ang_sep[i] < separation_deg:
