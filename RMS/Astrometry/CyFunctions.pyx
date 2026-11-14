@@ -1317,6 +1317,7 @@ cdef double radialRoot(double target, int kind, double k1, double k2, double k3,
     cdef int i
     cdef double lo = 0.0, hi = r_end, r, g, dg, f, df, res, nxt
 
+    # A target beyond the reach of the branch has no inverse
     if (target < 0) or (target > f_end):
         return NAN_VALUE
 
@@ -1385,6 +1386,7 @@ cdef double forwardJacobian(ForwardModel *m, double x_img, double y_img, double 
             rx = 0
             ry = 0
 
+        # Second powers of the coordinates
         x2 = x_img*x_img
         y2 = y_img*y_img
         xy2 = x_img*y_img
@@ -1500,6 +1502,7 @@ cdef double invertDistortionNewton(ForwardModel *m, double x_corr, double y_corr
 
     while True:
 
+        # The distortion and its Jacobian at the current point, and the squared error there
         forwardJacobian(m, x, y, out)
         n_eval += 1
         gx = out[0] - x_corr
@@ -1764,16 +1767,19 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
         else:
             model.poly_radial = 0
 
+        # The coefficients, zeros past the end of the arrays
         for j in range(14):
             model.cx[j] = x_poly_rev[j] if j < x_poly_rev.shape[0] else 0.0
             model.cy[j] = y_poly_rev[j] if j < y_poly_rev.shape[0] else 0.0
 
-        # The parameters of a radial model, with zeros for the radial coefficients its type does not have
+        # The distortion centre (the offsets of a polynomial) and the unit of the radius
         model.x0 = x0
         model.y0 = y0
         model.half_width = x_res/2.0
         model.kind = radialKind(dist_type)
         model.decentering = decentering_corr
+
+        # The parameters of a radial model, with zeros for the radial coefficients its type does not have
         if model.poly_radial < 0:
             n_k = radialTermCount(dist_type)
             model.xy = xy
@@ -1785,6 +1791,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
             model.k3 = k3 if n_k >= 3 else 0.0
             model.k4 = k4 if n_k >= 4 else 0.0
             model.p1, model.p2, model.p3, model.p4 = p1, p2, p3, p4
+        # A polynomial has none of them
         else:
             model.xy = model.a1 = model.sin_a2 = model.k1 = model.k2 = model.k3 = model.k4 = 0.0
             model.cos_a2 = 1.0
