@@ -216,7 +216,11 @@ class Platepar(object):
         # UT correction
         self.UT_corr = 0
 
+        # Reference hour angle (deg): the apparent Greenwich sidereal time at JD (mean sidereal time plus the
+        #   equation of the equinoxes, see Conversions.JD2HourAngle), the sidereal time of the true-of-date
+        #   reference pointing RA_d/dec_d. Recomputed from JD when a platepar is loaded
         self.Ho = 0
+
         self.X_res = 1280
         self.Y_res = 720
 

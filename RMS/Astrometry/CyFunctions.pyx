@@ -1385,10 +1385,13 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
         lon: [float] Longitude of station in degrees.
         x_res: [int] X resolution of the camera.
         y_res: [int] Y resolution of the camera.
-        h0: [float] Reference hour angle (deg).
+        h0: [float] Reference hour angle (deg): the apparent Greenwich sidereal time at jd_ref (mean
+            sidereal time plus the equation of the equinoxes, see Conversions.JD2HourAngle).
         jd_ref: [float] Reference Julian date of plate solution.
-        ra_ref: [float] Reference right ascension of the image centre (degrees).
-        dec_ref: [float] Reference declination of the image centre (degrees).
+        ra_ref: [float] Reference right ascension of the image centre (degrees), true equator and equinox
+            of jd_ref.
+        dec_ref: [float] Reference declination of the image centre (degrees), true equator and equinox of
+            jd_ref.
         pos_angle_ref: [float] Rotation from the celestial meridian (degrees).
         pix_scale: [float] Image scale (px/deg).
         x_poly_rev: [ndarray float] Distortion polynomial in X direction for reverse mapping.
@@ -1740,19 +1743,25 @@ cpdef (double, double, double) pointingCorrection(
     double h0, double jd_ref, double ra_ref, double dec_ref, double pos_angle_ref, 
     bool refraction=True
     ):
-    """ Compute the pointing correction for the given Julian date. The correction is done by computing the
-        difference in RA between the current and the reference epoch. The correction is done in the J2000
-        epoch to avoid the drift of the FOV centre over time.
+    """ Compute the pointing correction for the given Julian date. The camera is fixed in the horizontal
+        frame, so the reference right ascension advances by the sidereal time elapsed since the reference
+        time, at the same hour angle and declination: the result is the true-of-date pointing at jd. It is
+        then refracted (if enabled) and rotated to J2000, together with the position angle, so that the
+        field does not drift or rotate with time.
 
     Arguments:
         jd: [float] Julian date.
         lat: [float] Latitude of the observer in radians.
         lon: [float] Longitude of the observer in radians.
-        h0: [float] Reference hour angle in radians.
+        h0: [float] Reference hour angle in radians: the apparent Greenwich sidereal time at jd_ref (mean
+            sidereal time plus the equation of the equinoxes, see Conversions.JD2HourAngle).
         jd_ref: [float] Reference Julian date of the plate solution.
-        ra_ref: [float] Reference right ascension of the image centre in radians.
-        dec_ref: [float] Reference declination of the image centre in radians.
-        pos_angle_ref: [float] Rotation from the celestial meridian in radians.
+        ra_ref: [float] Reference right ascension of the image centre in radians: the true (unrefracted)
+            direction in the true equator and equinox of jd_ref.
+        dec_ref: [float] Reference declination of the image centre in radians, true equator and equinox
+            of jd_ref.
+        pos_angle_ref: [float] Rotation from the celestial meridian in radians, in the true equator and
+            equinox of jd_ref.
     
     Keyword arguments:
         refraction: [bool] Apply refraction correction. True by default.
@@ -1812,10 +1821,13 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         lon: [float] Longitude of the observer in degrees.
         x_res: [int] Image size, X dimension (px).
         y_res: [int] Image size, Y dimension (px).
-        h0: [float] Reference hour angle (deg).
+        h0: [float] Reference hour angle (deg): the apparent Greenwich sidereal time at jd_ref (mean
+            sidereal time plus the equation of the equinoxes, see Conversions.JD2HourAngle).
         jd_ref: [float] Reference Julian date when the plate was fit.
-        ra_ref: [float] Reference right ascension of the image centre (degrees).
-        dec_ref: [float] Reference declination of the image centre (degrees).
+        ra_ref: [float] Reference right ascension of the image centre (degrees), true equator and equinox
+            of jd_ref.
+        dec_ref: [float] Reference declination of the image centre (degrees), true equator and equinox of
+            jd_ref.
         pos_angle_ref: [float] Field rotation parameter (degrees).
         pix_scale: [float] Plate scale (px/deg).
         x_poly_fwd: [ndarray] 1D numpy array of 12 elements containing forward X axis polynomial parameters.
