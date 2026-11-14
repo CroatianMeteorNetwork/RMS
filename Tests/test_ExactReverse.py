@@ -17,6 +17,7 @@ from __future__ import print_function, division, absolute_import
 
 import copy
 import itertools
+import json
 
 import numpy as np
 import pytest
@@ -148,6 +149,28 @@ def test_the_option_is_off_by_default():
     assert Platepar().exact_reverse is False
 
 
+def test_the_option_is_saved_and_older_platepars_load_it_off(tmp_path):
+    """ The option is saved with the platepar, and a platepar written before it existed loads with it off. """
+
+    # Saved and read back on
+    path = str(tmp_path/"platepar.cal")
+    _platepar("radial5-odd").write(path)
+    loaded = Platepar()
+    loaded.read(path)
+    assert loaded.exact_reverse is True
+
+    # The same file without the option, as written before it existed
+    with open(path) as f:
+        platepar_dict = json.load(f)
+    del platepar_dict["exact_reverse"]
+    with open(path, "w") as f:
+        json.dump(platepar_dict, f)
+
+    loaded = Platepar()
+    loaded.read(path)
+    assert loaded.exact_reverse is False
+
+
 def test_a_point_beyond_the_reach_of_the_distortion_is_nan():
     """ A strong barrel distortion folds back past the frame: sky beyond its first maximum has no image. """
 
@@ -165,8 +188,8 @@ def test_a_point_beyond_the_reach_of_the_distortion_is_nan():
 
 def test_the_centre_of_the_projection_has_an_image():
     """ A sky point at the centre of the projection has no direction from it (0/0), but still an image: the
-        point the forward distortion takes to that centre. Several pointings, as rounding puts the point exactly
-        on the centre for only some of them. """
+        point the forward distortion takes to that centre. Several pointings, as rounding puts the point
+        exactly on the centre for only some of them. """
 
     for exact_reverse in (True, False):
         for dec_offset in np.linspace(-80.0, 30.0, 12):
