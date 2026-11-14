@@ -45,6 +45,7 @@ from RMS.Math import angularSeparation, sphericalPointFromHeadingAndDistance
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
 from RMS.Astrometry.CyFunctions import (
     pyRefractionTrueToApparent,
+    refractionScale,
 )
 
 
@@ -2458,7 +2459,8 @@ class Platepar(object):
         """
 
         return trueOfDateRaDec2ApparentAltAz(
-            self.RA_d, self.dec_d, self.JD, self.lat, self.lon, refraction=self.refraction
+            self.RA_d, self.dec_d, self.JD, self.lat, self.lon, refraction=self.refraction,
+            refraction_scale=refractionScale(self.elev)
         )
 
     def updateRefAltAz(self):
@@ -2480,7 +2482,8 @@ class Platepar(object):
 
         # Convert the reference apparent Alt/Az to a true-of-date RA/Dec, the frame of RA_d/dec_d
         self.RA_d, self.dec_d = apparentAltAz2TrueOfDateRaDec(
-            self.az_centre, self.alt_centre, self.JD, self.lat, self.lon, refraction=self.refraction
+            self.az_centre, self.alt_centre, self.JD, self.lat, self.lon, refraction=self.refraction,
+            refraction_scale=refractionScale(self.elev)
         )
 
         if not skip_rot_update:
