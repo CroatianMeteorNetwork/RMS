@@ -1219,8 +1219,9 @@ def applyPlateparToRaDecCentroids(ff_name, fps, meteor_meas, platepar, add_calst
         t_list = [t.year, t.month, t.day, t.hour, t.minute, t.second, int(t.microsecond/1000)]
         time_data.append(t_list)
 
-        # Convert RA/Dec to image coordinates
-        x, y = raDecToXYPP(np.array([ra]), np.array([dec]), date2JD(*t_list), platepar)
+        # Convert RA/Dec to image coordinates. They are measured directions of the meteor (as xyToRaDecPP
+        #   gives them with measurement=True), which are not aberrated
+        x, y = raDecToXYPP(np.array([ra]), np.array([dec]), date2JD(*t_list), platepar, measurement=True)
         X_data.append(x[0])
         Y_data.append(y[0])
 
