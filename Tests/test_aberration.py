@@ -22,7 +22,28 @@ except ImportError:
     erfa = None
 
 
+# The template carries no aberration flag, so a platepar read from it does not model the aberration; the
+#   tests that use it as a plate fitted with the aberration modelled turn the flag on
 TEMPLATE = os.path.join(getRmsRootDir(), 'share', 'platepar_templates', 'template_generic_720p_4mm.cal')
+
+
+def catalogDirections(jd, earth_frame_dirs):
+    """ Helper: the catalog directions of the stars that appear along the given lines of sight (unit vectors,
+        J2000 axes), by inverting erfa.ab with erfa's barycentric velocity of the Earth. """
+
+    tta = jd + TT_MINUS_UT
+    pvh, pvb = erfa.epv00(tta, 0.0)
+    vel = pvb[1]*(erfa.DAU/erfa.DAYSEC)/erfa.CMPS
+    bm1 = np.sqrt(1 - vel.dot(vel))
+    out = []
+    for v in earth_frame_dirs:
+        q = v.copy()
+        for _ in range(6):
+            q = q - (erfa.ab(q, vel, 1.0, bm1) - v)
+            q /= np.linalg.norm(q)
+        out.append(q)
+
+    return np.array(out)
 
 
 def separationArcsec(ra1, dec1, ra2, dec2):
@@ -54,7 +75,8 @@ class TestAberration(unittest.TestCase):
 
     @unittest.skipIf(erfa is None, "pyerfa not installed")
     def testAgainstErfa(self):
-        """ Within 0.1 arcsec of the IAU 2006 barycentric velocity (erfa.epv00 + erfa.ab). """
+        """ Within 0.03 arcsec of the IAU 2006 barycentric velocity (erfa.epv00 + erfa.ab); 0.020 arcsec is the
+            worst case found over 2020-2030. """
 
         rng = np.random.default_rng(1)
         for (y, m, d) in ((2026, 9, 4), (2026, 12, 1), (2027, 3, 15), (2027, 6, 20)):
@@ -68,7 +90,7 @@ class TestAberration(unittest.TestCase):
                 q = erfa.ab(p, v, 1.0, bm1)
                 ra_e, dec_e = np.arctan2(q[1], q[0])%(2*np.pi), np.arcsin(q[2])
                 ra_r, dec_r = applyAberration(ra, dec, jd)
-                self.assertLess(separationArcsec(ra_r, dec_r, ra_e, dec_e), 0.1, (y, m, d))
+                self.assertLess(separationArcsec(ra_r, dec_r, ra_e, dec_e), 0.03, (y, m, d))
 
 
     def testStarsAndMeasurementsAreDifferentFrames(self):
@@ -77,7 +99,6 @@ class TestAberration(unittest.TestCase):
 
         pp = Platepar()
         pp.read(TEMPLATE)
-        # The template carries no aberration flag; these plates are used with it modelled
         pp.aberration = True
         pp.lat, pp.lon, pp.elev = 40.0, -100.0, 300.0
         # High enough that the whole 82 x 46 deg field is above the horizon (the refraction functions are
@@ -201,26 +222,88 @@ class TestAberration(unittest.TestCase):
         self.assertTrue(pp_read.aberration)
 
 
+    @unittest.skipIf(erfa is None, "pyerfa not installed")
+    def testFittedPlateMeasuresTheGeometricDirection(self):
+        """ The star fit, then a measurement: a plate fitted to the catalog directions of the stars of a
+            distortion-free camera fixed in alt/az (erfa: aberration removed from the lines of sight), starting
+            from a pointing 0.1 deg off and without the aberration flag, measures a meteor at any pixel along the
+            geometric line of sight of that pixel (measurement=True), which is not aberrated. """
+
+        X, Y, d_ecef, f_scale = syntheticCamera(150.0, 40.0, 10.0)
+        jd = DATES[2]
+        lines_of_sight = earthFrameJ2000(jd, d_ecef)
+
+        # The stars at the pixels of the grid: their catalog directions
+        catalog = catalogDirections(jd, lines_of_sight)
+        ra_cat = np.degrees(np.arctan2(catalog[:, 1], catalog[:, 0]))%360
+        dec_cat = np.degrees(np.arcsin(catalog[:, 2]))
+
+        # A plate of the camera with the pointing 0.1 deg off and the rotation 0.1 deg off, fitted to the stars
+        pp = syntheticPlatepar(jd, X, Y, f_scale, lines_of_sight)
+
+        # The fit goes through the reverse mapping, so its distortion-centre offset is taken off as well
+        pp.x_poly_rev[0] = pp.x_poly_rev[1] = 0.0
+        pp.RA_d += 0.1
+        pp.dec_d -= 0.1
+        pp.pos_angle_ref += 0.1
+        pp.aberration = False
+        ones = np.ones(len(X))
+        pp.fitAstrometry(jd, np.c_[X, Y, ones], np.c_[ra_cat, dec_cat, ones], fit_only_pointing=True)
+        self.assertTrue(pp.aberration)
+
+        # A meteor at every pixel is measured along the line of sight of the pixel
+        _, ra, dec, _ = xyToRaDecPP(len(X)*[jd], X, Y, ones, pp, extinction_correction=False, measurement=True,
+            jd_time=True)
+        sep = separationArcsec(np.radians(ra), np.radians(dec),
+            np.arctan2(lines_of_sight[:, 1], lines_of_sight[:, 0]), np.arcsin(lines_of_sight[:, 2]))
+        self.assertLess(np.max(sep), 0.02)
+
+
+    def testPlateWithoutTheFlagGivesTheOutputsOfBefore(self):
+        """ A platepar without the aberration flag (fitted before the aberration was modelled) gives the same
+            outputs as the kernels without the aberration, to rounding, for stars and measurements alike. The
+            values were computed with the kernels before the aberration was added. """
+
+        pp = Platepar()
+        pp.read(TEMPLATE)
+        self.assertFalse(pp.aberration)
+        pp.lat, pp.lon, pp.elev = 43.19, -81.32, 300.0
+        pp.JD, pp.Ho = 2461000.5, 123.456
+        pp.RA_d, pp.dec_d, pp.pos_angle_ref = 210.3, 35.2, 12.0
+        pp.refraction = True
+        jd = pp.JD + 0.1
+
+        # Image -> sky, for stars and for measurements
+        X = np.array([50.0, 640.0, 1230.0, 300.0, 1000.0])
+        Y = np.array([40.0, 360.0, 680.0, 600.0, 120.0])
+        ra_before = [249.10654097146963, 187.88242530004916, 140.97636634456615, 206.03977569909966,
+            154.01999423770215]
+        dec_before = [33.095384768115665, 37.806123507156826, 17.428652028987226, 15.428606996137892,
+            56.31420121321367]
+        for measurement in (False, True):
+            _, ra, dec, _ = xyToRaDecPP(len(X)*[jd], X, Y, np.ones(len(X)), pp, extinction_correction=False,
+                jd_time=True, measurement=measurement)
+            np.testing.assert_allclose(ra, ra_before, rtol=0, atol=1e-11)
+            np.testing.assert_allclose(dec, dec_before, rtol=0, atol=1e-11)
+
+        # Sky -> image
+        ra_c = np.array([200.0, 215.5, 190.0, 230.0, 205.0])
+        dec_c = np.array([30.0, 40.0, 25.0, 45.0, 50.0])
+        x_before = [454.57275796484555, 356.8874448629715, 560.3463150917519, 287.44068322266537,
+            529.7649739583576]
+        y_before = [425.8652471596938, 200.1094510630682, 544.605081820676, 54.25615351017734,
+            126.57777939634846]
+        for measurement in (False, True):
+            x, y = raDecToXYPP(ra_c, dec_c, jd, pp, measurement=measurement)
+            np.testing.assert_allclose(x, x_before, rtol=0, atol=1e-8)
+            np.testing.assert_allclose(y, y_before, rtol=0, atol=1e-8)
+
+
     def testStarGridOverNight(self):
         """ The star fit as in real life, on a distortion-free camera fixed in alt/az and referenced at the start of
             the night: a star's catalog direction (erfa: velocity aberration removed) projects through xyToRaDecPP
             to the catalog direction over a 9 x 7 grid on the 82 x 46 deg frame, through the night, without
             rotation or scale errors that the centre alone cannot see. """
-
-        def catalogDirections(jd, earth_frame_dirs):
-            # Invert erfa.ab: the catalog directions of stars that appear along the given lines of sight
-            tta = jd + TT_MINUS_UT
-            pvh, pvb = erfa.epv00(tta, 0.0)
-            vel = pvb[1]*(erfa.DAU/erfa.DAYSEC)/erfa.CMPS
-            bm1 = np.sqrt(1 - vel.dot(vel))
-            out = []
-            for v in earth_frame_dirs:
-                q = v.copy()
-                for _ in range(6):
-                    q = q - (erfa.ab(q, vel, 1.0, bm1) - v)
-                    q /= np.linalg.norm(q)
-                out.append(q)
-            return np.array(out)
 
         for az, alt in ((14.0, 44.0), (200.0, 30.0)):
 
