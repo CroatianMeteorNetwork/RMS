@@ -286,6 +286,9 @@ def _quietJointFit(dir_paths, platepar, config, **kwargs):
 
     from RMS.Astrometry.JointDistortionFit import jointDistortionFit
 
+    # The fit record of the fitted platepar names the night calibration
+    kwargs.setdefault('fit_by', 'NightCalibration')
+
     try:
         return jointDistortionFit(dir_paths, platepar, config, snr_min=JOINT_SNR_MIN, **kwargs)
 
@@ -428,7 +431,8 @@ class NightCalibration(object):
         state['attempts'] += 1
         candidate, info = ac.fitCandidate({name: all_dir for name, _, _ in clear}, pool, held_out, catalog_stars,
                                           config, mask=self.mask, use_flat=config.use_flat,
-                                          fit_vignetting=(not config.use_flat), ff_frames=ff_frames)
+                                          fit_vignetting=(not config.use_flat), ff_frames=ff_frames,
+                                          fit_by='NightCalibration')
 
         score = None
         if candidate is not None:
@@ -795,7 +799,8 @@ def endOfNightCalibration(config, night_dir, calstars_name, platepar, platepar_p
         writeChunks(clear, all_dir, config, ff_frames=ff_frames)
         start, info = ac.fitCandidate({name: all_dir for name, _, _ in clear}, pool, held_out, catalog_stars,
                                       config, mask=mask, use_flat=config.use_flat,
-                                      fit_vignetting=(not config.use_flat), ff_frames=ff_frames)
+                                      fit_vignetting=(not config.use_flat), ff_frames=ff_frames,
+                                      fit_by='NightCalibration')
         if start is None:
             log.info("Automatic calibration at the end of the night: no platepar could be fitted ({:s})".format(
                 info.get('reason', '')))

@@ -77,6 +77,8 @@ def erfaJ2000(jd, lat, lon, az, alt):
     return raDec(erfa.pnm06a(jd + TT_MINUS_UT, 0.0).T.dot(unitVector(r, d)))
 
 
+# The template carries no aberration flag, so a platepar read from it does not model the aberration; the
+#   tests that use it as a plate fitted with the aberration modelled turn the flag on
 TEMPLATE = os.path.join(getRmsRootDir(), 'share', 'platepar_templates', 'template_generic_720p_4mm.cal')
 
 
@@ -282,6 +284,7 @@ class TestPrecessionNutation(unittest.TestCase):
 
         pp = Platepar()
         pp.read(TEMPLATE)
+        pp.aberration = True
         pp.JD = DATES[2]
         pp.Ho = 123.456
 
@@ -306,6 +309,7 @@ class TestPrecessionNutation(unittest.TestCase):
 
         pp = Platepar()
         pp.read(TEMPLATE)
+        pp.aberration = True
         pp.lat, pp.lon = np.degrees(lat), np.degrees(lon)
 
         for jd in DATES:
@@ -365,6 +369,7 @@ class TestPrecessionNutation(unittest.TestCase):
 
         pp = Platepar()
         pp.read(TEMPLATE)
+        pp.aberration = True
         pp.lat, pp.lon = 45.0, 15.0
 
         for refraction in (True, False):
@@ -476,6 +481,7 @@ def syntheticPlatepar(jd0, X, Y, f_scale, j2000_dirs):
 
     pp = Platepar()
     pp.read(TEMPLATE)
+    pp.aberration = True
     pp.X_res, pp.Y_res, pp.F_scale = X_RES, Y_RES, f_scale
     pp.lat, pp.lon, pp.elev = SITE
     pp.resetDistortionParameters()

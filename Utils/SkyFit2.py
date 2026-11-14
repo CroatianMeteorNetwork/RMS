@@ -9598,6 +9598,9 @@ class PlateTool(QtWidgets.QMainWindow):
             if not hasattr(self.platepar, "measurement_apparent_to_true_refraction"):
                 self.platepar.measurement_apparent_to_true_refraction = False
 
+            if not hasattr(self.platepar, "aberration"):
+                self.platepar.aberration = False
+
 
             # Update platepar distortion indices
             self.platepar.setDistortionType(self.platepar.distortion_type, reset_params=False)
@@ -12935,7 +12938,8 @@ class PlateTool(QtWidgets.QMainWindow):
                     first_platepar_fit=True,
                     use_nn_cost=True,
                     final_catalog_stars=tuned_catalog,
-                    iteration_callback=iteration_callback
+                    iteration_callback=iteration_callback,
+                    fit_by='SkyFit2 auto'
                 )
                 print("  NN fit complete: RA={:.2f} Dec={:.2f} Scale={:.3f} arcmin/px".format(
                     self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale))
@@ -13131,6 +13135,9 @@ class PlateTool(QtWidgets.QMainWindow):
         self.platepar.Ho = pp_aligned.Ho
         self.platepar.rotation_from_horiz = rotationWrtHorizon(self.platepar)
         self.platepar.updateRefAltAz()
+
+        # Record the pointing fit of the alignment
+        self.platepar.recordFit(pointing=True, fit_by='SkyFit2 align')
 
         # Update display
         self.updateStars()
@@ -13913,7 +13920,8 @@ class PlateTool(QtWidgets.QMainWindow):
                     first_platepar_fit=True,
                     use_nn_cost=True,
                     final_catalog_stars=tuned_catalog,
-                    iteration_callback=iteration_callback
+                    iteration_callback=iteration_callback,
+                    fit_by='SkyFit2 auto'
                 )
                 print("  NN fit complete: RA={:.2f} Dec={:.2f} Scale={:.3f} arcmin/px".format(
                     self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale))
@@ -15535,7 +15543,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Fit the platepar to paired stars
         self.platepar.fitAstrometry(jd, img_stars, catalog_stars, first_platepar_fit=self.first_platepar_fit,\
-            fit_only_pointing=self.fit_only_pointing, fixed_scale=self.fixed_scale)
+            fit_only_pointing=self.fit_only_pointing, fixed_scale=self.fixed_scale, fit_by='SkyFit2')
         self.first_platepar_fit = False
         self.platepar_modified = True
 

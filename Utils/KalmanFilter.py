@@ -546,8 +546,10 @@ def saveECSV(picks, times, platepar, save_path, orig_path):
     time_list = [[time.year, time.month, time.day, time.hour, time.minute, time.second + time.microsecond/1e6] \
                  for time in times]
     
+    # The picks are measurements of a meteor: its geometric direction, without the aberration of the stars
+    #   (as ApplyAstrometryECSV computes them)
     jd, ra, dec, _ = xyToRaDecPP(time_list, picks[:, 0], picks[:, 1], np.ones_like(picks[:, 0]), platepar, 
-                                 measurement=False, extinction_correction=False)
+                                 measurement=True, extinction_correction=False)
 
 
     az, alt = trueRaDec2ApparentAltAz(ra, dec ,jd, platepar.lat, platepar.lon, refraction=False)
