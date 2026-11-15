@@ -3,16 +3,19 @@ Tests of the correction of the timestamps of UWO .vid frames from their frame co
 the first frame plus the counter times the frame period, and a frame whose seconds field is off by whole seconds
 (the microseconds are right) gets the time given by its counter. A lost frame (a step of a frame period with the
 counter going up by one) is kept as it is, and a file whose counter doesn't follow the timestamps, or whose timestamps
-have a real gap or step (many lost frames), is not changed.
+have a real gap or step (many lost frames), is not changed. Short inputs, whose sampled frames are dense, are
+corrected as the long ones, and an input whose timestamps can't be checked gives a warning.
 """
 
 import datetime
+import logging
 
 import numpy as np
 import pytest
 
 import RMS.ConfigReader as cr
 from RMS.Astrometry.Conversions import datetime2UnixTime
+from RMS.Formats import Vid
 from RMS.Formats.FrameInterface import InputTypeUWOVid
 
 
@@ -194,3 +197,212 @@ def test_seconds_off_next_to_lost_frame_corrected(tmp_path):
     handle, read = readTimes(path, range(n))
     assert np.max(np.abs(read - times)) < 2e-6
     assert len(handle.vid_repaired_frames) == 1
+
+
+
+def stampFields(n):
+    """ The seconds and microseconds fields of the timestamps of n regular frames, and their counters.
+
+    Return:
+        (ts, tu, counters): [tuple of ndarrays]
+    """
+
+    times, counters = regular(n)
+    ts = np.floor(times).astype(np.int64)
+    tu = np.round((times - ts)*1e6).astype(np.int64)
+    carry = tu >= 1000000
+    ts[carry] += 1
+    tu[carry] -= 1000000
+
+    return ts, tu, counters
+
+
+def writeHeaders(path, ts, tu, counters, width=64, height=2):
+    """ A vid file of blank frames with the given timestamp fields and frame counters, written at once (for
+        long files): only the header of every frame is filled.
+    """
+
+    words = np.zeros((len(ts), width*height//2), dtype=np.uint32)
+    words[:, :4] = [0x10000, width*height*2, 116, 0]
+    words[:, 4] = counters
+    words[:, 5] = ts.astype(np.int32).view(np.uint32)
+    words[:, 6] = tu.astype(np.int32).view(np.uint32)
+    words.view(np.int16)[:, 14:18] = [1, width, height, 16]
+    words.tofile(path)
+
+
+def repairAll(path, ts, tu, counters):
+    """ The model of the timestamps of a vid file, and the seconds fields of all its frames after the repair.
+
+    Return:
+        (model, ts_repaired): [tuple] The model (see Vid.frameTimeModel) and the repaired seconds fields.
+    """
+
+    with open(path, 'rb') as fid:
+        model = Vid.frameTimeModel(fid)
+
+    # Every frame repaired as the vid input repairs it when the frame is read
+    st = Vid.VidStruct()
+    ts_repaired = ts.copy()
+    for i in range(len(ts)):
+        st.seq, st.ts, st.tu = int(counters[i]), int(ts[i]), int(tu[i])
+        Vid.repairFrameTime(st, model)
+        ts_repaired[i] = st.ts
+
+    return model, ts_repaired
+
+
+def sameModel(a, b):
+    """ Whether two models of the timestamps (or None) are identical. """
+
+    if (a is None) or (b is None):
+        return (a is None) and (b is None)
+
+    return all(np.array_equal(np.asarray(x), np.asarray(y)) for x, y in zip(a, b))
+
+
+# Lengths of the inputs and of the runs of frames with the seconds field off: the runs in the recordings are
+#   mostly under 12 frames, the longest seen 75 frames. In inputs under about 1700 frames the 64 sampled
+#   frames are dense, so a long run covered more than 3 of them and the repair was skipped
+RUN_CASES = [(n, k) for n in (128, 300, 578, 1125, 1700, 5760, 20000) for k in (1, 10, 41, 75) if k <= n//4]
+
+
+@pytest.mark.parametrize('where', ['start', 'middle', 'end'])
+@pytest.mark.parametrize('n, k', RUN_CASES)
+def test_run_corrected_in_short_and_long_inputs(tmp_path, n, k, where):
+
+    # A run of k frames with the seconds field 1 s low at the start, in the middle or at the end of the input
+    ts, tu, counters = stampFields(n)
+    first = {'start': 0, 'middle': n//2 - k//2, 'end': n - k}[where]
+    stamped = ts.copy()
+    stamped[first:first + k] -= 1
+    path = str(tmp_path/'run.vid')
+    writeHeaders(path, stamped, tu, counters)
+
+    # Every frame gets the seconds of its counter
+    model, repaired = repairAll(path, stamped, tu, counters)
+    assert model is not None
+    assert np.array_equal(repaired, ts)
+
+
+@pytest.mark.parametrize('n', [578, 1125])
+def test_burst_of_runs_corrected_in_short_input(tmp_path, n):
+
+    # Runs of 41 frames with the seconds field off every 64 frames (as they come in the recordings), over 300
+    #   frames of a short input: every run covers several sampled frames and all are corrected
+    ts, tu, counters = stampFields(n)
+    stamped = ts.copy()
+    for first in range(100, 400, 64):
+        stamped[first:first + 41] -= 1
+    path = str(tmp_path/'burst.vid')
+    writeHeaders(path, stamped, tu, counters)
+
+    model, repaired = repairAll(path, stamped, tu, counters)
+    assert model is not None
+    assert np.array_equal(repaired, ts)
+
+
+@pytest.mark.parametrize('n, first, length', [(578, 300, 278), (1125, 400, 300), (1700, 1100, 600),
+                                              (19281, 17900, 1381)])
+def test_long_run_of_whole_seconds_kept(tmp_path, n, first, length):
+
+    # A run of frames 1 s low much longer than a run of the seconds field off (here to the end of the input or
+    #   in the middle of it) is a step in the timestamps: no model, and nothing is changed
+    ts, tu, counters = stampFields(n)
+    stamped = ts.copy()
+    stamped[first:first + length] -= 1
+    path = str(tmp_path/'step.vid')
+    writeHeaders(path, stamped, tu, counters)
+
+    model, repaired = repairAll(path, stamped, tu, counters)
+    assert model is None
+    assert np.array_equal(repaired, stamped)
+
+
+def test_step_not_whole_seconds_kept(tmp_path):
+
+    # Frames half a second early in a short input are not the seconds field off: no model, nothing is changed
+    n = 578
+    ts, tu, counters = stampFields(n)
+    t_us = ts*1000000 + tu
+    t_us[200:241] -= 500000
+    stamped, stamped_tu = t_us//1000000, t_us%1000000
+    path = str(tmp_path/'half.vid')
+    writeHeaders(path, stamped, stamped_tu, counters)
+
+    model, repaired = repairAll(path, stamped, stamped_tu, counters)
+    assert model is None
+    assert np.array_equal(repaired, stamped)
+
+
+@pytest.mark.parametrize('n', [5760, 19281])
+@pytest.mark.parametrize('case', ['run', 'burst', 'step'])
+def test_long_input_model_unchanged(tmp_path, n, case):
+
+    # In a long input the sampled frames are sparse and the model is the one of at most 3 consecutive sampled
+    #   frames off it (the rule without the allowance for dense samples), for runs, bursts of runs and a step
+    ts, tu, counters = stampFields(n)
+    stamped = ts.copy()
+    if case == 'run':
+        stamped[3000:3075] -= 1
+    elif case == 'burst':
+        for first in range(2000, 3000, 64):
+            stamped[first:first + 41] -= 1
+    else:
+        stamped[n - 700:] -= 1
+    path = str(tmp_path/'long.vid')
+    writeHeaders(path, stamped, tu, counters)
+
+    with open(path, 'rb') as fid:
+        model = Vid.frameTimeModel(fid)
+        model_sparse = Vid.frameTimeModel(fid, max_run_frames=1)
+
+    assert sameModel(model, model_sparse)
+
+
+def test_short_file_long_run_corrected(tmp_path):
+
+    # A run of 41 frames with the seconds field off in a short file, read by the vid input: all corrected
+    n = 300
+    times, counters = regular(n)
+    stamped = times.copy()
+    bad = list(range(130, 171))
+    stamped[bad] -= 1.0
+    path = str(tmp_path/'short.vid')
+    writeVid(path, stamped, counters)
+
+    handle, read = readTimes(path, range(n))
+    assert np.max(np.abs(read - times)) < 2e-6
+    assert len(handle.vid_repaired_frames) == len(bad)
+
+
+def test_warning_without_model(tmp_path, caplog):
+
+    # A file whose timestamps can't be checked against the counter: a warning names it
+    n = 300
+    times, _ = regular(n)
+    counters = 1000 + np.random.default_rng(1).permutation(n)
+    path = str(tmp_path/'unchecked.vid')
+    writeVid(path, times, counters)
+
+    with caplog.at_level(logging.WARNING, logger='rmslogger'):
+        handle, _ = readTimes(path, range(1))
+
+    assert handle.vid_time_model is None
+    assert any((record.levelno == logging.WARNING) and ('could not be checked' in record.getMessage())
+               and ('unchecked.vid' in record.getMessage()) for record in caplog.records)
+
+
+def test_no_warning_with_model(tmp_path, caplog):
+
+    # A file with a model of its timestamps gives no warning about them
+    n = 300
+    times, counters = regular(n)
+    path = str(tmp_path/'checked.vid')
+    writeVid(path, times, counters)
+
+    with caplog.at_level(logging.WARNING, logger='rmslogger'):
+        handle, _ = readTimes(path, range(1))
+
+    assert handle.vid_time_model is not None
+    assert not any('could not be checked' in record.getMessage() for record in caplog.records)

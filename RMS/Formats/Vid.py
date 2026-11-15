@@ -150,7 +150,12 @@ def readFrame(st, fid, metadata_only=False):
 
 
 
-def frameTimeModel(fid, n_samples=64, tolerance=0.1, max_run=3):
+# The longest run of consecutive frames with the seconds field off which is taken as such (the longest seen
+#   in the recordings is 75 frames, most are under 12). A longer run is a step in the timestamps
+MAX_OFF_RUN_FRAMES = 128
+
+
+def frameTimeModel(fid, n_samples=64, tolerance=0.1, max_run=3, max_run_frames=MAX_OFF_RUN_FRAMES):
     """ A model of the frame timestamps of a vid file from its frame counter. The timestamps are written as the
         time of the first frame plus the counter times the frame period, so the time of any frame follows from
         its counter. A few frames can have a seconds field off by whole seconds (the microseconds stay right),
@@ -165,8 +170,12 @@ def frameTimeModel(fid, n_samples=64, tolerance=0.1, max_run=3):
         tolerance: [float] Largest difference (s) between a sampled timestamp and the model, apart from whole
             seconds. 0.1 by default (a few lost frames).
         max_run: [int] Most consecutive sampled frames off the model by whole seconds. Frames with the seconds
-            field off come in short runs, far shorter than the spacing of the samples, so more consecutive
-            samples off the model are a step in the timestamps. 3 by default.
+            field off come in short runs, far shorter than the spacing of the samples in a long file, so more
+            consecutive samples off the model are a step in the timestamps. 3 by default.
+        max_run_frames: [int] Longest run of frames with the seconds field off. In a short file the samples
+            are dense and such a run covers more than max_run of them, so the number of consecutive samples
+            allowed off the model is raised to the most which a run of this many frames can cover.
+            MAX_OFF_RUN_FRAMES by default.
 
     Return:
         [tuple] (counter, seconds, offset, period, counters, residuals) of the model (see fitTimeModel): the time
@@ -202,7 +211,8 @@ def frameTimeModel(fid, n_samples=64, tolerance=0.1, max_run=3):
     finally:
         fid.seek(file_pos)
 
-    return fitTimeModel(seqs, secs, usecs, tolerance=tolerance, max_run=max_run)
+    return fitTimeModel(seqs, secs, usecs, tolerance=tolerance, max_run=max_run,
+                        max_run_frames=max_run_frames)
 
 
 # A timestamp with its seconds field off reads exactly whole seconds early: the stamps are written to the
@@ -244,7 +254,8 @@ def wholeSecondsEarly(seq, res, seq_on, res_on, whole_tolerance=WHOLE_SECOND_TOL
     return 0
 
 
-def fitTimeModel(seqs, secs, usecs, tolerance=0.1, max_run=3, whole_tolerance=WHOLE_SECOND_TOLERANCE):
+def fitTimeModel(seqs, secs, usecs, tolerance=0.1, max_run=3, whole_tolerance=WHOLE_SECOND_TOLERANCE,
+                 max_run_frames=MAX_OFF_RUN_FRAMES):
     """ The model of the frame timestamps from the frame counter, fitted to the headers of sampled frames (see
         frameTimeModel). Shared by the vid files and the UWO PNG frame dumps, whose headers carry the same fields.
 
@@ -259,6 +270,9 @@ def fitTimeModel(seqs, secs, usecs, tolerance=0.1, max_run=3, whole_tolerance=WH
         max_run: [int] Most consecutive sampled frames off the model by whole seconds. 3 by default.
         whole_tolerance: [float] Largest difference (s) from exactly whole seconds early of a sample off the model.
             WHOLE_SECOND_TOLERANCE by default.
+        max_run_frames: [int] Longest run of frames with the seconds field off. Dense samples (a short input)
+            may have more than max_run consecutive samples off the model within a run this long, which is then
+            allowed. MAX_OFF_RUN_FRAMES by default.
 
     Return:
         [tuple] (counter, seconds, offset, period, counters, residuals) of the model: the line of frameTimeModel
@@ -304,6 +318,12 @@ def fitTimeModel(seqs, secs, usecs, tolerance=0.1, max_run=3, whole_tolerance=WH
     for i in np.nonzero(off)[0]:
         if wholeSecondsEarly(seqs[i], res[i], seq_on, res_on, whole_tolerance) == 0:
             return None
+
+    # A run of frames with the seconds field off covers more samples when they are dense (a short input), so
+    #   the number of consecutive samples allowed off the model is at least the most which a run of
+    #   max_run_frames frames can cover, at the smallest spacing of the samples. Sparse samples (a long input)
+    #   keep max_run
+    max_run = max(max_run, (max_run_frames - 1)//int(np.min(np.diff(seqs))) + 1)
     run = 0
     for o in off:
         run = run + 1 if o else 0

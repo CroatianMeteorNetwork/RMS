@@ -7,6 +7,7 @@ PNGs which are not frame dumps, are not changed.
 """
 
 import datetime
+import logging
 import os
 
 import cv2
@@ -190,3 +191,38 @@ def test_seconds_late_kept(tmp_path):
     handle, read = readTimes(path, n)
     assert np.max(np.abs(read - stamped)) < 2e-6
     assert not handle.png_repaired_frames
+
+
+
+def test_short_dump_long_run_corrected(tmp_path):
+
+    # A run of 20 frames with the seconds field off in a short recording (the sampled frames are dense, so the
+    #   run covers several of them): all corrected
+    n = 200
+    times, counters = regular(n)
+    stamped = times.copy()
+    bad = list(range(90, 110))
+    stamped[bad] -= 1.0
+    path = str(tmp_path/'short')
+    writeDumps(path, stamped, counters)
+
+    handle, read = readTimes(path, n)
+    assert np.max(np.abs(read - times)) < 2e-6
+    assert len(handle.png_repaired_frames) == len(bad)
+
+
+def test_warning_without_model(tmp_path, caplog):
+
+    # Frame dumps whose timestamps can't be checked against the counter: a warning names the directory
+    n = 100
+    times, _ = regular(n)
+    counters = 1000 + np.random.default_rng(2).permutation(n)
+    path = str(tmp_path/'unchecked')
+    writeDumps(path, times, counters)
+
+    with caplog.at_level(logging.WARNING, logger='rmslogger'):
+        handle = InputTypeImages(path, cr.Config(), beginning_time=None)
+
+    assert handle.png_time_model is None
+    assert any((record.levelno == logging.WARNING) and ('could not be checked' in record.getMessage())
+               and ('unchecked' in record.getMessage()) for record in caplog.records)

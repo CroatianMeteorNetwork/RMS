@@ -1364,11 +1364,13 @@ class InputTypeUWOVid(InputType):
         self.vid_file = open(self.vid_path, 'rb', buffering=65536)
 
         # The model of the timestamps from the frame counter, which corrects a seconds field off by whole
-        #   seconds in the frames read (see readNextFrame), and the counters of the corrected frames
+        #   seconds in the frames read (see readNextFrame), and the counters of the corrected frames. Without
+        #   a model a frame whose seconds field is off keeps a time off by whole seconds, so it is a warning
         self.vid_time_model = vidFrameTimeModel(self.vid_file)
         self.vid_repaired_frames = set()
         if self.vid_time_model is None:
-            log.info('The timestamps of {:s} are not checked against the frame counter'.format(self.file_name))
+            log.warning('The timestamps of {:s} could not be checked against the frame counter, frames with '
+                        'the seconds field off are not corrected'.format(self.file_name))
 
         # Read one video frame and rewind to beginning
         self.readNextFrame()
@@ -2007,12 +2009,14 @@ class InputTypeImages(InputType):
 
             self.uwo_png_mode = True
 
-            # The timestamp model of frame dumps whose headers carry a frame counter, before any time is read
+            # The timestamp model of frame dumps whose headers carry a frame counter, before any time is read.
+            #   Without a model a frame whose seconds field is off keeps a time off by whole seconds
             if self.uwo_magick_type == "emccd":
                 self.png_time_model = self.uwoTimeModel()
                 if self.png_time_model is None:
-                    log.info('The timestamps of the frames in {:s} are not checked against the frame '
-                             'counter'.format(self.dir_path))
+                    log.warning('The timestamps of the frames in {:s} could not be checked against the frame '
+                                'counter, frames with the seconds field off are not corrected'.format(
+                                    self.dir_path))
 
             # Get the beginning time
             self.loadFrame(fr_no=0)
