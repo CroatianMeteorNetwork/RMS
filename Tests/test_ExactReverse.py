@@ -189,6 +189,26 @@ def test_a_point_beyond_the_reach_of_the_distortion_is_nan(decentering):
     assert np.isnan(x[1]) and np.isnan(y[1])
 
 
+def test_decentering_keeps_points_beyond_the_radial_maximum_that_have_an_image():
+    """ The decentering can carry the mapping past the maximum of its radial part alone while the whole mapping
+        still rises (near the edge of the frame): such points have an image and come back to it. """
+
+    # A strong barrel distortion with a decentering term and no other decentering, the distortion centre in the
+    #   middle of the frame
+    pp = _platepar("radial3-odd", force_centre=True, decentering=True, refraction=False)
+    pp.x_poly_fwd[-5] = -0.3
+    pp.x_poly_fwd[-4:] = [0.005, 0.0, 0.0, 0.0]
+
+    # An image point near the right edge, whose corrected radius is beyond the maximum of the radial part alone
+    gx, gy = np.array([pp.X_res/2.0*(1 + 0.99)]), np.array([pp.Y_res/2.0])
+    _, ra, dec, _ = astrometry.xyToRaDecPP(np.full(1, JD), gx, gy, np.ones(1), pp, extinction_correction=False,
+        jd_time=True)
+    x, y = astrometry.raDecToXYPP(ra, dec, JD, pp)
+
+    assert np.isfinite(x[0]) and np.isfinite(y[0])
+    assert np.hypot(x[0] - gx[0], y[0] - gy[0]) < 1e-6
+
+
 def test_the_centre_of_the_projection_has_an_image():
     """ A sky point at the centre of the projection has no direction from it (0/0), but still an image: the
         point the forward distortion takes to that centre. Several pointings, as rounding puts the point

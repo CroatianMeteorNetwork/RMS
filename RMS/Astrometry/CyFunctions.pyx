@@ -1680,6 +1680,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
     cdef double r_end = 0, f_end = 0
     cdef double lin_xx = 1, lin_xy = 0, lin_yx = 0, lin_yy = 1, lin_det = 1
     cdef double img[2]
+    cdef bint seed_beyond_radial = False
     cdef bint radial_root = False
     cdef int j, n_k
     cdef ForwardModel model
@@ -1901,10 +1902,20 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
 
             # Polynomial models and decentering: Newton's method in the image plane. A polynomial starts from
             #   the corrected position with its linear part undone; a radial model with decentering from the
-            #   inverse of its radial part, which keeps the solution on the rising branch (NaN beyond it)
+            #   inverse of its radial part, which keeps the solution on the rising branch
             else:
+                seed_beyond_radial = False
                 if model.poly_radial < 0:
                     radialInverse(&model, x, y, r_end, f_end, img)
+
+                    # Beyond the maximum of the radial part alone the decentering can still keep the whole
+                    #   mapping rising (near the edge of the frame), so the solution is searched from the
+                    #   corrected position instead, and kept only within 1.5 times the frame: farther out it
+                    #   may lie on a folded sheet of the mapping
+                    if img[0] != img[0]:
+                        img[0] = x
+                        img[1] = y
+                        seed_beyond_radial = True
                 elif lin_det > 0:
                     img[0] = (lin_yy*(x - x0) - lin_xy*(y - y0))/lin_det
                     img[1] = (lin_xx*(y - y0) - lin_yx*(x - x0))/lin_det
@@ -1914,6 +1925,10 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
 
                 if img[0] == img[0]:
                     invertDistortionNewton(&model, x, y, img)
+
+                if seed_beyond_radial and ((fabs(img[0]) > 0.75*x_res) or (fabs(img[1]) > 0.75*y_res)):
+                    img[0] = NAN_VALUE
+                    img[1] = NAN_VALUE
 
             x_img = img[0]
             y_img = img[1]
