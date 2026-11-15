@@ -2187,14 +2187,14 @@ if __name__ == "__main__":
                              eventmonitor.stop()
                              del eventmonitor
 
-                        # Stop the slideshow if it was on
-                        if slideshow_view is not None:
+                    # Stop the slideshow if it was on
+                    if slideshow_view is not None:
 
-                            log.info("Stopping slideshow...")
-                            slideshow_view.stop()
-                            slideshow_view.join()
-                            del slideshow_view
-                            slideshow_view = None
+                        log.info("Stopping slideshow...")
+                        slideshow_view.stop()
+                        slideshow_view.join()
+                        del slideshow_view
+                        slideshow_view = None
 
                     sys.exit()
 
