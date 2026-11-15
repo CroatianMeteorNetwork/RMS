@@ -51,6 +51,11 @@ RECALIBRATE_NEIGHBOURHOOD_SIZE = 3
 LSQ_REFINE_MAX_ROUNDS = 5
 LSQ_REFINE_CONVERGED_PX = 0.01
 
+# Least squares refinement of the pointing: the number of matched stars which the refined pointing may lose
+#   (move out of the match radius) and still be used, as a fraction of the matched stars, and the least number
+LSQ_REFINE_MAX_LOST_FRACTION = 0.02
+LSQ_REFINE_MIN_LOST = 1
+
 # Get the logger from the main module
 log = getLogger("rmslogger", level="INFO")
 
@@ -133,8 +138,9 @@ def refinePointingLSQ(config, platepar, jd, star_dict_ff, catalog_stars, fit_rad
 
     Return:
         (platepar, matched_stars): [tuple] The refined platepar and its matched stars within check_radius, or
-            (None, None) if the refinement isn't used: too few stars, fewer stars matched, or a higher loss
-            (the robust one of the fit) on the stars matched with the given platepar.
+            (None, None) if the refinement isn't used: too few stars, more matched stars lost than allowed
+            (LSQ_REFINE_MAX_LOST_FRACTION of them, at least LSQ_REFINE_MIN_LOST), or a higher loss (the robust
+            one of the fit) on the stars matched with the given platepar.
     """
 
     # The stars matched with the given platepar, the pairs which the refinement must fit better. Too few stars
@@ -216,14 +222,23 @@ def refinePointingLSQ(config, platepar, jd, star_dict_ff, catalog_stars, fit_rad
             return None, None
         img_stars, cat_stars, _ = matched[jd]
 
-    # The refinement is used only if it matches at least as many stars, both for the fit and for the checks
-    #   after the recalibration, and has a lower loss on the stars matched with the given platepar
+    # The number of the matched stars which the refined pointing may lose. A star near the edge of the match
+    #   radius can move out of it when the pointing gets better, as the radius is about as large as the
+    #   error which the refinement removes, so losing one or a few stars is no sign of a worse fit. Losing
+    #   more than a small fraction of them is taken as a sign of a wrong fit
+    max_lost_fit = max(LSQ_REFINE_MIN_LOST, LSQ_REFINE_MAX_LOST_FRACTION*n_start)
+    max_lost_check = max(LSQ_REFINE_MIN_LOST, LSQ_REFINE_MAX_LOST_FRACTION*n_check)
+
+    # The refinement is used only if it loses at most the allowed number of the matched stars, both for the
+    #   fit and for the checks after the recalibration, and has a lower loss on the stars matched with the
+    #   given platepar
     n_fit, _, _, _ = CheckFit.matchStarsResiduals(config, refined, catalog_stars, star_dict_ff, fit_radius,
                                                   ret_nmatch=True, lim_mag=lim_mag)
     n_refined, _, _, matched_check = CheckFit.matchStarsResiduals(config, refined, catalog_stars, star_dict_ff,
                                                                   check_radius, ret_nmatch=True, lim_mag=lim_mag)
     cost_start, cost_refined = _robustCost(platepar, img_start, cat_start), _robustCost(refined, img_start, cat_start)
-    if (n_fit < n_start) or (n_refined < n_check) or (jd not in matched_check) or (cost_refined > cost_start):
+    if ((n_start - n_fit) > max_lost_fit) or ((n_check - n_refined) > max_lost_check) \
+            or (jd not in matched_check) or (cost_refined > cost_start):
 
         log.info('Least squares refinement of the pointing not used: stars within {:.2f} px {:d} (before {:d}), '
                  'within {:.2f} px {:d} (before {:d}), loss on the first pairs {:.3f} (before {:.3f})'.format(
