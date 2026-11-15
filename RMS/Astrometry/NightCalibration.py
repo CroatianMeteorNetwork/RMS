@@ -12,11 +12,17 @@ platepar is then good, the fitting of the night is done; otherwise, or if no pla
 attempt comes auto_calibration_retry_min minutes later with more stars, up to auto_calibration_max_fits attempts a
 night. The installed platepar is replaced only by a better one, so it never gets worse during the night.
 
-At the end of the night (endOfNightCalibration, called by Reprocess.processNight before the night is reduced): the
-platepar installed during the night (or a platepar fitted from scratch on the night's stars, if none was, or an
-existing platepar which fails on the night's stars) is refitted with the joint fit on all clear chunks of the night,
-every few chunks held out. It is installed only if it meets the quality control of the joint fit; the replaced
-platepar is kept. The night is then reduced with the installed platepar as usual.
+At the end of the night (endOfNightCalibration, called by Reprocess.processNight before the night is reduced):
+the platepar installed during the night (or a platepar fitted from scratch on the night's stars, if none was,
+or an existing platepar whose astrometry fails on the night's stars) is refitted with the joint fit on all
+clear chunks of the night, every few chunks held out. It is installed only if it meets the quality control of
+the joint fit; the replaced platepar is kept. The night is then reduced with the installed platepar as usual.
+
+The astrometry and the photometry of a platepar are judged separately (AutoCalibration.judgeScoreSplit). The
+joint fit refits the astrometry and keeps the photometry of its start. A platepar whose photometry alone fails
+(e.g. on a night with haze) is never refitted with it: only its photometry is refitted, or, on a sky with haze
+or clouds, the photometry of the night is recorded as unreliable (AutoCalibration.refitFailingPhotometry); a
+photometry which fails together with the astrometry is refitted the same way after the astrometry.
 """
 
 from __future__ import print_function, division, absolute_import
@@ -455,8 +461,10 @@ class NightCalibration(object):
 
 
     def _checkAndRefit(self, current, clear, now_jd, ff_frames, refit=True):
-        """ Check the installed platepar on new stars, fit a new one on all clear chunks so far starting from it,
-            and install the better of the two.
+        """ Check the installed platepar on new stars, fit a new one on all clear chunks so far starting from
+            it, and install the better of the two. A platepar whose photometry alone fails on the new stars
+            keeps its astrometry: no new platepar is fitted, only its photometry is refitted (see
+            AutoCalibration.refitFailingPhotometry), as is a photometry which fails after the new fit.
 
         Arguments:
             current: [Platepar] The installed platepar.
@@ -480,32 +488,37 @@ class NightCalibration(object):
             return None
         check = ac.spreadChunks(new, ac.MAX_HELD_OUT)
         check_names = set(name for name, _, _ in check)
+        fit_chunks = [chunk for chunk in clear if chunk[0] not in check_names]
 
         catalog_stars = ac._loadCatalog(config, now_jd)
 
+        # The installed platepar on the new stars, its astrometry and photometry judged separately
+        current_score = ac.scorePlatepar(current, check, catalog_stars, config, ff_frames=ff_frames,
+                                         mask=self.mask_img)
+        verdict = ac.judgeScoreSplit(current_score)
+        photometry_only = verdict['astrometry_ok'] and (not verdict['photometry_ok'])
+
         # A new platepar from all clear chunks so far except the new ones it is checked on, starting from the
-        #   installed one (an attempt of the night)
+        #   installed one (an attempt of the night). Not if the photometry alone fails: the joint fit refits
+        #   the distortion, which the photometry has nothing to do with
         candidate = None
         if refit:
             state['attempts'] += 1
+        if refit and (not photometry_only):
             fit_dir = os.path.join(self.work_dir, 'fit')
-            writeChunks([chunk for chunk in clear if chunk[0] not in check_names], fit_dir, config,
-                        ff_frames=ff_frames)
+            writeChunks(fit_chunks, fit_dir, config, ff_frames=ff_frames)
             candidate, _ = _quietJointFit([fit_dir], current, config, n_iter=JOINT_ITERATIONS, chunk_step=1,
                                           max_chunks=NIGHT_REFIT_MAX_CHUNKS, nproc=1, qc=False)
 
             # The vignetting of the refit is refitted on the same chunks if asked for (it stays independent of
             #   the new chunks the refit is compared on)
             if (candidate is not None) and ac.vignettingRefitEnabled(config):
-                candidate, info = ac.refitVignetting(candidate, [chunk for chunk in clear
-                                                                 if chunk[0] not in check_names],
-                                                     catalog_stars, config, ff_frames=ff_frames, mask=self.mask_img)
+                candidate, info = ac.refitVignetting(candidate, fit_chunks, catalog_stars, config,
+                                                     ff_frames=ff_frames, mask=self.mask_img)
                 log.info("Automatic calibration of the night: {:s} the refitted vignetting ({:s})".format(
                     'kept' if info['kept'] else 'did not keep', info['reason']))
 
         # Both scored on the same new chunks, the better one is installed
-        current_score = ac.scorePlatepar(current, check, catalog_stars, config, ff_frames=ff_frames,
-                                         mask=self.mask_img)
         best, best_score, action = current, current_score, 'kept the installed platepar'
         if candidate is not None:
             candidate_score = ac.scorePlatepar(candidate, check, catalog_stars, config, ff_frames=ff_frames,
@@ -518,29 +531,58 @@ class NightCalibration(object):
                 best, best_score, action = candidate, candidate_score, 'installed the refit ({:s})'.format(reason)
             else:
                 action += ' (refit: {:s})'.format(reason)
+        elif refit and photometry_only:
+            action += ' (only its photometry fails, no refit of the astrometry)'
         elif refit:
             action += ' (the refit failed)'
         else:
             action = 'checked the platepar of the last attempt'
 
+        # A photometry which fails while the astrometry is good (of the installed platepar, also one just
+        #   refitted) is refitted separately on the same chunks, its astrometry unchanged; on a sky with haze
+        #   or clouds it is recorded as unreliable
+        best_verdict = ac.judgeScoreSplit(best_score)
+        photometry = None
+        if refit and best_verdict['astrometry_ok'] and (not best_verdict['photometry_ok']):
+            new_chunks = sum(1 for chunk in self._chunks if chunk[1] > state['check_from_jd'])
+            clear_share = len(new)/max(1, new_chunks)
+            refitted, photometry = ac.refitFailingPhotometry(best, best_score, fit_chunks, check,
+                                                             catalog_stars, config, clear_share=clear_share,
+                                                             ff_frames=ff_frames, mask=self.mask_img)
+            if refitted is not None:
+                path = installPlatepar(refitted, self.platepar_path, photometry['reason'],
+                                       dry_run=self.dry_run)
+                state['installed'] = path
+                state['installed_jd'] = now_jd
+                best, best_score = refitted, ac.scorePlatepar(refitted, check, catalog_stars, config,
+                                                              ff_frames=ff_frames, mask=self.mask_img)
+                best_verdict = ac.judgeScoreSplit(best_score)
+                action += ', installed the refitted photometry'
+            else:
+                action += ', photometry not reliable ({:s})'.format(photometry['reason'])
+
         # The next new stars are those after this attempt
         state['check_from_jd'] = now_jd
 
         # Done if the installed platepar is good on the new stars (or after the check of the last attempt),
-        #   otherwise the next attempt comes later
-        ok, reasons = ac.judgeScore(best_score)
+        #   otherwise the next attempt comes later. The judgement of the installed platepar is recorded with
+        #   its astrometry and photometry separately
+        ok, reasons = best_verdict['ok'], best_verdict['reasons']
+        details = {'score': best_score.toDict(), 'verdict': best_verdict}
+        if photometry is not None:
+            details['photometry'] = photometry
         if not refit:
             state['done'] = True
             return self._record(now_jd, '{:s}: it is {:s} on new stars; done for the night'.format(
-                action, 'good' if ok else 'not good ({:s})'.format('; '.join(reasons))), score=best_score.toDict())
+                action, 'good' if ok else 'not good ({:s})'.format('; '.join(reasons))), **details)
         if ok:
             state['done'] = True
             return self._record(now_jd, 'attempt {:d}: {:s}, it is good on new stars; done for the night'.format(
-                state['attempts'], action), score=best_score.toDict())
+                state['attempts'], action), **details)
 
         state['next_attempt_jd'] = now_jd + config.auto_calibration_retry_min/1440.0
         return self._record(now_jd, 'attempt {:d}: {:s}, it fails on new stars ({:s})'.format(
-            state['attempts'], action, '; '.join(reasons)), score=best_score.toDict())
+            state['attempts'], action, '; '.join(reasons)), **details)
 
 
 
@@ -781,20 +823,22 @@ def endOfNightCalibration(config, night_dir, calstars_name, platepar, platepar_p
         return platepar, platepar_path, platepar_fmt
 
     held_out = ac.spreadChunks(clear[1::2], ac.MAX_HELD_OUT)
+    held_names = set(name for name, _, _ in held_out)
+    fit_chunks = [chunk for chunk in clear if chunk[0] not in held_names]
     catalog_stars = ac._loadCatalog(config, clear[len(clear)//2][1])
     fitted_tonight = state.get('installed') is not None
 
-    # The start of the joint fit: the platepar installed tonight, a platepar fitted from scratch on the night if
-    #   there is none, or an existing platepar which fails on the night's stars. An existing platepar which is good
-    #   is kept as it is
+    # The start of the joint fit: the platepar installed tonight, a platepar fitted from scratch on the night
+    #   if there is none, or an existing platepar whose astrometry fails on the night's stars. An existing
+    #   platepar which is good is kept as it is; one whose photometry alone fails gets only its photometry
+    #   refitted
     start = platepar
+    photometry_fails = False
     if start is None:
-        held_names = set(name for name, _, _ in held_out)
-        pool = [chunk for chunk in clear if chunk[0] not in held_names]
         all_dir = os.path.join(night_dir, WORK_DIR, 'all')
         writeChunks(clear, all_dir, config, ff_frames=ff_frames)
-        start, info = ac.fitCandidate({name: all_dir for name, _, _ in clear}, pool, held_out, catalog_stars,
-                                      config, mask=mask, use_flat=config.use_flat,
+        start, info = ac.fitCandidate({name: all_dir for name, _, _ in clear}, fit_chunks, held_out,
+                                      catalog_stars, config, mask=mask, use_flat=config.use_flat,
                                       fit_vignetting=(not config.use_flat), ff_frames=ff_frames)
         if start is None:
             log.info("Automatic calibration at the end of the night: no platepar could be fitted ({:s})".format(
@@ -808,9 +852,10 @@ def endOfNightCalibration(config, night_dir, calstars_name, platepar, platepar_p
             return platepar, platepar_path, platepar_fmt
 
     elif not fitted_tonight:
-        ok, reasons = ac.judgeScore(ac.scorePlatepar(platepar, held_out, catalog_stars, config,
-                                                     ff_frames=ff_frames, mask=mask_img))
-        if ok:
+        score = ac.scorePlatepar(platepar, held_out, catalog_stars, config, ff_frames=ff_frames,
+                                 mask=mask_img)
+        verdict = ac.judgeScoreSplit(score)
+        if verdict['ok']:
 
             # A good platepar gets only its vignetting refitted, if asked for and if that improves the photometry
             if ac.vignettingRefitEnabled(config):
@@ -823,8 +868,26 @@ def endOfNightCalibration(config, night_dir, calstars_name, platepar, platepar_p
 
             log.info("Automatic calibration at the end of the night: the platepar is good, it is kept")
             return platepar, platepar_path, platepar_fmt
-        log.info("Automatic calibration at the end of the night: the platepar fails ({:s}), it is refitted".format(
-            '; '.join(reasons)))
+
+        # The photometry alone fails: the distortion isn't refitted, only the photometry (nothing on a sky
+        #   with haze or clouds, then the photometry of the night is recorded as unreliable). The judgement
+        #   which fails is recorded with the night
+        _recordNight(night_dir, state, verdict=verdict)
+        if verdict['astrometry_ok']:
+            refitted, info = ac.refitFailingPhotometry(platepar, score, fit_chunks, held_out, catalog_stars,
+                                                       config, clear_share=len(clear)/len(chunks),
+                                                       ff_frames=ff_frames, mask=mask_img)
+            _recordNight(night_dir, state, photometry=info)
+            if refitted is not None:
+                return _installNight(refitted, platepar, platepar_path, platepar_fmt, config,
+                                     '{:s} on the night'.format(info['reason']), dry_run)
+            log.info("Automatic calibration at the end of the night: only the photometry fails, the platepar "
+                     "is kept, the photometry of the night is not reliable ({:s})".format(info['reason']))
+            return platepar, platepar_path, platepar_fmt
+
+        photometry_fails = not verdict['photometry_ok']
+        log.info("Automatic calibration at the end of the night: the astrometry of the platepar fails "
+                 "({:s}), it is refitted".format('; '.join(verdict['reasons'])))
 
     # The vignetting of the start is refitted first if asked for, on the chunks the joint fit is fitted on, so the
     #   quality control of the joint fit (which keeps the photometry of its start) judges it on chunks which were
@@ -843,6 +906,7 @@ def endOfNightCalibration(config, night_dir, calstars_name, platepar, platepar_p
 
     # Installed if it meets the quality control; otherwise the start is installed if it isn't yet (it was good on
     #   held-out chunks)
+    installed, reason = None, None
     if (fitted is not None) and report['qc']['ok']:
         installed, reason = fitted, 'joint fit of the night'
     elif start is not platepar:
@@ -850,11 +914,53 @@ def endOfNightCalibration(config, night_dir, calstars_name, platepar, platepar_p
             'fitted from scratch on the night' if from_scratch else 'vignetting refitted on the night',
             'failed' if report is None else 'fails: ' + ', '.join(report['qc']['failed']))
     else:
-        log.info("Automatic calibration at the end of the night: the joint fit {:s}, the platepar is kept".format(
-            'failed' if report is None else 'fails its quality control: ' + ', '.join(report['qc']['failed'])))
+        failure = 'failed' if (report is None) \
+            else 'fails its quality control: ' + ', '.join(report['qc']['failed'])
+        log.info("Automatic calibration at the end of the night: the joint fit {:s}, the astrometry of the "
+                 "platepar is kept".format(failure))
+
+    # A photometry which failed as well is refitted separately, on the platepar the night is reduced with if
+    #   its astrometry is good (the astrometry unchanged); on a sky with haze or clouds it is recorded as
+    #   unreliable
+    base = installed if installed is not None else platepar
+    base_score = None
+    if photometry_fails:
+        base_score = ac.scorePlatepar(base, held_out, catalog_stars, config, ff_frames=ff_frames,
+                                      mask=mask_img)
+    if (base_score is not None) and ac.judgeScoreSplit(base_score)['astrometry_ok']:
+        refitted, info = ac.refitFailingPhotometry(base, base_score, fit_chunks, held_out, catalog_stars,
+                                                   config, clear_share=len(clear)/len(chunks),
+                                                   ff_frames=ff_frames, mask=mask_img)
+        _recordNight(night_dir, state, photometry=info)
+        if refitted is not None:
+            installed = refitted
+            reason = '{:s}{:s} on the night'.format('' if reason is None else reason + '; ', info['reason'])
+        else:
+            log.info("Automatic calibration at the end of the night: the photometry of the night is not "
+                     "reliable ({:s})".format(info['reason']))
+
+    if installed is None:
         return platepar, platepar_path, platepar_fmt
 
     return _installNight(installed, platepar, platepar_path, platepar_fmt, config, reason, dry_run)
+
+
+def _recordNight(night_dir, state, **details):
+    """ Record the judgement of the platepar of a night at its end (its astrometry and photometry separately)
+        and whether the photometry of the night is reliable, in the state of the night.
+
+    Arguments:
+        night_dir: [str] Night directory.
+        state: [dict] The state of the night (see readState), updated and saved.
+
+    Keyword arguments:
+        verdict: [dict] The judgement of the platepar (see AutoCalibration.judgeScoreSplit).
+        photometry: [dict] What was done about a photometry which fails (see
+            AutoCalibration.refitFailingPhotometry), with whether the photometry of the night is 'reliable'.
+    """
+
+    state.setdefault('end_of_night', {}).update(details)
+    writeState(night_dir, state)
 
 
 def _installNight(installed, platepar, platepar_path, platepar_fmt, config, reason, dry_run):

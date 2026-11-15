@@ -238,8 +238,12 @@ def test_agreeing_subset():
 
 @pytest.fixture
 def camera(tmp_path, monkeypatch):
-    """ A camera with an output directory, and a file whose clear chunks are given directly. The fit and the scoring
-        of platepars are replaced: the platepars carry their score in their mag_lev (the worst zone share). """
+    """ A camera with an output directory, and a file whose clear chunks are given directly. The fit and the
+        scoring of platepars are replaced: the platepars carry their score in score_share (the worst zone
+        share, an attribute which is neither of the astrometry nor of the photometry, as a candidate carries
+        the photometry of the platepar it would replace). A platepar whose vignetting coefficient is
+        BAD_VIGNETTING fails the photometry (its scatter), and with state['haze'] the zero points of the
+        chunks scatter as on a sky with haze. """
 
     # A 512x512 camera with the automatic calibration
     config = cr.parse(REPO_CONFIG)
@@ -249,7 +253,8 @@ def camera(tmp_path, monkeypatch):
     os.makedirs(output_dir)
 
     rng = np.random.default_rng(2)
-    state = {'jd': 2461000.5, 'candidate_share': 0.95, 'fits': 0}
+    state = {'jd': 2461000.5, 'candidate_share': 0.95, 'fits': 0, 'haze': False, 'models': [],
+             'model_fails': False}
 
     def _readChunks(results_dir, config):
         """ The chunks of a file at the current time of the state. """
@@ -261,19 +266,34 @@ def camera(tmp_path, monkeypatch):
                 for i in range(10)], 256
 
     def _scorePlatepar(platepar, chunks, catalog_stars, config, **kwargs):
-        """ The score of the share stored in the mag_lev of the platepar, in the outer ring. """
+        """ The score of the share stored in score_share of the platepar, in the outer ring, with the
+            photometry of its vignetting coefficient and of the sky. """
 
-        share = platepar.mag_lev
-        return _score([share, 0.95, 0.95, share, 0.95, 0.95, 0.95, 0.95])
+        share = platepar.score_share
+        bad_photometry = (platepar.vignetting_coeff == BAD_VIGNETTING)
+        score = _score([share, 0.95, 0.95, share, 0.95, 0.95, 0.95, 0.95], mag_stddev=(0.35 if bad_photometry
+                                                                                      else 0.08))
+
+        # The zero points of the chunks at the offset of the platepars, scattering on a sky with haze
+        score.mag_lev = np.full(score.chunks, ZERO_POINT)
+        if state['haze']:
+            score.mag_lev[::2] -= 0.4
+        return score
 
     def _fitCandidate(chunk_dirs, section_chunks, held_out, catalog_stars, config, **kwargs):
-        """ A candidate with the share of state['candidate_share']. """
+        """ A candidate with the share of state['candidate_share']; none in the model of a platepar with
+            state['model_fails']. """
 
-        # The fits are counted with their options, the candidate has the share of state['candidate_share']
+        # The fits are counted with their options and models, the candidate has the share of
+        #   state['candidate_share']
         state['fits'] += 1
         state['fit_kwargs'] = kwargs
+        state['models'].append(kwargs.get('model'))
+        if state['model_fails'] and (kwargs.get('model') is not None):
+            return None, {'sections': [], 'reason': 'only 1 sections agree'}
         platepar = _platepar()
-        platepar.mag_lev = state['candidate_share']
+        platepar.score_share = state['candidate_share']
+        platepar.mag_lev = ZERO_POINT
         return platepar, {'sections': []}
 
     # Replace the reading of the stars, the fit, the scoring and the catalog
@@ -288,19 +308,30 @@ def camera(tmp_path, monkeypatch):
         # The results of the file, and the time moves 10 minutes to the next file
         results_dir = str(tmp_path/name)
         os.makedirs(results_dir, exist_ok=True)
-        result = ac.autoCalibrateFile(results_dir, config, output_dir, platepar_path)
+        result = ac.autoCalibrateFile(results_dir, config, output_dir, platepar_path,
+                                      fit_vignetting=config.auto_calibration_fit_vignetting)
         state['jd'] += 10/1440.0
         return result
 
     return config, output_dir, state, _process
 
 
-def _writePlatepar(path, share):
-    """ Write a platepar which scores the given share in the camera fixture, return its path. """
+# The photometric offset of the platepars of the camera fixture and of the zero points of the chunks, and a
+#   vignetting coefficient which fails the photometry there
+ZERO_POINT = 10.0
+BAD_VIGNETTING = 0.0012
 
-    # The share the platepar scores is stored in its mag_lev
+
+def _writePlatepar(path, share, vignetting_coeff=None):
+    """ Write a platepar which scores the given share in the camera fixture (and fails its photometry with
+        BAD_VIGNETTING), return its path. """
+
+    # The share the platepar scores is stored in score_share
     platepar = _platepar()
-    platepar.mag_lev = share
+    platepar.score_share = share
+    platepar.mag_lev = ZERO_POINT
+    if vignetting_coeff is not None:
+        platepar.vignetting_coeff = vignetting_coeff
     platepar.write(path)
 
     return path
@@ -465,7 +496,7 @@ def test_terrible_platepar_is_replaced_on_trial_and_kept(camera, tmp_path):
     assert ac.readState(output_dir)['trial'] is None
     assert not os.path.isfile(trial['previous'])
     with open(autoPlateparPath(output_dir, config)) as f:
-        assert json.load(f)['mag_lev'] == pytest.approx(0.95)
+        assert json.load(f)['score_share'] == pytest.approx(0.95)
 
 
 def test_failing_trial_platepar_is_rolled_back(camera, tmp_path):
@@ -492,7 +523,7 @@ def test_failing_trial_platepar_is_rolled_back(camera, tmp_path):
     assert result['replaced_platepar_mtime'] == pytest.approx(trial_mtime)
     assert result['installed'] == autoPlateparPath(output_dir, config)
     with open(autoPlateparPath(output_dir, config)) as f:
-        assert json.load(f)['mag_lev'] == pytest.approx(0.95)
+        assert json.load(f)['score_share'] == pytest.approx(0.95)
     assert ac.readState(output_dir)['trial'] is None
 
 
@@ -1162,3 +1193,347 @@ def test_vignetting_refit_enabled():
     assert ac.vignettingRefitEnabled(config)
     config.use_flat = True
     assert not ac.vignettingRefitEnabled(config)
+
+
+### Astrometry and photometry judged and refitted separately ###
+
+# A vignetting coefficient with which the photometry of the camera fixture is good
+GOOD_VIGNETTING = 0.0005
+
+
+def _assertSameAstrometry(platepar, other):
+    """ Every parameter of two platepars apart from the photometry is identical (bit for bit, as written). """
+
+    from RMS.Astrometry.JointDistortionFit import PHOTOMETRY_PARAMETERS
+
+    # The photometry of the other platepar set to the first one's, then the two have to be written the same
+    first, second = copy.deepcopy(platepar), copy.deepcopy(other)
+    for name in PHOTOMETRY_PARAMETERS:
+        setattr(second, name, getattr(first, name, None))
+
+    assert first.jsonStr() == second.jsonStr()
+
+
+def _refitVignettingStandIn(monkeypatch, calls):
+    """ A refit of the vignetting which finds GOOD_VIGNETTING, and also moves the astrometry of its copy,
+        which must never reach the platepar whose photometry is refitted. The number of chunks of every call
+        is recorded. """
+
+    def _refitVignetting(platepar, chunks, catalog_stars, config, ff_frames=256, mask=None):
+        calls.append(len(chunks))
+        trial = copy.deepcopy(platepar)
+        trial.vignetting_coeff = GOOD_VIGNETTING
+        trial.RA_d += 1.0
+        trial.score_share = 0.5
+        return trial, {'kept': True, 'reason': 'better'}
+
+    monkeypatch.setattr(ac, 'refitVignetting', _refitVignetting)
+
+
+def test_judgement_split_into_astrometry_and_photometry():
+    """ The astrometry and the photometry of a platepar are judged separately, and together as before. """
+
+    # Only the photometry fails
+    verdict = ac.judgeScoreSplit(_score([0.95]*8, mag_stddev=0.35))
+    assert verdict['astrometry_ok'] and (not verdict['photometry_ok'])
+    assert verdict['photometry_reasons'] == ['photometric scatter 0.35 mag']
+
+    # Only the astrometry fails
+    verdict = ac.judgeScoreSplit(_score([0.95, 0.95, 0.95, 0.2, 0.95, 0.95, 0.95, 0.95]))
+    assert (not verdict['astrometry_ok']) and verdict['photometry_ok']
+
+    # Both, the reasons of the astrometry first
+    score = _score([0.95, 0.95, 0.95, 0.2, 0.95, 0.95, 0.95, 0.95], mag_residual=0.4)
+    verdict = ac.judgeScoreSplit(score)
+    assert ac.judgeScore(score) == (False, verdict['astrometry_reasons'] + verdict['photometry_reasons'])
+    assert verdict['reasons'] == verdict['astrometry_reasons'] + verdict['photometry_reasons']
+
+
+def test_photometry_alone_failing_is_no_reason_for_a_new_astrometry():
+    """ A candidate of the astrometry replaces a platepar whose photometry alone fails only if it is clearly
+        better, as for a good platepar, and never on trial; one whose astrometry fails is replaced by any good
+        candidate, also one whose photometry fails as well while the current photometry fails (both are
+        refitted separately). """
+
+    candidate = _score([0.95]*8)
+    candidate.share = 0.95
+    hazy = _score([0.9]*8, mag_stddev=0.35)
+    hazy.share = 0.5
+
+    # Not better (the worst zone isn't clearly better), and not on trial
+    assert not ac.candidateIsBetter(candidate, hazy)[0]
+    assert not ac.candidateIsFarBetter(candidate, hazy)
+
+    # The astrometry fails as well: a candidate whose photometry fails too replaces it
+    both = _score([0.95, 0.95, 0.95, 0.2, 0.95, 0.95, 0.95, 0.95], mag_stddev=0.35)
+    hazy_candidate = _score([0.95]*8, mag_stddev=0.35)
+    assert ac.candidateIsBetter(hazy_candidate, both)[0]
+
+    # A candidate whose photometry fails doesn't replace a platepar whose photometry is good
+    astrometry_fails = _score([0.95, 0.95, 0.95, 0.2, 0.95, 0.95, 0.95, 0.95])
+    assert not ac.candidateIsBetter(hazy_candidate, astrometry_fails)[0]
+
+
+def test_photometry_alone_failing_refits_only_the_photometry(camera, tmp_path, monkeypatch):
+    """ A platepar whose astrometry is good but whose photometry fails (here its vignetting) gets only its
+        photometry refitted: no candidate of the astrometry is fitted, the refit waits for the confirmation on
+        a later file like a candidate, and the installed platepar has every parameter but the photometry
+        exactly as before. """
+
+    from RMS.Astrometry.AutoCalibration import autoPlateparPath
+
+    config, output_dir, state, process = camera
+    config.auto_calibration_fit_vignetting = True
+    config.use_flat = False
+    vignetting_calls = []
+    _refitVignettingStandIn(monkeypatch, vignetting_calls)
+    path = _writePlatepar(str(tmp_path/'vignetted.cal'), 0.95, vignetting_coeff=BAD_VIGNETTING)
+
+    # The photometry alone fails: its refit waits for the confirmation, nothing else is fitted
+    result = process('file1', path)
+    assert result['current']['astrometry_ok'] and (not result['current']['photometry_ok'])
+    assert result['action'] == 'refitted photometry waits for the confirmation'
+    assert result['photometry']['reliable'] is True
+    assert ac.readState(output_dir)['pending']['kind'] == 'photometry'
+    assert vignetting_calls
+
+    # Confirmed on the second file after the refit
+    assert process('file2', path)['action'] == 'candidate waits for the confirmation'
+    result = process('file3', path)
+    assert result['action'] == 'installed the confirmed photometry'
+
+    # No candidate of the astrometry was ever fitted, and the installed platepar differs only in its
+    #   photometry
+    assert state['fits'] == 0
+    installed, before = Platepar(), Platepar()
+    installed.read(autoPlateparPath(output_dir, config))
+    before.read(path)
+    assert installed.vignetting_coeff == pytest.approx(GOOD_VIGNETTING)
+    assert before.vignetting_coeff == pytest.approx(BAD_VIGNETTING)
+    _assertSameAstrometry(before, installed)
+
+
+@pytest.mark.parametrize('haze, reason', [(True, 'the sky is not photometric'),
+                                          (False, 'the refitted photometry fails too')])
+def test_photometry_failing_on_haze_or_not_fixed_is_recorded(camera, tmp_path, monkeypatch, haze, reason):
+    """ A photometry which fails on a sky with haze is recorded as unreliable without a refit, and so is one
+        whose refit fails as well (here the vignetting isn't refitted for the camera); the platepar is kept,
+        and no candidate of the astrometry is fitted, also after the interval of the periodic fit. """
+
+    from RMS.Astrometry.AutoCalibration import autoPlateparPath
+
+    config, output_dir, state, process = camera
+    state['haze'] = haze
+    refits = []
+    real_refit = ac.refitPhotometry
+    monkeypatch.setattr(ac, 'refitPhotometry',
+                        lambda *args, **kwargs: refits.append(1) or real_refit(*args, **kwargs))
+    path = _writePlatepar(str(tmp_path/'hazy.cal'), 0.95, vignetting_coeff=BAD_VIGNETTING)
+
+    for i in range(5):
+        result = process('file{:d}'.format(i), path)
+        if result['action'] != 'judged':
+            assert result['action'].startswith('photometry not reliable: ' + reason)
+            assert result['photometry']['reliable'] is False
+
+    # The refit only without haze, nothing installed or pending, no candidate fitted
+    assert bool(refits) is (not haze)
+    assert ac.readState(output_dir)['pending'] is None
+    assert not os.path.isfile(autoPlateparPath(output_dir, config))
+    assert state['fits'] == 0
+
+
+def test_astrometric_refit_keeps_the_model_and_the_photometry(camera, tmp_path):
+    """ A platepar whose astrometry fails is refitted in its own model (here another distortion type than the
+        config's), the model of the config is tried only if no candidate can be fitted in it; the candidate
+        carries the photometry of the platepar it would replace. """
+
+    config, output_dir, state, process = camera
+
+    # A platepar of another distortion type than the config's, with its own photometry, whose astrometry fails
+    platepar = _platepar()
+    platepar.setDistortionType('poly3+radial5', reset_params=True)
+    platepar.score_share = 0.75
+    platepar.mag_lev, platepar.vignetting_coeff = ZERO_POINT, 0.0007
+    path = str(tmp_path/'poly.cal')
+    platepar.write(path)
+
+    # Fitted in its model, the candidate waits for the confirmation with the photometry of the platepar
+    result = process('file1', path)
+    assert result['action'] == 'candidate waits for the confirmation'
+    assert [model['distortion_type'] for model in state['models']] == ['poly3+radial5']
+    assert state['fit_kwargs']['judge_photometry'] is True
+    pending = ac._platepar(ac.readState(output_dir)['pending']['path'], False)
+    assert pending.vignetting_coeff == pytest.approx(0.0007)
+    assert pending.mag_lev == pytest.approx(ZERO_POINT)
+
+    # No candidate in its model: the model of the config is fitted next
+    os.remove(ac.readState(output_dir)['pending']['path'])
+    state['models'], state['model_fails'] = [], True
+    state['jd'] += 30/1440.0
+    result = process('file2', path)
+    assert [None if model is None else model['distortion_type'] for model in state['models']] \
+        == ['poly3+radial5', None]
+    assert result['candidate']['models_tried'][0]['reason'] == 'only 1 sections agree'
+
+
+def test_model_of_the_candidates():
+    """ The candidates are fitted in the model of the platepar in use, then in the config's if it is another
+        one; without a platepar in the config's. """
+
+    config = cr.parse(REPO_CONFIG)
+    platepar = _platepar()
+
+    assert ac.candidateModels(None, config) == [None]
+    assert ac.candidateModels(platepar, config) == [{'distortion_type': 'radial7-odd', 'equal_aspect': True,
+                                                     'asymmetry_corr': True, 'decentering_corr': False,
+                                                     'force_distortion_centre': False}]
+
+    platepar.setDistortionType('poly3+radial5', reset_params=True)
+    models = ac.candidateModels(platepar, config)
+    assert (models[0]['distortion_type'] == 'poly3+radial5') and (models[1] is None)
+
+
+def test_both_failing_are_refitted_separately(camera, tmp_path, monkeypatch):
+    """ A platepar whose astrometry and photometry both fail: the astrometry is refitted first (its sections
+        judged only on the astrometry, the candidate keeps the photometry of the platepar), then the
+        photometry of the new astrometry is refitted on its own and confirmed. """
+
+    from RMS.Astrometry.AutoCalibration import autoPlateparPath
+
+    config, output_dir, state, process = camera
+    config.auto_calibration_fit_vignetting = True
+    config.use_flat = False
+    _refitVignettingStandIn(monkeypatch, [])
+    path = _writePlatepar(str(tmp_path/'moved.cal'), 0.2, vignetting_coeff=BAD_VIGNETTING)
+
+    # The astrometry far worse than the candidate's: on trial with the photometry of the platepar
+    result = process('file1', path)
+    assert result['action'] == 'installed the platepar on trial'
+    assert state['fit_kwargs']['judge_photometry'] is False
+    trial = ac._platepar(autoPlateparPath(output_dir, config), False)
+    assert trial.vignetting_coeff == pytest.approx(BAD_VIGNETTING)
+
+    # The trial is kept on its astrometry, although its photometry fails
+    assert process('file2', path)['action'] == 'the platepar on trial is tested'
+    result = process('file3', path)
+    assert result['action'] == 'kept the platepar on trial'
+    assert result['trial']['photometry_ok'] is False
+
+    # Then only the photometry of the new astrometry is refitted, and confirmed
+    assert process('file4', path)['action'] == 'refitted photometry waits for the confirmation'
+    process('file5', path)
+    assert process('file6', path)['action'] == 'installed the confirmed photometry'
+    assert state['fits'] == 1
+    installed = ac._platepar(autoPlateparPath(output_dir, config), False)
+    assert installed.vignetting_coeff == pytest.approx(GOOD_VIGNETTING)
+    _assertSameAstrometry(trial, installed)
+
+
+def test_old_state_file_is_read(camera, tmp_path):
+    """ The state of an older version (files without the number of their chunks, a pending candidate without
+        its kind, keys missing) is read: the candidate is confirmed as a candidate of the astrometry. """
+
+    from RMS.Astrometry.AutoCalibration import autoPlateparPath
+
+    config, output_dir, state, process = camera
+    bad = _writePlatepar(str(tmp_path/'bad.cal'), 0.75)
+    pending = _writePlatepar(os.path.join(output_dir, 'auto_pending_' + config.platepar_name), 0.95)
+    old_dir = str(tmp_path/'old')
+    os.makedirs(old_dir)
+    old = {'files': [{'results_dir': old_dir, 'start_jd': state['jd'] - 15/1440.0,
+                      'end_jd': state['jd'] - 5/1440.0, 'clear': []}],
+           'star_counts': [150]*20, 'last_attempt_jd': state['jd'] - 20/1440.0,
+           'pending': {'path': pending, 'fitted_jd': state['jd'] - 10/1440.0, 'reason': 'old'},
+           'trial': None, 'installs': []}
+    with open(ac.statePath(output_dir), 'w') as f:
+        json.dump(old, f)
+
+    result = process('file1', bad)
+    assert result['pending']['kind'] == 'astrometry'
+    assert result['action'] == 'installed the confirmed candidate'
+    assert os.path.isfile(autoPlateparPath(output_dir, config))
+    assert ac.readState(output_dir)['history'] == []
+
+
+def test_photometry_refit_keeps_the_astrometry_exactly(monkeypatch):
+    """ The refit of the photometry alone fits the vignetting (if it is refitted for the camera) and the
+        photometric offset, and keeps every other parameter of the platepar bit for bit; without the
+        vignetting refit only the offset is fitted. """
+
+    chunks = _vignettedChunks(monkeypatch, 0.0008)
+    config = cr.Config()
+    config.min_matched_stars = 3
+    config.auto_calibration_fit_vignetting = True
+    config.use_flat = False
+    platepar = _platepar()
+    platepar.vignetting_coeff = 0.0
+    platepar.mag_lev = 5.0
+    before = copy.deepcopy(platepar)
+
+    refitted, info = ac.refitPhotometry(platepar, chunks, None, config)
+    assert info['vignetting']['kept']
+    assert refitted.vignetting_coeff == pytest.approx(0.0008, rel=0.1)
+    assert refitted.mag_lev == pytest.approx(10.0, abs=0.05)
+    _assertSameAstrometry(before, refitted)
+    assert platepar.jsonStr() == before.jsonStr()
+
+    # Without the vignetting refit (the default, or a flat) only the offset
+    config.auto_calibration_fit_vignetting = False
+    refitted, info = ac.refitPhotometry(platepar, chunks, None, config)
+    assert 'vignetting' not in info
+    assert refitted.vignetting_coeff == 0.0
+    _assertSameAstrometry(before, refitted)
+
+
+def test_sky_is_photometric():
+    """ A sky is not photometric if the zero points of the chunks scatter, if they are much fainter than the
+        platepar's, or if few chunks are clear. """
+
+    platepar = _platepar()
+    platepar.mag_lev = 10.0
+    clear = _score([0.95]*8)
+    assert ac.skyIsPhotometric(clear, platepar, clear_share=0.9) == (True, '')
+
+    scattered = _score([0.95]*8)
+    scattered.mag_lev = np.array([10.0, 9.6]*5)
+    assert 'scatters' in ac.skyIsPhotometric(scattered, platepar)[1]
+
+    faint = _score([0.95]*8)
+    faint.mag_lev = np.full(10, 9.6)
+    assert 'fainter' in ac.skyIsPhotometric(faint, platepar)[1]
+
+    assert 'clear' in ac.skyIsPhotometric(clear, platepar, clear_share=0.3)[1]
+
+
+@pytest.mark.parametrize('judge_photometry', [True, False])
+def test_sections_judged_on_the_astrometry_alone_when_asked(monkeypatch, judge_photometry):
+    """ The sections of a candidate are fitted in the given model, and judged on their photometry too unless
+        asked not to (the photometry of the platepar in use fails as well, e.g. haze): then a photometry which
+        fails on the held-out chunks doesn't stop the new astrometry. """
+
+    import RMS.Astrometry.AutoPlatepar as ap
+
+    config = cr.parse(REPO_CONFIG)
+    chunks = [('FF_XX0001_20251225_0100{:02d}_000_0000000.fits'.format(i), 2461000.5 + i/1440.0,
+               _stars(np.linspace(10, 500, 60), np.linspace(10, 500, 60))) for i in range(8)]
+
+    # The sections are fitted in the given model, their photometry fails on the held-out chunks (haze)
+    models = []
+
+    def _fit(dir_path, config, catalog_stars, ff_name=None, distortion_type=None, **kwargs):
+        models.append(distortion_type)
+        return _platepar(), list(range(80)), ff_name
+
+    monkeypatch.setattr(ap, 'autoFitPlatepar', _fit)
+    monkeypatch.setattr(ac, 'fitPhotometry', lambda *a, **k: {})
+    monkeypatch.setattr(ac, 'scorePlatepar', lambda pp, *a, **k: _score([0.95]*8, mag_stddev=0.35))
+    monkeypatch.setattr(ac, 'sectionDifference', lambda a, b, jd, fwhm: (0.0, 0.0))
+
+    model = {'distortion_type': 'poly3+radial5', 'equal_aspect': True, 'asymmetry_corr': False,
+             'decentering_corr': False, 'force_distortion_centre': False}
+    candidate, info = ac.fitCandidate({c[0]: '.' for c in chunks}, chunks, chunks[:2], None, config,
+                                      model=model, judge_photometry=judge_photometry)
+
+    assert set(models) == {'poly3+radial5'}
+    assert (candidate is not None) is (not judge_photometry)

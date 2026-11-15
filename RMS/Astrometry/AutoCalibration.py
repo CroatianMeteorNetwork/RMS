@@ -14,11 +14,14 @@ A platepar is fitted from scratch (see AutoPlatepar) independently on several se
 which have to agree with each other apart from the pointing, and the photometry (with the vignetting coefficient
 for a new camera) is fitted on the chunks of the sections. The fitted platepar is judged on held-out chunks.
 
-The controller (autoCalibrateFile) runs after every processed file of a camera. It judges the current platepar on
-the clear chunks of the file and of the files shortly before it, fits a platepar when there is none, when the
-current one fails, and periodically to check whether a clearly better one can be fitted. A new camera gets the
-fitted platepar right away, a platepar is replaced only after the candidate is confirmed as clearly better on later
-chunks.
+The controller (autoCalibrateFile) runs after every processed file of a camera. It judges the current platepar
+on the clear chunks of the file and of the files shortly before it, its astrometry and its photometry
+separately. It fits a platepar when there is none, when the astrometry of the current one fails, and
+periodically to check whether a clearly better one can be fitted; a new fit keeps the photometry of the
+platepar it would replace, and its model unless no candidate can be fitted in it. A new camera gets the fitted
+platepar right away, a platepar is replaced only after the candidate is confirmed as clearly better on later
+chunks. A platepar whose photometry alone fails (e.g. on a sky with haze) keeps its astrometry: only its
+photometry is refitted, or the photometry of the sky is recorded as unreliable.
 
 The limits are in units of the measured width of the stars (FWHM) and in shares of the stars, so they work for
 cameras with different resolutions and fields of view.
@@ -674,7 +677,8 @@ TRIAL_MATCH_RATIO = 1.5
 
 
 def judgeScore(score):
-    """ Judge whether a platepar fits the stars well over the whole image, from its score on clear chunks.
+    """ Judge whether a platepar fits the stars well over the whole image, from its score on clear chunks:
+        both its astrometry (judgeAstrometry) and its photometry (judgePhotometry).
 
     Arguments:
         score: [CalibrationScore] Score of the platepar.
@@ -683,8 +687,56 @@ def judgeScore(score):
         (ok, reasons): [tuple] True if the platepar is good, and the reasons why it doesn't (list of str).
     """
 
+    # Nothing can be judged without chunks
+    if score.chunks == 0:
+        return False, ['no chunks to judge on']
+
+    # Good only if both are good, the reasons of the astrometry first
+    astrometry_ok, astrometry_reasons = judgeAstrometry(score)
+    photometry_ok, photometry_reasons = judgePhotometry(score)
+
+    return (astrometry_ok and photometry_ok), astrometry_reasons + photometry_reasons
+
+
+def judgeScoreSplit(score):
+    """ The judgement of a platepar with its astrometry and its photometry judged separately, so a platepar
+        whose photometry alone fails (e.g. on a sky with haze) has only its photometry refitted, never its
+        astrometry.
+
+    Arguments:
+        score: [CalibrationScore] Score of the platepar.
+
+    Return:
+        [dict] 'astrometry_ok' and 'astrometry_reasons' (see judgeAstrometry), 'photometry_ok' and
+            'photometry_reasons' (see judgePhotometry), and 'ok' and 'reasons' of both together (see
+            judgeScore).
+    """
+
+    # Each part on its own, and both together
+    astrometry_ok, astrometry_reasons = judgeAstrometry(score)
+    photometry_ok, photometry_reasons = judgePhotometry(score)
+    ok, reasons = judgeScore(score)
+
+    return {'ok': ok, 'reasons': reasons,
+            'astrometry_ok': astrometry_ok, 'astrometry_reasons': astrometry_reasons,
+            'photometry_ok': photometry_ok, 'photometry_reasons': photometry_reasons}
+
+
+def judgeAstrometry(score):
+    """ Judge the astrometry of a platepar from its score on clear chunks: the chunks are recalibrated, every
+        zone of the image matches the stars about as well as the others, and the matched stars are close to
+        the catalog.
+
+    Arguments:
+        score: [CalibrationScore] Score of the platepar.
+
+    Return:
+        (ok, reasons): [tuple] True if the astrometry is good, and the reasons why it isn't (list of str).
+    """
+
     reasons = []
 
+    # Nothing can be judged without chunks
     if score.chunks == 0:
         return False, ['no chunks to judge on']
 
@@ -710,7 +762,31 @@ def judgeScore(score):
     if not (np.isfinite(score.dist) and (score.dist <= MAX_DIST_FWHM)):
         reasons.append('median distance from the catalog {:.2f} FWHM'.format(score.dist))
 
+    return (len(reasons) == 0), reasons
+
+
+def judgePhotometry(score):
+    """ Judge the photometry of a platepar from its score on clear chunks: the photometric fits of the chunks
+        have a small scatter, and no zone of the image is too bright or too faint (e.g. a wrong vignetting
+        coefficient). The photometric offset is fitted on every chunk, so the transparency of the sky doesn't
+        enter as long as it is the same over the image during a chunk; haze or clouds which change over the
+        image or during a chunk do.
+
+    Arguments:
+        score: [CalibrationScore] Score of the platepar.
+
+    Return:
+        (ok, reasons): [tuple] True if the photometry is good, and the reasons why it isn't (list of str).
+    """
+
+    reasons = []
+
+    # Nothing can be judged without chunks
+    if score.chunks == 0:
+        return False, ['no chunks to judge on']
+
     # The photometry has to fit everywhere
+    judged = score.judged()
     if len(score.mag_lev_stddev) == 0:
         reasons.append('no photometric fit')
 
@@ -731,8 +807,11 @@ def judgeScore(score):
 
 
 def candidateIsBetter(candidate, current):
-    """ Whether a candidate platepar is clearly better than the current one, both scored on the same chunks. The
-        candidate has to be judged good itself.
+    """ Whether a candidate platepar (a new fit of the astrometry) is clearly better than the current one,
+        both scored on the same chunks. The candidate has to be judged good itself; only its astrometry if the
+        photometry of the current platepar fails too, as the photometry is then refitted separately (see
+        refitFailingPhotometry). A current platepar whose photometry alone fails is not replaced for that: the
+        candidate has to be clearly better, as for a good platepar.
 
     Arguments:
         candidate: [CalibrationScore] Score of the candidate.
@@ -742,16 +821,19 @@ def candidateIsBetter(candidate, current):
         (better, reason): [tuple] True if the candidate is better, and why (str).
     """
 
-    # The candidate has to be judged good itself
-    candidate_ok, candidate_reasons = judgeScore(candidate)
-    if not candidate_ok:
-        return False, 'the candidate fails: ' + '; '.join(candidate_reasons)
+    # The candidate has to be judged good itself: its astrometry, and its photometry unless the photometry of
+    #   the current platepar fails as well (e.g. haze on the chunks fails the photometry of every platepar)
+    candidate_verdict = judgeScoreSplit(candidate)
+    current_photometry_fails = (current is not None) and (not judgePhotometry(current)[0])
+    if (not candidate_verdict['astrometry_ok']) \
+            or ((not candidate_verdict['photometry_ok']) and (not current_photometry_fails)):
+        return False, 'the candidate fails: ' + '; '.join(candidate_verdict['reasons'])
 
     if current is None:
         return True, 'there is no platepar'
 
-    # A failing current platepar is replaced by any candidate which is good
-    current_ok, current_reasons = judgeScore(current)
+    # A current platepar whose astrometry fails is replaced by any candidate which is good
+    current_ok, current_reasons = judgeAstrometry(current)
     if not current_ok:
         return True, 'the current platepar fails: ' + '; '.join(current_reasons)
 
@@ -786,11 +868,11 @@ def candidateIsFarBetter(candidate, current):
         current: [CalibrationScore] Score of the current platepar, None if there is none.
 
     Return:
-        [bool] True if the current platepar fails and the candidate matches far more stars.
+        [bool] True if the astrometry of the current platepar fails and the candidate matches far more stars.
     """
 
-    # Only a failing platepar is replaced on trial
-    if (current is None) or judgeScore(current)[0]:
+    # Only a platepar whose astrometry fails is replaced on trial
+    if (current is None) or judgeAstrometry(current)[0]:
         return False
 
     def _farMore(candidate_share, current_share):
@@ -806,6 +888,32 @@ def candidateIsFarBetter(candidate, current):
     # The candidate matches far more stars over the whole image or in the worst zone
     return bool(_farMore(candidate.share, current.share)
                 or _farMore(candidate.worstZoneShare(), current.worstZoneShare()))
+
+
+def photometryIsBetter(candidate, current):
+    """ Whether a candidate which differs from the current platepar only in its photometry (see
+        refitFailingPhotometry) replaces it, both scored on the same chunks: the candidate has to be judged
+        good, while the photometry of the current platepar fails.
+
+    Arguments:
+        candidate: [CalibrationScore] Score of the candidate.
+        current: [CalibrationScore] Score of the current platepar.
+
+    Return:
+        (better, reason): [tuple] True if the candidate is better, and why (str).
+    """
+
+    # The candidate has to be judged good itself
+    candidate_ok, candidate_reasons = judgeScore(candidate)
+    if not candidate_ok:
+        return False, 'the candidate fails: ' + '; '.join(candidate_reasons)
+
+    # Only a photometry which fails is replaced
+    photometry_ok, photometry_reasons = judgePhotometry(current)
+    if photometry_ok:
+        return False, 'the photometry of the current platepar is good'
+
+    return True, 'the photometry of the current platepar fails: ' + '; '.join(photometry_reasons)
 
 
 
@@ -1070,6 +1178,181 @@ def refitVignetting(platepar, chunks, catalog_stars, config, ff_frames=256, mask
     return platepar, {'kept': False, 'reason': 'not better, ' + summary}
 
 
+### Refitting the photometry alone ###
+
+# The photometry of a platepar can't be judged on a sky with haze or clouds, which fails the photometry of any
+#   platepar. The sky of the judged chunks is taken as not photometric if their photometric offsets (zero
+#   points) scatter by more than HAZE_ZERO_POINT_SCATTER (mag, the transparency changes between the chunks),
+#   if their median is fainter than the offset of the platepar by more than HAZE_TRANSPARENCY_LOSS (mag, a low
+#   transparency), or if fewer than HAZE_MIN_CLEAR_SHARE of the chunks of their time are clear (drifting
+#   clouds). On three weeks of two 512x512 cameras, the zero points of the judged chunks scattered by 0.02 mag
+#   (median) and were 0.1 mag fainter than the platepar's where it was good, and by 0.15 mag and 0.3-0.5 mag
+#   fainter where its photometry alone failed
+HAZE_ZERO_POINT_SCATTER = 0.1
+HAZE_TRANSPARENCY_LOSS = 0.25
+HAZE_MIN_CLEAR_SHARE = 0.5
+
+
+def withPhotometry(platepar, source):
+    """ A copy of a platepar with the photometry of another one (the photometric offset and its scatter, the
+        vignetting and the extinction, see JointDistortionFit.PHOTOMETRY_PARAMETERS), every other parameter of
+        the platepar unchanged.
+
+    Arguments:
+        platepar: [Platepar] The platepar whose astrometry is kept (it is not changed).
+        source: [Platepar] The platepar whose photometry is taken.
+
+    Return:
+        [Platepar] The copy.
+    """
+
+    from RMS.Astrometry.JointDistortionFit import PHOTOMETRY_PARAMETERS
+
+    # Only the parameters of the photometry are taken from the source
+    result = copy.deepcopy(platepar)
+    for name in PHOTOMETRY_PARAMETERS:
+        if hasattr(source, name):
+            setattr(result, name, copy.deepcopy(getattr(source, name)))
+
+    return result
+
+
+def refitPhotometry(platepar, chunks, catalog_stars, config, ff_frames=256, mask=None, fit_vignetting=None):
+    """ Refit only the photometry of a platepar on clear chunks: its vignetting coefficient if that is
+        refitted for the camera (kept only if it makes the photometry better, see refitVignetting), then its
+        photometric offset and the scatter of it. Every other parameter of the platepar is kept exactly.
+
+    Arguments:
+        platepar: [Platepar] Platepar (it is not changed).
+        chunks: [list] Clear chunks as (name, jd, stars).
+        catalog_stars: [ndarray] Catalog stars (ra, dec, mag).
+        config: [Config] Configuration.
+
+    Keyword arguments:
+        ff_frames: [int] Number of frames of a chunk. 256 by default.
+        mask: [ndarray] Mask image (0 is masked), for the refit of the vignetting. None by default.
+        fit_vignetting: [bool] Refit the vignetting coefficient, never with a flat (config.use_flat). None by
+            default, in which case it is refitted as vignettingRefitEnabled says.
+
+    Return:
+        (platepar, info): [tuple] A copy of the platepar with the refitted photometry, and what was fitted
+            ('mag_lev', 'mag_lev_stddev', 'vignetting_coeff', and 'vignetting' with the outcome of the refit
+            of the vignetting if it was tried).
+    """
+
+    info = {}
+
+    # The vignetting first, if it is refitted for the camera (never with a flat)
+    if fit_vignetting is None:
+        fit_vignetting = vignettingRefitEnabled(config)
+    trial = copy.deepcopy(platepar)
+    if fit_vignetting and (not config.use_flat):
+        trial, info['vignetting'] = refitVignetting(trial, chunks, catalog_stars, config, ff_frames=ff_frames,
+                                                    mask=mask)
+
+    # The photometric offset with that coefficient
+    fitPhotometry(trial, chunks, catalog_stars, config, ff_frames=ff_frames)
+
+    # Only the photometry is taken from the fit, the astrometry of the platepar stays exactly as it was
+    refitted = withPhotometry(platepar, trial)
+    info.update({'mag_lev': refitted.mag_lev, 'mag_lev_stddev': refitted.mag_lev_stddev,
+                 'vignetting_coeff': refitted.vignetting_coeff})
+
+    return refitted, info
+
+
+def skyIsPhotometric(score, platepar, clear_share=None):
+    """ Whether the sky of the chunks a platepar was scored on is photometric, so a photometry which fails
+        there is the platepar's and not that of haze or clouds (see HAZE_ZERO_POINT_SCATTER,
+        HAZE_TRANSPARENCY_LOSS and HAZE_MIN_CLEAR_SHARE).
+
+    Arguments:
+        score: [CalibrationScore] Score of the platepar on the chunks.
+        platepar: [Platepar] The platepar, whose photometric offset is that of the sky it was fitted on.
+
+    Keyword arguments:
+        clear_share: [float] Share of the chunks of the time of the scored chunks which are clear. None by
+            default (not known, not checked).
+
+    Return:
+        (photometric, reason): [tuple] False and why if the sky has haze or clouds, otherwise True and ''.
+    """
+
+    reasons = []
+
+    # The transparency changes between the chunks
+    scatter = score.magLevScatter()
+    if np.isfinite(scatter) and (scatter > HAZE_ZERO_POINT_SCATTER):
+        reasons.append('the zero point of the chunks scatters by {:.2f} mag'.format(scatter))
+
+    # A low transparency: the stars are fainter than on the sky the platepar was fitted on
+    if len(score.mag_lev) and (platepar.mag_lev is not None):
+        loss = float(platepar.mag_lev - np.median(score.mag_lev))
+        if loss > HAZE_TRANSPARENCY_LOSS:
+            reasons.append('the stars are {:.2f} mag fainter than for the platepar'.format(loss))
+
+    # Drifting clouds: few chunks are clear
+    if (clear_share is not None) and (clear_share < HAZE_MIN_CLEAR_SHARE):
+        reasons.append('only {:.0f}% of the chunks are clear'.format(100*clear_share))
+
+    return (len(reasons) == 0), '; '.join(reasons)
+
+
+def refitFailingPhotometry(platepar, score, fit_chunks, held_out, catalog_stars, config, clear_share=None,
+                           ff_frames=256, mask=None, fit_vignetting=None):
+    """ Address a platepar whose photometry alone fails, never touching its astrometry. On a sky which isn't
+        photometric (haze, clouds, see skyIsPhotometric) nothing is refitted: the photometry of the chunks is
+        unreliable. Otherwise the photometry is refitted (see refitPhotometry) and used only if it is good on
+        the held-out chunks; if it still fails there, the failure isn't one the photometry of the platepar can
+        fix, and the photometry of the chunks is unreliable as well.
+
+    Arguments:
+        platepar: [Platepar] Platepar whose photometry fails (it is not changed).
+        score: [CalibrationScore] Its score on the held-out chunks.
+        fit_chunks: [list] Clear chunks (name, jd, stars) the photometry is refitted on.
+        held_out: [list] Clear chunks (name, jd, stars) of the score, the refitted photometry is judged on
+            them.
+        catalog_stars: [ndarray] Catalog stars (ra, dec, mag).
+        config: [Config] Configuration.
+
+    Keyword arguments:
+        clear_share: [float] Share of the chunks of the time of the held-out chunks which are clear. None by
+            default (not known).
+        ff_frames: [int] Number of frames of a chunk. 256 by default.
+        mask: [ndarray] Mask image (0 is masked). None by default.
+        fit_vignetting: [bool] Refit the vignetting coefficient (see refitPhotometry). None by default (as
+            vignettingRefitEnabled says).
+
+    Return:
+        (platepar, info): [tuple] A copy of the platepar with the refitted photometry if it is good on the
+            held-out chunks, otherwise None; and 'reliable' (False if the photometry of the chunks can't be
+            trusted), the 'reason', the 'score' of the refitted photometry (if it was refitted) and what was
+            fitted (see refitPhotometry).
+    """
+
+    # Nothing is refitted on a sky which isn't photometric
+    photometric, reason = skyIsPhotometric(score, platepar, clear_share=clear_share)
+    if not photometric:
+        return None, {'reliable': False, 'reason': 'the sky is not photometric: ' + reason}
+
+    # The photometry refitted on the chunks of the fit and judged on the held-out chunks
+    refitted, info = refitPhotometry(platepar, fit_chunks, catalog_stars, config, ff_frames=ff_frames,
+                                     mask=mask, fit_vignetting=fit_vignetting)
+    refit_score = scorePlatepar(refitted, held_out, catalog_stars, config, ff_frames=ff_frames, mask=mask)
+    info['score'] = refit_score.toDict()
+    ok, reasons = judgePhotometry(refit_score)
+    if not ok:
+        info.update({'reliable': False, 'reason': 'the refitted photometry fails too: ' + '; '.join(reasons)})
+        return None, info
+
+    # Good on the held-out chunks: the refitted photometry is used
+    vignetting = refitted.vignetting_coeff if (refitted.vignetting_coeff is not None) else 0.0
+    reason = 'photometry refitted (offset {:.2f} mag, vignetting {:.5f})'.format(refitted.mag_lev, vignetting)
+    info.update({'reliable': True, 'reason': reason})
+
+    return refitted, info
+
+
 def _jointVignetting(platepar, chunks, catalog_stars, config, ff_frames):
     """ Fit the vignetting coefficient jointly on the matched stars of all chunks: one coefficient for all, and a
         photometric offset for every chunk (the transparency changes), minimizing the robust scatter of the
@@ -1177,8 +1460,40 @@ def _agreeingSubset(n, agree):
     return []
 
 
+def candidateModels(platepar, config):
+    """ The models a candidate is fitted in, in turn until one of them gives a candidate: the model of the
+        platepar in use (its distortion type and the flags of the model, so a refit keeps e.g. a joint fit of
+        another type than the config's), then the model of the config if it is another one. Without a
+        platepar, the model of the config.
+
+    Arguments:
+        platepar: [Platepar] The platepar in use, None if there is none.
+        config: [Config] Configuration.
+
+    Return:
+        [list] Models as in AutoPlatepar.plateparModel, None for the model of the config.
+    """
+
+    from RMS.Astrometry.AutoPlatepar import MODEL_FLAGS, plateparModel
+
+    # Without a platepar, the model of the config
+    if platepar is None:
+        return [None]
+
+    # The model of the platepar, and the config's only if it is another one
+    model = {'distortion_type': platepar.distortion_type}
+    model.update({flag: bool(getattr(platepar, flag, False)) for flag in MODEL_FLAGS})
+    config_model = plateparModel(config)
+    config_model.update({flag: bool(config_model[flag]) for flag in MODEL_FLAGS})
+    if model == config_model:
+        return [model]
+
+    return [model, None]
+
+
 def fitCandidate(chunk_dirs, section_chunks, held_out, catalog_stars, config, mask=None, use_flat=False,
-                 fit_vignetting=False, vignetting_coeff=None, ff_frames=256, position_hint=None):
+                 fit_vignetting=False, vignetting_coeff=None, ff_frames=256, position_hint=None, model=None,
+                 judge_photometry=True):
     """ Fit a platepar from scratch (blind plate solve and distortion fit, see AutoPlatepar) independently on
         several sections (chunks spread in time), keep the sections which agree with each other apart from the
         pointing, take the one which scores best on the held-out chunks, and fit its photometry.
@@ -1201,6 +1516,12 @@ def fitCandidate(chunk_dirs, section_chunks, held_out, catalog_stars, config, ma
         ff_frames: [int] Number of frames of a chunk. 256 by default.
         position_hint: [tuple] (ra, dec, radius) in degrees: the plate solver only searches within the radius of
             this pointing. None by default (the whole sky).
+        model: [dict] Model of the fit (see AutoPlatepar.plateparModel and candidateModels). None by default
+            (the model of the config).
+        judge_photometry: [bool] Judge the sections on the held-out chunks also by their photometry. True by
+            default; False when the photometry of the platepar in use fails as well (e.g. haze), which is then
+            refitted separately (see refitFailingPhotometry), so only the astrometry of the sections is
+            judged.
 
     Return:
         (platepar, info): [tuple] The candidate platepar (None if it could not be fitted) and a dictionary which
@@ -1213,7 +1534,7 @@ def fitCandidate(chunk_dirs, section_chunks, held_out, catalog_stars, config, ma
 
     from RMS.Astrometry.AutoPlatepar import autoFitPlatepar
 
-    info = {'sections': []}
+    info = {'sections': [], 'model': model}
 
     # Fit every section independently. The plate solver prints its progress, which is not logged
     # Flat fielded stars have no vignetting left: the coefficient is 0 and it is not fitted
@@ -1223,14 +1544,15 @@ def fitCandidate(chunk_dirs, section_chunks, held_out, catalog_stars, config, ma
     fits = []
     for name, jd, stars in spreadChunks(section_chunks, N_SECTIONS):
 
-        # Fit the section from scratch
+        # Fit the section from scratch, in the given model (the config's if none is given)
         section = {'chunk': name, 'stars': len(stars)}
         try:
             with contextlib.redirect_stdout(io.StringIO()):
                 platepar, paired_stars, _ = autoFitPlatepar(chunk_dirs[name], config, catalog_stars, ff_name=name,
                                                             mask=mask, use_flat=use_flat,
                                                             position_hint=position_hint,
-                                                            stop_logodds=SOLVE_STOP_LOGODDS, verbose=False)
+                                                            stop_logodds=SOLVE_STOP_LOGODDS, verbose=False,
+                                                            **(model or {}))
 
         except Exception as e:
 
@@ -1252,10 +1574,12 @@ def fitCandidate(chunk_dirs, section_chunks, held_out, catalog_stars, config, ma
         return None, info
 
     # Every section is judged on the held-out chunks: a section fitted to a wrong solution fails there and is
-    #   dropped. Its photometry is fitted first on the chunks of the sections, as the candidate's is (below): the
-    #   plate solver gives the default vignetting coefficient, which can be far from the camera's (e.g. a wide
-    #   camera without a flat), and every section would fail on the photometry alone
+    #   dropped. Its photometry is fitted first on the chunks of the sections, as the candidate's is (below):
+    #   the plate solver gives the default vignetting coefficient, which can be far from the camera's (e.g. a
+    #   wide camera without a flat), and every section would fail on the photometry alone. Only the astrometry
+    #   is judged if asked (the photometry of the platepar in use fails too, e.g. haze)
     photometry_chunks = spreadChunks(section_chunks, 2*N_SECTIONS)
+    judge = judgeScore if judge_photometry else judgeAstrometry
     scores = {}
     good = []
     for name, jd, platepar, section in fits:
@@ -1265,7 +1589,7 @@ def fitCandidate(chunk_dirs, section_chunks, held_out, catalog_stars, config, ma
                                               ff_frames=ff_frames, fit_vignetting=fit_vignetting)
         score = scorePlatepar(platepar, held_out, catalog_stars, config, ff_frames=ff_frames,
                               mask=getattr(mask, 'img', None))
-        ok, reasons = judgeScore(score)
+        ok, reasons = judge(score)
         section['held_out_ok'] = ok
         section['held_out_worst_zone'] = score.worstZoneShare()
         if not ok:
@@ -1611,13 +1935,17 @@ def installPlatepar(platepar, output_dir, config, reason, dry_run=False):
 def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None, dry_run=False,
                       fit_vignetting=False):
     """ Judge the calibration of a camera on the clear chunks of a processed file (and of the files shortly
-        before it), and fit a new platepar if there is none, if the platepar fails, or periodically to check
-        whether a clearly better platepar can be fitted. A platepar is fitted from scratch on several sections,
-        which have to agree, and judged on chunks which were not fitted on (see fitCandidate and judgeScore). A
-        new platepar is installed right away if there is none; one which would replace a platepar has to be
-        confirmed as better on a later file first, unless the platepar fails and is far worse: then the new one is
-        installed right away on trial, and the previous one is put back if the new one fails on the following
-        chunks while the previous one is clearly better there.
+        before it), and fit a new platepar if there is none, if the astrometry of the platepar fails, or
+        periodically to check whether a clearly better platepar can be fitted. A platepar is fitted from
+        scratch on several sections, which have to agree, and judged on chunks which were not fitted on (see
+        fitCandidate and judgeScore); a refit keeps the model and the photometry of the platepar in use (see
+        candidateModels). A new platepar is installed right away if there is none; one which would replace a
+        platepar has to be confirmed as better on a later file first, unless the astrometry of the platepar
+        fails and is far worse: then the new one is installed right away on trial, and the previous one is put
+        back if the new one fails on the following chunks while the previous one is clearly better there. A
+        platepar whose photometry alone fails keeps its astrometry: only its photometry is refitted and
+        confirmed on a later file, or recorded as unreliable on a sky with haze or clouds (see
+        refitFailingPhotometry).
 
     Arguments:
         results_dir: [str] Results directory of the file (with its CALSTARS file).
@@ -1629,7 +1957,8 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
         mask: [MaskStructure] Mask of the camera. None by default.
         dry_run: [bool] Don't install the fitted platepars, only save them as candidates. False by default.
         fit_vignetting: [bool] Fit the vignetting coefficient also when a platepar exists (it is always fitted
-            without one). False by default. Never with a flat (config.use_flat), see fitCandidate.
+            without one): in the refit of a photometry which fails (the new astrometry of a platepar keeps its
+            photometry). False by default. Never with a flat (config.use_flat), see fitCandidate.
 
     Return:
         [dict] The judgement of the file, also saved to its results directory: whether the sky was clear, the
@@ -1662,8 +1991,15 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
         end_jd = chunks[-1][1]
         state['files'] = [entry for entry in state['files'] if entry['results_dir'] != results_dir]
         state['files'].append({'results_dir': results_dir, 'start_jd': chunks[0][1], 'end_jd': end_jd,
-                               'clear': clear_names})
+                               'clear': clear_names, 'chunks': len(chunks)})
         state['files'] = sorted(state['files'], key=lambda entry: entry['end_jd'])[-MAX_HISTORY:]
+
+        # The share of the chunks of the window which are clear (of the files whose number of chunks is known,
+        #   the state of an older version doesn't have it)
+        in_window = [entry for entry in state['files'] if ('chunks' in entry)
+                     and (end_jd - WINDOW_MINUTES/1440.0 <= entry['end_jd'] <= end_jd)]
+        window_chunks = sum(entry['chunks'] for entry in in_window)
+        clear_share = sum(len(entry['clear']) for entry in in_window)/window_chunks if window_chunks else None
 
         # The clear chunks of the files in the window, with the directories of their CALSTARS files
         window, chunk_dirs = [], {}
@@ -1704,14 +2040,14 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
         platepar_path = _plateparInUse(output_dir, config, platepar_path, dry_run)
         result['judged_platepar'] = platepar_path
 
-        # Judge the current platepar
+        # Judge the current platepar, its astrometry and its photometry separately
         current = _platepar(platepar_path, use_flat)
         current_score = None
         if current is not None:
             current_score = scorePlatepar(current, held_out, catalog_stars, config,
                                           ff_frames=ff_frames, mask=mask_img)
-            current_ok, current_reasons = judgeScore(current_score)
-            result['current'] = {'ok': current_ok, 'reasons': current_reasons, 'score': current_score.toDict()}
+            result['current'] = dict(judgeScoreSplit(current_score), score=current_score.toDict())
+            current_ok, current_reasons = result['current']['ok'], result['current']['reasons']
             log.info("Automatic calibration: the platepar {:s} on {:d} clear chunks{:s}".format(
                 'is good' if current_ok else 'FAILS', len(held_out),
                 '' if current_ok else ': ' + '; '.join(current_reasons)))
@@ -1734,20 +2070,23 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
                 writeState(output_dir, state)
                 return _saveFileResult(results_dir, result)
 
-            # The platepar on trial and the previous one are scored on the same later chunks
+            # The platepar on trial and the previous one are scored on the same later chunks. The trial tests
+            #   the new astrometry, so the platepar on trial is kept if its astrometry is good (a photometry
+            #   which fails is refitted separately on a later file)
             confirm_chunks = spreadChunks(later, MAX_HELD_OUT)
             previous = _platepar(trial['previous'], use_flat)
             trial_score = scorePlatepar(current, confirm_chunks, catalog_stars, config,
                                         ff_frames=ff_frames, mask=mask_img)
-            trial_ok, trial_reasons = judgeScore(trial_score)
+            trial_verdict = judgeScoreSplit(trial_score)
+            trial_ok, trial_reasons = trial_verdict['astrometry_ok'], trial_verdict['astrometry_reasons']
             previous_better, reason = False, ''
             if (not trial_ok) and (previous is not None):
                 previous_score = scorePlatepar(previous, confirm_chunks, catalog_stars, config,
                                                ff_frames=ff_frames, mask=mask_img)
                 previous_better, reason = candidateIsBetter(previous_score, trial_score)
 
-            result['trial'] = {'kept': trial_ok, 'reasons': trial_reasons, 'rolled_back': previous_better,
-                               'score': trial_score.toDict()}
+            result['trial'] = dict(trial_verdict, kept=trial_ok, rolled_back=previous_better,
+                                   score=trial_score.toDict())
             state['trial'] = None
             _removeFile(trial['previous'])
 
@@ -1792,38 +2131,53 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
                 writeState(output_dir, state)
                 return _saveFileResult(results_dir, result)
 
-            # Both platepars are scored on the same later chunks
+            # Both platepars are scored on the same later chunks. A refit of the photometry alone (the state
+            #   of an older version has only candidates of the astrometry) is applied to the platepar in use,
+            #   so its astrometry is the one in use, and it replaces it only while the photometry in use fails
             confirm_chunks = spreadChunks(later, MAX_HELD_OUT)
             candidate = _platepar(pending['path'], use_flat)
+            photometry_refit = (pending.get('kind') == 'photometry')
+            if photometry_refit:
+                candidate = withPhotometry(current, candidate)
             candidate_score = scorePlatepar(candidate, confirm_chunks, catalog_stars, config,
                                             ff_frames=ff_frames, mask=mask_img)
             current_confirm_score = scorePlatepar(current, confirm_chunks, catalog_stars, config,
                                                   ff_frames=ff_frames, mask=mask_img)
-            better, reason = candidateIsBetter(candidate_score, current_confirm_score)
-            result['pending'] = {'better': better, 'reason': reason, 'score': candidate_score.toDict()}
+            compare = photometryIsBetter if photometry_refit else candidateIsBetter
+            better, reason = compare(candidate_score, current_confirm_score)
+            result['pending'] = {'kind': pending.get('kind', 'astrometry'), 'better': better,
+                                 'reason': reason, 'score': candidate_score.toDict()}
             state['pending'] = None
             _removeFile(pending['path'])
 
             # A confirmed candidate is installed
             if better:
+                if photometry_refit:
+                    reason = 'photometry refitted, ' + reason
                 result['replaced_platepar_mtime'] = _mtime(platepar_path)
                 path = installPlatepar(candidate, output_dir, config, 'confirmed: ' + reason, dry_run=dry_run)
                 state['installs'].append({'jd': end_jd, 'path': path, 'reason': 'confirmed: ' + reason,
                                           'dry_run': dry_run})
-                result['action'] = _dryRunAction('installed the confirmed candidate', dry_run)
+                result['action'] = _dryRunAction('installed the confirmed {:s}'.format(
+                    'photometry' if photometry_refit else 'candidate'), dry_run)
                 result['installed'] = None if dry_run else path
                 writeState(output_dir, state)
                 return _saveFileResult(results_dir, result)
 
             log.info("Automatic calibration: the candidate was not confirmed ({:s})".format(reason))
 
-        # Fit a candidate without a platepar or when it fails (retried after a while, or sooner with clearly more
-        #   clear chunks), and periodically. A file which a worker finished late (older than the last attempt) makes
-        #   no decision, so the decisions never go back to an older window
-        current_fails = (current is None) or (not result['current']['ok'])
+        # Fit a candidate without a platepar or when its astrometry fails (retried after a while, or sooner
+        #   with clearly more clear chunks), and periodically; refit only the photometry of a platepar whose
+        #   photometry alone fails (retried after a while). A file which a worker finished late (older than
+        #   the last attempt) makes no decision, so the decisions never go back to an older window
+        astrometry_fails = (current is None) or (not result['current']['astrometry_ok'])
+        photometry_only = (not astrometry_fails) and (not result['current']['photometry_ok'])
         last = state.get('last_attempt_jd')
-        interval = RETRY_MINUTES if current_fails else config.auto_calibration_interval
-        more_evidence = current_fails and (len(window) >= RETRY_EVIDENCE_GROWTH*state.get('last_attempt_clear', 0))
+        interval = config.auto_calibration_interval
+        if astrometry_fails or photometry_only:
+            interval = RETRY_MINUTES
+        more_evidence = astrometry_fails \
+            and (len(window) >= RETRY_EVIDENCE_GROWTH*state.get('last_attempt_clear', 0))
 
         # A file older than the last attempt by less than LATE_MINUTES is a late worker; a much older one is older
         #   data processed again, which is judged as new
@@ -1834,16 +2188,54 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
             writeState(output_dir, state)
             return _saveFileResult(results_dir, result)
 
-        # Record the attempt, then fit the candidate
+        # Record the attempt
         state['last_attempt_jd'] = end_jd
         state['last_attempt_clear'] = len(window)
-        # A platepar which is good gives the pointing to search around (the blind search of the whole sky takes
-        #   minutes per section); without one, or when it fails (e.g. the camera moved), the whole sky is searched
-        position_hint = None if current_fails else _positionHint(current, end_jd)
-        candidate, info = fitCandidate(chunk_dirs, pool, held_out, catalog_stars, config, mask=mask,
-                                       use_flat=use_flat, fit_vignetting=(fit_vignetting or (current is None)),
-                                       vignetting_coeff=(None if current is None else current.vignetting_coeff),
-                                       ff_frames=ff_frames, position_hint=position_hint)
+
+        # A platepar whose photometry alone fails keeps its astrometry, no candidate is fitted for it: only
+        #   its photometry is refitted, which waits for the confirmation on a later file as a candidate does.
+        #   On a sky with haze or clouds, or if the refitted photometry fails too, the platepar is kept and
+        #   the photometry of the chunks is recorded as unreliable
+        if photometry_only:
+            refitted, info = refitFailingPhotometry(current, current_score, pool, held_out, catalog_stars,
+                                                    config, clear_share=clear_share, ff_frames=ff_frames,
+                                                    mask=mask_img, fit_vignetting=fit_vignetting)
+            result['photometry'] = info
+            if refitted is None:
+                result['action'] = 'photometry not reliable: ' + info['reason']
+            else:
+                path = os.path.join(output_dir, 'auto_pending_' + config.platepar_name)
+                writePlatepar(refitted, path)
+                state['pending'] = {'path': path, 'fitted_jd': max(chunk[1] for chunk in window),
+                                    'reason': info['reason'], 'kind': 'photometry'}
+                result['action'] = 'refitted photometry waits for the confirmation'
+            log.info("Automatic calibration: {:s}".format(result['action']))
+            writeState(output_dir, state)
+            return _saveFileResult(results_dir, result)
+
+        # A platepar whose astrometry is good gives the pointing to search around (the blind search of the
+        #   whole sky takes minutes per section); without one, or when it fails (e.g. the camera moved), the
+        #   whole sky is searched. The sections are judged only on their astrometry if the photometry of the
+        #   platepar fails too (it is refitted separately once the new astrometry is in use)
+        position_hint = None if astrometry_fails else _positionHint(current, end_jd)
+        judge_photometry = (current is None) or result['current']['photometry_ok']
+
+        # The candidate is fitted in the model of the platepar in use, and in the model of the config only if
+        #   none can be fitted in it
+        tried = []
+        vignetting_coeff = None if (current is None) else current.vignetting_coeff
+        for model in candidateModels(current, config):
+            candidate, info = fitCandidate(chunk_dirs, pool, held_out, catalog_stars, config, mask=mask,
+                                           use_flat=use_flat,
+                                           fit_vignetting=(fit_vignetting or (current is None)),
+                                           vignetting_coeff=vignetting_coeff, ff_frames=ff_frames,
+                                           position_hint=position_hint, model=model,
+                                           judge_photometry=judge_photometry)
+            if candidate is not None:
+                break
+            tried.append({'model': model, 'reason': info.get('reason', '')})
+        if tried:
+            info['models_tried'] = tried
         result['candidate'] = info
 
         # Without a candidate (e.g. too few sections agree), the next attempt is made later
@@ -1852,6 +2244,11 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
             log.info("Automatic calibration: no candidate platepar ({:s})".format(info.get('reason', '')))
             writeState(output_dir, state)
             return _saveFileResult(results_dir, result)
+
+        # The candidate replaces only the astrometry of a platepar: it carries the photometry of the platepar
+        #   in use (refitted separately when it fails)
+        if current is not None:
+            candidate = withPhotometry(candidate, current)
 
         # Judge the candidate on the held-out chunks, against the current platepar
         candidate_score = scorePlatepar(candidate, held_out, catalog_stars, config,
@@ -1894,7 +2291,8 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
             # A candidate which would replace a platepar waits for the confirmation on a later file
             path = os.path.join(output_dir, 'auto_pending_' + config.platepar_name)
             writePlatepar(candidate, path)
-            state['pending'] = {'path': path, 'fitted_jd': max(chunk[1] for chunk in window), 'reason': reason}
+            state['pending'] = {'path': path, 'fitted_jd': max(chunk[1] for chunk in window),
+                                'reason': reason, 'kind': 'astrometry'}
             result['action'] = 'candidate waits for the confirmation'
 
         else:

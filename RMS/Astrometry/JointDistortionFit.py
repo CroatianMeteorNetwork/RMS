@@ -119,7 +119,8 @@ OUTLIER_NIGHT_FACTOR = 2.0
 #   - better on the held-out stars: their median and rms residual no larger than with the starting platepars (by
 #       at most a share), the mean residual of no zone or corner larger by more than a fraction of a pixel, and the
 #       largest mean residual of the zones and corners not larger;
-#   - the judgement of the automatic calibration (AutoCalibration.judgeScore) is good on the held-out chunks;
+#   - the astrometric judgement of the automatic calibration (AutoCalibration.judgeAstrometry) is good on the
+#       held-out chunks (the fit keeps the photometry of its start, which is judged and refitted separately);
 #   - converged: the mapping of the image changed by less than a fraction of a pixel (rms) in the last fit, and
 #       few chunks were left out as outliers;
 #   - a sane model: the mapping changed from the starting platepar's by less than a share of the image diagonal,
@@ -1304,11 +1305,12 @@ def qualityControl(fitted, start, report, config, options, judge_groups=(), clea
         options: [dict] Limits of the checks (see QC_DEFAULTS).
 
     Keyword arguments:
-        judge_groups: [list] Held-out chunks to judge the fitted distortion on, as (name, fitted platepar to start
-            from, starting platepar, chunks as in readChunks), e.g. one group per night. Only the clear chunks are
-            judged (AutoCalibration.clearChunks). A group fails if the fitted platepar fails while the starting
-            platepar is good; one on which both fail (e.g. a night of poor transparency) isn't judged. Empty by
-            default (not judged).
+        judge_groups: [list] Held-out chunks to judge the fitted distortion on, as (name, fitted platepar to
+            start from, starting platepar, chunks as in readChunks), e.g. one group per night. Only the clear
+            chunks are judged (AutoCalibration.clearChunks), and only the astrometry
+            (AutoCalibration.judgeAstrometry): the fit keeps the photometry of its start, so a sky with haze,
+            which fails the photometry, doesn't stop it. A group fails if the fitted platepar fails while the
+            starting platepar is good; one on which both fail isn't judged. Empty by default (not judged).
         clear_hours: [float] Hours of the chunks of the nights. None by default.
         longest_span_hours: [float] Hours from the first to the last chunk of the longest night. None by default.
         mask: [ndarray] Mask image of the camera (0 is masked) for the selection of the clear chunks. None by
@@ -1414,13 +1416,14 @@ def qualityControl(fitted, start, report, config, options, judge_groups=(), clea
             chunks = AutoCalibration.spreadChunks(clear, options['judge_chunks'])
             catalog_stars = AutoCalibration._loadCatalog(config, chunks[len(chunks)//2][1])
 
-            # The fitted platepar, and if it fails, the starting platepar on the same chunks, both with the mask
-            ok, reasons = AutoCalibration.judgeScore(AutoCalibration.scorePlatepar(
+            # The astrometry of the fitted platepar, and if it fails, of the starting platepar on the same
+            #   chunks, both with the mask
+            ok, reasons = AutoCalibration.judgeAstrometry(AutoCalibration.scorePlatepar(
                 platepar, chunks, catalog_stars, config, ff_frames=group_chunks[0][3], mask=mask))
             if ok:
                 good_groups.append(label)
                 continue
-            start_ok, _ = AutoCalibration.judgeScore(AutoCalibration.scorePlatepar(
+            start_ok, _ = AutoCalibration.judgeAstrometry(AutoCalibration.scorePlatepar(
                 start_platepar, chunks, catalog_stars, config, ff_frames=group_chunks[0][3], mask=mask))
             if start_ok:
                 failed.append('{:s}: {:s}'.format(label, '; '.join(reasons)))

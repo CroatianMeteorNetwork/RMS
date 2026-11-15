@@ -4,8 +4,8 @@ Tests of the automatic calibration of a classic camera during the night and at i
 
 The fits and the scores are replaced by stand-ins whose outcome each test sets, so the tests check the decisions:
 when a platepar is fitted, installed, checked and refitted, the retries and their limit, that the installed platepar
-is only ever replaced by a better one, the reading of the stars of the detection, and the decisions at the end of
-the night.
+is only ever replaced by a better one, that a platepar whose photometry alone fails gets only its photometry
+refitted, the reading of the stars of the detection, and the decisions at the end of the night.
 """
 
 from __future__ import print_function, division, absolute_import
@@ -27,14 +27,31 @@ from RMS.Formats.Platepar import Platepar
 JD0 = 2461000.0
 
 
-class _Score(object):
-    """ A stand-in score: whether it is good and a value which compares platepars. """
+# A vignetting coefficient with which the stand-in photometry fails
+BAD_VIGNETTING = 0.0012
 
-    def __init__(self, ok, value):
-        self.ok, self.value = ok, value
+
+class _Score(object):
+    """ A stand-in score: whether its astrometry and its photometry are good, and a value which compares
+        platepars. """
+
+    def __init__(self, astrometry_ok, value, photometry_ok=True):
+        self.astrometry_ok, self.photometry_ok, self.value = astrometry_ok, photometry_ok, value
+        self.ok = astrometry_ok and photometry_ok
 
     def toDict(self):
         return {'ok': self.ok, 'value': self.value}
+
+
+def _verdict(score):
+    """ The stand-in judgement of a score, its astrometry and photometry separately. """
+
+    astrometry_reasons = [] if score.astrometry_ok else ['astrometry fails']
+    photometry_reasons = [] if score.photometry_ok else ['photometry fails']
+
+    return {'ok': score.ok, 'reasons': astrometry_reasons + photometry_reasons,
+            'astrometry_ok': score.astrometry_ok, 'astrometry_reasons': astrometry_reasons,
+            'photometry_ok': score.photometry_ok, 'photometry_reasons': photometry_reasons}
 
 
 def _platepar(value):
@@ -60,9 +77,11 @@ def setup(tmp_path, monkeypatch):
 
     Return:
         (config, night_dir, plan): plan sets the outcomes: 'first' (list of the values of the first fits, None
-            for a failure, a negative value for a platepar which fails on held-out chunks), 'refit' (value of the
-            refits, None for a failure), 'good_above' (a platepar is good on new stars if its value is above it),
-            and 'calls' records the fits.
+            for a failure, a negative value for a platepar which fails on held-out chunks), 'refit' (value of
+            the refits, None for a failure), 'good_above' (a platepar is good on new stars if its value is
+            above it), 'first_vignetting' (vignetting coefficient of the first fits), 'photometry_fails' (the
+            photometry of a platepar with BAD_VIGNETTING fails), 'sky_photometric' (False: the refit of the
+            photometry finds haze), and 'calls' records the fits.
     """
 
     config = cr.Config()
@@ -71,30 +90,52 @@ def setup(tmp_path, monkeypatch):
     night_dir = str(tmp_path/"night")
     os.makedirs(night_dir)
 
-    plan = {'first': [], 'refit': None, 'good_above': 0, 'calls': []}
+    plan = {'first': [], 'refit': None, 'good_above': 0, 'calls': [], 'sky_photometric': True,
+            'photometry_fails': False}
 
     def _fitCandidate(chunk_dirs, pool, held_out, catalog_stars, config, **kwargs):
         plan['calls'].append(('first', len(pool), kwargs.get('fit_vignetting')))
         value = plan['first'].pop(0) if plan['first'] else None
-        return (None, {'reason': 'no fit'}) if value is None else (_platepar(value), {})
+        if value is None:
+            return None, {'reason': 'no fit'}
+        platepar = _platepar(value)
+        platepar.vignetting_coeff = plan.get('first_vignetting', platepar.vignetting_coeff)
+        return platepar, {}
 
     def _jointFit(dir_paths, platepar, config, **kwargs):
         plan['calls'].append(('refit', platepar.mag_lev, kwargs.get('max_chunks')))
         plan['holdout_names'] = kwargs.get('holdout_names')
+        plan['joint_kwargs'] = kwargs
         if plan['refit'] is None:
             return None, None
         report = {'qc': {'ok': plan.get('qc_ok', True), 'failed': [] if plan.get('qc_ok', True) else ['converged'],
                          'checks': []},
                   'nights': [], 'held_out': [], 'distortion_type': 'radial7-odd', 'chunks': 0, 'match_radius': 1,
                   'lim_mag': 6, 'snr_min': 0, 'iterations': [{'iteration': 0, 'recalibrated': 0, 'stats': None}]}
-        return _platepar(plan['refit']), report
+
+        # The joint fit keeps the photometry of its start
+        fitted = _platepar(plan['refit'])
+        fitted.vignetting_coeff = platepar.vignetting_coeff
+        return fitted, report
 
     def _score(platepar, chunks, *args, **kwargs):
-        return _Score(platepar.mag_lev > plan['good_above'], platepar.mag_lev)
+        bad_photometry = plan['photometry_fails'] and (platepar.vignetting_coeff == BAD_VIGNETTING)
+        return _Score(platepar.mag_lev > plan['good_above'], platepar.mag_lev,
+                      photometry_ok=(not bad_photometry))
+
+    def _refitFailingPhotometry(platepar, score, fit_chunks, held_out, catalog_stars, config, **kwargs):
+        plan['calls'].append(('photometry', platepar.mag_lev, len(fit_chunks), len(held_out)))
+        if not plan['sky_photometric']:
+            return None, {'reliable': False, 'reason': 'the sky is not photometric: haze'}
+        refitted = copy.deepcopy(platepar)
+        refitted.vignetting_coeff = 0.0005
+        return refitted, {'reliable': True, 'reason': 'photometry refitted'}
 
     monkeypatch.setattr(ac, 'fitCandidate', _fitCandidate)
     monkeypatch.setattr(ac, 'scorePlatepar', _score)
     monkeypatch.setattr(ac, 'judgeScore', lambda score: (score.ok, [] if score.ok else ['fails']))
+    monkeypatch.setattr(ac, 'judgeScoreSplit', _verdict)
+    monkeypatch.setattr(ac, 'refitFailingPhotometry', _refitFailingPhotometry)
     monkeypatch.setattr(ac, 'candidateIsBetter', lambda cand, cur: (cand.value > cur.value,
                                                                     'value {:.1f}'.format(cand.value)))
     monkeypatch.setattr(ac, 'clearChunks', lambda chunks, *args, **kwargs: list(chunks))
@@ -483,6 +524,126 @@ def test_platepar_of_the_last_attempt_is_checked(setup):
     assert not [call for call in plan['calls'] if call[0] == 'refit']
     assert calibration.state['done'] and (calibration.state['attempts'] == 1)
     assert _installed(config) == 2.0
+
+
+def test_photometry_alone_failing_during_the_night_refits_only_the_photometry(setup):
+    """ When only the photometry of the installed platepar fails on new stars, the distortion isn't refitted
+        with the joint fit: only the photometry is refitted (on the chunks before the new ones, judged on the
+        new ones) and installed, which ends the night as the platepar is then good. """
+
+    config, night_dir, plan = setup
+    plan['first'] = [2.0]
+    plan['first_vignetting'] = BAD_VIGNETTING
+    plan['refit'] = 3.0
+    plan['good_above'] = 1.5
+
+    # The first platepar is good on its held-out chunks, then its photometry fails on the new stars
+    calibration = nc.NightCalibration(config, night_dir)
+    calibration.update(_chunks(ac.MIN_CLEAR_CHUNKS))
+    assert _installed(config) == 2.0
+    plan['photometry_fails'] = True
+    actions = _run(calibration, 120)
+
+    assert 'installed the refitted photometry' in actions[0][1] and 'done for the night' in actions[0][1]
+    assert not [call for call in plan['calls'] if call[0] == 'refit']
+    assert [call[1] for call in plan['calls'] if call[0] == 'photometry'] == [2.0]
+    platepar = ac._platepar(nc.installPath(config), False)
+    assert (platepar.mag_lev == 2.0) and (platepar.vignetting_coeff == pytest.approx(0.0005))
+    entry = calibration.state['history'][-1]
+    assert entry['verdict']['photometry_ok'] and entry['photometry']['reliable']
+
+
+def test_photometry_failing_on_haze_during_the_night_is_recorded(setup):
+    """ On a sky with haze the photometry which fails alone isn't refitted, nor the distortion: the installed
+        platepar is kept, the photometry of the new stars is recorded as unreliable, and it is checked again
+        after the retry time, up to the limit of the attempts. """
+
+    config, night_dir, plan = setup
+    plan['first'] = [2.0]
+    plan['first_vignetting'] = BAD_VIGNETTING
+    plan['refit'] = 3.0
+    plan['good_above'] = 1.5
+    plan['sky_photometric'] = False
+
+    calibration = nc.NightCalibration(config, night_dir)
+    calibration.update(_chunks(ac.MIN_CLEAR_CHUNKS))
+    plan['photometry_fails'] = True
+    actions = _run(calibration, 300)
+
+    attempts = [action for _, action in actions if action.startswith('attempt')]
+    assert len(attempts) == config.auto_calibration_max_fits - 1
+    assert all('photometry not reliable' in action for action in attempts)
+    assert not [call for call in plan['calls'] if call[0] == 'refit']
+    platepar = ac._platepar(nc.installPath(config), False)
+    assert (platepar.mag_lev == 2.0) and (platepar.vignetting_coeff == pytest.approx(BAD_VIGNETTING))
+    assert all(entry['photometry']['reliable'] is False for entry in calibration.state['history']
+               if 'photometry' in entry)
+
+
+def test_end_of_night_photometry_alone_failing(setup, monkeypatch):
+    """ An existing platepar whose photometry alone fails on the night's stars isn't refitted with the joint
+        fit: only its photometry is refitted and installed; on a sky with haze the platepar is kept and the
+        photometry of the night is recorded as unreliable. The judgement is recorded with the night. """
+
+    config, night_dir, plan = setup
+    plan['refit'] = 3.0
+    plan['good_above'] = 0.5
+    plan['photometry_fails'] = True
+    platepar = _platepar(1.0)
+    platepar.vignetting_coeff = BAD_VIGNETTING
+
+    result, _, _ = _endOfNight(setup, monkeypatch, platepar, False)
+    assert not [call for call in plan['calls'] if call[0] == 'refit']
+    assert (result.mag_lev == 1.0) and (result.vignetting_coeff == pytest.approx(0.0005))
+    record = nc.readState(night_dir)['end_of_night']
+    assert record['verdict']['astrometry_ok'] and (not record['verdict']['photometry_ok'])
+    assert record['photometry']['reliable'] is True
+
+    # On a sky with haze the platepar is kept
+    plan['sky_photometric'] = False
+    result, _, _ = _endOfNight(setup, monkeypatch, platepar, False)
+    assert result.vignetting_coeff == pytest.approx(BAD_VIGNETTING)
+    assert nc.readState(night_dir)['end_of_night']['photometry']['reliable'] is False
+    assert not [call for call in plan['calls'] if call[0] == 'refit']
+
+
+def test_end_of_night_both_failing_refits_the_astrometry_then_the_photometry(setup, monkeypatch):
+    """ An existing platepar whose astrometry and photometry both fail: the joint fit refits the astrometry in
+        the model of the platepar (no other distortion type is asked for) keeping its photometry, then the
+        photometry of the fit is refitted separately, and the night is reduced with both. """
+
+    config, night_dir, plan = setup
+    plan['refit'] = 3.0
+    plan['good_above'] = 2.0
+    plan['photometry_fails'] = True
+    platepar = _platepar(1.0)
+    platepar.vignetting_coeff = BAD_VIGNETTING
+
+    result, _, _ = _endOfNight(setup, monkeypatch, platepar, False)
+    assert [call[:2] for call in plan['calls']] == [('refit', 1.0), ('photometry', 3.0)]
+    assert plan['joint_kwargs'].get('distortion_type') is None
+    assert (result.mag_lev == 3.0) and (result.vignetting_coeff == pytest.approx(0.0005))
+    assert _installed(config) == 3.0
+
+
+def test_old_night_state_is_read(setup, monkeypatch):
+    """ The state of a night written by an older version (without the record of the end of the night) is read,
+        and kept when the end of the night records its judgement. """
+
+    config, night_dir, plan = setup
+    with open(os.path.join(night_dir, nc.STATE_NAME), 'w') as f:
+        json.dump({'attempts': 2, 'next_attempt_jd': None, 'installed': None, 'installed_jd': None,
+                   'check_from_jd': None, 'done': True, 'history': [{'jd': JD0, 'action': 'old'}]}, f)
+    plan['good_above'] = 0.5
+    plan['photometry_fails'] = True
+    platepar = _platepar(1.0)
+    platepar.vignetting_coeff = BAD_VIGNETTING
+
+    _endOfNight(setup, monkeypatch, platepar, False)
+    state = nc.readState(night_dir)
+    assert (state['attempts'] == 2) and (state['history'][0]['action'] == 'old')
+    assert state['end_of_night']['photometry']['reliable'] is True
+
 
 ### Periodic refit over many nights ###
 
