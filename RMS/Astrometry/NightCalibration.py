@@ -23,6 +23,10 @@ joint fit refits the astrometry and keeps the photometry of its start. A platepa
 (e.g. on a night with haze) is never refitted with it: only its photometry is refitted, or, on a sky with haze
 or clouds, the photometry of the night is recorded as unreliable (AutoCalibration.refitFailingPhotometry); a
 photometry which fails together with the astrometry is refitted the same way after the astrometry.
+
+The sky of every judgement is measured against the haze limits of the config (AutoCalibration.judgeSky) and
+recorded with it. At the end of the night the measured values are summarized in one line (summarizeNightSky),
+in the log, the state of the night and the report of its joint fit, so the limits can be tuned per camera.
 """
 
 from __future__ import print_function, division, absolute_import
@@ -46,6 +50,9 @@ STATE_NAME = 'auto_calibration_night.json'
 
 # Directory of the star lists of the fits, in the night directory
 WORK_DIR = 'auto_calibration'
+
+# Name of the report of the joint fit of the night, in the night directory
+JOINT_REPORT_NAME = 'auto_calibration_joint_report.txt'
 
 # Seconds between the reads of the new stars during the night
 POLL_SECONDS = 60
@@ -538,14 +545,20 @@ class NightCalibration(object):
         else:
             action = 'checked the platepar of the last attempt'
 
+        # The sky of the new stars measured against the haze limits, with the photometry of the platepar which
+        #   is judged on it and whether that photometry is good, recorded with the judgement for the tuning of
+        #   the limits of the camera
+        best_verdict = ac.judgeScoreSplit(best_score)
+        new_chunks = sum(1 for chunk in self._chunks if chunk[1] > state['check_from_jd'])
+        clear_share = len(new)/max(1, new_chunks)
+        sky = dict(ac.judgeSky(best_score, best, config=config, clear_share=clear_share),
+                   photometry_ok=best_verdict['photometry_ok'])
+
         # A photometry which fails while the astrometry is good (of the installed platepar, also one just
         #   refitted) is refitted separately on the same chunks, its astrometry unchanged; on a sky with haze
         #   or clouds it is recorded as unreliable
-        best_verdict = ac.judgeScoreSplit(best_score)
         photometry = None
         if refit and best_verdict['astrometry_ok'] and (not best_verdict['photometry_ok']):
-            new_chunks = sum(1 for chunk in self._chunks if chunk[1] > state['check_from_jd'])
-            clear_share = len(new)/max(1, new_chunks)
             refitted, photometry = ac.refitFailingPhotometry(best, best_score, fit_chunks, check,
                                                              catalog_stars, config, clear_share=clear_share,
                                                              ff_frames=ff_frames, mask=self.mask_img)
@@ -566,9 +579,9 @@ class NightCalibration(object):
 
         # Done if the installed platepar is good on the new stars (or after the check of the last attempt),
         #   otherwise the next attempt comes later. The judgement of the installed platepar is recorded with
-        #   its astrometry and photometry separately
+        #   its astrometry and photometry separately, and with the measured sky
         ok, reasons = best_verdict['ok'], best_verdict['reasons']
-        details = {'score': best_score.toDict(), 'verdict': best_verdict}
+        details = {'score': best_score.toDict(), 'verdict': best_verdict, 'sky': sky}
         if photometry is not None:
             details['photometry'] = photometry
         if not refit:
@@ -776,7 +789,7 @@ def jointFitNight(clear, start, config, night_dir, night_hours, ff_frames=256, n
 
     # The report of the fit is kept with the night
     if report is not None:
-        with open(os.path.join(night_dir, 'auto_calibration_joint_report.txt'), 'w') as f:
+        with open(os.path.join(night_dir, JOINT_REPORT_NAME), 'w') as f:
             f.write(formatReport(report))
 
     return fitted, report
@@ -785,7 +798,8 @@ def jointFitNight(clear, start, config, night_dir, night_hours, ff_frames=256, n
 def endOfNightCalibration(config, night_dir, calstars_name, platepar, platepar_path, platepar_fmt, dry_run=None,
                           nproc=None):
     """ The joint fit of the lens distortion on the clear chunks of the whole night (see the module docstring),
-        before the night is reduced.
+        before the night is reduced. The measured sky of the judgements of the night (during the night and at
+        its end) is then summarized in one line (see summarizeNightSky), for the tuning of the haze limits.
 
     Arguments:
         config: [Config] Configuration.
@@ -797,6 +811,103 @@ def endOfNightCalibration(config, night_dir, calstars_name, platepar, platepar_p
 
     Keyword arguments:
         dry_run: [bool] Only save the fitted platepars as candidates. config.auto_calibration_dry_run by default.
+        nproc: [int] Workers of the joint fit. config.auto_calibration_nproc by default.
+
+    Return:
+        (platepar, platepar_path, platepar_fmt): [tuple] The platepar to reduce the night with.
+    """
+
+    # The record of an earlier end of this night (the night processed again) is replaced by this one
+    state = readState(night_dir)
+    if state.pop('end_of_night', None) is not None:
+        writeState(night_dir, state)
+
+    # The report of the joint fit as it was before, to tell whether this end of the night wrote it
+    report_path = os.path.join(night_dir, JOINT_REPORT_NAME)
+    report_before = _mtime(report_path)
+
+    # The calibration of the end of the night
+    result = _endOfNightCalibration(config, night_dir, calstars_name, platepar, platepar_path, platepar_fmt,
+                                    dry_run=dry_run, nproc=nproc)
+
+    # The sky of the night in one line, in the log, the state and the report of the joint fit of the night. It
+    #   never changes the platepar the night is reduced with
+    try:
+        summarizeNightSky(night_dir, config, report_path=(report_path if _mtime(report_path) != report_before
+                                                          else None))
+    except Exception as e:
+        log.warning("Automatic calibration: the sky of the night can't be summarized ({:s})".format(repr(e)))
+
+    return result
+
+
+def _mtime(path):
+    """ The time a file was last changed.
+
+    Arguments:
+        path: [str] Path of the file.
+
+    Return:
+        [float] The time (s), None if there is no file.
+    """
+
+    return os.path.getmtime(path) if os.path.isfile(path) else None
+
+
+def summarizeNightSky(night_dir, config, report_path=None):
+    """ Summarize the measured sky of the judgements of a night (see AutoCalibration.skySummary): those
+        during the night and the one at its end. The summary is logged in one line and kept in the state of
+        the night ('end_of_night'), so a person tuning the haze limits of a camera sees what they would have
+        to be.
+
+    Arguments:
+        night_dir: [str] Night directory.
+        config: [Config] Configuration, with the haze limits.
+
+    Keyword arguments:
+        report_path: [str] A report of the night the summary is added to. None by default (none).
+
+    Return:
+        [str] The summary.
+    """
+
+    # The measured skies of the judgements of the night: during the night, then at its end
+    state = readState(night_dir)
+    skies = [entry['sky'] for entry in state['history'] if entry.get('sky')]
+    end_of_night = state.setdefault('end_of_night', {})
+    if end_of_night.get('sky'):
+        skies.append(end_of_night['sky'])
+
+    # Their distribution in one line of the log
+    summary, statistics = ac.skySummary(skies, config=config)
+    log.info("Automatic calibration of the night: sky of the night: {:s}".format(summary))
+
+    # Kept with the night, and added to its report
+    end_of_night.update({'sky_summary': summary, 'sky_statistics': statistics})
+    writeState(night_dir, state)
+    if report_path is not None:
+        with open(report_path, 'a') as f:
+            f.write('\nSky of the night (haze limits): {:s}\n'.format(summary))
+
+    return summary
+
+
+def _endOfNightCalibration(config, night_dir, calstars_name, platepar, platepar_path, platepar_fmt,
+                           dry_run=None, nproc=None):
+    """ The joint fit of the lens distortion on the clear chunks of the whole night, see endOfNightCalibration
+        (without the summary of the sky of the night).
+
+    Arguments:
+        config: [Config] Configuration.
+        night_dir: [str] Night directory.
+        calstars_name: [str] Name of the CALSTARS file of the night.
+        platepar: [Platepar] Platepar of the night (Reprocess.getPlatepar), None if there is none.
+        platepar_path: [str] Its path, the platepar is installed there (installPath(config) if there is none).
+        platepar_fmt: [str] Its format.
+
+    Keyword arguments:
+        dry_run: [bool] Only save the fitted platepars as candidates. config.auto_calibration_dry_run by
+            default.
         nproc: [int] Workers of the joint fit. config.auto_calibration_nproc by default.
 
     Return:
@@ -855,6 +966,12 @@ def endOfNightCalibration(config, night_dir, calstars_name, platepar, platepar_p
         score = ac.scorePlatepar(platepar, held_out, catalog_stars, config, ff_frames=ff_frames,
                                  mask=mask_img)
         verdict = ac.judgeScoreSplit(score)
+
+        # Every judgement is recorded with the night, with the sky of the night measured against the haze
+        #   limits (and whether the photometry judged on it is good), for the tuning of the limits
+        sky = dict(ac.judgeSky(score, platepar, config=config, clear_share=len(clear)/len(chunks)),
+                   photometry_ok=verdict['photometry_ok'])
+        _recordNight(night_dir, state, verdict=verdict, sky=sky)
         if verdict['ok']:
 
             # A good platepar gets only its vignetting refitted, if asked for and if that improves the photometry
@@ -870,9 +987,7 @@ def endOfNightCalibration(config, night_dir, calstars_name, platepar, platepar_p
             return platepar, platepar_path, platepar_fmt
 
         # The photometry alone fails: the distortion isn't refitted, only the photometry (nothing on a sky
-        #   with haze or clouds, then the photometry of the night is recorded as unreliable). The judgement
-        #   which fails is recorded with the night
-        _recordNight(night_dir, state, verdict=verdict)
+        #   with haze or clouds, then the photometry of the night is recorded as unreliable)
         if verdict['astrometry_ok']:
             refitted, info = ac.refitFailingPhotometry(platepar, score, fit_chunks, held_out, catalog_stars,
                                                        config, clear_share=len(clear)/len(chunks),
@@ -946,8 +1061,9 @@ def endOfNightCalibration(config, night_dir, calstars_name, platepar, platepar_p
 
 
 def _recordNight(night_dir, state, **details):
-    """ Record the judgement of the platepar of a night at its end (its astrometry and photometry separately)
-        and whether the photometry of the night is reliable, in the state of the night.
+    """ Record the judgement of the platepar of a night at its end (its astrometry and photometry separately),
+        the measured sky of the night and whether the photometry of the night is reliable, in the state of the
+        night.
 
     Arguments:
         night_dir: [str] Night directory.
@@ -955,6 +1071,8 @@ def _recordNight(night_dir, state, **details):
 
     Keyword arguments:
         verdict: [dict] The judgement of the platepar (see AutoCalibration.judgeScoreSplit).
+        sky: [dict] The measured sky the platepar was judged on (see AutoCalibration.judgeSky), with whether
+            its photometry is good there ('photometry_ok').
         photometry: [dict] What was done about a photometry which fails (see
             AutoCalibration.refitFailingPhotometry), with whether the photometry of the night is 'reliable'.
     """

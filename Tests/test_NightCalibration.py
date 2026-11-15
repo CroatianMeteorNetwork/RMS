@@ -32,12 +32,16 @@ BAD_VIGNETTING = 0.0012
 
 
 class _Score(object):
-    """ A stand-in score: whether its astrometry and its photometry are good, and a value which compares
-        platepars. """
+    """ A stand-in score: whether its astrometry and its photometry are good, a value which compares
+        platepars, and the zero points of the chunks (for the measured sky, see AutoCalibration.judgeSky). """
 
-    def __init__(self, astrometry_ok, value, photometry_ok=True):
+    def __init__(self, astrometry_ok, value, photometry_ok=True, mag_lev=()):
         self.astrometry_ok, self.photometry_ok, self.value = astrometry_ok, photometry_ok, value
         self.ok = astrometry_ok and photometry_ok
+        self.mag_lev = np.array(mag_lev, dtype=np.float64)
+
+    def magLevScatter(self):
+        return float(np.std(self.mag_lev)) if (len(self.mag_lev) > 1) else np.nan
 
     def toDict(self):
         return {'ok': self.ok, 'value': self.value}
@@ -81,7 +85,8 @@ def setup(tmp_path, monkeypatch):
             the refits, None for a failure), 'good_above' (a platepar is good on new stars if its value is
             above it), 'first_vignetting' (vignetting coefficient of the first fits), 'photometry_fails' (the
             photometry of a platepar with BAD_VIGNETTING fails), 'sky_photometric' (False: the refit of the
-            photometry finds haze), and 'calls' records the fits.
+            photometry finds haze, and the zero points of the chunks of the scores scatter by 0.2 mag), and
+            'calls' records the fits.
     """
 
     config = cr.Config()
@@ -120,8 +125,13 @@ def setup(tmp_path, monkeypatch):
 
     def _score(platepar, chunks, *args, **kwargs):
         bad_photometry = plan['photometry_fails'] and (platepar.vignetting_coeff == BAD_VIGNETTING)
+
+        # The zero points of the chunks at the platepar's, scattering on a sky with haze
+        zero_points = np.full(10, platepar.mag_lev)
+        if not plan['sky_photometric']:
+            zero_points[::2] -= 0.4
         return _Score(platepar.mag_lev > plan['good_above'], platepar.mag_lev,
-                      photometry_ok=(not bad_photometry))
+                      photometry_ok=(not bad_photometry), mag_lev=zero_points)
 
     def _refitFailingPhotometry(platepar, score, fit_chunks, held_out, catalog_stars, config, **kwargs):
         plan['calls'].append(('photometry', platepar.mag_lev, len(fit_chunks), len(held_out)))
@@ -643,6 +653,71 @@ def test_old_night_state_is_read(setup, monkeypatch):
     state = nc.readState(night_dir)
     assert (state['attempts'] == 2) and (state['history'][0]['action'] == 'old')
     assert state['end_of_night']['photometry']['reliable'] is True
+
+
+def test_sky_of_the_night_recorded_and_summarized(setup, monkeypatch, caplog):
+    """ The measured sky of the check of the installed platepar during the night is recorded with its
+        judgement; at the end of the night the sky of the night's judgements is summarized in one line, in the
+        log, the state of the night and the report of the joint fit of the night. """
+
+    import logging
+
+    config, night_dir, plan = setup
+    plan['first'] = [2.0]
+    plan['refit'] = 3.0
+    plan['good_above'] = 1.5
+
+    # The check during the night records the measured sky with the judgement
+    calibration = nc.NightCalibration(config, night_dir)
+    _run(calibration, 120)
+    checks = [entry for entry in calibration.state['history'] if 'sky' in entry]
+    assert len(checks) == 1
+    sky = checks[0]['sky']
+    assert (sky['zero_point_scatter'], sky['zero_point_offset'], sky['clear_fraction']) == (0.0, 0.0, 1.0)
+    assert (sky['limits_exceeded'] == []) and (sky['photometry_ok'] is True)
+
+    # The end of the night: the joint fit of the platepar installed tonight, then the summary
+    with caplog.at_level(logging.INFO, logger='rmslogger'):
+        _endOfNight(setup, monkeypatch, _platepar(3.0), True)
+    assert "sky of the night: 1 judged, 0 hazy (0 of the 0 with a failing photometry)" in caplog.text
+    record = nc.readState(night_dir)['end_of_night']
+    assert record['sky_summary'].startswith('1 judged, 0 hazy')
+    assert record['sky_statistics']['judged'] == 1
+    with open(os.path.join(night_dir, nc.JOINT_REPORT_NAME)) as f:
+        assert 'Sky of the night (haze limits): ' + record['sky_summary'] in f.read()
+
+
+def test_end_of_night_judgement_records_the_sky(setup, monkeypatch):
+    """ The judgement of an existing platepar at the end of the night is recorded with the measured sky, also
+        when it is good; on a sky with haze the limit which decided is recorded, and the summary counts the
+        night as hazy with a failing photometry. A night processed again replaces the record, and without a
+        joint fit no report is written. """
+
+    config, night_dir, plan = setup
+    plan['good_above'] = 0.5
+    platepar = _platepar(1.0)
+    platepar.vignetting_coeff = BAD_VIGNETTING
+
+    # A sky with haze: the photometry fails, the zero points scatter by 0.2 mag
+    plan['photometry_fails'] = True
+    plan['sky_photometric'] = False
+    _endOfNight(setup, monkeypatch, platepar, False)
+    record = nc.readState(night_dir)['end_of_night']
+    assert record['sky']['zero_point_scatter'] == pytest.approx(0.2)
+    assert record['sky']['limits_exceeded'] == ['zero_point_scatter']
+    assert record['sky']['photometry_ok'] is False
+    assert record['photometry']['reliable'] is False
+    assert record['sky_summary'].startswith('1 judged, 1 hazy (1 of the 1 with a failing photometry)')
+    assert not os.path.isfile(os.path.join(night_dir, nc.JOINT_REPORT_NAME))
+
+    # The night processed again on a clear sky with a good platepar: the record of the first time is replaced
+    plan['photometry_fails'] = False
+    plan['sky_photometric'] = True
+    _endOfNight(setup, monkeypatch, platepar, False)
+    record = nc.readState(night_dir)['end_of_night']
+    assert record['verdict']['ok'] and (record['sky']['limits_exceeded'] == [])
+    assert 'photometry' not in record
+    assert record['sky_summary'].startswith('1 judged, 0 hazy')
 
 
 ### Periodic refit over many nights ###

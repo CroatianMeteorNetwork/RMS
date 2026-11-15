@@ -21,7 +21,9 @@ periodically to check whether a clearly better one can be fitted; a new fit keep
 platepar it would replace, and its model unless no candidate can be fitted in it. A new camera gets the fitted
 platepar right away, a platepar is replaced only after the candidate is confirmed as clearly better on later
 chunks. A platepar whose photometry alone fails (e.g. on a sky with haze) keeps its astrometry: only its
-photometry is refitted, or the photometry of the sky is recorded as unreliable.
+photometry is refitted, or the photometry of the sky is recorded as unreliable. Whether the sky has haze or
+clouds is decided by limits of the config which are tuned per camera (see judgeSky): the measured values are
+saved with the judgement of every file and summarized for every night in the log (see skySummary).
 
 The limits are in units of the measured width of the stars (FWHM) and in shares of the stars, so they work for
 cameras with different resolutions and fields of view.
@@ -1183,14 +1185,21 @@ def refitVignetting(platepar, chunks, catalog_stars, config, ff_frames=256, mask
 # The photometry of a platepar can't be judged on a sky with haze or clouds, which fails the photometry of any
 #   platepar. The sky of the judged chunks is taken as not photometric if their photometric offsets (zero
 #   points) scatter by more than HAZE_ZERO_POINT_SCATTER (mag, the transparency changes between the chunks),
-#   if their median is fainter than the offset of the platepar by more than HAZE_TRANSPARENCY_LOSS (mag, a low
-#   transparency), or if fewer than HAZE_MIN_CLEAR_SHARE of the chunks of their time are clear (drifting
+#   if their median is fainter than the offset of the platepar by more than HAZE_ZERO_POINT_OFFSET (mag, a low
+#   transparency), or if fewer than HAZE_MIN_CLEAR_FRACTION of the chunks of their time are clear (drifting
 #   clouds). On three weeks of two 512x512 cameras, the zero points of the judged chunks scattered by 0.02 mag
 #   (median) and were 0.1 mag fainter than the platepar's where it was good, and by 0.15 mag and 0.3-0.5 mag
-#   fainter where its photometry alone failed
+#   fainter where its photometry alone failed. These are the defaults of the config options
+#   (auto_calibration_haze_zero_point_scatter, auto_calibration_haze_zero_point_offset and
+#   auto_calibration_haze_min_clear_fraction): the values differ between cameras, so they are tuned per camera
+#   on the measured values saved with every judgement and summarized for every night (see skySummary)
 HAZE_ZERO_POINT_SCATTER = 0.1
-HAZE_TRANSPARENCY_LOSS = 0.25
-HAZE_MIN_CLEAR_SHARE = 0.5
+HAZE_ZERO_POINT_OFFSET = 0.25
+HAZE_MIN_CLEAR_FRACTION = 0.5
+
+# Names of the measured quantities of the sky which are compared with the haze limits, in the order of the
+#   limits above
+SKY_QUANTITIES = ('zero_point_scatter', 'zero_point_offset', 'clear_fraction')
 
 
 def withPhotometry(platepar, source):
@@ -1261,47 +1270,154 @@ def refitPhotometry(platepar, chunks, catalog_stars, config, ff_frames=256, mask
     return refitted, info
 
 
-def skyIsPhotometric(score, platepar, clear_share=None):
-    """ Whether the sky of the chunks a platepar was scored on is photometric, so a photometry which fails
-        there is the platepar's and not that of haze or clouds (see HAZE_ZERO_POINT_SCATTER,
-        HAZE_TRANSPARENCY_LOSS and HAZE_MIN_CLEAR_SHARE).
+def hazeLimits(config=None):
+    """ The haze limits of a camera from its config (auto_calibration_haze_zero_point_scatter,
+        auto_calibration_haze_zero_point_offset and auto_calibration_haze_min_clear_fraction), the defaults
+        where an option is missing (see HAZE_ZERO_POINT_SCATTER, HAZE_ZERO_POINT_OFFSET and
+        HAZE_MIN_CLEAR_FRACTION).
+
+    Keyword arguments:
+        config: [Config] Configuration. None by default (the defaults).
+
+    Return:
+        [dict] The limits by the name of the quantity they limit (see SKY_QUANTITIES): the largest scatter and
+            offset of the zero points of a photometric sky (mag), and the smallest fraction of clear chunks.
+    """
+
+    # An option missing from the config has its default
+    return {'zero_point_scatter': float(getattr(config, 'auto_calibration_haze_zero_point_scatter',
+                                                HAZE_ZERO_POINT_SCATTER)),
+            'zero_point_offset': float(getattr(config, 'auto_calibration_haze_zero_point_offset',
+                                               HAZE_ZERO_POINT_OFFSET)),
+            'clear_fraction': float(getattr(config, 'auto_calibration_haze_min_clear_fraction',
+                                            HAZE_MIN_CLEAR_FRACTION))}
+
+
+def _rounded(value, digits=4):
+    """ A number rounded as the scores are saved, None as None.
+
+    Arguments:
+        value: [float] The number, or None.
+
+    Keyword arguments:
+        digits: [int] Decimal digits. 4 by default.
+
+    Return:
+        [float] The rounded number, None for None.
+    """
+
+    return None if (value is None) else round(float(value), digits)
+
+
+def judgeSky(score, platepar, config=None, clear_share=None):
+    """ Measure the sky of the chunks a platepar was scored on and judge whether it is photometric, so that a
+        photometry which fails there is the platepar's and not that of haze or clouds (see hazeLimits). The
+        measured values are saved with every judgement, so the limits of a camera can be tuned on them.
 
     Arguments:
         score: [CalibrationScore] Score of the platepar on the chunks.
         platepar: [Platepar] The platepar, whose photometric offset is that of the sky it was fitted on.
 
     Keyword arguments:
+        config: [Config] Configuration, with the haze limits. None by default (the default limits).
         clear_share: [float] Share of the chunks of the time of the scored chunks which are clear. None by
             default (not known, not checked).
 
     Return:
-        (photometric, reason): [tuple] False and why if the sky has haze or clouds, otherwise True and ''.
+        [dict] The measured 'zero_point_scatter' (mag, standard deviation of the zero points of the chunks),
+            'zero_point_offset' (mag, how much fainter the median zero point of the chunks is than the
+            platepar's, negative if brighter) and 'clear_fraction' (the clear share), None where not measured;
+            'photometric' (False on a sky with haze or clouds), 'limits_exceeded' (the names of the quantities
+            beyond their limits, which decided), the 'reason', and the 'limits' they were compared with.
     """
 
-    reasons = []
+    # The haze limits of the camera
+    limits = hazeLimits(config)
 
-    # The transparency changes between the chunks
+    # The transparency changes between the chunks: the scatter of their zero points
     scatter = score.magLevScatter()
-    if np.isfinite(scatter) and (scatter > HAZE_ZERO_POINT_SCATTER):
-        reasons.append('the zero point of the chunks scatters by {:.2f} mag'.format(scatter))
+    scatter = float(scatter) if np.isfinite(scatter) else None
 
     # A low transparency: the stars are fainter than on the sky the platepar was fitted on
+    offset = None
     if len(score.mag_lev) and (platepar.mag_lev is not None):
-        loss = float(platepar.mag_lev - np.median(score.mag_lev))
-        if loss > HAZE_TRANSPARENCY_LOSS:
-            reasons.append('the stars are {:.2f} mag fainter than for the platepar'.format(loss))
+        offset = float(platepar.mag_lev - np.median(score.mag_lev))
 
-    # Drifting clouds: few chunks are clear
-    if (clear_share is not None) and (clear_share < HAZE_MIN_CLEAR_SHARE):
-        reasons.append('only {:.0f}% of the chunks are clear'.format(100*clear_share))
+    # Drifting clouds: few chunks of the time are clear
+    clear = None if (clear_share is None) else float(clear_share)
 
-    return (len(reasons) == 0), '; '.join(reasons)
+    # Every quantity beyond its limit decides, with why
+    exceeded, reasons = [], []
+    if (scatter is not None) and (scatter > limits['zero_point_scatter']):
+        exceeded.append('zero_point_scatter')
+        reasons.append('the zero point of the chunks scatters by {:.2f} mag'.format(scatter))
+    if (offset is not None) and (offset > limits['zero_point_offset']):
+        exceeded.append('zero_point_offset')
+        reasons.append('the stars are {:.2f} mag fainter than for the platepar'.format(offset))
+    if (clear is not None) and (clear < limits['clear_fraction']):
+        exceeded.append('clear_fraction')
+        reasons.append('only {:.0f}% of the chunks are clear'.format(100*clear))
+
+    return {'zero_point_scatter': _rounded(scatter), 'zero_point_offset': _rounded(offset),
+            'clear_fraction': _rounded(clear), 'photometric': (len(exceeded) == 0),
+            'limits_exceeded': exceeded, 'reason': '; '.join(reasons), 'limits': limits}
+
+
+def skySummary(skies, config=None):
+    """ The distribution of the measured sky over the judgements of a night (see judgeSky), for the tuning of
+        the haze limits of a camera: how many judgements found haze or clouds (and how many of those whose
+        photometry failed, where it decides), and the median and the tail of every quantity next to its limit
+        (the 90th percentile of the zero point scatter and offset, the 10th of the clear fraction), with how
+        many judgements were beyond it.
+
+    Arguments:
+        skies: [list] Measured skies (dicts as judgeSky gives them), each optionally with 'photometry_ok'
+            (whether the photometry of the judged platepar was good).
+
+    Keyword arguments:
+        config: [Config] Configuration, whose haze limits are shown. None by default (the default limits).
+
+    Return:
+        (summary, statistics): [tuple] The summary in one line, and its numbers as a dictionary which can be
+            saved as JSON.
+    """
+
+    # The haze limits of the camera, which are shown next to the measured values
+    limits = hazeLimits(config)
+
+    # How many judgements found haze, of all and of those whose photometry failed
+    hazy = [sky for sky in skies if sky.get('limits_exceeded')]
+    failing = [sky for sky in skies if sky.get('photometry_ok') is False]
+    hazy_failing = [sky for sky in failing if sky.get('limits_exceeded')]
+    statistics = {'judged': len(skies), 'hazy': len(hazy), 'photometry_failing': len(failing),
+                  'hazy_photometry_failing': len(hazy_failing), 'limits': limits}
+    parts = ['{:d} judged, {:d} hazy ({:d} of the {:d} with a failing photometry)'.format(
+        len(skies), len(hazy), len(hazy_failing), len(failing))]
+
+    # The median and the tail of every quantity towards its limit, and how many were beyond it
+    for name, label, tail, unit, sign in (('zero_point_scatter', 'zero point scatter', 90, ' mag', ''),
+                                          ('zero_point_offset', 'zero point offset', 90, ' mag', '+'),
+                                          ('clear_fraction', 'clear fraction', 10, '', '')):
+        values = [sky[name] for sky in skies if sky.get(name) is not None]
+        beyond = sum(1 for sky in skies if name in sky.get('limits_exceeded', []))
+        if not values:
+            statistics[name] = {'median': None, 'p{:d}'.format(tail): None, 'beyond_limit': beyond}
+            parts.append('{:s} not measured'.format(label))
+            continue
+
+        median, percentile = float(np.median(values)), float(np.percentile(values, tail))
+        statistics[name] = {'median': _rounded(median), 'p{:d}'.format(tail): _rounded(percentile),
+                            'beyond_limit': beyond}
+        parts.append('{:s} median {:{sign}.2f}, {:d}th percentile {:{sign}.2f}{:s} (limit {:.2f}, beyond it '
+                     '{:d})'.format(label, median, tail, percentile, unit, limits[name], beyond, sign=sign))
+
+    return '; '.join(parts), statistics
 
 
 def refitFailingPhotometry(platepar, score, fit_chunks, held_out, catalog_stars, config, clear_share=None,
                            ff_frames=256, mask=None, fit_vignetting=None):
     """ Address a platepar whose photometry alone fails, never touching its astrometry. On a sky which isn't
-        photometric (haze, clouds, see skyIsPhotometric) nothing is refitted: the photometry of the chunks is
+        photometric (haze, clouds, see judgeSky) nothing is refitted: the photometry of the chunks is
         unreliable. Otherwise the photometry is refitted (see refitPhotometry) and used only if it is good on
         the held-out chunks; if it still fails there, the failure isn't one the photometry of the platepar can
         fix, and the photometry of the chunks is unreliable as well.
@@ -1326,18 +1442,21 @@ def refitFailingPhotometry(platepar, score, fit_chunks, held_out, catalog_stars,
     Return:
         (platepar, info): [tuple] A copy of the platepar with the refitted photometry if it is good on the
             held-out chunks, otherwise None; and 'reliable' (False if the photometry of the chunks can't be
-            trusted), the 'reason', the 'score' of the refitted photometry (if it was refitted) and what was
-            fitted (see refitPhotometry).
+            trusted), the 'reason', the measured 'sky' which decided whether it is refitted (see judgeSky),
+            the 'score' of the refitted photometry (if it was refitted) and what was fitted (see
+            refitPhotometry).
     """
 
-    # Nothing is refitted on a sky which isn't photometric
-    photometric, reason = skyIsPhotometric(score, platepar, clear_share=clear_share)
-    if not photometric:
-        return None, {'reliable': False, 'reason': 'the sky is not photometric: ' + reason}
+    # Nothing is refitted on a sky which isn't photometric. The measured sky is kept with the verdict, for the
+    #   tuning of the haze limits
+    sky = judgeSky(score, platepar, config=config, clear_share=clear_share)
+    if not sky['photometric']:
+        return None, {'reliable': False, 'reason': 'the sky is not photometric: ' + sky['reason'], 'sky': sky}
 
     # The photometry refitted on the chunks of the fit and judged on the held-out chunks
     refitted, info = refitPhotometry(platepar, fit_chunks, catalog_stars, config, ff_frames=ff_frames,
                                      mask=mask, fit_vignetting=fit_vignetting)
+    info['sky'] = sky
     refit_score = scorePlatepar(refitted, held_out, catalog_stars, config, ff_frames=ff_frames, mask=mask)
     info['score'] = refit_score.toDict()
     ok, reasons = judgePhotometry(refit_score)
@@ -1683,6 +1802,11 @@ HINT_RADIUS_FOV = 2.0
 MAX_STAR_COUNTS = 5000
 MAX_HISTORY = 200
 
+# The measured skies of the judged files of a night are kept for its summary (at most this many, the night of
+#   a camera with 30 s files has about 1500), and the summaries of this many nights
+MAX_NIGHT_SKIES = 3000
+MAX_SKY_NIGHTS = 30
+
 
 def statePath(output_dir):
     """ Path of the state file of the automatic calibration of a camera.
@@ -1734,7 +1858,7 @@ def readState(output_dir):
     """
 
     state = {'files': [], 'star_counts': [], 'last_attempt_jd': None, 'pending': None, 'trial': None,
-             'installs': [], 'history': []}
+             'installs': [], 'history': [], 'sky_night': None, 'sky_nights': []}
 
     # The saved state replaces the defaults
     path = statePath(output_dir)
@@ -1765,6 +1889,63 @@ def writeState(output_dir, state):
     with open(path + '.tmp', 'w') as f:
         json.dump(state, f, indent=4, sort_keys=True, default=_jsonDefault)
     os.replace(path + '.tmp', path)
+
+
+def nightName(jd, longitude):
+    """ The night of a time at a camera: the date (YYYYMMDD) of the local noon before it, so that every file
+        of a night has the same name at any longitude.
+
+    Arguments:
+        jd: [float] Julian date.
+        longitude: [float] Longitude of the camera (deg, east positive).
+
+    Return:
+        [str] The night as YYYYMMDD.
+    """
+
+    # Julian days begin at noon UTC; shifted by the longitude, they begin at the local (mean solar) noon
+    noon_jd = float(np.floor(jd + longitude/360.0))
+
+    return jd2Date(noon_jd, dt_obj=True).strftime('%Y%m%d')
+
+
+def _addNightSky(state, sky, photometry_ok, jd, config):
+    """ Add the measured sky of a judged file to its night in the state, for the summary of the night (see
+        skySummary). The first judged file of a later night logs the summary of the night before it and keeps
+        it in the state ('sky_nights'). A file of an earlier night than the one being collected (e.g. older
+        data processed again) isn't added.
+
+    Arguments:
+        state: [dict] The state of the camera (see readState), updated in place.
+        sky: [dict] The measured sky of the file (see judgeSky).
+        photometry_ok: [bool] Whether the photometry of the judged platepar was good.
+        jd: [float] Julian date of the end of the file.
+        config: [Config] Configuration, with the longitude of the camera and the haze limits.
+    """
+
+    # The night of the file, and the night being collected
+    night = nightName(jd, float(getattr(config, 'longitude', 0.0)))
+    collected = state.get('sky_night')
+
+    # Nothing is mixed into a later night
+    if collected and (night < collected['night']):
+        return
+
+    # The night before is over: its summary is logged and kept
+    if collected and (night > collected['night']):
+        summary, statistics = skySummary(collected['skies'], config=config)
+        log.info("Automatic calibration: sky of the night {:s}: {:s}".format(collected['night'], summary))
+        night_summary = {'night': collected['night'], 'summary': summary, 'statistics': statistics}
+        state['sky_nights'] = (state.get('sky_nights', []) + [night_summary])[-MAX_SKY_NIGHTS:]
+        collected = None
+
+    # The measured values of the file and whether its haze limits decided, in the night being collected
+    if not collected:
+        collected = state['sky_night'] = {'night': night, 'skies': []}
+    entry = {name: sky[name] for name in SKY_QUANTITIES}
+    entry.update({'limits_exceeded': sky['limits_exceeded'], 'photometry_ok': bool(photometry_ok)})
+    collected['skies'].append(entry)
+    del collected['skies'][:-MAX_NIGHT_SKIES]
 
 
 def _jsonDefault(value):
@@ -1962,8 +2143,9 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
 
     Return:
         [dict] The judgement of the file, also saved to its results directory: whether the sky was clear, the
-            score of the platepar, the candidate and what was done ('action'), and 'installed' with the path of a
-            newly installed platepar.
+            score of the platepar with its verdict and the measured sky ('current', see judgeSky), the
+            candidate and what was done ('action'), and 'installed' with the path of a newly installed
+            platepar.
     """
 
     # The chunks of the file, without them there is nothing to judge
@@ -2051,6 +2233,12 @@ def autoCalibrateFile(results_dir, config, output_dir, platepar_path, mask=None,
             log.info("Automatic calibration: the platepar {:s} on {:d} clear chunks{:s}".format(
                 'is good' if current_ok else 'FAILS', len(held_out),
                 '' if current_ok else ': ' + '; '.join(current_reasons)))
+
+            # The sky of the judged chunks measured against the haze limits, saved with the verdict and added
+            #   to the summary of the night, so the limits of the camera can be tuned on them
+            result['current']['sky'] = judgeSky(current_score, current, config=config,
+                                                clear_share=clear_share)
+            _addNightSky(state, result['current']['sky'], result['current']['photometry_ok'], end_jd, config)
 
         # A platepar on trial is tested on the chunks after the ones it was fitted on, once they span
         #   CONFIRM_MINUTES. No new candidate is fitted meanwhile. The trial ends if another platepar is in use

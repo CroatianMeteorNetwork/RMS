@@ -1488,22 +1488,208 @@ def test_photometry_refit_keeps_the_astrometry_exactly(monkeypatch):
 
 def test_sky_is_photometric():
     """ A sky is not photometric if the zero points of the chunks scatter, if they are much fainter than the
-        platepar's, or if few chunks are clear. """
+        platepar's, or if few chunks are clear; the measured values are given with the limits which
+        decided. """
 
     platepar = _platepar()
     platepar.mag_lev = 10.0
     clear = _score([0.95]*8)
-    assert ac.skyIsPhotometric(clear, platepar, clear_share=0.9) == (True, '')
+    sky = ac.judgeSky(clear, platepar, clear_share=0.9)
+    assert sky['photometric'] and (sky['limits_exceeded'] == []) and (sky['reason'] == '')
+    assert (sky['zero_point_scatter'], sky['zero_point_offset'], sky['clear_fraction']) == (0.0, 0.0, 0.9)
+    assert sky['limits'] == {'zero_point_scatter': 0.1, 'zero_point_offset': 0.25, 'clear_fraction': 0.5}
 
+    # The zero points scatter by 0.2 mag, their median is 0.2 mag fainter (within the limit)
     scattered = _score([0.95]*8)
     scattered.mag_lev = np.array([10.0, 9.6]*5)
-    assert 'scatters' in ac.skyIsPhotometric(scattered, platepar)[1]
+    sky = ac.judgeSky(scattered, platepar)
+    assert (sky['limits_exceeded'] == ['zero_point_scatter']) and ('scatters' in sky['reason'])
+    assert sky['zero_point_scatter'] == pytest.approx(0.2)
+    assert sky['zero_point_offset'] == pytest.approx(0.2)
+    assert sky['clear_fraction'] is None
 
     faint = _score([0.95]*8)
     faint.mag_lev = np.full(10, 9.6)
-    assert 'fainter' in ac.skyIsPhotometric(faint, platepar)[1]
+    sky = ac.judgeSky(faint, platepar)
+    assert (sky['limits_exceeded'] == ['zero_point_offset']) and ('fainter' in sky['reason'])
+    assert sky['zero_point_offset'] == pytest.approx(0.4)
 
-    assert 'clear' in ac.skyIsPhotometric(clear, platepar, clear_share=0.3)[1]
+    # Few clear chunks
+    sky = ac.judgeSky(clear, platepar, clear_share=0.3)
+    assert (sky['limits_exceeded'] == ['clear_fraction']) and ('clear' in sky['reason'])
+
+    # Each limit of the config moves the decision
+    config = cr.Config()
+    config.auto_calibration_haze_zero_point_scatter = 0.3
+    config.auto_calibration_haze_zero_point_offset = 0.5
+    config.auto_calibration_haze_min_clear_fraction = 0.2
+    for score, clear_share in ((scattered, None), (faint, None), (clear, 0.3)):
+        assert not ac.judgeSky(score, platepar, clear_share=clear_share)['photometric']
+        assert ac.judgeSky(score, platepar, config=config, clear_share=clear_share)['photometric']
+
+
+def _parseCalibration(text):
+    """ A default config with the given options of the [Calibration] section parsed. """
+
+    from configparser import RawConfigParser
+
+    config = cr.Config()
+    parser = RawConfigParser()
+    parser.read_string("[Calibration]\n" + text)
+    cr.parseCalibration(config, parser)
+
+    return config
+
+
+def test_haze_limits_are_options_of_the_config(caplog):
+    """ The haze limits are options of the config, whose defaults (also those of the default config file) are
+        the module's; a value which would take every sky as hazy, or none, keeps the default. """
+
+    import logging
+
+    # The defaults are the module's
+    defaults = {'zero_point_scatter': ac.HAZE_ZERO_POINT_SCATTER,
+                'zero_point_offset': ac.HAZE_ZERO_POINT_OFFSET,
+                'clear_fraction': ac.HAZE_MIN_CLEAR_FRACTION}
+    assert ac.hazeLimits(None) == defaults
+    assert ac.hazeLimits(cr.Config()) == defaults
+    assert ac.hazeLimits(cr.parse(REPO_CONFIG)) == defaults
+
+    # Values set in the config file
+    config = _parseCalibration("auto_calibration_haze_zero_point_scatter: 0.2\n"
+                               "auto_calibration_haze_zero_point_offset: 0.4\n"
+                               "auto_calibration_haze_min_clear_fraction: 0.3\n")
+    assert ac.hazeLimits(config) == {'zero_point_scatter': 0.2, 'zero_point_offset': 0.4,
+                                     'clear_fraction': 0.3}
+
+    # Values out of their range keep the defaults, with a warning each
+    with caplog.at_level(logging.WARNING, logger=cr.log.name):
+        config = _parseCalibration("auto_calibration_haze_zero_point_scatter: 0\n"
+                                   "auto_calibration_haze_zero_point_offset: -0.1\n"
+                                   "auto_calibration_haze_min_clear_fraction: 1.5\n")
+    assert ac.hazeLimits(config) == defaults
+    assert caplog.text.count('auto_calibration_haze_') == 3
+
+
+@pytest.mark.parametrize('scatter_limit, refitted', [(None, False), (0.3, True)])
+def test_haze_limit_of_the_config_decides_and_is_recorded(camera, tmp_path, monkeypatch, scatter_limit,
+                                                          refitted):
+    """ The zero points of the chunks scatter by 0.2 mag: with the default limit the sky is hazy and the
+        photometry which fails isn't refitted, with a limit of 0.3 mag in the config it is refitted (and fails
+        again, the vignetting isn't refitted for the camera). The measured values and the limits which decided
+        are saved with the verdict of the file. """
+
+    config, output_dir, state, process = camera
+    state['haze'] = True
+    if scatter_limit is not None:
+        config.auto_calibration_haze_zero_point_scatter = scatter_limit
+    refits = []
+    real_refit = ac.refitPhotometry
+    monkeypatch.setattr(ac, 'refitPhotometry',
+                        lambda *args, **kwargs: refits.append(1) or real_refit(*args, **kwargs))
+    path = _writePlatepar(str(tmp_path/'hazy.cal'), 0.95, vignetting_coeff=BAD_VIGNETTING)
+
+    # The decision follows the limit
+    result = process('file1', path)
+    assert bool(refits) is refitted
+    reason = 'the refitted photometry fails too' if refitted else 'the sky is not photometric'
+    assert result['action'].startswith('photometry not reliable: ' + reason)
+
+    # The measured sky next to the verdict, and with the record of the photometry it decided
+    sky = result['current']['sky']
+    assert sky['zero_point_scatter'] == pytest.approx(0.2)
+    assert sky['zero_point_offset'] == pytest.approx(0.2)
+    assert sky['clear_fraction'] == 1.0
+    assert sky['limits_exceeded'] == ([] if refitted else ['zero_point_scatter'])
+    assert sky['limits']['zero_point_scatter'] == (scatter_limit or ac.HAZE_ZERO_POINT_SCATTER)
+    assert result['photometry']['sky'] == sky
+
+    # The same in the saved result of the file
+    with open(os.path.join(str(tmp_path/'file1'), ac.FILE_RESULT_NAME)) as f:
+        saved = json.load(f)
+    assert saved['current']['sky'] == sky
+    assert saved['current']['photometry_ok'] is False
+
+
+def test_night_name():
+    """ The night of a time is the date of the local noon before it, at any longitude. """
+
+    from RMS.Astrometry.Conversions import date2JD
+
+    # West: 22:00 and 10:00 local time (UTC-5:24) are of the night which began on the 14th, 13:00 isn't
+    assert ac.nightName(date2JD(2026, 11, 15, 3, 0, 0), -81.0) == '20261114'
+    assert ac.nightName(date2JD(2026, 11, 15, 15, 0, 0), -81.0) == '20261114'
+    assert ac.nightName(date2JD(2026, 11, 15, 18, 30, 0), -81.0) == '20261115'
+
+    # East: 00:04 and 11:04 local time (UTC+1:04) are of the night which began on the 14th
+    assert ac.nightName(date2JD(2026, 11, 14, 23, 0, 0), 16.0) == '20261114'
+    assert ac.nightName(date2JD(2026, 11, 15, 10, 0, 0), 16.0) == '20261114'
+
+
+def test_sky_summary_of_a_night():
+    """ The summary of the measured sky of a night: how many judgements found haze (of all and of those whose
+        photometry failed), the median and the tail of every quantity next to its limit, and how many were
+        beyond it. """
+
+    def _sky(scatter, offset, clear, exceeded, photometry_ok):
+        """ A measured sky with the given values. """
+        return {'zero_point_scatter': scatter, 'zero_point_offset': offset, 'clear_fraction': clear,
+                'limits_exceeded': exceeded, 'photometry_ok': photometry_ok}
+
+    # Five judgements: one hazy by the clear fraction (its photometry good), one by the zero points (failing),
+    #   and a failing photometry on a clear sky
+    skies = [_sky(0.02, 0.05, 0.9, [], True), _sky(0.03, -0.02, 1.0, [], False),
+             _sky(0.04, 0.10, 0.3, ['clear_fraction'], True), _sky(0.05, 0.08, 0.8, [], True),
+             _sky(0.25, 0.45, 0.7, ['zero_point_scatter', 'zero_point_offset'], False)]
+
+    # The line and its numbers
+    summary, statistics = ac.skySummary(skies)
+    assert summary == ("5 judged, 2 hazy (1 of the 2 with a failing photometry); "
+                       "zero point scatter median 0.04, 90th percentile 0.17 mag (limit 0.10, beyond it 1); "
+                       "zero point offset median +0.08, 90th percentile +0.31 mag (limit 0.25, beyond it 1); "
+                       "clear fraction median 0.80, 10th percentile 0.46 (limit 0.50, beyond it 1)")
+    assert (statistics['judged'], statistics['hazy'], statistics['photometry_failing'],
+            statistics['hazy_photometry_failing']) == (5, 2, 2, 1)
+    assert statistics['zero_point_scatter']['p90'] == pytest.approx(0.17)
+    assert statistics['clear_fraction']['p10'] == pytest.approx(0.46)
+    json.dumps(statistics)
+
+    # Without values
+    summary, statistics = ac.skySummary([_sky(None, None, None, [], True)])
+    assert summary.startswith('1 judged, 0 hazy') and ('clear fraction not measured' in summary)
+
+
+def test_sky_of_the_files_summarized_per_night(camera, tmp_path, caplog):
+    """ The measured sky of every judged file is collected for its night; the first file of the next night
+        logs the summary of the night before it and keeps it in the state. A file of an earlier night (e.g. a
+        late one) isn't added to the night being collected. """
+
+    import logging
+
+    config, output_dir, state, process = camera
+    path = _writePlatepar(str(tmp_path/'good.cal'), 0.95)
+    first_night = ac.nightName(state['jd'], config.longitude)
+    next_night = ac.nightName(state['jd'] + 1.0, config.longitude)
+
+    # Three files of a night, then the first of the next one
+    for i in range(3):
+        process('file{:d}'.format(i), path)
+    with caplog.at_level(logging.INFO, logger='rmslogger'):
+        state['jd'] += 1.0
+        process('next', path)
+    assert "sky of the night {:s}: 3 judged, 0 hazy".format(first_night) in caplog.text
+
+    # The summary of the night kept in the state, the next night collected
+    saved = ac.readState(output_dir)
+    assert [night['night'] for night in saved['sky_nights']] == [first_night]
+    assert saved['sky_nights'][0]['statistics']['judged'] == 3
+    assert (saved['sky_night']['night'] == next_night) and (len(saved['sky_night']['skies']) == 1)
+    assert saved['sky_night']['skies'][0]['zero_point_scatter'] == 0.0
+
+    # A file of the night before isn't mixed in
+    state['jd'] -= 1.0
+    process('late', path)
+    assert len(ac.readState(output_dir)['sky_night']['skies']) == 1
 
 
 @pytest.mark.parametrize('judge_photometry', [True, False])
