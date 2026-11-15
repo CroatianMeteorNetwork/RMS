@@ -1900,6 +1900,20 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
             if radial_root:
                 radialInverse(&model, x, y, r_end, f_end, img)
 
+                # No root on the rising branch: beyond the maximum of the radial function, or where an
+                #   asymmetry larger than 1 makes its scale factor negative (a fit that left the asymmetry
+                #   free over negligible radial terms, whose mapping is still regular). The solution is then
+                #   searched by Newton's method from the corrected position, which checks the orientation of
+                #   the mapping, and kept only within 1.5 times the frame: farther out it may lie on a folded
+                #   sheet
+                if img[0] != img[0]:
+                    img[0] = x
+                    img[1] = y
+                    invertDistortionNewton(&model, x, y, img)
+                    if (fabs(img[0]) > 0.75*x_res) or (fabs(img[1]) > 0.75*y_res):
+                        img[0] = NAN_VALUE
+                        img[1] = NAN_VALUE
+
             # Polynomial models and decentering: Newton's method in the image plane. A polynomial starts from
             #   the corrected position with its linear part undone; a radial model with decentering from the
             #   inverse of its radial part, which keeps the solution on the rising branch

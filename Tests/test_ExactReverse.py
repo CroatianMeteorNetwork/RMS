@@ -209,6 +209,20 @@ def test_decentering_keeps_points_beyond_the_radial_maximum_that_have_an_image()
     assert np.hypot(x[0] - gx[0], y[0] - gy[0]) < 1e-6
 
 
+def test_an_asymmetry_larger_than_one_over_negligible_radial_terms_inverts():
+    """ A fit can leave the asymmetry free over almost zero radial terms (one radial7-odd platepar in the field
+        has a1 = -10.86, a2 = 0.2857, k = 3.2e-5, -6.3e-8, -2.0e-10): the scale factor of the radial function is
+        then negative in many directions, while the mapping itself stays close to the identity. Every point of
+        the frame comes back to its pixel. """
+
+    pp = _platepar("radial7-odd", asymmetry_corr=True, refraction=False)
+    # The coefficients after the distortion centre: a1, a2, then the three radial terms
+    pp.x_poly_fwd[-5:] = [-10.86, 0.2857, 3.2e-5, -6.3e-8, -2.0e-10]
+    pp.x_poly_rev = np.array(pp.x_poly_fwd)
+
+    assert _roundTrip(pp) < 1e-6
+
+
 def test_the_centre_of_the_projection_has_an_image():
     """ A sky point at the centre of the projection has no direction from it (0/0), but still an image: the
         point the forward distortion takes to that centre. Several pointings, as rounding puts the point
