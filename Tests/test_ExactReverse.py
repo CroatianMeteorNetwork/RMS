@@ -250,6 +250,29 @@ def test_a_polynomial_point_past_the_first_fold_has_no_image():
     assert np.max(np.hypot(x[1:] - gx[1:], y[1:] - gy[1:])) < 1e-6
 
 
+def test_a_polynomial_shear_is_not_a_fold():
+    """ A polynomial that shears the image without folding it (poly3+radial with only the x**2 term in Y at 0.12,
+        (X, Y) = (x, y + 0.12*x**2): the Jacobian determinant is 1 everywhere) takes the image point 300 px below
+        and 50 px right of the centre to the corrected point 50 px right of it. Newton's method moves far from
+        the inverse of the linear part to find it, and the point comes back to its pixel: the distance from the
+        corrected origin shrinks along the way, but the orientation of the mapping never changes. """
+
+    pp = _platepar("poly3+radial", refraction=False)
+    pp.x_poly_fwd[:] = 0.0
+    pp.y_poly_fwd[:] = 0.0
+    pp.y_poly_fwd[3] = 0.12
+    pp.x_poly_rev = np.array(pp.x_poly_fwd)
+    pp.y_poly_rev = np.array(pp.y_poly_fwd)
+
+    gx = np.array([pp.X_res/2.0 + 50.0])
+    gy = np.array([pp.Y_res/2.0 - 300.0])
+    _, ra, dec, _ = astrometry.xyToRaDecPP(np.full(1, JD), gx, gy, np.ones(1), pp, extinction_correction=False,
+        jd_time=True)
+    x, y = astrometry.raDecToXYPP(np.array(ra), np.array(dec), JD, pp)
+
+    assert np.hypot(x[0] - gx[0], y[0] - gy[0]) < 1e-6
+
+
 def test_decentering_that_lowers_the_maximum_leaves_no_image_past_the_fold():
     """ The same fold with a decentering term (p1 = -0.02), which on the right of the centre lowers the maximum of
         the corrected radius below that of the radial part alone. Image points on the far sheet, 0.826 to 0.830
