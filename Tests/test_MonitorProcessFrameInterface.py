@@ -1545,6 +1545,63 @@ def test_backfill_calibrates_files_without_a_platepar_or_with_a_failing_one(conf
     assert mon.backfillCalibration(output_dir, config, 'night', replaced_mtimes=[1000.0]) == ['f5']
 
 
+def test_backfill_keeps_a_platepar_newer_than_the_fitted_one(config_path, tmp_path, monkeypatch):
+    """ A file calibrated with a platepar newer than the automatically fitted one (a given platepar which was
+        selected over an old fit) keeps it when it fails the judgement, e.g. on a hazy night: the old fit is not
+        the platepar in use and is not put back. A newer version which was replaced (a rolled back trial) is
+        still calibrated again. """
+
+    import json
+    import shutil
+
+    import RMS.Astrometry.AutoCalibration as ac
+    from RMS.MonitorNightReport import autoPlateparPath, readDoneFlag, selectPlatepar
+
+    # A camera with an old automatic fit and a newer given platepar, which is the one in use
+    config = cr.parse(config_path)
+    config.monitor_auto_calibration = True
+    output_dir = str(tmp_path/'out')
+    os.makedirs(output_dir)
+    auto_path = autoPlateparPath(output_dir, config)
+    with open(auto_path, 'w') as f:
+        f.write('auto')
+    os.utime(auto_path, (2000, 2000))
+    given = str(tmp_path/'given.cal')
+    with open(given, 'w') as f:
+        f.write('given')
+    os.utime(given, (3000, 3000))
+    assert selectPlatepar(output_dir, config, given) == given
+
+    # Files of the night: with the given platepar failing its judgement, with a platepar older than the fit
+    #   failing its judgement, and without a platepar
+    files = {'f1': (True, 3000.0, False), 'f2': (True, 1000.0, False), 'f3': (False, None, None)}
+    for name, (calibrated, mtime, ok) in files.items():
+        results_dir = os.path.join(output_dir, name)
+        os.makedirs(results_dir)
+        mon.writeDoneFlag(results_dir, {'night': 'night', 'calibrated': calibrated, 'platepar_mtime': mtime})
+        if ok is not None:
+            with open(os.path.join(results_dir, ac.FILE_RESULT_NAME), 'w') as f:
+                json.dump({'current': {'ok': ok}}, f)
+
+    # The recalibration copies the platepar into the results, as recalibrateResults does
+    recalibrated = []
+
+    def _recalibrate(results_dir, config, platepar_path=None, proc_log=None, matched_filter=False):
+        shutil.copy2(platepar_path, os.path.join(results_dir, config.platepar_name))
+        recalibrated.append(os.path.basename(results_dir))
+
+    monkeypatch.setattr(mon, 'recalibrateResults', _recalibrate)
+
+    # The file with the newer given platepar keeps it, the others get the fit as before
+    assert sorted(mon.backfillCalibration(output_dir, config, 'night')) == ['f2', 'f3']
+    assert readDoneFlag(os.path.join(output_dir, 'f1'))['platepar_mtime'] == 3000
+
+    # A newer version which was replaced (a trial which was rolled back to the fit) is calibrated again
+    recalibrated.clear()
+    assert mon.backfillCalibration(output_dir, config, 'night', replaced_mtimes=[3000.0]) == ['f1']
+    assert readDoneFlag(os.path.join(output_dir, 'f1'))['platepar_mtime'] == 2000
+
+
 def test_recalibration_includes_the_matched_filter_results(config_path, tmp_path, monkeypatch):
     """ Recalibrating the results of a file with a new platepar also recalibrates the completed results of the
         separate matched-filter pass. """

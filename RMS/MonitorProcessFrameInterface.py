@@ -923,7 +923,8 @@ def backfillCalibration(output_dir, config, night_name, proc_log=None, replaced_
     """ Add the astrometry and the photometry of the installed automatic platepar to the files which need it (the
         detections themselves are not repeated):
           - the files of the night processed without a platepar,
-          - the files of the night whose platepar failed the judgement of the automatic calibration,
+          - the files of the night whose platepar failed the judgement of the automatic calibration, unless that
+            platepar is newer than the installed automatic one (it was selected over it, see selectPlatepar),
           - with replaced_mtimes, the files of every night not reported yet which were calibrated with a replaced
             version, unless their own judgement passed it (with refine_replaced, also then).
         One backfill runs at a time per camera, and it stops when another platepar is installed meanwhile (the
@@ -1044,6 +1045,12 @@ def _needsCalibration(info, results_path, platepar_mtime, replaced_mtimes, resul
     # With a replaced version, unless its own judgement passed it (a refinement of it replaces it anyway)
     if version in replaced_mtimes:
         return refine_replaced or (not _plateparPassed(results_path, result_name))
+
+    # With a platepar newer than the fitted one: the fitted platepar is not the one in use (a given platepar, or
+    #   the one carried forward from a night, was selected over it, see selectPlatepar), so it is not put back,
+    #   also where the newer platepar failed its judgement
+    if (version is not None) and (version > platepar_mtime):
+        return False
 
     # With a platepar which failed its judgement
     return _plateparFailed(results_path, result_name)
