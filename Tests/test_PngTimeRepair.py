@@ -4,9 +4,12 @@ header of every frame (in its first row) carries its timestamp and a frame count
 off by whole seconds (the microseconds are right) gets the time given by its counter. A lost frame is kept as it is,
 and dumps whose timestamps have a real gap (many lost frames) or whose counter doesn't follow the timestamps, and
 PNGs which are not frame dumps, are not changed.
+Dense bursts of runs in long dumps are corrected from the headers between the sampled frames, with few more
+images read.
 """
 
 import datetime
+import logging
 import os
 
 import cv2
@@ -15,7 +18,9 @@ import pytest
 
 import RMS.ConfigReader as cr
 from RMS.Astrometry.Conversions import datetime2UnixTime
+import RMS.Formats.FrameInterface as FrameInterface
 from RMS.Formats.FrameInterface import InputTypeImages, UWO_MAGICK_EMCCD
+from RMS.Formats.FrameInterface import MAX_DENSE_PNG_HEADERS
 
 
 # Time of the first frame, and the frame period of the test frames
@@ -190,3 +195,75 @@ def test_seconds_late_kept(tmp_path):
     handle, read = readTimes(path, n)
     assert np.max(np.abs(read - stamped)) < 2e-6
     assert not handle.png_repaired_frames
+
+
+
+def test_short_dump_long_run_corrected(tmp_path):
+
+    # A run of 20 frames with the seconds field off in a short recording (the sampled frames are dense, so the
+    #   run covers several of them): all corrected
+    n = 200
+    times, counters = regular(n)
+    stamped = times.copy()
+    bad = list(range(90, 110))
+    stamped[bad] -= 1.0
+    path = str(tmp_path/'short')
+    writeDumps(path, stamped, counters)
+
+    handle, read = readTimes(path, n)
+    assert np.max(np.abs(read - times)) < 2e-6
+    assert len(handle.png_repaired_frames) == len(bad)
+
+
+def test_warning_without_model(tmp_path, caplog):
+
+    # Frame dumps whose timestamps can't be checked against the counter: a warning names the directory
+    n = 100
+    times, _ = regular(n)
+    counters = 1000 + np.random.default_rng(2).permutation(n)
+    path = str(tmp_path/'unchecked')
+    writeDumps(path, times, counters)
+
+    with caplog.at_level(logging.WARNING, logger='rmslogger'):
+        handle = InputTypeImages(path, cr.Config(), beginning_time=None)
+
+    assert handle.png_time_model is None
+    assert any((record.levelno == logging.WARNING) and ('could not be checked' in record.getMessage())
+               and ('unchecked' in record.getMessage()) for record in caplog.records)
+
+
+def test_dense_burst_corrected_in_3_minute_dump(tmp_path, monkeypatch):
+
+    # A burst of runs as in the recordings in a 3-minute dump (5760 frames): runs of 7 frames every 64 frames
+    #   over 2000 frames, with 5 runs of 41 frames every 96 frames in it. The sampled frames alone give no
+    #   model (more than 3 in a row are off it), the headers between them do, and every frame is corrected
+    n = 5760
+    times, counters = regular(n)
+    stamped = times.copy()
+    for first in range(1000, 3000, 64):
+        stamped[first:first + 7] -= 1.0
+    for first in range(1700, 1700 + 5*96, 96):
+        stamped[first:first + 41] -= 1.0
+    path = str(tmp_path/'burst')
+    writeDumps(path, stamped, counters)
+
+    handle, read = readTimes(path, n)
+    assert handle.png_time_model is not None
+    assert np.max(np.abs(read - times)) < 2e-6
+    assert len(handle.png_repaired_frames) == np.sum(np.abs(stamped - times) > 0.5)
+
+    # The images read for the model: the 64 sampled frames and fewer than MAX_DENSE_PNG_HEADERS more, and with
+    #   no more allowed than the samples there is no model
+    reads = []
+    imread = FrameInterface.cv2.imread
+
+    def countingImread(*args):
+        reads.append(args[0])
+        return imread(*args)
+
+    monkeypatch.setattr(FrameInterface.cv2, 'imread', countingImread)
+    assert handle.uwoTimeModel() is not None
+    assert 64 < len(reads) < 64 + MAX_DENSE_PNG_HEADERS
+    reads.clear()
+    assert handle.uwoTimeModel(max_dense=0) is None
+    assert len(reads) <= 64

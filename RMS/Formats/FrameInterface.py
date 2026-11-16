@@ -31,7 +31,7 @@ from RMS.Formats.Vid import readFrame as readVidFrame
 from RMS.Formats.Vid import VidStruct
 from RMS.Formats.Vid import frameTimeModel as vidFrameTimeModel
 from RMS.Formats.Vid import repairFrameTime as repairVidFrameTime
-from RMS.Formats.Vid import fitTimeModel, wholeSecondsOff
+from RMS.Formats.Vid import sampleTimeModel, wholeSecondsOff
 from RMS.GeoidHeightEGM96 import wgs84toMSLHeight
 from RMS.Routines import Image
 from RMS.Routines.GstreamerCapture import GstVideoFile
@@ -112,6 +112,10 @@ from RMS.Routines.DynamicFTPCompressionCy import FFMimickInterface
 UWO_MAGICK_CAMO = 1144018537
 UWO_MAGICK_EMCCD = 1141003881
 UWO_MAGICK_ASGARD = 38037846
+
+# Most headers of UWO PNG frame dumps read besides the 64 sampled frames to build the model of their
+#   timestamps (see InputTypeImages.uwoTimeModel): each is a whole image read, so fewer than for vid files
+MAX_DENSE_PNG_HEADERS = 128
 
 
 def getCacheID(first_frame, size):
@@ -1364,11 +1368,13 @@ class InputTypeUWOVid(InputType):
         self.vid_file = open(self.vid_path, 'rb', buffering=65536)
 
         # The model of the timestamps from the frame counter, which corrects a seconds field off by whole
-        #   seconds in the frames read (see readNextFrame), and the counters of the corrected frames
+        #   seconds in the frames read (see readNextFrame), and the counters of the corrected frames. Without
+        #   a model a frame whose seconds field is off keeps a time off by whole seconds, so it is a warning
         self.vid_time_model = vidFrameTimeModel(self.vid_file)
         self.vid_repaired_frames = set()
         if self.vid_time_model is None:
-            log.info('The timestamps of {:s} are not checked against the frame counter'.format(self.file_name))
+            log.warning('The timestamps of {:s} could not be checked against the frame counter, frames with '
+                        'the seconds field off are not corrected'.format(self.file_name))
 
         # Read one video frame and rewind to beginning
         self.readNextFrame()
@@ -2007,12 +2013,14 @@ class InputTypeImages(InputType):
 
             self.uwo_png_mode = True
 
-            # The timestamp model of frame dumps whose headers carry a frame counter, before any time is read
+            # The timestamp model of frame dumps whose headers carry a frame counter, before any time is read.
+            #   Without a model a frame whose seconds field is off keeps a time off by whole seconds
             if self.uwo_magick_type == "emccd":
                 self.png_time_model = self.uwoTimeModel()
                 if self.png_time_model is None:
-                    log.info('The timestamps of the frames in {:s} are not checked against the frame '
-                             'counter'.format(self.dir_path))
+                    log.warning('The timestamps of the frames in {:s} could not be checked against the frame '
+                                'counter, frames with the seconds field off are not corrected'.format(
+                                    self.dir_path))
 
             # Get the beginning time
             self.loadFrame(fr_no=0)
@@ -2781,31 +2789,29 @@ class InputTypeImages(InputType):
         return (self.uwo_png_mode or self.fripon_mode or self.fits_mode) and (not self.cabernet_status)
 
 
-    def uwoTimeModel(self, n_samples=64):
-        """ The model of the timestamps of UWO PNG frame dumps from their frame counter, from the headers of frames
-            spread over the input (see Vid.fitTimeModel: the header of every frame carries its timestamp and a
-            frame counter, and a few frames can have a seconds field off by whole seconds).
+    def uwoTimeModel(self, n_samples=64, max_dense=MAX_DENSE_PNG_HEADERS):
+        """ The model of the timestamps of UWO PNG frame dumps from their frame counter, from the headers of
+            frames spread over the input (see Vid.sampleTimeModel: the header of every frame carries its
+            timestamp and a frame counter, and a few frames can have a seconds field off by whole seconds).
 
         Keyword arguments:
             n_samples: [int] Number of frames sampled. 64 by default.
+            max_dense: [int] Most headers read besides the sampled frames, when those alone can't give the
+                model. MAX_DENSE_PNG_HEADERS by default.
 
         Return:
             [tuple] The model (see Vid.fitTimeModel), or None if the counter doesn't give the timestamps.
         """
 
-        seqs, secs, usecs = [], [], []
-        for k in np.unique(np.linspace(0, self.total_frames - 1, min(n_samples, self.total_frames)).astype(int)):
-
-            # The header words of the frame: the first row, byteswapped as when the frame is read (see loadFrame)
+        # The header words of a frame: the first row, byteswapped as when the frame is read (see loadFrame)
+        def readHeader(k):
             img = cv2.imread(os.path.join(self.dir_path, self.img_list[k]), -1)
             if (img is None) or (img.dtype != np.uint16) or (self.getUWOMagickType(img) != "emccd"):
-                continue
+                return None
             row = img[0].byteswap().astype(np.int64)
-            secs.append(int(row[6] + (row[7] << 16)))
-            usecs.append(int(row[8] + (row[9] << 16)))
-            seqs.append(int(row[14] + (row[15] << 16)))
+            return int(row[14] + (row[15] << 16)), int(row[6] + (row[7] << 16)), int(row[8] + (row[9] << 16))
 
-        return fitTimeModel(seqs, secs, usecs)
+        return sampleTimeModel(self.total_frames, readHeader, n_samples=n_samples, max_dense=max_dense)
 
 
     def getUWOMagickType(self, img):
