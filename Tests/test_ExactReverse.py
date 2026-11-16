@@ -5,9 +5,10 @@ radial models, decentering), a platepar with a few pixels of distortion takes a 
 back. Without refraction the round trip has to close to 1e-9 px. With refraction it can only close if the
 sky -> image refraction is the exact inverse of the image -> sky one; where it is not, that test is skipped.
 
-Also tested: a sky point the forward distortion cannot reach comes back as NaN, such a point does not throw the
-pointing fit off, the centre of the projection has an image, and fitAstrometry with the option returns the
-platepar that generated noise-free stars, through its forward mapping.
+Also tested: a sky point the forward distortion cannot reach comes back as NaN (also where a folded sheet of
+the mapping has a solution inside the frame), such a point does not throw the pointing fit off, the centre of
+the projection has an image, and fitAstrometry with the option returns the platepar that generated noise-free
+stars, through its forward mapping.
 
 Run with pytest:
     python -m pytest Tests/test_ExactReverse.py -v
@@ -187,6 +188,35 @@ def test_a_point_beyond_the_reach_of_the_distortion_is_nan(decentering):
 
     assert np.isfinite(x[0]) and np.isfinite(y[0])
     assert np.isnan(x[1]) and np.isnan(y[1])
+
+
+@pytest.mark.parametrize("decentering", [False, True])
+def test_a_point_past_the_first_fold_has_no_image(decentering):
+    """ A barrel distortion strong enough to fold inside the frame (radial3-odd, k1 = -2, the distortion
+        centre in the middle of the frame: the corrected radius peaks at 0.27 half widths, 0.41 half widths
+        from the centre) takes the image point 0.958 half widths left of the centre, past the fold, to the
+        corrected point 0.8 half widths right of it. That sky point is beyond the reach of the distortion and
+        has no image, although the folded sheet has a solution inside the frame with the orientation of the
+        image. Also with decentering (its coefficients zero), where Newton's method finds that solution, which
+        is then dropped as a fold lies between it and the distortion centre. A point before the fold comes
+        back to its pixel. """
+
+    # No offset of the distortion centre, k1 = -2, and no decentering
+    pp = _platepar("radial3-odd", decentering=decentering, refraction=False)
+    pp.x_poly_fwd[:] = 0.0
+    pp.x_poly_fwd[2] = -2.0
+    pp.x_poly_rev = np.array(pp.x_poly_fwd)
+
+    # Image points on the horizontal line through the centre, in half widths from it: past the fold and
+    #   before it
+    gx = pp.X_res/2.0*(1 + np.array([-0.9579033, 0.3]))
+    gy = np.full(2, pp.Y_res/2.0)
+    _, ra, dec, _ = astrometry.xyToRaDecPP(np.full(2, JD), gx, gy, np.ones(2), pp,
+        extinction_correction=False, jd_time=True)
+    x, y = astrometry.raDecToXYPP(np.array(ra), np.array(dec), JD, pp)
+
+    assert np.isnan(x[0]) and np.isnan(y[0])
+    assert np.hypot(x[1] - gx[1], y[1] - gy[1]) < 1e-6
 
 
 def test_decentering_keeps_points_beyond_the_radial_maximum_that_have_an_image():
