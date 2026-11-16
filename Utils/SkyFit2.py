@@ -181,7 +181,8 @@ from RMS.Astrometry.AtmosphericExtinction import atmosphericExtinctionCorrection
 from RMS.Astrometry.StarClasses import CatalogStar, GeoPoint, PlanetPoint, PairedStars
 from RMS.Astrometry.StarFilters import filterPhotometricOutliers, filterBlendedStars
 from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, trueRaDec2ApparentAltAz, \
-    apparentAltAz2TrueRADec, jd2Date, datetime2JD, JD2LST, geo2Cartesian, vector2RaDec, raDec2Vector
+    trueOfDateRaDec2ApparentAltAz, apparentAltAz2TrueOfDateRaDec, \
+    jd2Date, datetime2JD, JD2LST, geo2Cartesian, vector2RaDec, raDec2Vector
 from RMS.Astrometry.AstrometryNet import astrometryNetSolve
 from RMS.Astrometry.ApplyRecalibrate import recalibrateFF
 from RMS.Astrometry.AutoPlatepar import selectBestFrame, autoFitPlatepar, plateparModel, applyPlateparModel
@@ -6073,8 +6074,13 @@ class PlateTool(QtWidgets.QMainWindow):
             catalog_dec = test_catalog[:, 1]
             ra_rad = np.radians(catalog_ra)
             dec_rad = np.radians(catalog_dec)
-            ra_center = np.radians(self.platepar.RA_d)
-            dec_center = np.radians(self.platepar.dec_d)
+
+            # J2000 direction of the image centre at the time of this image, the frame of the catalog
+            #   (RA_d/dec_d are true of date at the platepar reference time)
+            _, ra_c, dec_c, _ = xyToRaDecPP([jd], [self.platepar.X_res/2], [self.platepar.Y_res/2], [1],
+                self.platepar, extinction_correction=False, jd_time=True)
+            ra_center = np.radians(ra_c[0])
+            dec_center = np.radians(dec_c[0])
 
             # Spherical angular distance from camera pointing to each catalog star
             cos_ang_dist = (np.sin(dec_center) * np.sin(dec_rad) +
@@ -10975,10 +10981,10 @@ class PlateTool(QtWidgets.QMainWindow):
                         self.lenses
                     ) = data
 
-                    # Compute reference Alt/Az to apparent coordinates, epoch of date
-                    self.platepar.az_centre, self.platepar.alt_centre = trueRaDec2ApparentAltAz( \
-                        self.platepar.RA_d, self.platepar.dec_d, self.platepar.JD, \
-                        self.platepar.lat, self.platepar.lon, self.platepar.refraction)
+                    # Compute the reference apparent Alt/Az (RA_d/dec_d are epoch of date, see
+                    #   Platepar.computeRefAltAz). Not updateRefAltAz(): the loaded rotation wrt horizon
+                    #   must survive until the position angle is derived from it below.
+                    self.platepar.az_centre, self.platepar.alt_centre = self.platepar.computeRefAltAz()
 
                     # Compute the position angle
                     self.platepar.pos_angle_ref = rotationWrtHorizonToPosAngle(self.platepar, \
@@ -13503,9 +13509,8 @@ class PlateTool(QtWidgets.QMainWindow):
             self.platepar.RA_d -= ra_err
             self.platepar.dec_d -= dec_err
 
-            azim_corr, alt_corr = trueRaDec2ApparentAltAz(
-                self.platepar.RA_d, self.platepar.dec_d, jd,
-                self.platepar.lat, self.platepar.lon)
+            # RA_d/dec_d are epoch of date (platepar.JD == jd here), see Platepar.computeRefAltAz
+            azim_corr, alt_corr = self.platepar.computeRefAltAz()
             self.platepar.az_centre = azim_corr
             self.platepar.alt_centre = alt_corr
 
@@ -14017,9 +14022,10 @@ class PlateTool(QtWidgets.QMainWindow):
         # Set the reference hour angle
         self.platepar.Ho = JD2HourAngle(self.platepar.JD)
 
-        # Convert FOV centre to RA, Dec
-        ra, dec = apparentAltAz2TrueRADec(self.azim_centre, self.alt_centre, date2JD(*img_time),
-                                          self.platepar.lat, self.platepar.lon)
+        # Convert the FOV centre (apparent alt/az) to true RA/Dec in the epoch of date, which is the frame of
+        #   the platepar reference pointing (see Platepar.computeRefAltAz)
+        ra, dec = apparentAltAz2TrueOfDateRaDec(self.azim_centre, self.alt_centre, date2JD(*img_time),
+            self.platepar.lat, self.platepar.lon, refraction=self.platepar.refraction)
 
         return ra, dec, rot_horizontal, lenses_template_file
 
@@ -14623,9 +14629,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.lenses
             ) = self.getFOVcentre()
 
-            # Recalculate reference alt/az
-            self.platepar.az_centre, self.platepar.alt_centre = trueRaDec2ApparentAltAz(self.platepar.RA_d, \
-                self.platepar.dec_d, self.platepar.JD, self.platepar.lat, self.platepar.lon)
+            # Recalculate reference alt/az, with the refraction setting of the platepar as getFOVcentre
+            self.platepar.az_centre, self.platepar.alt_centre = self.platepar.computeRefAltAz()
 
 
         # Check that the calibration parameters are within the nominal range
@@ -17344,7 +17349,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         # Compute alt/az pointing
-        azim, elev = trueRaDec2ApparentAltAz(self.platepar.RA_d, self.platepar.dec_d, self.platepar.JD, \
+        azim, elev = trueOfDateRaDec2ApparentAltAz(self.platepar.RA_d, self.platepar.dec_d, self.platepar.JD, \
             self.platepar.lat, self.platepar.lon, refraction=False)
 
         # Compute FOV size
