@@ -848,9 +848,12 @@ def rangeToHeightWGS84(azim, elev, h, lat, lon, alt, max_iter=20, height_tol=1.0
 
     """
 
-    # Every line of sight and height as arrays of one shape
+    # Every line of sight and height as arrays of one shape, flattened so that the indices of the points
+    #   still converging address them directly; the ranges take the broadcast shape back at the end
     azim, elev, h = np.broadcast_arrays(np.atleast_1d(azim).astype(np.float64), \
         np.atleast_1d(elev).astype(np.float64), np.atleast_1d(h).astype(np.float64))
+    shape = azim.shape
+    azim, elev, h = azim.ravel(), elev.ravel(), h.ravel()
 
     # Observer position and the unit line of sight, both in ECEF
     lat_rad, lon_rad = np.radians(lat), np.radians(lon)
@@ -913,7 +916,7 @@ def rangeToHeightWGS84(azim, elev, h, lat, lon, alt, max_iter=20, height_tol=1.0
 
     r[~good] = np.nan
 
-    return r
+    return r.reshape(shape)
 
 
 def AER2LatLonAlt(azim, elev, r, lat, lon, alt):
