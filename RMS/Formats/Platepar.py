@@ -1456,6 +1456,24 @@ class Platepar(object):
                         if change < 1e-9:
                             break
 
+                    # Refit the reverse polynomial to the final pointing, as it is fitted without the option, for
+                    #   readers that do not know it (the pointing moved since the reverse fit above)
+                    res = self._withReverseProjection(
+                        _lstsqFit,
+                        _calcImageResidualsDistortionVect,
+                        self.x_poly_rev,
+                        (self, jd, catalog_stars, img_stars, 'x'),
+                    )
+                    self.x_poly_rev = res.x
+
+                    res = self._withReverseProjection(
+                        _lstsqFit,
+                        _calcImageResidualsDistortionVect,
+                        self.y_poly_rev,
+                        (self, jd, catalog_stars, img_stars, 'y'),
+                    )
+                    self.y_poly_rev = res.x
+
                 ### ###
 
             # Fit radial distortion (+ pointing)

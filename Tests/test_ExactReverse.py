@@ -396,6 +396,41 @@ def test_fitting_returns_the_forward_mapping_that_made_the_stars(dist_type):
     assert np.max(np.hypot(np.array(x) - gx, np.array(y) - gy)) < 0.05
 
 
+@pytest.mark.parametrize("dist_type", ["poly3+radial", "poly3+radial3", "poly3+radial5"])
+def test_the_reverse_polynomial_follows_the_final_pointing(dist_type):
+    """ A polynomial fitted with exact_reverse refines its pointing through the exact inverse after the reverse
+        polynomial was fitted; the reverse polynomial is then refitted to the final pointing, so a reader that
+        does not know the option (or SkyFit2 with the option unticked) puts the stars on their pixels: within
+        0.02 px (0.005-0.008 px measured; 0.046 px for poly3+radial5 with the reverse polynomial left at the
+        first pointing). """
+
+    true_pp = _platepar(dist_type, refraction=False)
+
+    rng = np.random.default_rng(1)
+    img_x = rng.uniform(40, true_pp.X_res - 40, 60)
+    img_y = rng.uniform(40, true_pp.Y_res - 40, 60)
+    _, ra, dec, _ = astrometry.xyToRaDecPP(np.full(img_x.size, JD), img_x, img_y, np.ones(img_x.size), true_pp,
+        extinction_correction=False, jd_time=True)
+    img_stars = np.column_stack([img_x, img_y, np.ones(img_x.size)])
+    catalog_stars = np.column_stack([np.array(ra), np.array(dec), np.ones(img_x.size)])
+
+    pp = copy.deepcopy(true_pp)
+    pp.RA_d += 0.05
+    pp.dec_d -= 0.03
+    pp.pos_angle_ref += 0.1
+    pp.x_poly_fwd = pp.x_poly_fwd*0.9
+    pp.y_poly_fwd = pp.y_poly_fwd*0.9
+    pp.fitAstrometry(JD, img_stars, catalog_stars)
+    assert pp.exact_reverse
+
+    # The catalog stars through the reverse polynomial, as without the option
+    rev = copy.deepcopy(pp)
+    rev.exact_reverse = False
+    x, y = astrometry.raDecToXYPP(catalog_stars[:, 0], catalog_stars[:, 1], JD, rev)
+
+    assert np.max(np.hypot(np.array(x) - img_x, np.array(y) - img_y)) < 0.02
+
+
 @pytest.mark.parametrize("exact_reverse", [False, True])
 def test_a_fit_of_the_pointing_alone_keeps_the_option(exact_reverse):
     """ A fit of the pointing alone (fit_only_pointing, fitPointing, or too few stars to fit the distortion)
