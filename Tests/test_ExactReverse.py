@@ -405,6 +405,35 @@ def test_a_star_without_image_does_not_throw_off_the_pointing_fit():
     assert abs(pp.pos_angle_ref - true_pp.pos_angle_ref) < 1e-4
 
 
+def test_a_star_without_image_does_not_stop_the_full_fit():
+    """ The same unreachable pair in a full fit of a radial model (pointing and distortion): the refinement of
+        the pointing on the image residuals gets a finite residual for it, as the pointing fit does, so the fit
+        completes with a finite platepar (least squares refuses NaN residuals: "Residuals are not finite in the
+        initial point"). The pair is 55 deg off on the sky, where the distortion is fitted, so only that the fit
+        completes is tested here. """
+
+    true_pp = _platepar("radial3-odd", refraction=False)
+    true_pp.x_poly_fwd[-1] = -0.3
+
+    gx, gy = (v.ravel() for v in np.meshgrid(np.linspace(200, true_pp.X_res - 200, 6),
+        np.linspace(150, true_pp.Y_res - 150, 4)))
+    _, ra, dec, _ = astrometry.xyToRaDecPP(np.full(gx.size, JD), gx, gy, np.ones(gx.size), true_pp,
+        extinction_correction=False, jd_time=True)
+
+    img_stars = np.column_stack([np.append(gx, true_pp.X_res/2.0), np.append(gy, true_pp.Y_res/2.0),
+        np.ones(gx.size + 1)])
+    catalog_stars = np.column_stack([np.append(ra, ra[0]), np.append(dec, dec[0] - 55.0), np.ones(gx.size + 1)])
+
+    pp = copy.deepcopy(true_pp)
+    pp.RA_d += 0.03
+    pp.dec_d -= 0.02
+    pp.pos_angle_ref += 0.05
+    pp.fitAstrometry(JD, img_stars, catalog_stars)
+
+    assert np.isfinite([pp.RA_d, pp.dec_d, pp.pos_angle_ref, pp.F_scale]).all()
+    assert np.isfinite(pp.x_poly_fwd).all() and np.isfinite(pp.x_poly_rev).all()
+
+
 @pytest.mark.parametrize("dist_type", ["radial5-odd", "radial7-odd", "poly3+radial3"])
 def test_fitting_returns_the_forward_mapping_that_made_the_stars(dist_type):
     """ Noise-free stars made through the forward mapping, refitted with exact_reverse from a perturbed platepar.

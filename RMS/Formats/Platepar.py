@@ -2056,7 +2056,14 @@ class Platepar(object):
                     rev_fixed = self.x_poly_rev.tolist()
 
                     def _calcImageResidualsAstroVect(params, *args):
-                        return _calcImageResidualsAstroAndDistortionRadialVect(list(params) + rev_fixed, *args)
+                        res = _calcImageResidualsAstroAndDistortionRadialVect(list(params) + rev_fixed, *args)
+
+                        # A catalog star with no image (beyond the reach of the exact inverse) counts as off by
+                        #   the image diagonal, as in the pointing fit, so the residuals stay finite for least
+                        #   squares
+                        res[~np.isfinite(res)] = np.hypot(self.X_res, self.Y_res)/np.sqrt(2)
+
+                        return res
 
                     p_final = [self.RA_d/360.0, self.dec_d/90.0, self.pos_angle_ref/360.0,
                                abs(self.F_scale)] + ([] if exact_reverse else self.x_poly_rev.tolist())
