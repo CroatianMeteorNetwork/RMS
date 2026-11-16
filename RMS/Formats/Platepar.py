@@ -216,7 +216,11 @@ class Platepar(object):
         # UT correction
         self.UT_corr = 0
 
+        # Reference hour angle (deg): the apparent Greenwich sidereal time at JD (mean sidereal time plus the
+        #   equation of the equinoxes, see Conversions.JD2HourAngle), the sidereal time of the true-of-date
+        #   reference pointing RA_d/dec_d. Recomputed from JD when a platepar is loaded
         self.Ho = 0
+
         self.X_res = 1280
         self.Y_res = 720
 
@@ -2088,13 +2092,20 @@ class Platepar(object):
 
     def __setstate__(self, state):
         """ Restore a pickled platepar (e.g. from a SkyFit2 state file). A platepar pickled before an option existed
-            gets its default, as when a platepar file is loaded (see loadFromDict).
+            gets its default, and the reference hour angle is recomputed from the reference time, as when a
+            platepar file is loaded (see loadFromDict).
 
         Arguments:
             state: [dict] The attributes of the pickled platepar.
         """
 
         self.__dict__.update(state)
+
+        # The reference hour angle is a function of the reference time only, so it is recomputed as in
+        #   loadFromDict: a platepar pickled with the mean sidereal time keeps pointing where it was fitted, and
+        #   gives the same coordinates as the same calibration loaded from its platepar file
+        if 'JD' in self.__dict__:
+            self.Ho = JD2HourAngle(self.JD)
 
         # The decentering correction (platepars pickled before it existed have none)
         if 'decentering_corr' not in self.__dict__:
@@ -2105,6 +2116,12 @@ class Platepar(object):
 
         # Parse JSON into an object with attributes corresponding to dict keys
         self.__dict__ = platepar_dict
+
+        # The reference hour angle is a function of the reference time only, so it is recomputed rather
+        #   than taken from the file: this way a platepar written with an older definition of the sidereal
+        #   time (e.g. without the equation of the equinoxes) keeps pointing where it was fitted
+        if 'JD' in self.__dict__:
+            self.Ho = JD2HourAngle(self.JD)
 
         # Add the version if it was not in the platepar (v1 platepars didn't have a version)
         if not 'version' in self.__dict__:
