@@ -223,6 +223,33 @@ def test_a_point_past_the_first_fold_has_no_image(decentering):
     assert np.hypot(x[1] - gx[1], y[1] - gy[1]) < 1e-6
 
 
+def test_a_polynomial_point_past_the_first_fold_has_no_image():
+    """ The same fold made by a polynomial (poly3+radial, the third order terms x**3, x*y**2 in X and x**2*y,
+        y**3 in Y at -2/640**2, all else zero: the corrected radius peaks at 0.27 half widths, 0.41 half widths
+        from the centre). The image point 0.958 half widths left of the centre goes to the corrected point 0.8
+        half widths right of it, beyond the reach of the distortion: Newton's method finds that folded solution
+        inside the frame with the orientation of the image, and it is dropped. A point before the fold comes back
+        to its pixel. """
+
+    pp = _platepar("poly3+radial", refraction=False)
+    pp.x_poly_fwd[:] = 0.0
+    pp.y_poly_fwd[:] = 0.0
+    pp.x_poly_fwd[6] = pp.x_poly_fwd[8] = -2.0/640**2
+    pp.y_poly_fwd[7] = pp.y_poly_fwd[9] = -2.0/640**2
+    pp.x_poly_rev = np.array(pp.x_poly_fwd)
+    pp.y_poly_rev = np.array(pp.y_poly_fwd)
+
+    # Image points on the horizontal line through the centre, in half widths from it: past the fold and before it
+    gx = pp.X_res/2.0*(1 + np.array([-0.95790328, 0.3, -0.3]))
+    gy = np.full(3, pp.Y_res/2.0)
+    _, ra, dec, _ = astrometry.xyToRaDecPP(np.full(3, JD), gx, gy, np.ones(3), pp, extinction_correction=False,
+        jd_time=True)
+    x, y = astrometry.raDecToXYPP(np.array(ra), np.array(dec), JD, pp)
+
+    assert np.isnan(x[0]) and np.isnan(y[0])
+    assert np.max(np.hypot(x[1:] - gx[1:], y[1:] - gy[1:])) < 1e-6
+
+
 def test_decentering_that_lowers_the_maximum_leaves_no_image_past_the_fold():
     """ The same fold with a decentering term (p1 = -0.02), which on the right of the centre lowers the maximum of
         the corrected radius below that of the radial part alone. Image points on the far sheet, 0.826 to 0.830

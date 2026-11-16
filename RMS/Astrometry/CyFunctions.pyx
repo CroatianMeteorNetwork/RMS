@@ -1826,6 +1826,11 @@ cdef int FOLD_SAMPLES = 32
 #   moves it by a few thousandths at most; farther moves are checked along the whole ray
 cdef double FOLD_FREE_MOVE = 0.01
 
+# Fraction of the distance of its seed (the inverse of the linear part) from the image of the corrected origin that
+#   Newton's method may move a polynomial model, with only the end point checked for a fold: the higher terms of
+#   fitted plates move it by much less, while a solution on a folded sheet lies far from the seed
+cdef double POLY_FOLD_FREE_FRACTION = 0.25
+
 
 # A distortion model of cyXYToRADec, unpacked for the exact inverse
 cdef struct ForwardModel:
@@ -2303,29 +2308,32 @@ cdef double invertDistortionNewton(ForwardModel *m, double x_corr, double y_corr
 
 
 @cython.cdivision(True)
-cdef bint beforeFirstFold(ForwardModel *m, double x_img, double y_img, int n_samples):
-    """ Whether an image point of a radial model lies before the first fold of its forward distortion, i.e. on
-        the sheet of the mapping that holds the image of the sky. The distortion centre goes to the corrected
-        origin, and along the ray from it to the point the corrected point has to move away from that origin
-        all the way: past a fold it turns back, and may come out again on the far side of the origin. Checked
-        at evenly spaced samples of the ray, both from one sample to the next and in the direction of the ray
-        at each sample.
+cdef bint beforeFirstFold(ForwardModel *m, double x_start, double y_start, double x_img, double y_img,
+    int n_samples):
+    """ Whether an image point lies before the first fold of the forward distortion, i.e. on the sheet of the
+        mapping that holds the image of the sky. The start of the ray (the distortion centre of a radial model,
+        the image of the corrected origin for a polynomial) goes to the corrected origin, and along the ray from
+        it to the point the corrected point has to move away from that origin all the way: past a fold it turns
+        back, and may come out again on the far side of the origin. Checked at evenly spaced samples of the ray,
+        both from one sample to the next and in the direction of the ray at each sample.
 
     Arguments:
-        m: [ForwardModel pointer] The distortion model, a radial one.
+        m: [ForwardModel pointer] The distortion model.
+        x_start: [float] Image X coordinate of the start of the ray, relative to the image centre (px).
+        y_start: [float] Image Y coordinate of the start of the ray, relative to the image centre (px).
         x_img: [float] Image X coordinate relative to the image centre (px).
         y_img: [float] Image Y coordinate relative to the image centre (px).
         n_samples: [int] Number of samples, the last one at the point (1 checks only the point itself).
 
     Return:
-        [bool] True if no fold lies between the distortion centre and the point.
+        [bool] True if no fold lies between the start of the ray and the point.
     """
 
     cdef int i
     cdef double out[6]
-    cdef double dx = x_img - m.x0, dy = y_img - m.y0, t, dist2, dist2_prev = 0.0, outward
+    cdef double dx = x_img - x_start, dy = y_img - y_start, t, dist2, dist2_prev = 0.0, outward
 
-    # The distortion centre is its own image
+    # The start of the ray is its own image
     if (dx == 0) and (dy == 0):
         return True
 
@@ -2334,7 +2342,7 @@ cdef bint beforeFirstFold(ForwardModel *m, double x_img, double y_img, int n_sam
     #   direction of the ray) has to be positive at each sample
     for i in range(1, n_samples + 1):
         t = <double>i/n_samples
-        forwardJacobian(m, m.x0 + t*dx, m.y0 + t*dy, out)
+        forwardJacobian(m, x_start + t*dx, y_start + t*dy, out)
         dist2 = out[0]*out[0] + out[1]*out[1]
         outward = out[0]*(out[2]*dx + out[3]*dy) + out[1]*(out[4]*dx + out[5]*dy)
         if (dist2 <= dist2_prev) or (outward <= 0):
@@ -2421,6 +2429,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
     cdef int fold_samples
     cdef double lin_xx = 1, lin_xy = 0, lin_yx = 0, lin_yy = 1, lin_det = 1
     cdef double img[2]
+    cdef double poly_origin[2]
     cdef bint seed_beyond_radial = False
     cdef bint radial_root = False
     cdef int j, n_k
@@ -2589,6 +2598,21 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
             lin_yy = 1.0 + model.cy[2]
             lin_det = lin_xx*lin_yy - lin_xy*lin_yx
 
+            # The image of the corrected origin, where the rays of the fold check start: Newton's method from
+            #   the inverse of the linear part (that seed itself if there is no solution)
+            if lin_det > 0:
+                poly_origin[0] = (lin_yy*(0.0 - x0) - lin_xy*(0.0 - y0))/lin_det
+                poly_origin[1] = (lin_xx*(0.0 - y0) - lin_yx*(0.0 - x0))/lin_det
+            else:
+                poly_origin[0] = 0.0
+                poly_origin[1] = 0.0
+            img[0] = poly_origin[0]
+            img[1] = poly_origin[1]
+            invertDistortionNewton(&model, 0.0, 0.0, img)
+            if img[0] == img[0]:
+                poly_origin[0] = img[0]
+                poly_origin[1] = img[1]
+
         # The rising branch of a radial model, for its inverse (which with decentering starts Newton's method)
         if model.poly_radial < 0:
             radial_root = not decentering_corr
@@ -2670,7 +2694,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
                     img[1] = y
                     invertDistortionNewton(&model, x, y, img)
                     if (img[0] == img[0]) and ((fabs(img[0]) > 0.75*x_res) or (fabs(img[1]) > 0.75*y_res)
-                        or (not beforeFirstFold(&model, img[0], img[1], FOLD_SAMPLES))):
+                        or (not beforeFirstFold(&model, model.x0, model.y0, img[0], img[1], FOLD_SAMPLES))):
 
                         img[0] = NAN_VALUE
                         img[1] = NAN_VALUE
@@ -2718,8 +2742,25 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
                         fold_samples = 1
 
                     if (seed_beyond_radial and ((fabs(img[0]) > 0.75*x_res) or (fabs(img[1]) > 0.75*y_res))) \
-                        or (not beforeFirstFold(&model, img[0], img[1], fold_samples)):
+                        or (not beforeFirstFold(&model, model.x0, model.y0, img[0], img[1], fold_samples)):
 
+                        img[0] = NAN_VALUE
+                        img[1] = NAN_VALUE
+
+                # A polynomial with strong higher terms folds as well, and Newton's method can end on a folded
+                #   sheet inside the frame. Its solution is kept only with no fold between it and the image of
+                #   the corrected origin: checked along the whole ray when Newton's method moved it far from the
+                #   inverse of the linear part (relative to the distance of that seed from the origin), otherwise
+                #   at the solution alone
+                elif (model.poly_radial >= 0) and (img[0] == img[0]):
+                    if sqrt((img[0] - seed_x)**2 + (img[1] - seed_y)**2) > max(FOLD_FREE_MOVE*0.5*x_res,
+                        POLY_FOLD_FREE_FRACTION*sqrt((seed_x - poly_origin[0])**2 + (seed_y - poly_origin[1])**2)):
+
+                        fold_samples = FOLD_SAMPLES
+                    else:
+                        fold_samples = 1
+
+                    if not beforeFirstFold(&model, poly_origin[0], poly_origin[1], img[0], img[1], fold_samples):
                         img[0] = NAN_VALUE
                         img[1] = NAN_VALUE
 
