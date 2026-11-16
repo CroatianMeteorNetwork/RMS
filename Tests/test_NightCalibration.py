@@ -636,6 +636,53 @@ def test_end_of_night_both_failing_refits_the_astrometry_then_the_photometry(set
     assert _installed(config) == 3.0
 
 
+def test_end_of_night_photometry_failing_of_the_platepar_installed_tonight(setup, monkeypatch):
+    """ The platepar installed tonight is judged on the night's stars before its joint fit: a photometry which
+        fails there (e.g. haze later in the night) is refitted separately on the joint fit, which keeps it; on
+        a sky with haze the joint fit is installed and the photometry of the night is recorded as unreliable;
+        if the astrometry of the platepar the night is reduced with fails as well, its photometry is recorded
+        as unreliable without a refit. A failing photometry is never installed without a record. """
+
+    config, night_dir, plan = setup
+    plan['refit'] = 3.0
+    plan['photometry_fails'] = True
+    platepar = _platepar(1.0)
+    platepar.vignetting_coeff = BAD_VIGNETTING
+
+    # A clear sky: the joint fit refits the astrometry, then its photometry is refitted separately
+    result, _, _ = _endOfNight(setup, monkeypatch, platepar, True)
+    assert [call[:2] for call in plan['calls']] == [('refit', 1.0), ('photometry', 3.0)]
+    assert (result.mag_lev == 3.0) and (result.vignetting_coeff == pytest.approx(0.0005))
+    assert _installed(config) == 3.0
+    record = nc.readState(night_dir)['end_of_night']
+    assert record['verdict']['astrometry_ok'] and (not record['verdict']['photometry_ok'])
+    assert record['sky']['photometry_ok'] is False
+    assert record['photometry']['reliable'] is True
+
+    # A sky with haze: the joint fit is installed with the photometry it kept, recorded as unreliable
+    plan['calls'] = []
+    plan['sky_photometric'] = False
+    result, _, _ = _endOfNight(setup, monkeypatch, platepar, True)
+    assert [call[:2] for call in plan['calls']] == [('refit', 1.0), ('photometry', 3.0)]
+    assert (result.mag_lev == 3.0) and (result.vignetting_coeff == pytest.approx(BAD_VIGNETTING))
+    record = nc.readState(night_dir)['end_of_night']
+    assert record['photometry']['reliable'] is False
+    assert record['sky']['limits_exceeded'] == ['zero_point_scatter']
+
+    # The astrometry fails too and the joint fit fails its quality control: the platepar is kept, its
+    #   photometry can't be refitted and is recorded as unreliable
+    plan['calls'] = []
+    plan['sky_photometric'] = True
+    plan['good_above'] = 2.0
+    plan['qc_ok'] = False
+    result, _, _ = _endOfNight(setup, monkeypatch, platepar, True)
+    assert [call[:2] for call in plan['calls']] == [('refit', 1.0)]
+    assert (result.mag_lev == 1.0) and (result.vignetting_coeff == pytest.approx(BAD_VIGNETTING))
+    record = nc.readState(night_dir)['end_of_night']
+    assert record['photometry']['reliable'] is False
+    assert record['photometry']['reason'].startswith('not refitted, the astrometry fails')
+
+
 def test_old_night_state_is_read(setup, monkeypatch):
     """ The state of a night written by an older version (without the record of the end of the night) is read,
         and kept when the end of the night records its judgement. """
@@ -657,8 +704,9 @@ def test_old_night_state_is_read(setup, monkeypatch):
 
 def test_sky_of_the_night_recorded_and_summarized(setup, monkeypatch, caplog):
     """ The measured sky of the check of the installed platepar during the night is recorded with its
-        judgement; at the end of the night the sky of the night's judgements is summarized in one line, in the
-        log, the state of the night and the report of the joint fit of the night. """
+        judgement, as is that of its judgement on the night's stars at the end of the night; the sky of the
+        night's judgements is then summarized in one line, in the log, the state of the night and the report
+        of the joint fit of the night. """
 
     import logging
 
@@ -676,13 +724,15 @@ def test_sky_of_the_night_recorded_and_summarized(setup, monkeypatch, caplog):
     assert (sky['zero_point_scatter'], sky['zero_point_offset'], sky['clear_fraction']) == (0.0, 0.0, 1.0)
     assert (sky['limits_exceeded'] == []) and (sky['photometry_ok'] is True)
 
-    # The end of the night: the joint fit of the platepar installed tonight, then the summary
+    # The end of the night: the platepar installed tonight judged on the night's stars (recorded as well) and
+    #   its joint fit, then the summary of both judgements
     with caplog.at_level(logging.INFO, logger='rmslogger'):
         _endOfNight(setup, monkeypatch, _platepar(3.0), True)
-    assert "sky of the night: 1 judged, 0 hazy (0 of the 0 with a failing photometry)" in caplog.text
+    assert "sky of the night: 2 judged, 0 hazy (0 of the 0 with a failing photometry)" in caplog.text
     record = nc.readState(night_dir)['end_of_night']
-    assert record['sky_summary'].startswith('1 judged, 0 hazy')
-    assert record['sky_statistics']['judged'] == 1
+    assert record['verdict']['ok'] and (record['sky']['limits_exceeded'] == [])
+    assert record['sky_summary'].startswith('2 judged, 0 hazy')
+    assert record['sky_statistics']['judged'] == 2
     with open(os.path.join(night_dir, nc.JOINT_REPORT_NAME)) as f:
         assert 'Sky of the night (haze limits): ' + record['sky_summary'] in f.read()
 
