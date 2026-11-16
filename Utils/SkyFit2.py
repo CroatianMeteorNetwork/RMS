@@ -15472,9 +15472,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 ra_array, dec_array = np.array(ra_array), np.array(dec_array)
 
-                # Compute image coordinates
+                # Compute image coordinates. The circle was fitted to measured directions of the picks
+                #   (measurement=True above), which are not aberrated, so it is projected the same way
                 x_array, y_array = raDecToXYPP(ra_array, dec_array, \
-                    datetime2JD(self.img_handle.currentFrameTime(dt_obj=True)), self.platepar)
+                    datetime2JD(self.img_handle.currentFrameTime(dt_obj=True)), self.platepar, measurement=True)
 
                 # Remove points outside the image
                 filter_arr = (x_array >= 0) & (x_array <= self.platepar.X_res) & (y_array >= 0) \
