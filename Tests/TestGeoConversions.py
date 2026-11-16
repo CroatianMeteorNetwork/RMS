@@ -11,8 +11,8 @@ np = pytest.importorskip("numpy")
 from RMS.Formats.Platepar import Platepar
 from RMS.Misc import getRmsRootDir
 from RMS.Astrometry.ApplyAstrometry import xyHt2Geo, geoHt2XY, xyToRaDecPP
-from RMS.Astrometry.Conversions import AEH2Range, AEGeoidH2LatLonAlt, AER2ECEF, ecef2LatLonAlt, \
-    latLonAlt2ECEF, JD2HourAngle, trueRaDec2ApparentAltAz
+from RMS.Astrometry.Conversions import rangeToHeightWGS84, AEH2Range, AEGeoidH2LatLonAlt, AER2ECEF, \
+    ecef2LatLonAlt, latLonAlt2ECEF, JD2HourAngle, trueRaDec2ApparentAltAz
 from RMS.Astrometry.CyFunctions import refractionScale
 
 import os
@@ -232,6 +232,22 @@ def test_vectorized_range_and_geoid_conversion_match_the_scalar_calls():
         assert isinstance(lat_s, float)
         assert lat_t[i] == pytest.approx(lat_s, abs=1.0e-12)
         assert lon_t[i] == pytest.approx(lon_s, abs=1.0e-12)
+
+
+def test_range_of_a_grid_keeps_its_shape():
+    """ Lines of sight given as a grid (here 2x2 elevations against a height) come back as ranges of the same
+        shape, each equal to the call for that line of sight alone. """
+
+    azim = np.array([[0.0, 90.0], [180.0, 270.0]])
+    elev = np.array([[60.0, 20.0], [35.0, 45.0]])
+
+    r = rangeToHeightWGS84(azim, elev, 100.0e3, LAT, LON, ALT)
+    assert r.shape == (2, 2)
+
+    for i in range(2):
+        for j in range(2):
+            r_one = rangeToHeightWGS84(azim[i, j], elev[i, j], 100.0e3, LAT, LON, ALT)
+            assert r[i, j] == pytest.approx(r_one[0], abs=1.0e-6)
 
 
 def test_ecef_conversions_accept_arrays():
