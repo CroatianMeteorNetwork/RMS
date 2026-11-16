@@ -7,8 +7,8 @@ sky -> image refraction is the exact inverse of the image -> sky one; where it i
 
 Also tested: a sky point the forward distortion cannot reach comes back as NaN (also where a folded sheet of
 the mapping has a solution inside the frame), such a point does not throw the pointing fit off, the centre of
-the projection has an image, and fitAstrometry with the option returns the platepar that generated noise-free
-stars, through its forward mapping.
+the projection has an image, fitAstrometry with the option returns the platepar that generated noise-free
+stars, through its forward mapping, and a fit of the pointing alone goes through the platepar's own mapping.
 
 Run with pytest:
     python -m pytest Tests/test_ExactReverse.py -v
@@ -341,3 +341,49 @@ def test_fitting_returns_the_forward_mapping_that_made_the_stars(dist_type):
     x, y = astrometry.raDecToXYPP(np.array(ra_true), np.array(dec_true), JD, pp)
 
     assert np.max(np.hypot(np.array(x) - gx, np.array(y) - gy)) < 0.05
+
+
+@pytest.mark.parametrize("exact_reverse", [False, True])
+def test_a_fit_of_the_pointing_alone_keeps_the_option(exact_reverse):
+    """ A fit of the pointing alone (fit_only_pointing, fitPointing, or too few stars to fit the distortion)
+        keeps the option and the distortion of the platepar, and fits the pointing through the platepar's own
+        mapping from the sky to the image. """
+
+    # A reverse distortion far from the inverse of the forward one, so that the mapping the pointing is fitted
+    #   through matters
+    true_pp = _platepar("poly3+radial", refraction=False)
+    true_pp.x_poly_rev = 0.5*true_pp.x_poly_fwd
+    true_pp.y_poly_rev = 0.5*true_pp.y_poly_fwd
+    true_pp.exact_reverse = exact_reverse
+
+    # Fewer stars than the distortion needs, where the platepar puts them
+    gx, gy = (v.ravel() for v in np.meshgrid(np.linspace(150, true_pp.X_res - 150, 4),
+        np.linspace(100, true_pp.Y_res - 100, 3)))
+    assert gx.size < true_pp.poly_length + 1
+    _, ra, dec, _ = astrometry.xyToRaDecPP(np.full(gx.size, JD), gx, gy, np.ones(gx.size), true_pp,
+        extinction_correction=False, jd_time=True)
+    ra, dec = np.array(ra), np.array(dec)
+    x, y = astrometry.raDecToXYPP(ra, dec, JD, true_pp)
+    img_stars = np.column_stack([x, y, np.ones(gx.size)])
+    catalog_stars = np.column_stack([ra, dec, np.ones(gx.size)])
+
+    fits = [
+        lambda pp: pp.fitAstrometry(JD, img_stars, catalog_stars, fit_only_pointing=True),
+        lambda pp: pp.fitPointing(JD, img_stars, catalog_stars),
+        lambda pp: pp.fitAstrometry(JD, img_stars, catalog_stars),
+    ]
+    for fit in fits:
+
+        # From a perturbed pointing
+        pp = copy.deepcopy(true_pp)
+        pp.RA_d += 0.3
+        pp.dec_d -= 0.2
+        pp.pos_angle_ref += 0.5
+        fit(pp)
+
+        assert pp.exact_reverse is exact_reverse
+        for name in ("x_poly_fwd", "y_poly_fwd", "x_poly_rev", "y_poly_rev"):
+            assert np.array_equal(getattr(pp, name), getattr(true_pp, name))
+        assert abs(pp.RA_d - true_pp.RA_d) < 1e-4
+        assert abs(pp.dec_d - true_pp.dec_d) < 1e-4
+        assert abs(pp.pos_angle_ref - true_pp.pos_angle_ref) < 1e-4

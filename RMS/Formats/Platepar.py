@@ -1139,6 +1139,10 @@ class Platepar(object):
         # print('DIS_Y', _calcImageResidualsDistortion(self.y_poly_rev,  catalog_stars, \
         #     img_stars, 'y'))
 
+        # The distortion is fitted below unless only the pointing is fitted, or there are too few stars for it
+        min_fit_stars = self.poly_length + 1
+        fit_distortion = (len(img_stars) >= min_fit_stars) and (not fit_only_pointing)
+
         ### ASTROMETRIC PARAMETERS FIT ###
 
         # Fit the pointing parameters (RA, Dec, rotation, scale)
@@ -1150,9 +1154,10 @@ class Platepar(object):
         ) and not use_nn_cost:
 
             # With the exact reverse, the polynomial models first go through their usual sequence, which needs
-            #   the reverse polynomial (see the refinement after the forward fit)
+            #   the reverse polynomial (see the refinement after the forward fit). A fit of the pointing alone
+            #   (also with too few stars for the distortion) goes through the mapping of the platepar
             if getattr(self, "exact_reverse", False) and self.distortion_type.startswith("poly") \
-                and not fit_only_pointing:
+                and fit_distortion:
 
                 self._withReverseProjection(self.fitPointing, jd, img_stars, catalog_stars, fixed_scale)
 
@@ -1164,9 +1169,7 @@ class Platepar(object):
         ### DISTORTION FIT ###
 
         # Fit the polynomial distortion parameters if there are enough picked stars
-        min_fit_stars = self.poly_length + 1
-
-        if (len(img_stars) >= min_fit_stars) and (not fit_only_pointing):
+        if fit_distortion:
 
             # Fit the polynomial distortion
             if self.distortion_type.startswith("poly"):
