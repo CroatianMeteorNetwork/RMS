@@ -1056,6 +1056,70 @@ def test_binned_frames_speed_limits_and_intensity(config, method, factor):
     assert np.isclose(ratio, factor, rtol=0.1)
 
 
+### Noise of the background ###
+
+def test_noise_floor_is_the_sky_noise(config):
+    """ The noise which the frames are divided by is never below the local noise of the sky: the pixels whose
+        noise came out lower by chance (the 15% error of an estimate from few samples) get the noise of the sky,
+        the large-scale change of the noise over the image is kept, the pixels noisier than the sky (hot pixels,
+        stars) keep their own noise, and without mf_noise_sky_floor the noise is used as it is.
+    """
+
+    # A noise which grows from 5 to 10 ADU across the image, with a 15% error in every pixel and a few hot pixels
+    rng = np.random.default_rng(3)
+    sky = np.tile(np.linspace(5.0, 10.0, SIZE), (SIZE, 1)).astype(np.float32)
+    noise = (sky*(1 + 0.15*rng.standard_normal((SIZE, SIZE)))).astype(np.float32)
+    hot = (rng.integers(10, SIZE - 10, 20), rng.integers(10, SIZE - 10, 20))
+    noise[hot] = 5*sky[hot]
+
+    det = MatchedFilterDetector(_SynthHandle([]), config)
+    floored = det.noiseFloor(noise)
+
+    # No pixel is below its input, and away from the edges of the image (where the median filter of the sky level
+    #   is one-sided) none is below the sky by more than a few percent: the lower half of the pattern is gone
+    assert np.all(floored >= noise)
+    is_hot = np.zeros(noise.shape, dtype=bool)
+    is_hot[hot] = True
+    inner = np.zeros(noise.shape, dtype=bool)
+    inner[16:-16, 16:-16] = True
+    inner &= ~is_hot
+    ratio = floored[inner]/sky[inner]
+    assert np.percentile(ratio, 1) > 0.97
+    assert np.std(ratio) < 0.7*np.std(noise[inner]/sky[inner])
+
+    # The hot pixels keep their own noise
+    assert np.allclose(floored[hot], noise[hot])
+
+    # Turned off, the noise of every pixel is used
+    config.mf_noise_sky_floor = False
+    det = MatchedFilterDetector(_SynthHandle([]), config)
+    assert np.array_equal(det.noiseFloor(noise), noise)
+
+
+@pytest.mark.parametrize('seed', [1, 2])
+def test_noise_floor_reduces_the_position_error_of_a_slow_object(config, seed):
+    """ The noise of every pixel, estimated from few samples, multiplies the image of an object by a fixed
+        pixel pattern, which moves its measured positions by the same small amount in every frame in which it
+        crosses the same pixels. With the noise floor the positions of a slow bright object are closer to the
+        truth (by about a sixth in the rms on the synthetic frames), and the object is still found once.
+    """
+
+    config.mf_smooth_frames = 0
+    errors = []
+    for floor in (False, True):
+        config.mf_noise_sky_floor = floor
+        obj = linearObject(12.0, 20, 50, 0.3, 0.1, 40, 440)
+        _, detections = runDetector(_SynthHandle([obj], seed=seed), config)
+        assert len(detections) == 1
+
+        # The rms distance of the measured positions from the true ones
+        rows = detections[0][2]
+        true = np.array([obj['pos'](f) for f in rows[:, 0]])
+        errors.append(np.sqrt(np.mean(np.sum((rows[:, 1:3] - true)**2, axis=1))))
+
+    assert errors[1] < 0.92*errors[0]
+
+
 ### Photometry and saturation ###
 
 @pytest.mark.parametrize('snr, vx', [(3.0, 0.3), (12.0, 0.8), (12.0, 1.8)])
