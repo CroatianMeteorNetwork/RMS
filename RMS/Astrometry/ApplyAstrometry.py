@@ -1551,7 +1551,7 @@ def fovEdgePolygon(platepar, jd, side_sample=10, trim_px=2, aberration=None):
     Keyword arguments:
         side_sample: [int] Number of points on each side of the FOV. 10 by default.
         trim_px: [int] Number of pixels to trim on each side. 2 by default.
-        aberration: [bool] Passed to xyToRaDecPP: None (the default) gives the edges as catalog directions,
+        aberration: [bool] Given to xyToRaDecPP: None (the default) gives the edges as catalog directions,
             in the frame of the stars; False gives them as geometric directions in the Earth's frame, the
             frame of targets on the ground or in the atmosphere.
 
