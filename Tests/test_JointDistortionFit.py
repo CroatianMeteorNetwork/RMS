@@ -1037,6 +1037,36 @@ def test_quality_control_selects_clear_chunks_with_the_mask(nights, fit_held_chu
     assert 'judged on the held-out chunks' in qc['failed']
 
 
+def test_quality_control_judges_only_the_astrometry(nights, fit_held_chunks, monkeypatch):
+    """ The judgement of the quality control is of the astrometry only: the fit keeps the photometry of its
+        start, so held-out chunks on which the photometry fails (e.g. haze) don't fail a fit whose astrometry
+        is good. """
+
+    import RMS.Astrometry.AutoCalibration as ac
+
+    config, truth, start, dirs, pointings = nights
+    fitted, report = fit_held_chunks
+
+    # Clear held-out chunks on which the astrometry is good and the photometry fails
+    score = ac.CalibrationScore()
+    score.chunks = score.recalibrated = 10
+    score.zone_stars = np.full(len(score.zones), 50)
+    score.zone_share = np.full(len(score.zones), 0.95)
+    score.zone_mag_residual = np.zeros(len(score.zones))
+    score.dist = 0.2
+    score.mag_lev_stddev = np.full(10, 0.4)
+    monkeypatch.setattr(ac, 'clearChunks', lambda chunks, *args, **kwargs: chunks)
+    monkeypatch.setattr(ac, 'scorePlatepar', lambda *args, **kwargs: score)
+    monkeypatch.setattr(ac, '_loadCatalog', lambda config, jd: None)
+
+    chunks = [('FF', 0.0, np.zeros((3, 8)), 256)]*10
+    qc = qualityControl(fitted, start, report, config, dict(QC_DEFAULTS, **SMALL_QC),
+                        judge_groups=[('night', fitted, start, chunks)])
+    assert ac.judgeScore(score)[0] is False
+    check = [check for check in qc['checks'] if check['name'] == 'judged on the held-out chunks'][0]
+    assert check['ok'], check
+
+
 def test_chunks_timed_by_the_frame_rate_of_the_header(tmp_path):
     """ The chunks of a CALSTARS file with the frame rate in its header are timed with it, and their duration
         (for the hours of clear sky of the quality control) is that of the header's frame rate. """
