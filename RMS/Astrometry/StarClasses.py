@@ -79,8 +79,10 @@ class PlanetPoint(object):
 
         Arguments:
             name: [str] Name of the body (e.g., 'Jupiter', 'Moon').
-            ra: [float] Right ascension in degrees.
-            dec: [float] Declination in degrees.
+            ra: [float] Right ascension in degrees, in the catalog frame: the apparent direction without the
+                annual aberration, which the plate applies to it as to a catalog star (see
+                SkyFit2.solarSystemBodiesRaDec).
+            dec: [float] Declination in degrees, in the catalog frame.
             mag: [float] Apparent magnitude.
         """
 

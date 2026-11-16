@@ -386,6 +386,65 @@ class TestAberration(unittest.TestCase):
             np.radians(pp_true.dec_d)), 0.1)
 
 
+    def testSolarSystemBodiesAreAberratedOnce(self):
+        """ SkyFit2 gives the Sun, the Moon and the planets to the plate (the overlay and the fit references)
+            in the catalog frame, with the annual aberration taken out of astropy's apparent directions.
+            Through a plate that models the aberration they land where the camera sees their apparent
+            directions: a measurement at that pixel gives the apparent direction back. The apparent directions
+            themselves would be aberrated a second time (up to 20 arcsec). """
+
+        import datetime
+
+        # SkyFit2 needs its GUI libraries, the ephemerides need astropy
+        try:
+            from Utils.SkyFit2 import solarSystemBodiesRaDec, ASTROPY_AVAILABLE
+        except Exception as e:
+            self.skipTest("SkyFit2 cannot be imported: {}".format(e))
+        if not ASTROPY_AVAILABLE:
+            self.skipTest("astropy not installed")
+
+        from astropy.coordinates import get_body, EarthLocation
+        from astropy.time import Time
+        from RMS.Formats.Platepar import getCatalogStarsImagePositions
+
+        # The bodies as SkyFit2 computes them, and their apparent directions from astropy
+        lat, lon, elev = 43.19, -81.32, 300.0
+        obs_time = (2026, 5, 1, 3, 0, 0, 0)
+        jd = date2JD(*obs_time)
+        t = Time(datetime.datetime(*obs_time[:6]))
+        loc = EarthLocation(lat=lat, lon=lon, height=elev)
+        bodies = solarSystemBodiesRaDec(obs_time, lat, lon, elev)
+        self.assertEqual(len(bodies), 9)
+
+        shifts = []
+        for name, ra, dec, mag in bodies:
+
+            body = get_body(name.lower(), t, loc)
+            ra_app, dec_app = body.ra.rad, body.dec.rad
+
+            # A plate pointing at the body, with the aberration modelled and no refraction
+            pp = Platepar()
+            pp.read(TEMPLATE)
+            pp.lat, pp.lon, pp.elev = lat, lon, elev
+            pp.JD, pp.Ho = jd, JD2HourAngle(jd)
+            pp.RA_d, pp.dec_d = np.degrees(ra_app), np.degrees(dec_app)
+            pp.resetDistortionParameters()
+            pp.refraction = False
+            pp.aberration = True
+
+            # The body projected as SkyFit2 projects it, and the direction measured at that pixel
+            x, y, _ = getCatalogStarsImagePositions(np.array([[ra, dec, mag]]), jd, pp)
+            _, ra_m, dec_m, _ = xyToRaDecPP([jd], x, y, [1], pp, extinction_correction=False,
+                measurement=True, jd_time=True)
+            sep = separationArcsec(np.radians(ra_m[0]), np.radians(dec_m[0]), ra_app, dec_app)
+            self.assertLess(sep, 0.01, name)
+
+            shifts.append(separationArcsec(np.radians(ra), np.radians(dec), ra_app, dec_app))
+
+        # The aberration taken out of the apparent directions reaches 20 arcsec on this date
+        self.assertGreater(max(shifts), 15.0)
+
+
     @unittest.skipIf(erfa is None, "pyerfa not installed")
     def testStarGridOverNight(self):
         """ The star fit as in real life, on a distortion-free camera fixed in alt/az and referenced at the start of

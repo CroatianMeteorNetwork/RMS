@@ -123,6 +123,78 @@ def computeSolarSystemMagnitude(body_name, body, sun, time):
     mag = v_1_0 + 5 * np.log10(r * delta) + c1 * phase_angle + c2 * phase_angle**2
 
     return mag
+
+
+def solarSystemBodiesRaDec(obs_time, lat, lon, elev):
+    """ Directions and magnitudes of the Sun, the Moon and the planets seen from the station, in the frame of
+        the star catalog, so that the plate projects them (as the overlay and as fit references) the way it
+        projects catalog stars.
+
+        astropy gives the apparent (GCRS) direction of a body, with the annual aberration in it. A plate that
+        models the aberration applies it to everything it projects through the star path, so the aberration
+        is taken out of the bodies' directions here and the plate puts it back. Handing it the apparent
+        directions would apply the aberration twice (up to 20.5 arcsec). A plate fitted before the aberration
+        was modelled has absorbed it into its pointing, so it too maps catalog-frame directions where the
+        camera sees them.
+
+    Arguments:
+        obs_time: [tuple] Observation time (year, month, day, hour, minute, second, ...), UTC.
+        lat: [float] Station latitude (deg).
+        lon: [float] Station longitude (deg).
+        elev: [float] Station elevation (m).
+
+    Return:
+        bodies: [list] A (display_name, ra, dec, mag) entry for every body that could be computed: the
+            direction in the catalog frame (deg, J2000) and the apparent visual magnitude.
+    """
+
+    # The time, for astropy and for the aberration
+    dt = datetime.datetime(*obs_time[:6])
+    t = Time(dt)
+    jd = date2JD(*obs_time[:6])
+
+    # Observer location
+    loc = EarthLocation(lat=lat, lon=lon, height=elev)
+
+    # Bodies to display (name, display_name)
+    bodies = [
+        ('sun', 'Sun'),
+        ('moon', 'Moon'),
+        ('mercury', 'Mercury'),
+        ('venus', 'Venus'),
+        ('mars', 'Mars'),
+        ('jupiter', 'Jupiter'),
+        ('saturn', 'Saturn'),
+        ('uranus', 'Uranus'),
+        ('neptune', 'Neptune'),
+    ]
+
+    # Get sun position for magnitude calculations
+    sun = get_sun(t)
+
+    # Compute the direction and the magnitude of every body
+    body_radec = []
+    for body_name, display_name in bodies:
+        try:
+
+            # Get body position (GCRS apparent coordinates)
+            body = get_body(body_name, t, loc)
+
+            # The apparent direction without the annual aberration: the direction in the catalog frame
+            ra, dec = removeAberration(body.ra.rad, body.dec.rad, jd)
+
+            # Compute apparent magnitude
+            mag = computeSolarSystemMagnitude(body_name, body, sun, t)
+
+            body_radec.append((display_name, np.degrees(ra), np.degrees(dec), mag))
+
+        except Exception:
+            # Skip bodies that fail (e.g., if ephemeris data is missing)
+            continue
+
+    return body_radec
+
+
 import matplotlib.gridspec as gridspec
 import matplotlib.ticker as ticker
 import scipy.optimize
@@ -211,7 +283,7 @@ from Utils.KalmanFilter import KalmanFilter
 
 import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
-from RMS.Astrometry.CyFunctions import subsetCatalog, j2000FromTrueOfDate, refractionScale
+from RMS.Astrometry.CyFunctions import subsetCatalog, j2000FromTrueOfDate, refractionScale, removeAberration
 from RMS.Astrometry.MatchStars import matchStars
 from RMS.Routines.SatellitePositions import SatellitePredictor, loadTLEs, loadRobustTLEs, findClosestTLEFile, SKYFIELD_AVAILABLE
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
@@ -3019,7 +3091,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Cache for planet ephemerides (expensive astropy calls)
         self._planet_cache_time = None  # Observation time when ephemerides were computed
-        self._planet_cache_radec = []   # List of (name, ra, dec, mag) from astropy
+        self._planet_cache_radec = []   # List of (name, ra, dec, mag), see solarSystemBodiesRaDec
 
         # astrometry.net matched star markers (main window) - cyan color
         # These show catalog star positions that matched to input stars
@@ -4657,50 +4729,11 @@ class PlateTool(QtWidgets.QMainWindow):
         ff_jd = date2JD(*obs_time)
 
         # Check if we need to recompute ephemerides (expensive astropy calls)
-        # Only recompute when the observation time changes
+        # Only recompute when the observation time changes. The directions are in the catalog frame (the
+        #   annual aberration taken out), so they are projected and fitted the way catalog stars are
         if self._planet_cache_time != obs_time[:6]:
-            # Convert to astropy Time
-            dt = datetime.datetime(*obs_time[:6])
-            t = Time(dt)
-
-            # Observer location
-            loc = EarthLocation(lat=self.platepar.lat, lon=self.platepar.lon,
-                               height=self.platepar.elev)
-
-            # Bodies to display (name, display_name)
-            bodies = [
-                ('sun', 'Sun'),
-                ('moon', 'Moon'),
-                ('mercury', 'Mercury'),
-                ('venus', 'Venus'),
-                ('mars', 'Mars'),
-                ('jupiter', 'Jupiter'),
-                ('saturn', 'Saturn'),
-                ('uranus', 'Uranus'),
-                ('neptune', 'Neptune'),
-            ]
-
-            # Get sun position for magnitude calculations
-            sun = get_sun(t)
-
-            # Compute and cache ephemerides
-            self._planet_cache_radec = []
-            for body_name, display_name in bodies:
-                try:
-                    # Get body position (GCRS apparent coordinates)
-                    body = get_body(body_name, t, loc)
-                    ra_deg = body.ra.deg
-                    dec_deg = body.dec.deg
-
-                    # Compute apparent magnitude
-                    mag = computeSolarSystemMagnitude(body_name, body, sun, t)
-
-                    self._planet_cache_radec.append((display_name, ra_deg, dec_deg, mag))
-
-                except Exception as e:
-                    # Skip bodies that fail (e.g., if ephemeris data is missing)
-                    pass
-
+            self._planet_cache_radec = solarSystemBodiesRaDec(obs_time, self.platepar.lat, self.platepar.lon,
+                self.platepar.elev)
             self._planet_cache_time = obs_time[:6]
 
         # Now compute x/y positions from cached RA/Dec (this is fast and depends on platepar)
@@ -9734,6 +9767,11 @@ class PlateTool(QtWidgets.QMainWindow):
             if not hasattr(self.geo_points_obj, "ra_plate_data"):
                 self.geo_points_obj.ra_plate_data = self.geo_points_obj.ra_data
                 self.geo_points_obj.dec_plate_data = self.geo_points_obj.dec_data
+
+        # The solar system bodies are computed again: a state saved before their directions were given in the
+        #   catalog frame holds the apparent ones
+        self._planet_cache_time = None
+        self._planet_cache_radec = []
 
         # Update the possibly missing params
         if not hasattr(self, "geo_marker_scale"):
