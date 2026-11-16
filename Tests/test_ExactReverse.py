@@ -57,6 +57,10 @@ def _platepar(dist_type, equal_aspect=True, asymmetry_corr=False, force_centre=F
     pp.F_scale = 15.6
     pp.refraction = refraction
 
+    # The annual aberration is off: its inverse in the star path closes to ~1 mas, and the round trips here test
+    #   the distortion (and the refraction) to 1e-9 px
+    pp.aberration = False
+
     # The flags first: setDistortionType sizes the arrays from them
     pp.equal_aspect = equal_aspect
     pp.asymmetry_corr = asymmetry_corr
@@ -404,6 +408,9 @@ def test_a_fit_of_the_pointing_alone_keeps_the_option(exact_reverse):
     true_pp.x_poly_rev = 0.5*true_pp.x_poly_fwd
     true_pp.y_poly_rev = 0.5*true_pp.y_poly_fwd
     true_pp.exact_reverse = exact_reverse
+
+    # A fit models the annual aberration (it turns the flag on), so the stars are made with it
+    true_pp.aberration = True
 
     # Fewer stars than the distortion needs, where the platepar puts them
     gx, gy = (v.ravel() for v in np.meshgrid(np.linspace(150, true_pp.X_res - 150, 4),
