@@ -597,6 +597,136 @@ class TestAberration(unittest.TestCase):
             self.assertEqual((body.ra, body.dec, body.mag), catalog[name], name)
 
 
+    def _pairsTool(self, dir_path, image_time):
+        """ Helper: a SkyFit2 tool without a window (a mock) showing an image, with the folder-level pairs
+            file in the given directory, for PlateTool.savePairs and PlateTool.loadPairs.
+
+        Arguments:
+            dir_path: [str] Directory of the pairs file.
+            image_time: [tuple] Time of the current image (year, month, day, hour, minute, second).
+
+        Return:
+            tool: [MagicMock] The tool.
+        """
+
+        from unittest import mock
+
+        tool = mock.MagicMock()
+        tool._pairsFilePath.return_value = os.path.join(dir_path, 'skyfit_matched_pairs.json')
+        tool._currentImageKey.return_value = 'FF_XX0001_20260501_030000_000_0000000.fits'
+        tool.img_handle.currentTime.return_value = image_time
+
+        return tool
+
+
+    # Star pairs of the pairs file tests, as saved in both versions of the file
+    PAIRS_FILE_STARS = [
+        {'x': 50.0, 'y': 60.0, 'fwhm': 2.1, 'intens_acc': 5000.0, 'snr': 30.0, 'saturated': False,
+            'ra': 120.123456789012, 'dec': -12.987654321098, 'mag': 3.21, 'type': 'star'},
+        {'x': 700.5, 'y': 400.25, 'fwhm': 1.9, 'intens_acc': 800.0, 'snr': 8.0, 'saturated': True,
+            'ra': 359.999999999, 'dec': 88.0000000001, 'mag': 5.5, 'type': 'star'},
+    ]
+
+
+    def testOldPairsFilePlanetsConverted(self):
+        """ A pairs file of version 1 holds the apparent directions of the paired solar system bodies, without
+            a frame marker. Loading it gives them in the catalog frame within 0.01 arcsec of a pick now,
+            converted at the time saved with the image (here a day away from the time of the current image),
+            and the star pairs as saved. A body without the marker in a file of version 2 (written by an
+            older SkyFit2 into a newer file) is converted the same way. """
+
+        import json
+        import tempfile
+        from Utils.SkyFit2 import PlateTool
+
+        catalog, apparent, _, obs_time = self._solarSystemPairs()
+        names = list(catalog)
+
+        # The bodies as version 1 saved them: apparent directions, no name, no marker
+        planets = [{'x': 100.0 + 10*i, 'y': 200.0, 'fwhm': 2.0, 'intens_acc': 1000.0, 'snr': 10.0,
+            'saturated': False, 'ra': apparent[name][0], 'dec': apparent[name][1], 'mag': apparent[name][2],
+            'type': 'planet'} for i, name in enumerate(names)]
+
+        for version in (1, 2):
+            with tempfile.TemporaryDirectory() as dir_path:
+
+                # The file saved on the image at obs_time, loaded with a different current image time
+                tool = self._pairsTool(dir_path, (2026, 5, 2, 3, 0, 0))
+                data = {'format': 'skyfit_matched_pairs', 'version': version, 'images': {
+                    tool._currentImageKey(): {'jd': date2JD(*obs_time),
+                        'pairs': self.PAIRS_FILE_STARS + planets}}}
+                with open(tool._pairsFilePath(), 'w') as f:
+                    json.dump(data, f, indent=1)
+
+                PlateTool.loadPairs(tool)
+                entries = tool.paired_stars.paired_stars
+                self.assertEqual(len(entries), len(self.PAIRS_FILE_STARS) + len(planets))
+
+            # The star pairs as saved
+            n_stars = len(self.PAIRS_FILE_STARS)
+            for p, entry in zip(self.PAIRS_FILE_STARS, entries[:n_stars]):
+                self.assertEqual(entry[4].coords(), (p['ra'], p['dec'], p['mag']))
+                self.assertEqual(entry[:4] + entry[5:], [p['x'], p['y'], p['fwhm'], p['intens_acc'], p['snr'],
+                    p['saturated']])
+
+            # The bodies where a pick gives them now
+            for name, entry in zip(names, entries[n_stars:]):
+                ra, dec, _ = catalog[name]
+                ra_l, dec_l, _ = entry[4].coords()
+                sep = separationArcsec(np.radians(ra_l), np.radians(dec_l), np.radians(ra), np.radians(dec))
+                self.assertLess(sep, 0.01, "{} (version {})".format(name, version))
+
+
+    def testNewPairsFileRoundTrip(self):
+        """ A pairs file saved now is of version 2, with the solar system bodies in the catalog frame, marked
+            and named. Loading it gives the bodies and the star pairs bit-identical, the bodies as bodies. """
+
+        import json
+        import tempfile
+        from RMS.Astrometry.StarClasses import CatalogStar, PlanetPoint
+        from Utils.SkyFit2 import PlateTool
+
+        catalog, _, _, obs_time = self._solarSystemPairs()
+
+        # Star pairs and freshly picked bodies on the image
+        paired_stars = PairedStars()
+        for p in self.PAIRS_FILE_STARS:
+            paired_stars.addPair(p['x'], p['y'], p['fwhm'], p['intens_acc'],
+                CatalogStar(p['ra'], p['dec'], p['mag']), snr=p['snr'], saturated=p['saturated'])
+        for i, (name, (ra, dec, mag)) in enumerate(catalog.items()):
+            paired_stars.addPair(100.0 + 10*i, 200.0, 2.0, 1000.0, PlanetPoint(name, ra, dec, mag), snr=10.0)
+
+        with tempfile.TemporaryDirectory() as dir_path:
+
+            # Save the pairs, and load them on the same image
+            tool = self._pairsTool(dir_path, obs_time)
+            tool.paired_stars = paired_stars
+            PlateTool.savePairs(tool)
+
+            with open(tool._pairsFilePath()) as f:
+                data = json.load(f)
+
+            tool_loaded = self._pairsTool(dir_path, obs_time)
+            PlateTool.loadPairs(tool_loaded)
+
+        # Version 2, the bodies marked and named
+        self.assertEqual(data['version'], 2)
+        saved = data['images'][tool._currentImageKey()]['pairs']
+        self.assertEqual([p['name'] for p in saved if p['type'] == 'planet'], list(catalog))
+        self.assertTrue(all(p['catalog_frame'] for p in saved if p['type'] == 'planet'))
+
+        # Every pair loaded as it was picked
+        loaded = tool_loaded.paired_stars.paired_stars
+        self.assertEqual(len(loaded), len(paired_stars.paired_stars))
+        for entry, entry_loaded in zip(paired_stars.paired_stars, loaded):
+            self.assertEqual(entry_loaded[4].pick_type, entry[4].pick_type)
+            self.assertEqual(entry_loaded[4].coords(), entry[4].coords())
+            self.assertEqual(entry_loaded[:4] + entry_loaded[5:], entry[:4] + entry[5:])
+            if entry[4].pick_type == 'planet':
+                self.assertEqual(entry_loaded[4].name, entry[4].name)
+                self.assertTrue(entry_loaded[4].catalog_frame)
+
+
     @unittest.skipIf(erfa is None, "pyerfa not installed")
     def testStarGridOverNight(self):
         """ The star fit as in real life, on a distortion-free camera fixed in alt/az and referenced at the start of

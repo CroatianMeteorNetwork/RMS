@@ -9489,7 +9489,13 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def savePairs(self):
         """ Save the current image's matched star pairs into the folder-level pairs file,
-            keyed by image. Pairs saved for other images in the folder are preserved. """
+            keyed by image. Pairs saved for other images in the folder are preserved.
+
+            Version 2 of the file: the solar system bodies are saved in the catalog frame (see
+            solarSystemBodiesRaDec) with their name and a catalog_frame marker. Version 1 saved the apparent
+            directions without the marker, which loadPairs converts. The keys of the pairs are unchanged, so
+            older readers still load the file.
+        """
 
         if len(self.paired_stars) == 0:
             qmessagebox(message="No matched pairs on the current image to save.",
@@ -9505,16 +9511,24 @@ class PlateTool(QtWidgets.QMainWindow):
                 n_skipped += 1
                 continue
             ra, dec, mag = obj.coords()
-            pairs.append({'x': float(x), 'y': float(y), 'fwhm': float(fwhm),
-                          'intens_acc': float(intens_acc), 'snr': float(snr),
-                          'saturated': bool(saturated),
-                          'ra': float(ra), 'dec': float(dec), 'mag': float(mag),
-                          'type': getattr(obj, 'pick_type', 'star')})
+            pair = {'x': float(x), 'y': float(y), 'fwhm': float(fwhm),
+                    'intens_acc': float(intens_acc), 'snr': float(snr),
+                    'saturated': bool(saturated),
+                    'ra': float(ra), 'dec': float(dec), 'mag': float(mag),
+                    'type': getattr(obj, 'pick_type', 'star')}
+
+            # A solar system body keeps its name and the frame of its direction: the marker is only set
+            #   when the direction is in the catalog frame, so loadPairs converts any that is not
+            if pair['type'] == 'planet':
+                pair['name'] = obj.name
+                pair['catalog_frame'] = bool(getattr(obj, 'catalog_frame', False))
+
+            pairs.append(pair)
 
         path = self._pairsFilePath()
 
         # Merge into the existing folder-level file so other images' pairs are kept
-        data = {'format': 'skyfit_matched_pairs', 'version': 1, 'images': {}}
+        data = {'format': 'skyfit_matched_pairs', 'version': 2, 'images': {}}
         if os.path.isfile(path):
             try:
                 with open(path) as f:
@@ -9524,6 +9538,10 @@ class PlateTool(QtWidgets.QMainWindow):
                     data.setdefault('images', {})
             except Exception:
                 pass  # corrupt/unreadable - start fresh
+
+        # The file now has pairs of version 2. The pairs of other images saved in version 1 keep their
+        #   apparent bodies without the marker, which loadPairs converts when they are loaded
+        data['version'] = 2
 
         key = self._currentImageKey()
         try:
@@ -9544,7 +9562,13 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def loadPairs(self):
         """ Load matched pairs for the CURRENT image from the folder-level pairs file.
-            Pairs are per-image, so only the current image's saved entry is restored. """
+            Pairs are per-image, so only the current image's saved entry is restored.
+
+            A solar system body saved without the catalog_frame marker (a version 1 file, or a pair written
+            into a newer file by an older SkyFit2) holds the apparent direction, which a plate that models the
+            aberration would aberrate a second time (up to 20.5 arcsec). The aberration is taken out of it at
+            the time of its image (see savePairs). Star pairs are loaded as saved.
+        """
 
         path = self._pairsFilePath()
         if not os.path.isfile(path):
@@ -9569,9 +9593,42 @@ class PlateTool(QtWidgets.QMainWindow):
                         title="Load pairs", message_type="warning")
             return
 
+        # The time of the image the pairs were saved for, else the time of the current image (the same image)
+        jd = images[key].get('jd')
+        if jd is None:
+            try:
+                jd = date2JD(*self.img_handle.currentTime())
+            except Exception:
+                jd = None
+
         new_pairs = PairedStars()
+        n_converted = 0
         for p in images[key].get('pairs', []):
-            star = CatalogStar(p['ra'], p['dec'], p['mag'])
+
+            # A solar system body is restored in the catalog frame, its apparent direction converted at the
+            #   time of the image if it was saved without the marker
+            if p.get('type') == 'planet':
+
+                ra, dec = p['ra'], p['dec']
+                catalog_frame = bool(p.get('catalog_frame', False))
+                if (not catalog_frame) and (jd is not None):
+                    ra, dec = removeAberration(np.radians(ra), np.radians(dec), jd)
+                    ra, dec = np.degrees(ra), np.degrees(dec)
+                    catalog_frame = True
+                    n_converted += 1
+
+                elif not catalog_frame:
+                    print("WARNING: No time to convert the saved pair of {} to the catalog frame, it keeps "
+                        "its apparent direction".format(p.get('name', 'a solar system body')))
+
+                # The marker tells whether the direction is in the catalog frame now
+                star = PlanetPoint(p.get('name', 'Planet'), ra, dec, p['mag'])
+                star.catalog_frame = catalog_frame
+
+            # Catalog stars as saved
+            else:
+                star = CatalogStar(p['ra'], p['dec'], p['mag'])
+
             new_pairs.addPair(p['x'], p['y'], p['fwhm'], p['intens_acc'], star,
                               snr=p.get('snr', 0), saturated=p.get('saturated', False))
 
@@ -9579,6 +9636,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updatePairedStars()
 
         msg = "Loaded {} matched pairs for '{}'".format(len(new_pairs), key)
+        if n_converted:
+            msg += " ({} solar system bodies converted to the catalog frame)".format(n_converted)
         print(msg)
         self.status_bar.showMessage(msg)
 
