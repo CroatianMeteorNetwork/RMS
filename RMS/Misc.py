@@ -857,6 +857,79 @@ def runGitCommand(args, cwd=None, timeout=GIT_NETWORK_TIMEOUT, network=False):
                 pass
 
 
+# Timeout of the local git commands which read the commit of the code (s)
+GIT_LOCAL_TIMEOUT = 10.0
+
+# The tracked files whose changes make the code differ from its commit (the configuration, the mask and the
+#   camera settings are tracked as well and are edited on every station)
+GIT_CODE_PATHSPECS = ['*.py', '*.pyx', '*.pxd', '*.pyxbld', '*.c', '*.cpp', '*.h']
+
+# The commit of the RMS code of this process, read once (see rmsCommit)
+_RMS_COMMIT = None
+
+
+def gitCommit(dir_path, timeout=GIT_LOCAL_TIMEOUT):
+    """ The commit checked out in a git working tree, never failing.
+
+    Arguments:
+        dir_path: [str] Root directory of the working tree.
+
+    Keyword arguments:
+        timeout: [float] Timeout of each git command (s). GIT_LOCAL_TIMEOUT by default.
+
+    Return:
+        [str] The short hash of the commit, with '+' appended if a tracked code file (GIT_CODE_PATHSPECS)
+            differs from it or if that could not be checked. 'unknown' if the directory is not the root of a
+            git working tree (e.g. an installed copy inside another repository) or git could not be run.
+    """
+
+    try:
+
+        # The root of the working tree and the commit, both in one call
+        code, out, _ = runGitCommand(['-C', dir_path, 'rev-parse', '--show-toplevel', '--short', 'HEAD'],
+                                     timeout=timeout)
+        lines = [line.strip() for line in out.strip().splitlines()]
+        if (code != 0) or (len(lines) != 2) or (not lines[1]):
+            return 'unknown'
+
+        # The directory has to be the root itself, not a directory inside some other repository
+        top_level, commit = lines
+        if os.path.normcase(os.path.realpath(top_level)) != os.path.normcase(os.path.realpath(dir_path)):
+            return 'unknown'
+
+        # Changes of the tracked code, staged or not (exit code 1), or a check which did not work
+        code, _, _ = runGitCommand(['-C', dir_path, 'diff', '--quiet', 'HEAD', '--'] + GIT_CODE_PATHSPECS,
+                                   timeout=timeout)
+        if code != 0:
+            commit += '+'
+
+        return commit
+
+    except Exception:
+
+        # No git, a timeout or anything else: the commit is not known
+        return 'unknown'
+
+
+def rmsCommit():
+    """ The commit of the RMS code of this process (see gitCommit), read once and kept.
+
+    Return:
+        [str] Short hash of the commit, with '+' if the code has changes, or 'unknown'.
+    """
+
+    global _RMS_COMMIT
+
+    # Read only the first time, the code of a running process does not change
+    if _RMS_COMMIT is None:
+        try:
+            _RMS_COMMIT = gitCommit(getRmsRootDir())
+        except Exception:
+            _RMS_COMMIT = 'unknown'
+
+    return _RMS_COMMIT
+
+
 ### ###
 
 

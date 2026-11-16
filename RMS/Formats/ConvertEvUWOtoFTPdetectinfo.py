@@ -7,7 +7,7 @@ import datetime
 import numpy as np
 import scipy.interpolate
 
-from RMS.Astrometry.Conversions import raDec2AltAz, altAz2RADec, unixTime2JD, jd2Date
+from RMS.Astrometry.Conversions import trueRaDec2ApparentAltAz, apparentAltAz2TrueRADec, unixTime2JD, jd2Date
 from RMS.Formats.FTPdetectinfo import writeFTPdetectinfo
 
 
@@ -123,8 +123,10 @@ def readEvFile(dir_path, file_name):
         # Compute the julian date
         jd_ref = unixTime2JD(ts, tu)
 
-        # Convert theta and phi to RA/Dec
-        ra_data, dec_data = altAz2RADec(90 - np.array(phi_data), 90 - np.array(theta_data), jd_ref, lat, lon)
+        # Convert theta and phi to RA/Dec in J2000, through the true equator and equinox of date (no refraction
+        #   is removed from the altitude, as before)
+        ra_data, dec_data = apparentAltAz2TrueRADec(90 - np.array(phi_data), 90 - np.array(theta_data), jd_ref,
+            lat, lon, refraction=False)
 
         return jd_ref, lat, lon, elev, site, stream, time_data, x_data, y_data, ra_data, dec_data, level_data, mag_data
 
@@ -177,8 +179,8 @@ if __name__ == "__main__":
             # Compute frame number
             frame = (t - t0)*args.fps
 
-            # Compute azimuth and elevation
-            azim, elev = raDec2AltAz(ra, dec, jd_ref, lat, lon)
+            # Compute azimuth and elevation, back through the frame of date
+            azim, elev = trueRaDec2ApparentAltAz(ra, dec, jd_ref, lat, lon, refraction=False)
 
             centroids.append([frame, x, y, ra, dec, azim, elev, lvl, mag])
 

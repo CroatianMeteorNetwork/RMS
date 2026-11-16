@@ -1025,7 +1025,8 @@ def sectionDifference(platepar_a, platepar_b, jd, fwhm):
     """ How differently two platepars map the image, apart from the pointing: a grid of image positions is mapped
         to the sky with the first platepar, the pointing of the second (RA, Dec, rotation and scale, which the
         recalibration refits on every chunk) is fitted to map those sky positions back onto the grid, and the
-        remaining differences are measured.
+        remaining differences are measured. Both platepars have to treat the annual aberration the same way
+        (a ValueError is raised otherwise).
 
     Arguments:
         platepar_a: [Platepar] First platepar.
@@ -1040,6 +1041,11 @@ def sectionDifference(platepar_a, platepar_b, jd, fwhm):
     import scipy.optimize
 
     from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
+
+    # Plates with and without the annual aberration modelled differ by a pattern that no pointing absorbs (up
+    #   to ~6 arcsec over a wide field), so only plates with the same setting are compared
+    if getattr(platepar_a, 'aberration', False) != getattr(platepar_b, 'aberration', False):
+        raise ValueError("sectionDifference: one platepar models the aberration and the other doesn't")
 
     # A grid of image positions (without the outermost edge) mapped to the sky with the first platepar
     w, h = platepar_a.X_res, platepar_a.Y_res
@@ -1612,7 +1618,7 @@ def candidateModels(platepar, config):
 
 def fitCandidate(chunk_dirs, section_chunks, held_out, catalog_stars, config, mask=None, use_flat=False,
                  fit_vignetting=False, vignetting_coeff=None, ff_frames=256, position_hint=None, model=None,
-                 judge_photometry=True):
+                 judge_photometry=True, fit_by='AutoCalibration'):
     """ Fit a platepar from scratch (blind plate solve and distortion fit, see AutoPlatepar) independently on
         several sections (chunks spread in time), keep the sections which agree with each other apart from the
         pointing, take the one which scores best on the held-out chunks, and fit its photometry.
@@ -1641,6 +1647,8 @@ def fitCandidate(chunk_dirs, section_chunks, held_out, catalog_stars, config, ma
             default; False when the photometry of the platepar in use fails as well (e.g. haze), which is then
             refitted separately (see refitFailingPhotometry), so only the astrometry of the sections is
             judged.
+        fit_by: [str] Short label of what made the fit, for the fit record of the candidate.
+            'AutoCalibration' by default.
 
     Return:
         (platepar, info): [tuple] The candidate platepar (None if it could not be fitted) and a dictionary which
@@ -1720,7 +1728,18 @@ def fitCandidate(chunk_dirs, section_chunks, held_out, catalog_stars, config, ma
     if len(good) < MIN_SECTIONS:
         info['reason'] = 'only {:d} sections are good on the held-out chunks'.format(len(good))
         return None, info
-    fits = good
+
+    # Only sections that treat the annual aberration the same way can be compared (see sectionDifference). The
+    #   plate solver models it, so a section with the other setting (the minority) is left out
+    aberration = [bool(getattr(fit[2], 'aberration', False)) for fit in good]
+    aberration_used = 2*sum(aberration) >= len(aberration)
+    fits = [fit for fit, flag in zip(good, aberration) if flag == aberration_used]
+    if len(fits) < len(good):
+        log.warning("Auto calibration: {:d} sections left out, they treat the aberration differently from "
+                    "the others".format(len(good) - len(fits)))
+    if len(fits) < MIN_SECTIONS:
+        info['reason'] = 'only {:d} sections treat the aberration the same way'.format(len(fits))
+        return None, info
 
     # The width of the stars is the unit of the agreement (only the measured widths)
     fwhm = medianFWHM(section_chunks)
@@ -1754,6 +1773,11 @@ def fitCandidate(chunk_dirs, section_chunks, held_out, catalog_stars, config, ma
     info['photometry'] = section['photometry']
 
     platepar.auto_recalibrated = False
+
+    # The fit record names the automatic calibration, which fitted the section with the plate solver
+    for entry in (getattr(platepar, 'fit_record', None) or {}).values():
+        if isinstance(entry, dict):
+            entry['by'] = fit_by
 
     return platepar, info
 

@@ -33,6 +33,7 @@ cdef extern from "math.h":
     double hypot(double, double)
     double fmod(double, double)
     double M_PI "M_PI"
+    double exp(double)
 
 
 # Define Pi
@@ -156,12 +157,15 @@ def subsetCatalog(np.ndarray[FLOAT_TYPE_t, ndim=2] catalog_list, double ra_c, do
     # Define variables
     cdef int i, k
     cdef double dec_min, dec_max
-    cdef double ra, dec, mag, elev
+    cdef double ra, dec, mag, elev, lst
     cdef np.ndarray[FLOAT_TYPE_t, ndim=2] filtered_list = np.zeros(shape=(catalog_list.shape[0], \
         catalog_list.shape[1]), dtype=FLOAT_TYPE)
 
     cdef np.ndarray[INT_TYPE_t, ndim=1] filtered_indices = np.zeros(shape=(catalog_list.shape[0]), \
         dtype=INT_TYPE)
+
+    # Local sidereal time, the same for all stars
+    lst = radians(cyjd2LST(jd, lon))
 
     # Calculate minimum and maximum declination
     dec_min = dec_c - radius
@@ -191,7 +195,7 @@ def subsetCatalog(np.ndarray[FLOAT_TYPE_t, ndim=2] catalog_list, double ra_c, do
         if (angularSeparation(ra, dec, ra_c, dec_c) <= radius) and (mag <= mag_limit):
 
             # Compute the local star elevation
-            _, elev = cyraDec2AltAz(radians(ra), radians(dec), jd, radians(lat), radians(lon))
+            _, elev = raDec2AltAzLST(radians(ra), radians(dec), lst, radians(lat))
 
 
             # Only take stars above -5 degrees, if the filtering is on
@@ -212,34 +216,6 @@ def subsetCatalog(np.ndarray[FLOAT_TYPE_t, ndim=2] catalog_list, double ra_c, do
 
 
 
-
-
-
-@cython.cdivision(True)
-cdef double cyjd2LST(double jd, double lon):
-    """ Convert Julian date to apparent Local Sidereal Time. The times is apparent, not mean!
-
-    Source: J. Meeus: Astronomical Algorithms
-
-    Arguments:
-        jd: [float] Decimal julian date, epoch J2000.0.
-        lon: [float] Longitude of the observer in degrees.
-    
-    Return:
-        lst [float] Apparent Local Sidereal Time (deg).
-    """
-
-    cdef double gst
-
-    cdef double t = (jd - J2000_DAYS)/36525.0
-
-    # Calculate the Mean sidereal rotation of the Earth in radians (Greenwich Sidereal Time)
-    gst = 280.46061837 + 360.98564736629*(jd - J2000_DAYS) + 0.000387933*t**2 - (t**3)/38710000.0
-    gst = (gst + 360)%360
-
-
-    # Compute the apparent Local Sidereal Time (LST)
-    return (gst + lon + 360)%360
 
 
 
@@ -303,54 +279,6 @@ cpdef (double, double) equatorialCoordPrecession(double start_epoch, double fina
     return ra_corr, dec_corr
 
 
-@cython.boundscheck(False)
-@cython.wraparound(False)
-@cython.cdivision(True)
-cdef void precessionMatrix(double zeta, double theta, double z, double P[3][3]):
-    """ Calculate the precession matrix based on precession angles.
-
-    Arguments:
-        zeta: [double] Precession angle zeta in radians.
-        theta: [double] Precession angle theta in radians.
-        z: [double] Precession angle z in radians.
-        P: [double[3][3]] Output: a 3x3 rotation matrix representing the precession transformation.
-
-    Return:
-        None
-
-    Notes:
-        - This matrix is used to transform coordinates from one epoch to another, 
-          accounting for the precession of the Earth's rotational axis.
-        - The matrix is calculated using the formulation from the IAU 1976 precession model.
-        - Input angles should be calculated for the time span between the initial and final epochs.
-    """
-
-    # Sines and cosines of the precession angles
-    cdef double czeta = cos(zeta)
-    cdef double szeta = sin(zeta)
-    cdef double ctheta = cos(theta)
-    cdef double stheta = sin(theta)
-    cdef double cz = cos(z)
-    cdef double sz = sin(z)
-
-    # Calculate matrix elements
-    P[0][0] = czeta*ctheta*cz - szeta*sz
-    P[0][1] = -szeta*ctheta*cz - czeta*sz
-    P[0][2] = -stheta*cz
-    
-    P[1][0] = czeta*ctheta*sz + szeta*cz
-    P[1][1] = -szeta*ctheta*sz + czeta*cz
-    P[1][2] = -stheta*sz
-    
-    P[2][0] = czeta*stheta
-    P[2][1] = -szeta*stheta
-    P[2][2] = ctheta
-
-
-
-@cython.boundscheck(False)
-@cython.wraparound(False)
-@cython.cdivision(True)
 cdef (double, double) nutationComponents(double T):
     """ Calculate nutation corrections """
 
@@ -379,222 +307,464 @@ cdef (double, double) nutationComponents(double T):
     return delta_psi, delta_eps
 
 
-cdef inline double dotProduct3(double *a, double *b):
-    """ Dot product of two 3D vectors.
+
+cdef double meanObliquity(double T):
+    """ Mean obliquity of the ecliptic (Meeus, Astronomical Algorithms, eq. 22.2).
 
     Arguments:
-        a: [double[3]] First vector.
-        b: [double[3]] Second vector.
+        T: [float] Julian centuries since J2000.0.
 
     Return:
-        [double] The dot product.
+        eps: [float] Mean obliquity (radians).
     """
 
-    return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]
+    return radians(23.0 + 26.0/60.0 + 21.448/3600.0 - (46.8150*T + 0.00059*T*T - 0.001813*T*T*T)/3600.0)
 
 
-cdef inline void crossProduct3(double *a, double *b, double *out):
-    """ Cross product of two 3D vectors.
+cdef double equationOfEquinoxes(double jd):
+    """ Equation of the equinoxes: apparent minus mean sidereal time, dpsi*cos(eps), from the same nutation
+        series as the frame rotation below. Up to about 1.1 s of time, i.e. 15.8 arcsec of hour angle, over
+        the 18.6-year nutation cycle. Hour angles of true-of-date right ascensions must be taken against the
+        apparent sidereal time, otherwise the alt/az is off by this much.
 
     Arguments:
-        a: [double[3]] First vector.
-        b: [double[3]] Second vector.
-        out: [double[3]] Output: the cross product a x b.
+        jd: [float] Julian date.
 
     Return:
-        None
+        [float] Equation of the equinoxes (deg).
+
     """
 
-    out[0] = a[1]*b[2] - a[2]*b[1]
-    out[1] = a[2]*b[0] - a[0]*b[2]
-    out[2] = a[0]*b[1] - a[1]*b[0]
+    cdef double T, dpsi, deps
+
+    T = (jd - J2000_DAYS)/36525.0
+    dpsi, deps = nutationComponents(T)
+
+    return degrees(dpsi*cos(meanObliquity(T) + deps))
 
 
-cdef inline void matrixVectorProduct3(double M[3][3], double *v, double *out):
-    """ Product of a 3x3 matrix and a 3D vector.
+
+cpdef double cyjd2GST(double jd):
+    """ Apparent Greenwich sidereal time: the mean sidereal time (Meeus, Astronomical Algorithms, eq. 12.4)
+        plus the equation of the equinoxes. This is the sidereal time that goes with true-of-date right
+        ascensions, which is the frame of the platepar reference pointing and of trueOfDateFromJ2000.
+        JD2HourAngle and JD2LST in RMS.Astrometry.Conversions call this, so the three stay identical.
 
     Arguments:
-        M: [double[3][3]] Matrix.
-        v: [double[3]] Vector.
-        out: [double[3]] Output: the product M v (must not be v).
+        jd: [float] Julian date.
 
     Return:
-        None
+        [float] Apparent Greenwich sidereal time (deg), in [0, 360).
+
     """
 
-    cdef int i
+    cdef double gst
 
-    # Every element of the result is the dot product of a matrix row and the vector
-    for i in range(3):
-        out[i] = M[i][0]*v[0] + M[i][1]*v[1] + M[i][2]*v[2]
+    # Mean sidereal rotation of the Earth
+    gst = meanSiderealTime(jd)
+
+    # Apparent sidereal time
+    gst += equationOfEquinoxes(jd)
+
+    return (gst%360 + 360)%360
 
 
-cdef inline void normalizeVector3(double *v):
-    """ Normalize a 3D vector to unit length, in place.
+
+cdef double meanSiderealTime(double jd):
+    """ Mean Greenwich sidereal time (Meeus, Astronomical Algorithms, eq. 12.4), not normalized.
 
     Arguments:
-        v: [double[3]] Vector, normalized in place.
+        jd: [float] Julian date.
 
     Return:
-        None
+        [float] Mean Greenwich sidereal time (deg).
+
     """
 
-    cdef double norm = sqrt(dotProduct3(v, v))
+    cdef double t = (jd - J2000_DAYS)/36525.0
 
-    v[0] /= norm
-    v[1] /= norm
-    v[2] /= norm
+    return 280.46061837 + 360.98564736629*(jd - J2000_DAYS) + 0.000387933*t**2 - (t**3)/38710000.0
 
 
-@cython.boundscheck(False)
-@cython.wraparound(False)
-@cython.cdivision(True)
+
+cdef double cyjd2LST(double jd, double lon):
+    """ Apparent local sidereal time.
+
+    Arguments:
+        jd: [float] Julian date.
+        lon: [float] Longitude of the observer in degrees.
+
+    Return:
+        [float] Apparent local sidereal time (deg), in [0, 360).
+
+    """
+
+    return (cyjd2GST(jd) + lon + 360)%360
+
+
+
+cdef struct FrameRotation:
+    # Mean precession angles between the two epochs (Meeus, Astronomical Algorithms, eq. 21.2)
+    double zeta
+    double z
+    double theta
+    # Nutation of the start epoch, removed first (not applied when the start epoch is J2000)
+    bint nutate_start
+    double dpsi_start
+    double deps_start
+    double eps_start
+    # Nutation of the final epoch, applied last (not applied when the final epoch is J2000)
+    bint nutate_final
+    double dpsi_final
+    double deps_final
+    double eps_final
+
+
+
+cdef FrameRotation frameRotation(double start_epoch, double final_epoch):
+    """ Parameters of the rotation from the true equator and equinox of one epoch to that of another. J2000
+        (J2000_DAYS) is treated as the mean, catalog frame and gets no nutation. Evaluated once so that
+        several vectors can be rotated with the same parameters (see frameRotateVector).
+
+    Arguments:
+        start_epoch: [float] Julian date of the starting epoch.
+        final_epoch: [float] Julian date of the final epoch.
+
+    Return:
+        [FrameRotation] Precession angles and nutation components of both epochs.
+
+    """
+
+    cdef FrameRotation f
+    cdef double T
+
+    # Mean precession from the mean equinox of the start epoch to that of the final epoch
+    f = precessionRotation(start_epoch, final_epoch)
+
+    # Nutation of each epoch that is not J2000
+    f.nutate_start = start_epoch != J2000_DAYS
+    if f.nutate_start:
+        T = (start_epoch - J2000_DAYS)/36525.0
+        f.dpsi_start, f.deps_start = nutationComponents(T)
+        f.eps_start = meanObliquity(T)
+
+    f.nutate_final = final_epoch != J2000_DAYS
+    if f.nutate_final:
+        T = (final_epoch - J2000_DAYS)/36525.0
+        f.dpsi_final, f.deps_final = nutationComponents(T)
+        f.eps_final = meanObliquity(T)
+
+    return f
+
+
+
+cdef FrameRotation precessionRotation(double start_epoch, double final_epoch):
+    """ The mean precession part of frameRotation, without the nutation of either epoch.
+
+    Arguments:
+        start_epoch: [float] Julian date of the starting epoch.
+        final_epoch: [float] Julian date of the final epoch.
+
+    Return:
+        [FrameRotation] Precession angles, nutation off at both epochs.
+
+    """
+
+    cdef FrameRotation f
+    cdef double T, t
+
+    # Mean precession from the mean equinox of the start epoch to that of the final epoch
+    T = (start_epoch - J2000_DAYS)/36525.0
+    t = (final_epoch - start_epoch)/36525.0
+
+    f.zeta = radians(((2306.2181 + 1.39656*T - 0.000139*T**2)*t + (0.30188 - 0.000344*T)*t**2 \
+        + 0.017998*t**3)/3600)
+    f.z = radians(((2306.2181 + 1.39656*T - 0.000139*T**2)*t + (1.09468 + 0.000066*T)*t**2 \
+        + 0.018203*t**3)/3600)
+    f.theta = radians(((2004.3109 - 0.85330*T - 0.000217*T**2)*t - (0.42665 + 0.000217*T)*t**2 \
+        - 0.041833*t**3)/3600)
+
+    # No nutation
+    f.nutate_start = f.nutate_final = False
+    f.dpsi_start = f.deps_start = f.eps_start = 0.0
+    f.dpsi_final = f.deps_final = f.eps_final = 0.0
+
+    return f
+
+
+
+cdef (double, double, double) nutationRotate(double dpsi, double deps, double eps, double x, double y, \
+    double z, bint inverse):
+    """ Rotate a unit vector between the mean and the true equator and equinox of date.
+
+        Nutation is a rotation about the ecliptic pole by the nutation in longitude, combined with the
+        change of obliquity: N = R1(-(eps + deps)) * R3(-dpsi) * R1(eps) takes a vector from the mean
+        equator and equinox of date to the true equator and equinox of date (the frame the Earth actually
+        rotates in, and the one the sidereal time refers to). inverse=True applies N^T (true -> mean).
+
+    Arguments:
+        dpsi: [float] Nutation in longitude (radians).
+        deps: [float] Nutation in obliquity (radians).
+        eps: [float] Mean obliquity of the ecliptic (radians).
+        x, y, z: [float] Unit vector components (equatorial axes).
+        inverse: [bool] False: mean -> true, True: true -> mean.
+
+    Return:
+        (x, y, z): [tuple of floats] Rotated vector.
+
+    """
+
+    cdef double eps1, x1, y1, z1, x2, y2, z2
+
+    eps1 = eps + deps
+
+    if not inverse:
+
+        # R1(eps): rotate into the ecliptic frame
+        x1 = x
+        y1 = y*cos(eps) + z*sin(eps)
+        z1 = -y*sin(eps) + z*cos(eps)
+
+        # R3(-dpsi): nutation in longitude, about the ecliptic pole
+        x2 = x1*cos(dpsi) - y1*sin(dpsi)
+        y2 = x1*sin(dpsi) + y1*cos(dpsi)
+        z2 = z1
+
+        # R1(-(eps + deps)): back to the equator, with the nutated obliquity
+        return x2, y2*cos(eps1) - z2*sin(eps1), y2*sin(eps1) + z2*cos(eps1)
+
+    else:
+
+        # N^T = R1(-eps) * R3(dpsi) * R1(eps + deps)
+        x1 = x
+        y1 = y*cos(eps1) + z*sin(eps1)
+        z1 = -y*sin(eps1) + z*cos(eps1)
+
+        x2 = x1*cos(dpsi) + y1*sin(dpsi)
+        y2 = -x1*sin(dpsi) + y1*cos(dpsi)
+        z2 = z1
+
+        return x2, y2*cos(eps) - z2*sin(eps), y2*sin(eps) + z2*cos(eps)
+
+
+
+cdef (double, double, double) frameRotateVector(FrameRotation f, double x, double y, double z):
+    """ Rotate a unit vector from the true equator and equinox of the start epoch to that of the final
+        epoch: nutation of the start epoch removed, mean precession applied, nutation of the final epoch
+        added. The precession is the same Meeus formulation as equatorialCoordPrecession, written for a
+        vector: R3(-z) * R2(theta) * R3(-zeta).
+
+    Arguments:
+        f: [FrameRotation] Parameters from frameRotation().
+        x, y, z: [float] Unit vector components (equatorial axes).
+
+    Return:
+        (x, y, z): [tuple of floats] Rotated vector.
+
+    """
+
+    cdef double x1, y1, z1, a, b, c
+
+    if f.nutate_start:
+        x, y, z = nutationRotate(f.dpsi_start, f.deps_start, f.eps_start, x, y, z, True)
+
+    # R3(-zeta): right ascension increases by zeta
+    x1 = x*cos(f.zeta) - y*sin(f.zeta)
+    y1 = x*sin(f.zeta) + y*cos(f.zeta)
+    z1 = z
+
+    # R2(theta): tilt towards the new pole (the A, B, C of Meeus eq. 21.4)
+    a = y1
+    b = cos(f.theta)*x1 - sin(f.theta)*z1
+    c = sin(f.theta)*x1 + cos(f.theta)*z1
+
+    # R3(-z): right ascension increases by z
+    x = b*cos(f.z) - a*sin(f.z)
+    y = b*sin(f.z) + a*cos(f.z)
+    z = c
+
+    if f.nutate_final:
+        x, y, z = nutationRotate(f.dpsi_final, f.deps_final, f.eps_final, x, y, z, False)
+
+    return x, y, z
+
+
+
+cdef (double, double) frameRotateRaDec(FrameRotation f, double ra, double dec):
+    """ frameRotateVector for a direction given as right ascension and declination.
+
+    Arguments:
+        f: [FrameRotation] Parameters from frameRotation().
+        ra: [float] Right ascension in the start frame (radians).
+        dec: [float] Declination in the start frame (radians).
+
+    Return:
+        (ra, dec): [tuple of floats] Right ascension and declination in the final frame (radians).
+
+    """
+
+    cdef double x, y, z
+
+    x, y, z = frameRotateVector(f, cos(dec)*cos(ra), cos(dec)*sin(ra), sin(dec))
+
+    return (atan2(y, x) + 2*pi)%(2*pi), atan2(z, sqrt(x*x + y*y))
+
+
+
+cpdef (double, double) trueOfDateFromJ2000(double jd, double ra, double dec):
+    """ Catalog (mean J2000) right ascension and declination -> true equator and equinox of date, i.e.
+        precession followed by nutation. This is the frame that goes with the apparent sidereal time when
+        computing hour angles and alt/az, and the frame in which the platepar reference pointing RA_d/dec_d
+        is expressed.
+
+    Arguments:
+        jd: [float] Julian date of the epoch of date.
+        ra: [float] Right ascension (radians, J2000).
+        dec: [float] Declination (radians, J2000).
+
+    Return:
+        (ra, dec): [tuple of floats] True equatorial coordinates of date (radians).
+
+    """
+
+    return frameRotateRaDec(frameRotation(J2000_DAYS, jd), ra, dec)
+
+
+
+cpdef (double, double) j2000FromTrueOfDate(double jd, double ra, double dec):
+    """ Inverse of trueOfDateFromJ2000: true equator and equinox of date -> catalog (mean J2000)
+        coordinates.
+
+    Arguments:
+        jd: [float] Julian date of the epoch of date.
+        ra: [float] Right ascension (radians, true of date).
+        dec: [float] Declination (radians, true of date).
+
+    Return:
+        (ra, dec): [tuple of floats] J2000 equatorial coordinates (radians).
+
+    """
+
+    return frameRotateRaDec(frameRotation(jd, J2000_DAYS), ra, dec)
+
+
+
+cdef struct DateFrame:
+    # Everything in a J2000 <-> alt/az conversion that depends only on the time and the longitude. The
+    #   kernels evaluate it once per Julian date instead of once per point (see dateFrame).
+    FrameRotation to_date
+    FrameRotation to_j2000
+    double lst
+    double gst
+
+
+
+cdef DateFrame dateFrame(double jd, double lon):
+    """ Frame rotations and sidereal times for the given time and place.
+
+    Arguments:
+        jd: [float] Julian date.
+        lon: [float] Longitude of the observer in radians.
+
+    Return:
+        [DateFrame] J2000 -> true of date and true of date -> J2000 rotations, and the local and the
+            Greenwich apparent sidereal time (radians).
+
+    """
+
+    cdef DateFrame d
+    cdef double T, dpsi, deps, eps, gst
+
+    # The nutation of the date, evaluated once for both rotations and the sidereal time
+    T = (jd - J2000_DAYS)/36525.0
+    dpsi, deps = nutationComponents(T)
+    eps = meanObliquity(T)
+
+    # J2000 -> true of date and back: the mean precession both ways, with the nutation of the date (none at
+    #   J2000 itself, as in frameRotation)
+    d.to_date = precessionRotation(J2000_DAYS, jd)
+    d.to_j2000 = precessionRotation(jd, J2000_DAYS)
+    if jd != J2000_DAYS:
+        d.to_date.nutate_final = True
+        d.to_date.dpsi_final, d.to_date.deps_final, d.to_date.eps_final = dpsi, deps, eps
+        d.to_j2000.nutate_start = True
+        d.to_j2000.dpsi_start, d.to_j2000.deps_start, d.to_j2000.eps_start = dpsi, deps, eps
+
+    # Apparent sidereal time, mean plus the equation of the equinoxes (as cyjd2GST), for Greenwich and the
+    #   observer (as cyjd2LST(jd, 0) and cyjd2LST(jd, lon))
+    gst = meanSiderealTime(jd)
+    gst += degrees(dpsi*cos(eps + deps))
+    gst = (gst%360 + 360)%360
+    d.lst = radians((gst + degrees(lon) + 360)%360)
+    d.gst = radians((gst + 360)%360)
+
+    return d
+
+
+
 cpdef (double, double, double) equatorialCoordAndRotPrecession(double start_epoch, double final_epoch,
                                                                double ra, double dec, double rot_angle):
-    """ Corrects Right Ascension, Declination, and Rotation wrt Standard angle from one epoch to another,
-    taking only precession into account.
-    
+    """ Transforms right ascension, declination and the rotation wrt standard angle (pos_angle_ref) from
+        the true equator and equinox of one epoch to that of another, with the same rotation as
+        trueOfDateFromJ2000 / j2000FromTrueOfDate. The rotation angle changes by the angle between the two
+        frames' north directions at the transformed point, so a gnomonic projection defined in one frame is
+        exactly the same projection in the other.
+
     Arguments:
         start_epoch: [float] Julian date of the starting epoch.
         final_epoch: [float] Julian date of the final epoch.
         ra: [float] Input right ascension (radians).
         dec: [float] Input declination (radians).
         rot_angle [float] the rotation wrt Standard angle, aka pos_angle_ref (radians).
-    
+
     Return:
-        (ra, dec, rot_angle): [tuple of floats] Precessed equatorial coordinates and rotation angle (radians).
+        (ra, dec, rot_angle): [tuple of floats] Precessed equatorial coordinates and rotation angle
+            (radians).
+
     """
-    
-    # Don't precess if the start and final epoch are the same
+
+    # Don't transform if the start and final epoch are the same
     if start_epoch == final_epoch:
         return ra, dec, rot_angle
 
-    # The vectors and matrices are plain C arrays: small numpy arrays made this function, which is called for
-    #   every coordinate conversion, several times more expensive
-    cdef:
-        double initial_vector[3]
-        double transformed_vector[3]
-        double nutated_vector[3]
-        double parallel_vec[3]
-        double parallel_vec_precessed[3]
-        double normal_vector[3]
-        double transformed_normal[3]
-        double proj_parallel[3]
-        double proj_parallel_precessed[3]
-        double cross_vec[3]
-        double P[3][3]
-        double epsilon_matrix[3][3]
-        double psi_matrix[3][3]
-        double parallel_dot, distance
-
-        double ra_precessed, dec_precessed, T, t, zeta, z, theta, Delta_psi, Delta_epsilon
-        double new_rot_angle, angle1, angle2, rotation_change
-        int i
-
-    # Calculate precession parameters
-    T = (start_epoch - 2451545.0)/36525.0  # J2000.0 epoch
-    t = (final_epoch - start_epoch)/36525.0
-
-    # Calculate correction parameters in degrees
-    zeta = ((2306.2181 + 1.39656*T - 0.000139*T ** 2)*t + (0.30188 - 0.000344*T)*t ** 2 + 0.017998*t ** 3)/3600
-    z = ((2306.2181 + 1.39656*T - 0.000139*T ** 2)*t + (1.09468 + 0.000066*T)*t ** 2 + 0.018203*t ** 3)/3600
-    theta = ((2004.3109 - 0.85330*T - 0.000217*T ** 2)*t - (0.42665 + 0.000217*T)*t ** 2 - 0.041833*t ** 3)/3600
-
-    # Convert parameters to radians
-    zeta = radians(zeta)
-    z = radians(z)
-    theta = radians(theta)
-
-    # Calculate precession matrix
-    precessionMatrix(zeta, theta, z, P)
-
-    # Convert RA, Dec to cartesian coordinates (as raDecToCartesian)
-    initial_vector[0] = cos(dec)*cos(ra)
-    initial_vector[1] = cos(dec)*sin(ra)
-    initial_vector[2] = sin(dec)
-
-    # Apply precession
-    matrixVectorProduct3(P, initial_vector, transformed_vector)
+    return frameRotateRaDecRot(frameRotation(start_epoch, final_epoch), ra, dec, rot_angle)
 
 
 
-    # Calculate nutation corrections
-    Delta_psi, Delta_epsilon = nutationComponents(T)
+cdef (double, double, double) frameRotateRaDecRot(FrameRotation f, double ra, double dec, double rot_angle):
+    """ equatorialCoordAndRotPrecession with the frame rotation (frameRotation) given instead of the two
+        epochs, so that it is evaluated once per Julian date.
 
-    # Construct the nutation matrices
-    epsilon_matrix[0][0], epsilon_matrix[0][1], epsilon_matrix[0][2] = 1, 0, 0
-    epsilon_matrix[1][0], epsilon_matrix[1][1], epsilon_matrix[1][2] = 0, cos(Delta_epsilon), sin(Delta_epsilon)
-    epsilon_matrix[2][0], epsilon_matrix[2][1], epsilon_matrix[2][2] = 0, -sin(Delta_epsilon), cos(Delta_epsilon)
+    Arguments:
+        f: [FrameRotation] Parameters from frameRotation().
+        ra: [float] Input right ascension (radians).
+        dec: [float] Input declination (radians).
+        rot_angle: [float] The rotation wrt standard angle, aka pos_angle_ref (radians).
 
-    psi_matrix[0][0], psi_matrix[0][1], psi_matrix[0][2] = cos(Delta_psi), -sin(Delta_psi), 0
-    psi_matrix[1][0], psi_matrix[1][1], psi_matrix[1][2] = sin(Delta_psi), cos(Delta_psi), 0
-    psi_matrix[2][0], psi_matrix[2][1], psi_matrix[2][2] = 0, 0, 1
+    Return:
+        (ra, dec, rot_angle): [tuple of floats] Transformed equatorial coordinates and rotation angle
+            (radians).
 
-    # Apply nutation (obliquity first, then longitude)
-    matrixVectorProduct3(epsilon_matrix, transformed_vector, nutated_vector)
-    matrixVectorProduct3(psi_matrix, nutated_vector, transformed_vector)
+    """
 
+    cdef double x, y, z, nx, ny, nz, ra_precessed, dec_precessed, rotation_change, new_rot_angle
+    cdef double ex, ey, px, py, pz
 
-    # Calculate normal vector to the plane of precession
-    crossProduct3(initial_vector, transformed_vector, normal_vector)
-    matrixVectorProduct3(P, normal_vector, transformed_normal)
+    # Pointing direction, and the local north direction at it (a physical direction fixed to the sensor)
+    x, y, z = frameRotateVector(f, cos(dec)*cos(ra), cos(dec)*sin(ra), sin(dec))
+    nx, ny, nz = frameRotateVector(f, -sin(dec)*cos(ra), -sin(dec)*sin(ra), cos(dec))
 
-    # Normalize vectors
-    normalizeVector3(initial_vector)
-    normalizeVector3(transformed_vector)
-    normalizeVector3(normal_vector)
-    normalizeVector3(transformed_normal)
+    # Transformed pointing
+    ra_precessed = (atan2(y, x) + 2*pi)%(2*pi)
+    dec_precessed = atan2(z, sqrt(x*x + y*y))
 
-    # Convert precessed vector back to RA, Dec (as cartesianToRaDec)
-    distance = hypot(hypot(transformed_vector[0], transformed_vector[1]), transformed_vector[2])
-    if distance == 0:
-        ra_precessed, dec_precessed = 0.0, 0.0
-    else:
-        ra_precessed = fmod(atan2(transformed_vector[1], transformed_vector[0]) + 2*M_PI, 2*M_PI)
-        dec_precessed = asin(transformed_vector[2]/distance)
-
-    # Calculate vector tangent to the parallel of declination
-    parallel_vec[0], parallel_vec[1], parallel_vec[2] = -sin(ra), cos(ra), 0
-    parallel_vec_precessed[0], parallel_vec_precessed[1], parallel_vec_precessed[2] = -sin(ra_precessed), \
-        cos(ra_precessed), 0
-
-    # Project parallel vectors onto the plane perpendicular to the line of sight
-    parallel_dot = dotProduct3(parallel_vec, initial_vector)
-    for i in range(3):
-        proj_parallel[i] = parallel_vec[i] - parallel_dot*initial_vector[i]
-
-    parallel_dot = dotProduct3(parallel_vec_precessed, transformed_vector)
-    for i in range(3):
-        proj_parallel_precessed[i] = parallel_vec_precessed[i] - parallel_dot*transformed_vector[i]
-
-    # Normalize projected vectors
-    normalizeVector3(proj_parallel)
-    normalizeVector3(proj_parallel_precessed)
-
-    # Calculate the angles between the normal vector and projected parallels
-    # in the plane perpendicular to the line of sight (sensor plane).
-    #
-    # The normal vectors are fixed relative to the camera sensor.
-    # The projected parallels represent how the celestial parallels appear on the sensor plane.
-    #
-    # Since the rotationWrtStandard function computes pos_angle_ref as the angle between
-    # a row of pixels and the parallel passing through the center of the FOV,
-    # we want to determine how precession affects this angle.
-    #
-    # By comparing these angles before and after precession, we can quantify
-    # the change in field orientation due to precession.
-
-    # Angle for the initial position
-    crossProduct3(normal_vector, proj_parallel, cross_vec)
-    angle1 = atan2(dotProduct3(cross_vec, initial_vector), dotProduct3(normal_vector, proj_parallel))
-
-    # Angle for the precessed position
-    crossProduct3(transformed_normal, proj_parallel_precessed, cross_vec)
-    angle2 = atan2(dotProduct3(cross_vec, transformed_vector), dotProduct3(transformed_normal,
-        proj_parallel_precessed))
-
-    # Calculate the change in angle
-    rotation_change = angle2 - angle1
+    # The transported north direction, measured against the final frame's east and north at the new
+    #   point, gives the rotation of the field: this is how much a row of pixels turns relative to the
+    #   local parallel
+    ex, ey = -sin(ra_precessed), cos(ra_precessed)
+    px, py, pz = -sin(dec_precessed)*cos(ra_precessed), -sin(dec_precessed)*sin(ra_precessed), \
+        cos(dec_precessed)
+    rotation_change = atan2(nx*ex + ny*ey, nx*px + ny*py + nz*pz)
 
     # Apply the rotation change to the initial rotation angle
     new_rot_angle = rot_angle + rotation_change
@@ -602,59 +772,278 @@ cpdef (double, double, double) equatorialCoordAndRotPrecession(double start_epoc
     # Normalize the new rotation angle to be between -pi and pi
     new_rot_angle = fmod(new_rot_angle + M_PI, 2*M_PI) - M_PI
 
-    # print("Rotation change due to precession: {} arcmin".format(degrees(rotation_change) * 60))
-
     return ra_precessed, dec_precessed, new_rot_angle
+
+
+# International Standard Atmosphere in the troposphere: T/T0 = 1 - ISA_LAPSE*h and
+#   P/P0 = (T/T0)**ISA_PRESSURE_EXP, so the refractivity of the air (n - 1), proportional to P/T, falls as
+#   (T/T0)**(ISA_PRESSURE_EXP - 1). Above the tropopause the temperature is constant and the pressure
+#   falls exponentially.
+cdef double ISA_LAPSE = 2.25577e-5
+cdef double ISA_PRESSURE_EXP = 5.25588
+cdef double ISA_TROPOPAUSE = 11000.0
+cdef double ISA_STRATOSPHERE_SCALE = 6341.6
+
+
+cdef double isaRefractivity(double h):
+    """ Refractivity of the International Standard Atmosphere at the given height, relative to sea level.
+
+    Arguments:
+        h: [float] Height above sea level (m).
+
+    Return:
+        [float] Refractivity (n - 1) relative to its sea-level value.
+
+    """
+
+    cdef double refractivity_tropopause
+
+    # Keep the profile defined below sea level
+    if h < -500.0:
+        h = -500.0
+
+    # In the troposphere the refractivity falls as a power of the temperature ratio
+    if h <= ISA_TROPOPAUSE:
+        return (1.0 - ISA_LAPSE*h)**(ISA_PRESSURE_EXP - 1.0)
+
+    # Above the tropopause the temperature is constant, so the refractivity follows the pressure
+    refractivity_tropopause = (1.0 - ISA_LAPSE*ISA_TROPOPAUSE)**(ISA_PRESSURE_EXP - 1.0)
+
+    return refractivity_tropopause*exp(-(h - ISA_TROPOPAUSE)/ISA_STRATOSPHERE_SCALE)
+
+
+cdef double isaRefractivityIntegral(double h):
+    """ Integral of the relative ISA refractivity from sea level up to the given height.
+
+    Arguments:
+        h: [float] Height above sea level (m).
+
+    Return:
+        [float] Integral (m). Tends to 8434 m for large heights.
+
+    """
+
+    cdef double j_tropopause, tail_scale
+
+    # Keep the profile defined below sea level
+    if h < -500.0:
+        h = -500.0
+
+    # Closed form of the troposphere power law
+    if h <= ISA_TROPOPAUSE:
+        return (1.0 - (1.0 - ISA_LAPSE*h)**ISA_PRESSURE_EXP)/(ISA_LAPSE*ISA_PRESSURE_EXP)
+
+    # Above the tropopause, add the exponential tail to the integral up to the tropopause
+    j_tropopause = (1.0 - (1.0 - ISA_LAPSE*ISA_TROPOPAUSE)**ISA_PRESSURE_EXP)/(ISA_LAPSE*ISA_PRESSURE_EXP)
+    tail_scale = isaRefractivity(ISA_TROPOPAUSE)*ISA_STRATOSPHERE_SCALE
+
+    return j_tropopause + tail_scale*(1.0 - exp(-(h - ISA_TROPOPAUSE)/ISA_STRATOSPHERE_SCALE))
+
+
+cpdef double refractionScale(double elev_obs):
+    """ Scale of the atmospheric refraction at the observer's height, relative to sea level. The refraction
+        is proportional to the refractivity of the air at the observer, i.e. to its pressure over
+        temperature, taken here from the International Standard Atmosphere: 1.0 at sea level, 0.93 at 700 m,
+        0.82 at 2000 m and 0.76 at 2800 m. The weather is not modelled, and +-10 K or +-10 hPa change the
+        refraction by about 3.5% or 1%.
+
+    Arguments:
+        elev_obs: [float] Height of the observer above sea level (m).
+
+    Return:
+        [float] Factor to multiply the sea-level refraction with.
+
+    """
+
+    # Clamp to the tropopause, above which the ground-observer model no longer applies
+    if elev_obs > ISA_TROPOPAUSE:
+        elev_obs = ISA_TROPOPAUSE
+
+    return isaRefractivity(elev_obs)
+
+
+cpdef double refractionTargetFraction(double elev_obs, double target_height):
+    """ Fraction of the refraction of a star that applies to a target at a finite height, e.g. a meteor.
+        The light from a target inside or just above the atmosphere is bent only by the air between the
+        target and the observer, and the straight line to the target differs from the arrival direction of
+        the light by the path average of the bending accumulated along the way. With the ISA refractivity
+        profile this gives, seen from sea level: 1 for a star, 0.92 for a meteor at 100 km, 0.72 for a
+        target at 30 km and 0.38 for a target at 10 km. Beyond the atmosphere the fraction keeps growing
+        towards 1 as 1 - 8.4 km/height, without a jump, and is exactly 1 for an infinite height.
+
+        Flat-atmosphere approximation, independent of the elevation angle. Compared with a ray trace
+        through the US Standard Atmosphere, it is within 2% of the star refraction for targets below
+        30 km at any elevation; for targets at 100 km and higher it is within 0.6 arcsec at 20 deg elevation
+        and above, 1.5-4 arcsec at 10 deg and up to 17 arcsec at 5 deg, where the curvature of the Earth
+        starts to matter. For such targets it should not be used much below 15-20 deg elevation.
+
+        Only valid for a target above the observer. The closed form breaks down for a target below the
+        observer, where the mean refractivity along the path exceeds the one at the observer and the
+        fraction comes out negative, so that case returns 0.
+
+    Arguments:
+        elev_obs: [float] Height of the observer above sea level (m).
+        target_height: [float] Height of the target above sea level (m). Infinity means a star.
+
+    Return:
+        [float] Factor in [0, 1] to multiply the star refraction with (on top of refractionScale).
+
+    """
+
+    cdef double height_diff, path_integral
+
+    # Clamp to the tropopause, above which the ground-observer model no longer applies
+    if elev_obs > ISA_TROPOPAUSE:
+        elev_obs = ISA_TROPOPAUSE
+
+    height_diff = target_height - elev_obs
+
+    # No air between the observer and the target, or a target below the observer (see the note above)
+    if height_diff <= 1.0:
+        return 0.0
+
+    # Refractivity integrated over the path, relative to the refractivity at the observer. It is finite
+    #   for an infinite height, so a star comes out with exactly the full refraction
+    path_integral = isaRefractivityIntegral(target_height) - isaRefractivityIntegral(elev_obs)
+
+    return 1.0 - path_integral/(height_diff*isaRefractivity(elev_obs))
 
 
 
 @cython.cdivision(True)
-cdef double refractionApparentToTrue(double elev):
-    """ Correct the apparent elevation of a star for refraction to true elevation. The temperature and air
-        pressure are assumed to be unknown. 
+cdef (double, double) bennettRefraction(double elev, double refraction_scale):
+    """ Atmospheric refraction at the given apparent elevation, and its derivative with respect to that
+        elevation. Standard conditions at sea level; the observer's height enters through the scale. The
+        derivative is returned alongside because inverting the formula (refractionTrueToApparent) needs it
+        and it costs only a few operations once the tangent has been computed.
 
         Source: Explanatory Supplement to the Astronomical Almanac (1992), p. 144.
 
     Arguments:
         elev: [float] Apparent elevation (radians).
+        refraction_scale: [float] Scale of the refraction for the observer's height, from
+            refractionScale().
+
+    Return:
+        (refraction, derivative): [tuple]
+            refraction: [float] Refraction to subtract from the apparent elevation (radians).
+            derivative: [float] Derivative of the refraction with respect to the apparent elevation.
+
+    """
+
+    cdef double elev_deg, arg_slope, cotangent, refraction
+
+    # Don't apply refraction for elevations below -0.5 deg. The refraction is held at its value there, so
+    #   it no longer varies with the elevation and its derivative is zero.
+    if elev <= radians(-0.5):
+        elev_deg = -0.5
+        arg_slope = 0.0
+
+    else:
+        elev_deg = degrees(elev)
+        arg_slope = 1.0 - 7.31/(elev_deg + 4.4)**2
+
+    # Bennett's formula gives the refraction in arc minutes
+    cotangent = 1.0/tan(radians(elev_deg + 7.31/(elev_deg + 4.4)))
+    refraction = refraction_scale*radians(cotangent/60)
+
+    # d(cot x)/dx = -(1 + cot**2 x), and the degree-to-radian conversions of the two elevations cancel
+    return (refraction, -refraction_scale*radians((1.0 + cotangent*cotangent)*arg_slope/60))
+
+
+
+cdef double refractionApparentToTrue(double elev, double refraction_scale=1.0):
+    """ Correct the apparent elevation of a star for refraction to true elevation. Standard conditions at
+        sea level (Bennett's formula); the observer's height is taken into account through the scale.
+
+    Arguments:
+        elev: [float] Apparent elevation (radians).
+
+    Keyword arguments:
+        refraction_scale: [float] Scale of the refraction for the observer's height, from
+            refractionScale(). 1.0 by default (sea level). Multiply by refractionTargetFraction() for a
+            target at a finite height.
 
     Return:
         [float] True elevation (radians).
 
     """
 
-    cdef double refraction, elev_calc
+    cdef double refraction, derivative
 
-    # Don't apply refraction for elevations below -0.5 deg
-    if elev <= radians(-0.5):
-        elev_calc = radians(-0.5)
-    else:
-        elev_calc = elev
-
-    # Refraction in radians
-    refraction = radians(1.0/(60*tan(radians(degrees(elev_calc) + 7.31/(degrees(elev_calc) + 4.4)))))
+    refraction, derivative = bennettRefraction(elev, refraction_scale)
 
     # Correct the elevation
     return elev - refraction
 
 
 
-cpdef double pyRefractionApparentToTrue(double elev):
+cpdef double pyRefractionApparentToTrue(double elev, double refraction_scale=1.0):
     """ Python version of the refraction correction (apparent to true).
 
     Arguments:
         elev: [float] Apparent elevation (radians).
+
+    Keyword arguments:
+        refraction_scale: [float] Scale of the refraction for the observer's height, from
+            refractionScale(). 1.0 by default (sea level).
 
     Return:
         [float] True elevation (radians).
 
     """
 
-    return refractionApparentToTrue(elev)
+    return refractionApparentToTrue(elev, refraction_scale)
 
 
 
-cpdef (double, double) eqRefractionApparentToTrue(double ra, double dec, double jd, double lat, double lon):
+cdef (double, double) eqRefraction(DateFrame d, double ra, double dec, double lat, bint true_to_apparent, \
+    double refraction_scale):
+    """ Refract J2000 equatorial coordinates at their altitude. The body of eqRefractionApparentToTrue and
+        eqRefractionTrueToApparent, with the frame rotations and the sidereal time taken from a DateFrame so
+        that the kernels compute them once per Julian date.
+
+    Arguments:
+        d: [DateFrame] From dateFrame() for the time and the observer's longitude.
+        ra: [float] J2000 right ascension in radians.
+        dec: [float] J2000 declination in radians.
+        lat: [float] Latitude in radians.
+        true_to_apparent: [bool] True: true -> apparent, False: apparent -> true.
+        refraction_scale: [float] Scale of the refraction for the observer's height, from
+            refractionScale().
+
+    Return:
+        (ra, dec): [tuple of floats] Refracted J2000 right ascension and declination in radians.
+
+    """
+
+    cdef double azim, alt
+
+    # Precession and nutation: J2000 -> true equator and equinox of date, the frame of the sidereal time
+    ra, dec = frameRotateRaDec(d.to_date, ra, dec)
+
+    # Convert coordinates to alt/az
+    azim, alt = raDec2AltAzLST(ra, dec, d.lst, lat)
+
+    # Correct the elevation
+    if true_to_apparent:
+        alt = refractionTrueToApparent(alt, refraction_scale)
+    else:
+        alt = refractionApparentToTrue(alt, refraction_scale)
+
+    # Convert back to equatorial
+    ra, dec = altAz2RADecLST(azim, alt, d.lst, lat)
+
+    # Nutation and precession: true equator and equinox of date -> J2000
+    ra, dec = frameRotateRaDec(d.to_j2000, ra, dec)
+
+
+    return (ra, dec)
+
+
+
+cpdef (double, double) eqRefractionApparentToTrue(double ra, double dec, double jd, double lat, double lon, \
+    double refraction_scale=1.0):
     """ Correct the equatorial coordinates for refraction. The correction is done from apparent to true
         coordinates.
     
@@ -665,6 +1054,10 @@ cpdef (double, double) eqRefractionApparentToTrue(double ra, double dec, double 
         lat: [float] latitude in radians.
         lon: [float] longitude in radians.
 
+    Keyword arguments:
+        refraction_scale: [float] Scale of the refraction for the observer's height, from
+            refractionScale(). 1.0 by default (sea level).
+
     Return:
         (ra, dec):
             - ra: [float] Refraction corrected (true) right ascension in radians.
@@ -672,75 +1065,76 @@ cpdef (double, double) eqRefractionApparentToTrue(double ra, double dec, double 
 
     """
 
-    cdef double azim, alt
-
-    # Precess RA/Dec from J2000 to the epoch of date
-    ra, dec = equatorialCoordPrecession(J2000_DAYS, jd, ra, dec)
-
-    # Convert coordinates to alt/az
-    azim, alt = cyraDec2AltAz(ra, dec, jd, lat, lon)
-
-    # Correct the elevation
-    alt = refractionApparentToTrue(alt)
-
-    # Convert back to equatorial
-    ra, dec = cyaltAz2RADec(azim, alt, jd, lat, lon)
-
-    # Precess RA/Dec from the epoch of date to J2000
-    ra, dec = equatorialCoordPrecession(jd, J2000_DAYS, ra, dec)
-
-
-    return (ra, dec)
+    return eqRefraction(dateFrame(jd, lon), ra, dec, lat, False, refraction_scale)
 
 
 
 @cython.cdivision(True)
-cdef double refractionTrueToApparent(double elev):
-    """ Correct the true elevation of a star for refraction to apparent elevation. The temperature and air
-        pressure are assumed to be unknown. 
+cdef double refractionTrueToApparent(double elev, double refraction_scale=1.0):
+    """ Correct the true elevation of a star for refraction to apparent elevation, as the exact inverse of
+        refractionApparentToTrue, so that the two directions close on each other.
 
-        Source: https://en.wikipedia.org/wiki/Atmospheric_refraction
+        Solves elev_app - refraction(elev_app) = elev for elev_app by Newton's method on Bennett's formula.
+        The refraction is smooth and its derivative is at most 0.263 in magnitude at sea level (at -0.5 deg,
+        the lowest elevation the formula is evaluated at), so two or three steps reach double precision at
+        any elevation, the horizon included.
 
     Arguments:
-        elev: [float] Apparent elevation (radians).
+        elev: [float] True elevation (radians).
+
+    Keyword arguments:
+        refraction_scale: [float] Scale of the refraction for the observer's height, from
+            refractionScale(). 1.0 by default (sea level). Multiply by refractionTargetFraction() for a
+            target at a finite height.
 
     Return:
-        [float] True elevation (radians).
+        [float] Apparent elevation (radians).
 
     """
 
-    cdef double refraction, elev_calc
+    cdef double elev_app, refraction, derivative, step
+    cdef int i
 
-    # Don't apply refraction for elevation below -0.5 deg
-    if elev <= radians(-0.5):
-        elev_calc = radians(-0.5)
-    else:
-        elev_calc = elev
+    elev_app = elev
 
-    # Refraction in radians
-    refraction = radians(1.02/(60*tan(radians(degrees(elev_calc) + 10.3/(degrees(elev_calc) + 5.11)))))
+    for i in range(10):
 
-    # Apply the refraction
-    return elev + refraction
+        refraction, derivative = bennettRefraction(elev_app, refraction_scale)
+
+        # Newton step on elev_app - refraction(elev_app) - elev
+        step = (elev + refraction - elev_app)/(1.0 - derivative)
+        elev_app += step
+
+        # Newton converges quadratically: after a step below 1e-8 rad the error left is of the order of
+        #   1e-15 rad (1e-10 arcsec), so another evaluation would not change the result in practice
+        if fabs(step) < 1e-8:
+            break
+
+    return elev_app
 
 
 
-cpdef double pyRefractionTrueToApparent(double elev):
+cpdef double pyRefractionTrueToApparent(double elev, double refraction_scale=1.0):
     """ Python version of the refraction correction (true to apparent).
 
     Arguments:
-        elev: [float] Apparent elevation (radians).
+        elev: [float] True elevation (radians).
+
+    Keyword arguments:
+        refraction_scale: [float] Scale of the refraction for the observer's height, from
+            refractionScale(). 1.0 by default (sea level).
 
     Return:
-        [float] True elevation (radians).
+        [float] Apparent elevation (radians).
 
     """
 
-    return refractionTrueToApparent(elev)
+    return refractionTrueToApparent(elev, refraction_scale)
 
 
 
-cpdef (double, double) eqRefractionTrueToApparent(double ra, double dec, double jd, double lat, double lon):
+cpdef (double, double) eqRefractionTrueToApparent(double ra, double dec, double jd, double lat, double lon, \
+    double refraction_scale=1.0):
     """ Correct the equatorial coordinates for refraction. The correction is done from true to apparent
         coordinates.
     
@@ -751,6 +1145,10 @@ cpdef (double, double) eqRefractionTrueToApparent(double ra, double dec, double 
         lat: [float] Latitude in radians.
         lon: [float] Longitude in radians.
 
+    Keyword arguments:
+        refraction_scale: [float] Scale of the refraction for the observer's height, from
+            refractionScale(). 1.0 by default (sea level).
+
     Return:
         (ra, dec):
             - ra: [float] Apparent right ascension in radians.
@@ -758,29 +1156,10 @@ cpdef (double, double) eqRefractionTrueToApparent(double ra, double dec, double 
 
     """
 
-    cdef double azim, alt
-
-    # Precess RA/Dec from J2000 to the epoch of date
-    ra, dec = equatorialCoordPrecession(J2000_DAYS, jd, ra, dec)
-
-    # Convert coordinates to alt/az
-    azim, alt = cyraDec2AltAz(ra, dec, jd, lat, lon)
-
-    # Correct the elevation
-    alt = refractionTrueToApparent(alt)
-
-    # Convert back to equatorial
-    ra, dec = cyaltAz2RADec(azim, alt, jd, lat, lon)
-
-    # Precess RA/Dec from the epoch of date to J2000
-    ra, dec = equatorialCoordPrecession(jd, J2000_DAYS, ra, dec)
-
-
-    return (ra, dec)
+    return eqRefraction(dateFrame(jd, lon), ra, dec, lat, True, refraction_scale)
 
 
 
-@cython.cdivision(True)
 cpdef (double, double) cyraDec2AltAz(double ra, double dec, double jd, double lat, double lon):
     """ Convert right ascension and declination to azimuth (+East of due North) and altitude. Same epoch is
         assumed, no correction for refraction is done.
@@ -799,10 +1178,65 @@ cpdef (double, double) cyraDec2AltAz(double ra, double dec, double jd, double la
 
         """
 
-    cdef double lst, ha, azim, sin_elev, elev
-
     # Calculate Local Sidereal Time
-    lst = radians(cyjd2LST(jd, degrees(lon)))
+    return raDec2AltAzLST(ra, dec, radians(cyjd2LST(jd, degrees(lon))), lat)
+
+
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+def cyraDec2AltAz_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_arr, np.ndarray[FLOAT_TYPE_t, ndim=1] dec_arr, \
+    np.ndarray[FLOAT_TYPE_t, ndim=1] jd_arr, np.ndarray[FLOAT_TYPE_t, ndim=1] lat_arr, \
+    np.ndarray[FLOAT_TYPE_t, ndim=1] lon_arr):
+    """ cyraDec2AltAz for arrays of the same length. The sidereal time is evaluated only when the time or
+        the longitude changes.
+
+    Arguments:
+        ra_arr: [ndarray] Right ascension of every point (radians).
+        dec_arr: [ndarray] Declination of every point (radians).
+        jd_arr: [ndarray] Julian date of every point.
+        lat_arr: [ndarray] Latitude of the observer of every point (radians).
+        lon_arr: [ndarray] Longitude of the observer of every point (radians).
+
+    Return:
+        (azim_arr, elev_arr): [tuple of ndarrays] Azimuth (+east of due north) and elevation in radians.
+    """
+
+    cdef int i
+    cdef double lst, azim, elev
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] azim_arr = np.zeros_like(ra_arr)
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] elev_arr = np.zeros_like(ra_arr)
+
+    for i in range(ra_arr.shape[0]):
+
+        if (i == 0) or (jd_arr[i] != jd_arr[i - 1]) or (lon_arr[i] != lon_arr[i - 1]):
+            lst = radians(cyjd2LST(jd_arr[i], degrees(lon_arr[i])))
+
+        azim, elev = raDec2AltAzLST(ra_arr[i], dec_arr[i], lst, lat_arr[i])
+
+        azim_arr[i] = azim
+        elev_arr[i] = elev
+
+    return azim_arr, elev_arr
+
+
+
+@cython.cdivision(True)
+cdef (double, double) raDec2AltAzLST(double ra, double dec, double lst, double lat):
+    """ cyraDec2AltAz with the local sidereal time given instead of the time and longitude.
+
+    Arguments:
+        ra: [float] Right ascension (radians), in the frame of the sidereal time (true of date).
+        dec: [float] Declination (radians).
+        lst: [float] Local apparent sidereal time (radians).
+        lat: [float] Latitude of the observer (radians).
+
+    Return:
+        (azim, elev): [tuple of floats] Azimuth (+east of due north) and elevation (radians).
+
+    """
+
+    cdef double ha, azim, sin_elev, elev
 
     # Calculate the hour angle
     ha = lst - ra
@@ -826,7 +1260,7 @@ cpdef (double, double) cyraDec2AltAz(double ra, double dec, double jd, double la
 
 
 cpdef (double, double) cyTrueRaDec2ApparentAltAz(double ra, double dec, double jd, double lat, double lon, \
-    bool refraction=True):
+    bool refraction=True, double refraction_scale=1.0):
     """ Convert the true right ascension and declination in J2000 to azimuth (+East of due North) and 
         altitude in the epoch of date. The correction for refraction is performed.
 
@@ -839,6 +1273,8 @@ cpdef (double, double) cyTrueRaDec2ApparentAltAz(double ra, double dec, double j
 
     Keyword arguments:
         refraction: [bool] Apply refraction correction. True by default.
+        refraction_scale: [float] Scale of the refraction for the observer's height above sea level, from
+            refractionScale(). 1.0 by default (sea level).
 
     Return:
         (azim, elev): [tuple]
@@ -847,18 +1283,44 @@ cpdef (double, double) cyTrueRaDec2ApparentAltAz(double ra, double dec, double j
 
         """
 
+    return trueRaDec2ApparentAltAzOfDate(frameRotation(J2000_DAYS, jd), radians(cyjd2LST(jd, degrees(lon))), \
+        ra, dec, lat, refraction, refraction_scale)
+
+
+
+cdef (double, double) trueRaDec2ApparentAltAzOfDate(FrameRotation to_date, double lst, double ra, double dec, \
+    double lat, bint refraction, double refraction_scale):
+    """ cyTrueRaDec2ApparentAltAz with the J2000 -> true of date rotation (frameRotation) and the local
+        sidereal time given instead of the time and longitude, so that they are evaluated once for all
+        points of the same time.
+
+    Arguments:
+        to_date: [FrameRotation] J2000 -> true of date rotation, frameRotation(J2000_DAYS, jd).
+        lst: [float] Local apparent sidereal time (radians).
+        ra: [float] Right ascension (radians, J2000).
+        dec: [float] Declination (radians, J2000).
+        lat: [float] Latitude of the observer (radians).
+        refraction: [bool] Apply the refraction (true -> apparent elevation).
+        refraction_scale: [float] Scale of the refraction for the observer's height above sea level, from
+            refractionScale().
+
+    Return:
+        (azim, elev): [tuple of floats] Azimuth (+east of due north) and elevation (radians).
+
+    """
+
     cdef double azim, elev
 
 
-    # Precess RA/Dec to the epoch of date
-    ra, dec = equatorialCoordPrecession(J2000_DAYS, jd, ra, dec)
+    # Precession and nutation: catalog J2000 -> true equator and equinox of date
+    ra, dec = frameRotateRaDec(to_date, ra, dec)
 
     # Convert to alt/az
-    azim, elev = cyraDec2AltAz(ra, dec, jd, lat, lon)
+    azim, elev = raDec2AltAzLST(ra, dec, lst, lat)
 
     # Correct elevation for refraction
     if refraction:
-        elev = refractionTrueToApparent(elev)
+        elev = refractionTrueToApparent(elev, refraction_scale)
 
 
     return (azim, elev)
@@ -869,7 +1331,7 @@ cpdef (double, double) cyTrueRaDec2ApparentAltAz(double ra, double dec, double j
 @cython.wraparound(False)
 def cyTrueRaDec2ApparentAltAz_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_arr, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] dec_arr, np.ndarray[FLOAT_TYPE_t, ndim=1] jd_arr, \
-    double lat, double lon, bool refraction=True):
+    double lat, double lon, bool refraction=True, double refraction_scale=1.0):
     """ Convert the true right ascension and declination in J2000 to azimuth (+East of due North) and 
         altitude in the epoch of date. The correction for refraction is performed.
     Arguments:
@@ -880,6 +1342,8 @@ def cyTrueRaDec2ApparentAltAz_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_arr, \
         lon: [float] Longitude in radians.
     Keyword arguments:
         refraction: [bool] Apply refraction correction. True by default.
+        refraction_scale: [float] Scale of the refraction for the observer's height above sea level, from
+            refractionScale(). 1.0 by default (sea level).
     Return:
         (azim, elev): [tuple]
             azim: [ndarray] Azimuth (+east of due north) in radians (epoch of date).
@@ -887,7 +1351,8 @@ def cyTrueRaDec2ApparentAltAz_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_arr, \
         """
 
     cdef int i
-    cdef double azim, elev
+    cdef double azim, elev, lst
+    cdef FrameRotation to_date
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] azim_arr = np.zeros_like(ra_arr)
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] elev_arr = np.zeros_like(ra_arr)
 
@@ -895,9 +1360,14 @@ def cyTrueRaDec2ApparentAltAz_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_arr, \
     # Convert all entries
     for i in range(len(ra_arr)):
 
+        # The frame rotation and the sidereal time depend only on the time, evaluated when it changes
+        if (i == 0) or (jd_arr[i] != jd_arr[i - 1]):
+            to_date = frameRotation(J2000_DAYS, jd_arr[i])
+            lst = radians(cyjd2LST(jd_arr[i], degrees(lon)))
+
         # Compute alt/az
-        azim, elev = cyTrueRaDec2ApparentAltAz(ra_arr[i], dec_arr[i], jd_arr[i], lat, lon, \
-            refraction=refraction)
+        azim, elev = trueRaDec2ApparentAltAzOfDate(to_date, lst, ra_arr[i], dec_arr[i], lat, refraction, \
+            refraction_scale)
 
         # Assign alt/az to array
         azim_arr[i] = azim
@@ -909,10 +1379,9 @@ def cyTrueRaDec2ApparentAltAz_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_arr, \
 
 
 
-@cython.cdivision(True)
 cpdef (double, double) cyaltAz2RADec(double azim, double elev, double jd, double lat, double lon):
-    """ Convert azimuth and altitude in a given time and position on Earth to right ascension and 
-        declination. 
+    """ Convert azimuth and altitude in a given time and position on Earth to right ascension and
+        declination.
 
     Arguments:
         azim: [float] Azimuth (+east of due north) in radians.
@@ -927,12 +1396,67 @@ cpdef (double, double) cyaltAz2RADec(double azim, double elev, double jd, double
             dec: [float] Declination (radians).
     """
 
-
-    cdef double lst, ha, ra, dec
-
     # Calculate Local Sidereal Time
-    lst = radians(cyjd2LST(jd, degrees(lon)))
-    
+    return altAz2RADecLST(azim, elev, radians(cyjd2LST(jd, degrees(lon))), lat)
+
+
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+def cyaltAz2RADec_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] azim_arr, np.ndarray[FLOAT_TYPE_t, ndim=1] elev_arr, \
+    np.ndarray[FLOAT_TYPE_t, ndim=1] jd_arr, np.ndarray[FLOAT_TYPE_t, ndim=1] lat_arr, \
+    np.ndarray[FLOAT_TYPE_t, ndim=1] lon_arr):
+    """ cyaltAz2RADec for arrays of the same length. The sidereal time is evaluated only when the time or
+        the longitude changes.
+
+    Arguments:
+        azim_arr: [ndarray] Azimuth (+east of due north) of every point (radians).
+        elev_arr: [ndarray] Elevation of every point (radians).
+        jd_arr: [ndarray] Julian date of every point.
+        lat_arr: [ndarray] Latitude of the observer of every point (radians).
+        lon_arr: [ndarray] Longitude of the observer of every point (radians).
+
+    Return:
+        (ra_arr, dec_arr): [tuple of ndarrays] Right ascension and declination in radians.
+    """
+
+    cdef int i
+    cdef double lst, ra, dec
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] ra_arr = np.zeros_like(azim_arr)
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] dec_arr = np.zeros_like(azim_arr)
+
+    for i in range(azim_arr.shape[0]):
+
+        if (i == 0) or (jd_arr[i] != jd_arr[i - 1]) or (lon_arr[i] != lon_arr[i - 1]):
+            lst = radians(cyjd2LST(jd_arr[i], degrees(lon_arr[i])))
+
+        ra, dec = altAz2RADecLST(azim_arr[i], elev_arr[i], lst, lat_arr[i])
+
+        ra_arr[i] = ra
+        dec_arr[i] = dec
+
+    return ra_arr, dec_arr
+
+
+
+@cython.cdivision(True)
+cdef (double, double) altAz2RADecLST(double azim, double elev, double lst, double lat):
+    """ cyaltAz2RADec with the local sidereal time given instead of the time and longitude.
+
+    Arguments:
+        azim: [float] Azimuth (+east of due north) (radians).
+        elev: [float] Elevation (radians).
+        lst: [float] Local apparent sidereal time (radians).
+        lat: [float] Latitude of the observer (radians).
+
+    Return:
+        (ra, dec): [tuple of floats] Right ascension and declination (radians), in the frame of the
+            sidereal time (true of date).
+
+    """
+
+    cdef double ha, ra, dec
+
     # Calculate hour angle
     ha = atan2(-sin(azim), tan(elev)*cos(lat) - cos(azim)*sin(lat))
     
@@ -947,7 +1471,7 @@ cpdef (double, double) cyaltAz2RADec(double azim, double elev, double jd, double
 
 
 cpdef (double, double) cyApparentAltAz2TrueRADec(double azim, double elev, double jd, double lat, double lon, \
-    bool refraction=True):
+    bool refraction=True, double refraction_scale=1.0):
     """ Convert the apparent azimuth and altitude in the epoch of date to true (refraction corrected) right 
         ascension and declination in J2000.
 
@@ -960,6 +1484,8 @@ cpdef (double, double) cyApparentAltAz2TrueRADec(double azim, double elev, doubl
 
     Keyword arguments:
         refraction: [bool] Apply refraction correction. True by default.
+        refraction_scale: [float] Scale of the refraction for the observer's height above sea level, from
+            refractionScale(). 1.0 by default (sea level).
 
     Return:
         (ra, dec): [tuple]
@@ -967,19 +1493,44 @@ cpdef (double, double) cyApparentAltAz2TrueRADec(double azim, double elev, doubl
             dec: [float] Declination (radians, J2000).
     """
 
+    return apparentAltAz2TrueRADecOfDate(frameRotation(jd, J2000_DAYS), radians(cyjd2LST(jd, degrees(lon))), \
+        azim, elev, lat, refraction, refraction_scale)
+
+
+
+cdef (double, double) apparentAltAz2TrueRADecOfDate(FrameRotation to_j2000, double lst, double azim, \
+    double elev, double lat, bint refraction, double refraction_scale):
+    """ cyApparentAltAz2TrueRADec with the true of date -> J2000 rotation (frameRotation) and the local
+        sidereal time given instead of the time and longitude, so that they are evaluated once for all
+        points of the same time.
+
+    Arguments:
+        to_j2000: [FrameRotation] True of date -> J2000 rotation, frameRotation(jd, J2000_DAYS).
+        lst: [float] Local apparent sidereal time (radians).
+        azim: [float] Azimuth (+east of due north) (radians).
+        elev: [float] Elevation (radians).
+        lat: [float] Latitude of the observer (radians).
+        refraction: [bool] Remove the refraction (apparent -> true elevation).
+        refraction_scale: [float] Scale of the refraction for the observer's height above sea level, from
+            refractionScale().
+
+    Return:
+        (ra, dec): [tuple of floats] Right ascension and declination (radians, J2000).
+
+    """
 
     cdef double ra, dec
 
 
     # Correct elevation for refraction
     if refraction:
-        elev = refractionApparentToTrue(elev)
+        elev = refractionApparentToTrue(elev, refraction_scale)
 
     # Convert to RA/Dec (true, epoch of date)
-    ra, dec = cyaltAz2RADec(azim, elev, jd, lat, lon)
+    ra, dec = altAz2RADecLST(azim, elev, lst, lat)
 
-    # Precess RA/Dec to J2000
-    ra, dec = equatorialCoordPrecession(jd, J2000_DAYS, ra, dec)
+    # Nutation and precession: true equator and equinox of date -> catalog J2000
+    ra, dec = frameRotateRaDec(to_j2000, ra, dec)
 
 
     return (ra, dec)
@@ -988,7 +1539,7 @@ cpdef (double, double) cyApparentAltAz2TrueRADec(double azim, double elev, doubl
 @cython.boundscheck(False)
 @cython.wraparound(False)
 def cyApparentAltAz2TrueRADec_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] azim_arr, np.ndarray[FLOAT_TYPE_t, ndim=1] elev_arr,
-    double jd, double lat, double lon, bool refraction=True):
+    double jd, double lat, double lon, bool refraction=True, double refraction_scale=1.0):
     """ Convert the apparent azimuth and altitude in the epoch of date to true (refraction corrected) right 
         ascension and declination in J2000.
     Arguments:
@@ -999,6 +1550,8 @@ def cyApparentAltAz2TrueRADec_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] azim_arr, np
         lon: [float] Longitude of the observer in radians.
     Keyword arguments:
         refraction: [bool] Apply refraction correction. True by default.
+        refraction_scale: [float] Scale of the refraction for the observer's height above sea level, from
+            refractionScale(). 1.0 by default (sea level).
     Return:
         (ra_arr, dec_arr): [tuple]
             ra: [float] Right ascension (radians, J2000).
@@ -1006,16 +1559,21 @@ def cyApparentAltAz2TrueRADec_vect(np.ndarray[FLOAT_TYPE_t, ndim=1] azim_arr, np
     """
 
     cdef int i
-    cdef double ra, dec
+    cdef double ra, dec, lst
+    cdef FrameRotation to_j2000
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] ra_arr = np.zeros_like(azim_arr)
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] dec_arr = np.zeros_like(azim_arr)
 
 
+    # The frame rotation and the sidereal time are the same for all points
+    to_j2000 = frameRotation(jd, J2000_DAYS)
+    lst = radians(cyjd2LST(jd, degrees(lon)))
+
     for i in range(len(azim_arr)):
 
         # Compute RA/Dec
-        ra, dec = cyApparentAltAz2TrueRADec(azim_arr[i], elev_arr[i], jd, lat, lon, \
-            refraction=refraction)
+        ra, dec = apparentAltAz2TrueRADecOfDate(to_j2000, lst, azim_arr[i], elev_arr[i], lat, refraction, \
+            refraction_scale)
 
         ra_arr[i] = ra
         dec_arr[i] = dec
@@ -1093,6 +1651,124 @@ cpdef (double, double) cartesianToRaDec(np.ndarray[np.float64_t, ndim=1] vec):
 
 
 
+
+### Annual aberration ###
+
+# Constant of aberration kappa = n*a / (c*sqrt(1 - e^2)), the Earth's mean speed around the Sun in units of c
+cdef double ABERRATION_CONSTANT = radians(20.49552/3600.0)
+
+# Mean obliquity of the ecliptic at J2000
+cdef double MEAN_OBLIQUITY_J2000 = radians(23.4392911)
+
+
+cdef (double, double, double) earthVelocityJ2000(double jd):
+    """ Heliocentric velocity of the Earth at the given Julian date, in units of c, in equatorial axes
+        (mean equinox and obliquity of J2000).
+
+        Keplerian two-body velocity from the low-precision solar solution (Meeus, Astronomical Algorithms,
+        ch. 25) with the longitudes referred to the J2000 equinox, within 0.05 arcsec of the IAU 2006
+        barycentric velocity. The Moon's ~13 m/s and the planetary perturbations are neglected.
+
+    Arguments:
+        jd: [float] Julian date.
+
+    Return:
+        (vx, vy, vz): [tuple of floats] Velocity components in units of c (equatorial J2000 axes).
+    """
+
+    cdef double T, L0, M, e, C, sun_lon, earth_lon, perihelion_lon, prec, vx_ecl, vy_ecl
+
+    T = (jd - J2000_DAYS)/36525.0
+
+    # Geometric mean longitude and mean anomaly of the Sun, eccentricity of the Earth's path around the Sun
+    L0 = radians((280.46646 + 36000.76983*T + 0.0003032*T*T)%360.0)
+    M = radians((357.52911 + 35999.05029*T - 0.0001537*T*T)%360.0)
+    e = 0.016708634 - 0.000042037*T - 0.0000001267*T*T
+
+    # Equation of the centre, true geocentric longitude of the Sun
+    C = radians((1.914602 - 0.004817*T - 0.000014*T*T)*sin(M) + (0.019993 - 0.000101*T)*sin(2*M) \
+        + 0.000289*sin(3*M))
+    sun_lon = L0 + C
+
+    # True heliocentric longitude of the Earth, and the longitude of the Earth's perihelion: the Sun's perigee
+    #   longitude (mean longitude - mean anomaly) plus 180 deg. Both are referred to the mean equinox of date;
+    #   subtract the general precession in longitude to refer them to the J2000 equinox, so the velocity comes
+    #   out in J2000 axes
+    prec = radians(1.3969713*T)
+    earth_lon = sun_lon + pi - prec
+    perihelion_lon = L0 - M + pi - prec
+
+    # Keplerian velocity in the ecliptic plane: kappa*(-(sin L + e sin w), cos L + e cos w)
+    vx_ecl = -ABERRATION_CONSTANT*(sin(earth_lon) + e*sin(perihelion_lon))
+    vy_ecl = ABERRATION_CONSTANT*(cos(earth_lon) + e*cos(perihelion_lon))
+
+    # Ecliptic -> equatorial axes
+    return vx_ecl, vy_ecl*cos(MEAN_OBLIQUITY_J2000), vy_ecl*sin(MEAN_OBLIQUITY_J2000)
+
+
+cdef (double, double) shiftDirection(double ra, double dec, double vx, double vy, double vz):
+    """ Direction (ra, dec) shifted by a small velocity vector: the first-order aberration formula
+        p' = (p + v/c)/|p + v/c|.
+
+    Arguments:
+        ra: [float] Right ascension (radians).
+        dec: [float] Declination (radians).
+        vx, vy, vz: [float] Velocity in units of c, in the axes of ra and dec (see earthVelocityJ2000).
+
+    Return:
+        (ra, dec): [tuple of floats] Shifted direction (radians).
+    """
+
+    cdef double x, y, z, n
+
+    x = cos(dec)*cos(ra) + vx
+    y = cos(dec)*sin(ra) + vy
+    z = sin(dec) + vz
+    n = sqrt(x*x + y*y + z*z)
+
+    return (atan2(y, x) + 2*pi)%(2*pi), asin(z/n)
+
+
+cpdef (double, double) applyAberration(double ra, double dec, double jd):
+    """ Annual aberration: catalog (barycentric) direction -> apparent direction seen from the moving Earth.
+        Stars are displaced by up to 20.5 arcsec towards the apex of the Earth's motion.
+
+    Arguments:
+        ra: [float] Right ascension (radians, J2000).
+        dec: [float] Declination (radians, J2000).
+        jd: [float] Julian date.
+
+    Return:
+        (ra, dec): [tuple of floats] Apparent direction (radians, J2000 axes).
+    """
+
+    cdef double vx, vy, vz
+
+    vx, vy, vz = earthVelocityJ2000(jd)
+
+    return shiftDirection(ra, dec, vx, vy, vz)
+
+
+cpdef (double, double) removeAberration(double ra, double dec, double jd):
+    """ Inverse of applyAberration: apparent direction -> catalog direction. First-order inverse, exact to
+        ~0.002 arcsec.
+
+    Arguments:
+        ra: [float] Right ascension (radians, J2000 axes), apparent direction.
+        dec: [float] Declination (radians, J2000 axes), apparent direction.
+        jd: [float] Julian date.
+
+    Return:
+        (ra, dec): [tuple of floats] Catalog direction (radians, J2000).
+    """
+
+    cdef double vx, vy, vz
+
+    vx, vy, vz = earthVelocityJ2000(jd)
+
+    return shiftDirection(ra, dec, -vx, -vy, -vz)
+
+
 cdef int radialTermCount(str dist_type):
     """ Number of the radial distortion coefficients (k1, k2, ...) of a radial distortion type (see
         Platepar.radialTermCount): the decentering coefficients follow them in the distortion arrays.
@@ -1118,7 +1794,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
     double pix_scale, np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_rev, 
     np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_rev, str dist_type, bool refraction=True, bool equal_aspect=False, 
     bool force_distortion_centre=False, bool asymmetry_corr=True, bool decentering_corr=False,
-    np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data=None):
+    np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data=None, double refraction_scale=1.0, bool aberration=True):
     """ Convert RA, Dec to distortion corrected image coordinates. 
 
     Arguments:
@@ -1129,10 +1805,13 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
         lon: [float] Longitude of station in degrees.
         x_res: [int] X resolution of the camera.
         y_res: [int] Y resolution of the camera.
-        h0: [float] Reference hour angle (deg).
+        h0: [float] Reference hour angle (deg): the apparent Greenwich sidereal time at jd_ref (mean
+            sidereal time plus the equation of the equinoxes, see Conversions.JD2HourAngle).
         jd_ref: [float] Reference Julian date of plate solution.
-        ra_ref: [float] Reference right ascension of the image centre (degrees).
-        dec_ref: [float] Reference declination of the image centre (degrees).
+        ra_ref: [float] Reference right ascension of the image centre (degrees), true equator and equinox
+            of jd_ref.
+        dec_ref: [float] Reference declination of the image centre (degrees), true equator and equinox of
+            jd_ref.
         pos_angle_ref: [float] Rotation from the celestial meridian (degrees).
         pix_scale: [float] Image scale (px/deg).
         x_poly_rev: [ndarray float] Distortion polynomial in X direction for reverse mapping.
@@ -1141,9 +1820,15 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
         
     Keyword arguments:
         refraction: [bool] Apply refraction correction. True by default.
+        refraction_scale: [float] Scale of the refraction for the observer's height above sea level, from
+            refractionScale(). 1.0 by default (sea level).
         equal_aspect: [bool] Force the X/Y aspect ratio to be equal. Used only for radial distortion. \
             False by default.
         force_distortion_centre: [bool] Force the distortion centre to the image centre. False by default.
+        aberration: [bool] Displace the input directions by the annual aberration of light (up to 20.5 arcsec
+            towards the apex of the Earth's motion), i.e. treat them as catalog directions of distant sources.
+            True by default. Set False for directions already in the Earth's frame (e.g. an object in the
+            atmosphere), which are not aberrated.
         asymmetry_corr: [bool] Correct the distortion for asymmetry. Only for radial distortion. True by
             default.
         decentering_corr: [bool] Correct the radial distortion for decentering (a lens element off the optical
@@ -1158,6 +1843,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
 
     cdef int i
     cdef double ra_centre, dec_centre, ra, dec
+    cdef double vx, vy, vz
 
     # The reference position angle as given (it is replaced by its value corrected for the date below), for the
     #   correction at the date of every point
@@ -1166,18 +1852,19 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
     cdef double x0, y0, xy, a1, a2, k1, k2, k3, k4, k5
     cdef double p1 = 0, p2 = 0, p3 = 0, p4 = 0, u, v, r2, q1, q2
     cdef int index_offset
+    cdef DateFrame date_frame
 
     # Init output arrays
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] x_array = np.zeros_like(ra_data)
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] y_array = np.zeros_like(ra_data)
 
 
+    # Frame rotations and sidereal time for the pointing and the refraction, the same for all stars
+    date_frame = dateFrame(jd, radians(lon))
+
     # Correct the pointing for precession (output in radians)
-    ra_centre, dec_centre, pos_angle_ref = pointingCorrection(
-            jd, radians(lat), radians(lon), 
-            radians(h0), jd_ref, radians(ra_ref), radians(dec_ref), radians(pos_angle_ref), 
-            refraction=refraction
-            )
+    ra_centre, dec_centre, pos_angle_ref = pointingCorrectionOfDate(date_frame, jd, radians(lat), radians(h0),
+        radians(ra_ref), radians(dec_ref), radians(pos_angle_ref), refraction, refraction_scale)
 
     # # Compute the current RA of the FOV centre by adding the difference in between the current and the 
     # #   reference hour angle
@@ -1277,36 +1964,52 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
         y0 = y_poly_rev[0]
 
 
+    # Earth velocity for the annual aberration of the catalog directions
+    vx = vy = vz = 0.0
+    if aberration:
+        vx, vy, vz = earthVelocityJ2000(jd)
+
     # Convert all equatorial coordinates to image coordinates
     for i in range(ra_data.shape[0]):
 
-        # With a date per point, correct the pointing for the date of this point
-        if jd_data is not None:
+        # With a date per point, the pointing, the refraction and the aberration are computed at the date of
+        #   this point, when it differs from the date they were last computed at
+        if (jd_data is not None) and (jd_data[i] != jd):
             jd = jd_data[i]
-            ra_centre, dec_centre, pos_angle_ref = pointingCorrection(
-                    jd, radians(lat), radians(lon),
-                    radians(h0), jd_ref, radians(ra_ref), radians(dec_ref), radians(pos_angle_ref_in),
-                    refraction=refraction
-                    )
+            date_frame = dateFrame(jd, radians(lon))
+            ra_centre, dec_centre, pos_angle_ref = pointingCorrectionOfDate(date_frame, jd, radians(lat),
+                radians(h0), radians(ra_ref), radians(dec_ref), radians(pos_angle_ref_in), refraction,
+                refraction_scale)
+
+            if aberration:
+                vx, vy, vz = earthVelocityJ2000(jd)
 
         ra = radians(ra_data[i])
         dec = radians(dec_data[i])
+
+        # Annual aberration: catalog direction -> apparent direction seen from the moving Earth
+        if aberration:
+            ra, dec = shiftDirection(ra, dec, vx, vy, vz)
 
         ### Gnomonization of star coordinates to image coordinates ###
 
         # Apply refraction
         if refraction:
-            ra, dec = eqRefractionTrueToApparent(ra, dec, jd, radians(lat), radians(lon))
+            ra, dec = eqRefraction(date_frame, ra, dec, radians(lat), True, refraction_scale)
 
 
         # Compute the distance from the FOV centre to the sky coordinate
         radius = radians(angularSeparation(degrees(ra), degrees(dec), degrees(ra_centre), \
             degrees(dec_centre)))
 
-        # Compute theta - the direction angle between the FOV centre, sky coordinate, and the image vertical
-        sin_ang = cos(dec)*sin(ra - ra_centre)/sin(radius)
-        cos_ang = (sin(dec) - sin(dec_centre)*cos(radius))/(cos(dec_centre)*sin(radius))
-        theta   = -atan2(sin_ang, cos_ang) + pos_angle_ref - pi/2.0
+        # Compute theta - the direction angle between the FOV centre, sky coordinate, and the image vertical.
+        #   It is undefined (0/0) for the FOV centre itself, which projects to x = y = 0 at any angle.
+        if radius == 0:
+            theta = 0
+        else:
+            sin_ang = cos(dec)*sin(ra - ra_centre)/sin(radius)
+            cos_ang = (sin(dec) - sin(dec_centre)*cos(radius))/(cos(dec_centre)*sin(radius))
+            theta   = -atan2(sin_ang, cos_ang) + pos_angle_ref - pi/2.0
 
         # Calculate the standard coordinates
         x = degrees(radius)*cos(theta)*pix_scale
@@ -1466,27 +2169,35 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
 
 
 
-cdef (double, double, double) pointingCorrection(
+cpdef (double, double, double) pointingCorrection(
     double jd, double lat, double lon, 
     double h0, double jd_ref, double ra_ref, double dec_ref, double pos_angle_ref, 
-    bool refraction=True
+    bool refraction=True, double refraction_scale=1.0
     ):
-    """ Compute the pointing correction for the given Julian date. The correction is done by computing the
-        difference in RA between the current and the reference epoch. The correction is done in the J2000
-        epoch to avoid the drift of the FOV centre over time.
+    """ Compute the pointing correction for the given Julian date. The camera is fixed in the horizontal
+        frame, so the reference right ascension advances by the sidereal time elapsed since the reference
+        time, at the same hour angle and declination: the result is the true-of-date pointing at jd. It is
+        then refracted (if enabled) and rotated to J2000, together with the position angle, so that the
+        field does not drift or rotate with time.
 
     Arguments:
         jd: [float] Julian date.
         lat: [float] Latitude of the observer in radians.
         lon: [float] Longitude of the observer in radians.
-        h0: [float] Reference hour angle in radians.
+        h0: [float] Reference hour angle in radians: the apparent Greenwich sidereal time at jd_ref (mean
+            sidereal time plus the equation of the equinoxes, see Conversions.JD2HourAngle).
         jd_ref: [float] Reference Julian date of the plate solution.
-        ra_ref: [float] Reference right ascension of the image centre in radians.
-        dec_ref: [float] Reference declination of the image centre in radians.
-        pos_angle_ref: [float] Rotation from the celestial meridian in radians.
+        ra_ref: [float] Reference right ascension of the image centre in radians: the true (unrefracted)
+            direction in the true equator and equinox of jd_ref.
+        dec_ref: [float] Reference declination of the image centre in radians, true equator and equinox
+            of jd_ref.
+        pos_angle_ref: [float] Rotation from the celestial meridian in radians, in the true equator and
+            equinox of jd_ref.
     
     Keyword arguments:
         refraction: [bool] Apply refraction correction. True by default.
+        refraction_scale: [float] Scale of the refraction for the observer's height above sea level, from
+            refractionScale(). 1.0 by default (sea level).
 
     Return:
         (ra_ref_now_corr, dec_ref_corr, pos_angle_ref_now_corr): [tuple]
@@ -1496,15 +2207,46 @@ cdef (double, double, double) pointingCorrection(
 
     """
 
-    cdef double ra_ref_now, ra_ref_now_corr, dec_ref_corr, ra_ref_now_corr_j2000, dec_ref_corr_j2000
-    cdef double pos_angle_ref_now_corr
+    return pointingCorrectionOfDate(dateFrame(jd, lon), jd, lat, h0, ra_ref, dec_ref, pos_angle_ref, \
+        refraction, refraction_scale)
+
+
+
+cdef (double, double, double) pointingCorrectionOfDate(DateFrame d, double jd, double lat, double h0, \
+    double ra_ref, double dec_ref, double pos_angle_ref, bint refraction, double refraction_scale):
+    """ pointingCorrection with the frame rotations and sidereal times (dateFrame) given instead of the
+        longitude, so that the kernels evaluate them once per Julian date for both the pointing and the
+        refraction of the points.
+
+    Arguments:
+        d: [DateFrame] From dateFrame() for the time and the observer's longitude.
+        jd: [float] Julian date.
+        lat: [float] Latitude of the observer in radians.
+        h0: [float] Reference hour angle in radians (see pointingCorrection).
+        ra_ref: [float] Reference right ascension of the image centre in radians (see pointingCorrection).
+        dec_ref: [float] Reference declination of the image centre in radians (see pointingCorrection).
+        pos_angle_ref: [float] Rotation from the celestial meridian in radians.
+        refraction: [bool] Apply refraction correction.
+        refraction_scale: [float] Scale of the refraction for the observer's height above sea level, from
+            refractionScale().
+
+    Return:
+        (ra_ref_now_corr, dec_ref_corr, pos_angle_ref_now_corr): [tuple of floats] See pointingCorrection.
+
+    """
+
+    cdef double ra_ref_now, ra_ref_now_corr, dec_ref_corr, azim, alt
 
     # Compute the reference RA centre at the given JD by adding the hour angle difference
-    ra_ref_now = (ra_ref + radians(cyjd2LST(jd, 0)) - h0 + 2*pi)%(2*pi)
+    ra_ref_now = (ra_ref + d.gst - h0 + 2*pi)%(2*pi)
 
-    # Correct the FOV centre for refraction
+    # Correct the FOV centre for refraction. The reference is a true-of-date direction, so it is taken to
+    #   alt/az directly: eqRefractionTrueToApparent expects J2000 input and would precess it a second
+    #   time, evaluating the refraction about 22 arcmin (in 2026) away from the real altitude.
     if refraction:
-        ra_ref_now_corr, dec_ref_corr = eqRefractionTrueToApparent(ra_ref_now, dec_ref, jd, lat, lon)
+        azim, alt = raDec2AltAzLST(ra_ref_now, dec_ref, d.lst, lat)
+        alt = refractionTrueToApparent(alt, refraction_scale)
+        ra_ref_now_corr, dec_ref_corr = altAz2RADecLST(azim, alt, d.lst, lat)
 
     else:
         ra_ref_now_corr = ra_ref_now
@@ -1512,13 +2254,12 @@ cdef (double, double, double) pointingCorrection(
 
 
     # Precess the reference RA, dec, position angle to J2000 (needs to be used to avoid FOV centre drift
-    # over time)
-    # The position angle needs to be corrected for precession, otherwise the FOV rotates with time
-    # Applying the difference in RA between the current and the reference epoch fixes the position angle
-    ra_ref_now_corr_j2000, dec_ref_corr_j2000, pos_angle_ref_now_corr = equatorialCoordAndRotPrecession(jd,
-                                        J2000_DAYS, ra_ref_now_corr, dec_ref_corr, pos_angle_ref)
+    #   over time). The position angle needs to be corrected for precession, otherwise the FOV rotates with
+    #   time. No rotation at J2000 itself, as in equatorialCoordAndRotPrecession
+    if jd == J2000_DAYS:
+        return ra_ref_now_corr, dec_ref_corr, pos_angle_ref
 
-    return ra_ref_now_corr_j2000, dec_ref_corr_j2000, pos_angle_ref_now_corr
+    return frameRotateRaDecRot(d.to_j2000, ra_ref_now_corr, dec_ref_corr, pos_angle_ref)
 
 
 @cython.boundscheck(False)
@@ -1529,7 +2270,8 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
     double h0, double jd_ref, double ra_ref, double dec_ref, double pos_angle_ref, double pix_scale, \
     np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_fwd, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_fwd, \
     str dist_type, bool refraction=True, bool equal_aspect=False, bool force_distortion_centre=False,\
-    bool asymmetry_corr=True, bool precompute_pointing_corr=False, bool decentering_corr=False):
+    bool asymmetry_corr=True, bool precompute_pointing_corr=False, bool decentering_corr=False,
+    double refraction_scale=1.0, bool aberration=True):
     """
     Arguments:
         jd_data: [ndarray] Julian date of each data point.
@@ -1539,10 +2281,13 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         lon: [float] Longitude of the observer in degrees.
         x_res: [int] Image size, X dimension (px).
         y_res: [int] Image size, Y dimension (px).
-        h0: [float] Reference hour angle (deg).
+        h0: [float] Reference hour angle (deg): the apparent Greenwich sidereal time at jd_ref (mean
+            sidereal time plus the equation of the equinoxes, see Conversions.JD2HourAngle).
         jd_ref: [float] Reference Julian date when the plate was fit.
-        ra_ref: [float] Reference right ascension of the image centre (degrees).
-        dec_ref: [float] Reference declination of the image centre (degrees).
+        ra_ref: [float] Reference right ascension of the image centre (degrees), true equator and equinox
+            of jd_ref.
+        dec_ref: [float] Reference declination of the image centre (degrees), true equator and equinox of
+            jd_ref.
         pos_angle_ref: [float] Field rotation parameter (degrees).
         pix_scale: [float] Plate scale (px/deg).
         x_poly_fwd: [ndarray] 1D numpy array of 12 elements containing forward X axis polynomial parameters.
@@ -1551,11 +2296,17 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         
     Keyword arguments:
         refraction: [bool] Apply refraction correction. True by default.
+        refraction_scale: [float] Scale of the refraction for the observer's height above sea level, from
+            refractionScale(). 1.0 by default (sea level).
         equal_aspect: [bool] Force the X/Y aspect ratio to be equal. Used only for radial distortion. \
             False by default.
         force_distortion_centre: [bool] Force the distortion centre to the image centre. False by default.
         asymmetry_corr: [bool] Correct the distortion for asymmetry. Only for radial distortion. True by
             default.
+        aberration: [bool] Remove the annual aberration of light (up to 20.5 arcsec) so the output is the
+            catalog direction of a distant source (a star). True by default. Set False for an object in the
+            atmosphere (a meteor), whose light is not aberrated: the output is then the geometric direction
+            in the Earth's frame, which is what a trajectory solver uses.
         decentering_corr: [bool] Correct the radial distortion for decentering (a lens element off the optical
             axis, Brown-Conrady): the coefficients p1, p2, p3, p4 follow the radial ones. False by default.
         precompute_pointing_corr: [bool] Precompute the pointing correction. False by default. This is used
@@ -1577,6 +2328,8 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
     cdef int index_offset
     cdef double radius, theta, sin_t, cos_t
     cdef double ra_ref_now_corr, ra, dec, dec_ref_corr, pos_angle_ref_now_corr
+    cdef double vx, vy, vz
+    cdef DateFrame date_frame
 
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data = np.zeros_like(jd_data)
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] dec_data = np.zeros_like(jd_data)
@@ -1587,7 +2340,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         ra_ref_now_corr, dec_ref_corr, pos_angle_ref_now_corr = pointingCorrection(
             np.mean(jd_data), radians(lat), radians(lon), 
             radians(h0), jd_ref, radians(ra_ref), radians(dec_ref), radians(pos_angle_ref), 
-            refraction=refraction
+            refraction=refraction, refraction_scale=refraction_scale
             )
 
 
@@ -1676,6 +2429,25 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         jd = jd_data[i]
         x_img = x_data[i]
         y_img = y_data[i]
+
+
+        # What depends only on the time is evaluated when it changes, i.e. once per frame
+        if (i == 0) or (jd != jd_data[i - 1]):
+
+            # Frame rotations and sidereal time for the pointing and the refraction
+            if refraction or (not precompute_pointing_corr):
+                date_frame = dateFrame(jd, radians(lon))
+
+            if not precompute_pointing_corr:
+
+                # Correct the pointing for precession (output in radians)
+                ra_ref_now_corr, dec_ref_corr, pos_angle_ref_now_corr = pointingCorrectionOfDate(date_frame,
+                    jd, radians(lat), radians(h0), radians(ra_ref), radians(dec_ref), radians(pos_angle_ref),
+                    refraction, refraction_scale)
+
+            # Earth velocity for the annual aberration
+            if aberration:
+                vx, vy, vz = earthVelocityJ2000(jd)
 
 
         ### APPLY DISTORTION CORRECTION ###
@@ -1824,16 +2596,6 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
 
         ### Convert gnomonic X, Y to RA, Dec ###
 
-        if not precompute_pointing_corr:
-
-            # Correct the pointing for precession (output in radians)
-            ra_ref_now_corr, dec_ref_corr, pos_angle_ref_now_corr = pointingCorrection(
-                jd, radians(lat), radians(lon), 
-                radians(h0), jd_ref, radians(ra_ref), radians(dec_ref), radians(pos_angle_ref), 
-                refraction=refraction
-                )
-
-
         # Radius from FOV centre to sky coordinate
         radius = radians(sqrt(x_corr**2 + y_corr**2))
 
@@ -1854,7 +2616,11 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
 
         # Apply refraction correction
         if refraction:
-            ra, dec = eqRefractionApparentToTrue(ra, dec, jd, radians(lat), radians(lon))
+            ra, dec = eqRefraction(date_frame, ra, dec, radians(lat), False, refraction_scale)
+
+        # Annual aberration: apparent direction seen from the moving Earth -> catalog direction
+        if aberration:
+            ra, dec = shiftDirection(ra, dec, -vx, -vy, -vz)
 
 
 
