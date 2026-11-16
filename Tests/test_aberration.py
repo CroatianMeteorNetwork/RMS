@@ -798,5 +798,52 @@ class TestAberration(unittest.TestCase):
         self.assertEqual(calls, [False])
 
 
+    def testHorizontalGridAndHorizonOnTheirAltAz(self):
+        """ The alt/az grid lines and the horizon are directions fixed to the Earth: on a plate fitted with the
+            aberration modelled they are drawn without it, so every grid point measured back from the image lies
+            on its altitude or azimuth line and the horizon at altitude 0 (applying the aberration to them moves
+            them by up to ~20 arcsec). """
+
+        from RMS.Astrometry.Conversions import trueRaDec2ApparentAltAz
+        from RMS.Astrometry.CyFunctions import refractionScale
+        from RMS.Routines import AddCelestialGrid
+
+        class _Grid(object):
+            # Stands in for the plot curve: keeps the points the grid functions draw
+            def setData(self, x, y, connect):
+                self.x, self.y = np.array(x) - 0.5, np.array(y) - 0.5
+
+        pp = Platepar()
+        pp.read(TEMPLATE)
+        pp.aberration = True
+        pp.lat, pp.lon, pp.elev = 40.0, -100.0, 300.0
+        pp.JD = date2JD(2026, 3, 20, 4, 0, 0)
+        pp.alt_centre, pp.az_centre, pp.pos_angle_ref = 50.0, 0.0, 15.0
+        pp.updateRefRADec(skip_rot_update=True)
+        pp.resetDistortionParameters()
+
+        def _altAz(grid):
+            # Measure the drawn points back as apparent alt/az through the Earth-frame path
+            _, ra, dec, _ = xyToRaDecPP(len(grid.x)*[pp.JD], grid.x, grid.y, np.ones(len(grid.x)), pp,
+                extinction_correction=False, jd_time=True, aberration=False)
+            return trueRaDec2ApparentAltAz(np.array(ra), np.array(dec), pp.JD, pp.lat, pp.lon,
+                refraction=pp.refraction, refraction_scale=refractionScale(pp.elev))
+
+        # Every alt/az grid point is on a line of the 10 deg grid (distance along the sky in arcsec)
+        grid = _Grid()
+        AddCelestialGrid.updateAzAltGrid(grid, pp)
+        az, alt = _altAz(grid)
+        self.assertGreater(len(az), 1000)
+        off_alt = np.abs(alt - 10.0*np.round(alt/10.0))*3600
+        off_az = np.abs((az - 10.0*np.round(az/10.0) + 180.0)%360.0 - 180.0)*np.cos(np.radians(alt))*3600
+        self.assertLess(np.max(np.minimum(off_alt, off_az)), 0.5)
+
+        # The horizon drawn with the equatorial grid is at altitude 0
+        grid = _Grid()
+        AddCelestialGrid.updateRaDecGrid(grid, pp)
+        _, alt = _altAz(grid)
+        self.assertGreater(np.count_nonzero(np.abs(alt)*3600 < 1.0), 100)
+
+
 if __name__ == "__main__":
     unittest.main()
