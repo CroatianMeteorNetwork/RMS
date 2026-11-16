@@ -2,6 +2,7 @@
 
 from __future__ import print_function, division, absolute_import
 
+import copy
 import json
 import os
 import unittest
@@ -11,7 +12,9 @@ import numpy as np
 from RMS.Formats.Platepar import Platepar
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDecToXYPP
 from RMS.Astrometry.CyFunctions import applyAberration, removeAberration
-from RMS.Astrometry.Conversions import date2JD, jd2Date
+from RMS.Astrometry.Conversions import (date2JD, jd2Date, JD2HourAngle, latLonAlt2ECEF,
+    ecef2LatLonAlt)
+from RMS.Astrometry.StarClasses import GeoPoint, PairedStars
 from RMS.Misc import getRmsRootDir
 from Tests.test_precession_nutation import (DATES, TT_MINUS_UT, X_RES, Y_RES, syntheticCamera, earthFrameJ2000,
     syntheticPlatepar, errorField, unitVector)
@@ -298,6 +301,89 @@ class TestAberration(unittest.TestCase):
             x, y = raDecToXYPP(ra_c, dec_c, jd, pp, measurement=measurement)
             np.testing.assert_allclose(x, x_before, rtol=0, atol=1e-8)
             np.testing.assert_allclose(y, y_before, rtol=0, atol=1e-8)
+
+
+    def testGroundReferencesOfAnOlderPlate(self):
+        """ SkyFit2's fit of ground references (GeoPoints) starting from a platepar fitted before the
+            aberration was modelled: the references are prepared for the model of the fit, with the aberration
+            modelled, so the fitted plate measures every ground point along its true direction from the true
+            pointing. Prepared for the old model of the plate they kept the aberration, which the fit applied
+            on top (20 arcsec here). """
+
+        import tempfile
+        import types
+
+        # SkyFit2 needs its GUI libraries
+        try:
+            from Utils.SkyFit2 import PlateTool, GeoPoints
+        except Exception as e:
+            self.skipTest("SkyFit2 cannot be imported: {}".format(e))
+
+        # The true plate of a camera looking low towards the south-south-east, with the aberration modelled
+        #   (20.7 arcsec at the centre on this date) and no refraction, so that a ground point is measured
+        #   along its true direction
+        jd = DATES[2]
+        pp_true = Platepar()
+        pp_true.read(TEMPLATE)
+        pp_true.lat, pp_true.lon, pp_true.elev = 43.19, -81.32, 300.0
+        pp_true.JD, pp_true.Ho = jd, JD2HourAngle(jd)
+        pp_true.alt_centre, pp_true.az_centre, pp_true.pos_angle_ref = 6.0, 150.0, 0.0
+        pp_true.updateRefRADec(skip_rot_update=True)
+        pp_true.resetDistortionParameters()
+        pp_true.refraction = False
+        pp_true.aberration = True
+
+        # Ground points 20 km away, on a grid of directions over the field
+        lat, lon = np.radians(pp_true.lat), np.radians(pp_true.lon)
+        east = np.array([-np.sin(lon), np.cos(lon), 0.0])
+        north = np.array([-np.sin(lat)*np.cos(lon), -np.sin(lat)*np.sin(lon), np.cos(lat)])
+        up = np.array([np.cos(lat)*np.cos(lon), np.cos(lat)*np.sin(lon), np.sin(lat)])
+        station = np.array(latLonAlt2ECEF(lat, lon, pp_true.elev))
+        lines = []
+        for az in np.radians(150.0 + np.linspace(-30.0, 30.0, 5)):
+            for alt in np.radians(np.linspace(1.0, 12.0, 3)):
+                d = np.cos(alt)*np.sin(az)*east + np.cos(alt)*np.cos(az)*north + np.sin(alt)*up
+                lat_p, lon_p, ele_p = ecef2LatLonAlt(*(station + 20000.0*d))
+                lines.append("P{:d},{:.9f},{:.9f},{:.3f}\n".format(len(lines), np.degrees(lat_p),
+                    np.degrees(lon_p), ele_p))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'geo_points.txt')
+            with open(path, 'w') as f:
+                f.writelines(lines)
+            geo = GeoPoints(path)
+
+        # Where the camera sees them: their true directions, projected as they are (not aberrated)
+        geo.update(pp_true, jd)
+        ra_true, dec_true = np.array(geo.ra_data), np.array(geo.dec_data)
+        x, y = raDecToXYPP(ra_true, dec_true, jd, pp_true, measurement=True)
+
+        # The platepar fitted before the aberration was modelled, without the flag and with the pointing and
+        #   the rotation 0.05 deg off. SkyFit2 prepares the ground references for it when it draws them
+        pp = copy.deepcopy(pp_true)
+        pp.aberration = False
+        pp.RA_d += 0.05
+        pp.dec_d -= 0.05
+        pp.pos_angle_ref += 0.05
+        geo.update(pp, jd)
+
+        # The ground points picked at their image positions and fitted by SkyFit2, whose fit reads only these
+        #   attributes of the tool
+        paired = PairedStars()
+        for i, (x_i, y_i) in enumerate(zip(x, y)):
+            paired.addPair(x_i, y_i, 2.0, 1000.0, GeoPoint(geo, i))
+        tool = types.SimpleNamespace(platepar=pp, geo_points_obj=geo, paired_stars=paired,
+            first_platepar_fit=False, fit_only_pointing=True, fixed_scale=False)
+        PlateTool.fitPairs(tool, jd)
+        self.assertTrue(pp.aberration)
+
+        # The fitted plate measures the ground points along their true directions, from the true pointing
+        _, ra, dec, _ = xyToRaDecPP(len(x)*[jd], x, y, np.ones(len(x)), pp, extinction_correction=False,
+            measurement=True, jd_time=True)
+        sep = separationArcsec(np.radians(ra), np.radians(dec), np.radians(ra_true), np.radians(dec_true))
+        self.assertLess(np.max(sep), 0.1)
+        self.assertLess(separationArcsec(np.radians(pp.RA_d), np.radians(pp.dec_d), np.radians(pp_true.RA_d),
+            np.radians(pp_true.dec_d)), 0.1)
 
 
     @unittest.skipIf(erfa is None, "pyerfa not installed")

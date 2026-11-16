@@ -15510,6 +15510,50 @@ class PlateTool(QtWidgets.QMainWindow):
         return overfit
 
 
+    def fitPairs(self, jd):
+        """ Fit the platepar to the paired stars, ground references and solar system bodies.
+
+            The fit models the annual aberration (Platepar.fitAstrometry turns it on where it fits), and the
+            plate coordinates of the ground references depend on it: the aberration that the plate applies is
+            taken out of them (see targetRaDecToPlateRaDec). So they are prepared for the model of the fit
+            before they are taken as fit inputs, whatever the model of the platepar before the fit. For a
+            platepar fitted before the aberration was modelled they would otherwise keep the aberration, and
+            the fit would apply it on top (up to 20.5 arcsec). After the fit they follow the platepar again.
+
+        Arguments:
+            jd: [float] Julian date of the image that is fitted.
+
+        Return:
+            (img_stars, catalog_stars): [tuple of ndarrays] The image coordinates (x, y, intensity) and the
+                sky coordinates (ra, dec, mag) of the pairs, the latter for the platepar after the fit.
+        """
+
+        # The ground references prepared for the model of the fit, with the aberration modelled. Only the
+        #   station and the refraction and aberration settings of the platepar are used for them, and the
+        #   platepar keeps its own model until the fit changes it
+        if self.geo_points_obj is not None:
+            pp_fit_model = copy.copy(self.platepar)
+            pp_fit_model.aberration = True
+            self.geo_points_obj.update(pp_fit_model, jd)
+
+        # Extract paired catalog stars and image coordinates separately
+        img_stars = np.array(self.paired_stars.imageCoords())
+        catalog_stars = np.array(self.paired_stars.skyCoords())
+
+        # Fit the platepar to the pairs. Then the ground references follow the model of the platepar, which a
+        #   fit that fails leaves as it was
+        try:
+            self.platepar.fitAstrometry(jd, img_stars, catalog_stars,
+                first_platepar_fit=self.first_platepar_fit, fit_only_pointing=self.fit_only_pointing,
+                fixed_scale=self.fixed_scale, fit_by='SkyFit2')
+
+        finally:
+            if self.geo_points_obj is not None:
+                self.geo_points_obj.update(self.platepar, jd)
+
+        return img_stars, np.array(self.paired_stars.skyCoords())
+
+
     def fitPickedStars(self):
         """ Fit stars that are manually picked. The function first only estimates the astrometry parameters
             without the distortion, then just the distortion parameters, then all together.
@@ -15534,16 +15578,11 @@ class PlateTool(QtWidgets.QMainWindow):
         print("----------------------------------------")
         print("Fitting platepar...")
 
-        # Extract paired catalog stars and image coordinates separately
-        img_stars = np.array(self.paired_stars.imageCoords())
-        catalog_stars = np.array(self.paired_stars.skyCoords())
-
         # Get the Julian date of the image that's being fit
         jd = date2JD(*self.img_handle.currentTime())
 
-        # Fit the platepar to paired stars
-        self.platepar.fitAstrometry(jd, img_stars, catalog_stars, first_platepar_fit=self.first_platepar_fit,\
-            fit_only_pointing=self.fit_only_pointing, fixed_scale=self.fixed_scale, fit_by='SkyFit2')
+        # Fit the platepar to paired stars, with the paired catalog stars and image coordinates separately
+        img_stars, catalog_stars = self.fitPairs(jd)
         self.first_platepar_fit = False
         self.platepar_modified = True
 
