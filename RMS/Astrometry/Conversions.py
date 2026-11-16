@@ -1467,6 +1467,30 @@ def j2000RaDec2TrueOfDate(ra, dec, jd):
     return _perPoint(one, ra, dec)
 
 
+
+def j2000ToTrueOfDateMatrix(jd):
+    """ The rotation from J2000 to the true equator and equinox of date (precession and nutation, the same
+        transform as j2000RaDec2TrueOfDate), as a matrix for direction and position vectors. The frame of date
+        is the frame of the apparent sidereal time (JD2LST), so positions from geo2Cartesian and lines of sight
+        rotated by this matrix are in one frame.
+
+    Arguments:
+        jd: [float] Julian date of the epoch of date.
+
+    Return:
+        [ndarray] 3x3 rotation matrix M: v_date = M.dot(v_j2000), and v_j2000 = M.T.dot(v_date).
+    """
+
+    # The columns are the J2000 axes (x to the equinox, y at 90 deg of right ascension, z to the pole) in the
+    #   frame of date
+    columns = []
+    for ra, dec in ((0.0, 0.0), (np.pi/2, 0.0), (0.0, np.pi/2)):
+        ra_t, dec_t = trueOfDateFromJ2000(jd, ra, dec)
+        columns.append([np.cos(dec_t)*np.cos(ra_t), np.cos(dec_t)*np.sin(ra_t), np.sin(dec_t)])
+
+    return np.array(columns).T
+
+
 def geocentricToApparentRadiantAndVelocity(ra_g, dec_g, vg, lat, lon, elev, jd, include_rotation=True):
     """ Converts the geocentric into apparent meteor radiant and velocity. The conversion is not perfect
         as the zenith attraction correction should be done after the radiant has been derotated for Earth's
