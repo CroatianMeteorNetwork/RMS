@@ -262,6 +262,49 @@ class TestPrecessionNutation(unittest.TestCase):
         self.assertNotEqual(pp2.Ho, 123.456)
 
 
+    def testHourAngleIsRecomputedWhenAPlateparIsUnpickled(self):
+        """ A platepar pickled with the mean sidereal time as Ho (e.g. in a SkyFit2 state file saved before Ho
+            became the apparent one) is restored with the recomputed Ho, and gives the same coordinates as the
+            same calibration loaded from its platepar file. A platepar pickled with the current Ho keeps it. """
+
+        import pickle
+        import tempfile
+
+        # An older platepar: Ho is the mean sidereal time, which differs from the apparent one by the equation
+        #   of the equinoxes (12 arcsec here, up to 16 arcsec over the nutation cycle)
+        pp = Platepar()
+        pp.read(TEMPLATE)
+        pp.JD = DATES[2]
+        pp.Ho = JD2HourAngle(pp.JD) - 12.0/3600
+
+        # Restore it from a pickle, as SkyFit2 restores a state file, and from its platepar file
+        pp_pickled = pickle.loads(pickle.dumps(pp))
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'platepar_cmn2010.cal')
+            pp.write(path)
+            pp_json = Platepar()
+            pp_json.read(path)
+
+        self.assertEqual(pp_pickled.Ho, JD2HourAngle(pp.JD))
+        self.assertEqual(pp_pickled.Ho, pp_json.Ho)
+
+        # The same pixels an hour later give the same sky coordinates either way
+        X = np.linspace(100, pp.X_res - 100, 5)
+        Y = np.linspace(100, pp.Y_res - 100, 5)
+        jds = np.full(len(X), pp.JD + 1/24.0)
+        _, ra_p, dec_p, _ = xyToRaDecPP(jds, X, Y, np.ones(len(X)), pp_pickled, extinction_correction=False,
+            jd_time=True)
+        _, ra_j, dec_j, _ = xyToRaDecPP(jds, X, Y, np.ones(len(X)), pp_json, extinction_correction=False,
+            jd_time=True)
+        sep = [separationArcsec(np.radians(r1), np.radians(d1), np.radians(r2), np.radians(d2))
+            for r1, d1, r2, d2 in zip(ra_p, dec_p, ra_j, dec_j)]
+        self.assertLess(max(sep), 1e-6)
+
+        # A platepar pickled with the current definition is restored unchanged
+        pp_new = pickle.loads(pickle.dumps(pp_json))
+        self.assertEqual(pp_new.Ho, pp_json.Ho)
+
+
     @unittest.skipIf(erfa is None, "pyerfa not installed")
     def testCentroidAltAzAgainstErfa(self):
         """ The az/alt that applyPlateparToCentroids writes to FTPdetectinfo, and applyPlateparToRaDecCentroids,
