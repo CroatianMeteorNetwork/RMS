@@ -123,6 +123,136 @@ def computeSolarSystemMagnitude(body_name, body, sun, time):
     mag = v_1_0 + 5 * np.log10(r * delta) + c1 * phase_angle + c2 * phase_angle**2
 
     return mag
+
+
+def solarSystemBodiesRaDec(obs_time, lat, lon, elev):
+    """ Directions and magnitudes of the Sun, the Moon and the planets seen from the station, in the frame of
+        the star catalog, so that the plate projects them (as the overlay and as fit references) the way it
+        projects catalog stars.
+
+        astropy gives the apparent (GCRS) direction of a body, with the annual aberration in it. A plate that
+        models the aberration applies it to everything it projects through the star path, so the aberration
+        is taken out of the bodies' directions here and the plate puts it back. Handing it the apparent
+        directions would apply the aberration twice (up to 20.5 arcsec). A plate fitted before the aberration
+        was modelled has absorbed it into its pointing, so it too maps catalog-frame directions where the
+        camera sees them.
+
+    Arguments:
+        obs_time: [tuple] Observation time (year, month, day, hour, minute, second, ...), UTC.
+        lat: [float] Station latitude (deg).
+        lon: [float] Station longitude (deg).
+        elev: [float] Station elevation (m).
+
+    Return:
+        bodies: [list] A (display_name, ra, dec, mag) entry for every body that could be computed: the
+            direction in the catalog frame (deg, J2000) and the apparent visual magnitude.
+    """
+
+    # The time, for astropy and for the aberration
+    dt = datetime.datetime(*obs_time[:6])
+    t = Time(dt)
+    jd = date2JD(*obs_time[:6])
+
+    # Observer location
+    loc = EarthLocation(lat=lat, lon=lon, height=elev)
+
+    # Bodies to display (name, display_name)
+    bodies = [
+        ('sun', 'Sun'),
+        ('moon', 'Moon'),
+        ('mercury', 'Mercury'),
+        ('venus', 'Venus'),
+        ('mars', 'Mars'),
+        ('jupiter', 'Jupiter'),
+        ('saturn', 'Saturn'),
+        ('uranus', 'Uranus'),
+        ('neptune', 'Neptune'),
+    ]
+
+    # Get sun position for magnitude calculations
+    sun = get_sun(t)
+
+    # Compute the direction and the magnitude of every body
+    body_radec = []
+    for body_name, display_name in bodies:
+        try:
+
+            # Get body position (GCRS apparent coordinates)
+            body = get_body(body_name, t, loc)
+
+            # The apparent direction without the annual aberration: the direction in the catalog frame
+            ra, dec = removeAberration(body.ra.rad, body.dec.rad, jd)
+
+            # Compute apparent magnitude
+            mag = computeSolarSystemMagnitude(body_name, body, sun, t)
+
+            body_radec.append((display_name, np.degrees(ra), np.degrees(dec), mag))
+
+        except Exception:
+            # Skip bodies that fail (e.g., if ephemeris data is missing)
+            continue
+
+    return body_radec
+
+
+def migrateStatePlanetPairs(paired_stars, cache_time, platepar):
+    """ Convert the solar system bodies paired in a state saved before their directions were given in the
+        catalog frame (see solarSystemBodiesRaDec) to that frame, once.
+
+        Such a state holds astropy's apparent directions of the paired bodies, with the annual aberration in
+        them, which a plate that models the aberration would apply a second time (up to 20.5 arcsec). The
+        aberration is taken out at the time of the ephemerides the bodies were picked from: the time the
+        bodies were last computed for, which the state keeps (_planet_cache_time). That is the time of the
+        image the pairs belong to, as the pairs are cleared when the image changes; in the manual reduction
+        mode it is the time of the current frame, at most the length of the video away. A state without it
+        falls back to the reference time of the platepar, set to the time of the image when the platepar is
+        made or automatically aligned in SkyFit2. The aberration turns with the motion of the Earth by about
+        0.015 arcsec an hour and 0.35 arcsec a day, so a time an hour off changes the converted directions
+        by 0.015 arcsec. The converted bodies are marked as being in the catalog frame, so a state saved
+        again is not converted twice; bodies picked after the change are marked when they are picked.
+
+    Arguments:
+        paired_stars: [PairedStars] The pairs of the loaded state, changed in place.
+        cache_time: [tuple] The time the bodies were last computed for (year, month, day, hour, minute,
+            second), UTC, as saved in the state. None if the state does not have it.
+        platepar: [Platepar] The platepar of the state, its reference time is the fallback. None if there
+            is none.
+
+    Return:
+        n_converted: [int] Number of the bodies converted to the catalog frame.
+    """
+
+    # The paired bodies that are still in the apparent frame
+    old_bodies = [entry[4] for entry in paired_stars.paired_stars
+        if (getattr(entry[4], 'pick_type', None) == 'planet')
+            and (not getattr(entry[4], 'catalog_frame', False))]
+
+    if not old_bodies:
+        return 0
+
+    # The time of the ephemerides the bodies were picked from, else the reference time of the platepar
+    if cache_time is not None:
+        jd = date2JD(*cache_time)
+    elif platepar is not None:
+        jd = platepar.JD
+    else:
+        print("WARNING: The paired solar system bodies of the state could not be converted to the catalog "
+            "frame, there is no time to do it for")
+        return 0
+
+    # Take the annual aberration out of the apparent directions, as solarSystemBodiesRaDec does
+    for body in old_bodies:
+        ra, dec = removeAberration(np.radians(body.ra), np.radians(body.dec), jd)
+        body.ra, body.dec = np.degrees(ra), np.degrees(dec)
+        body.catalog_frame = True
+
+    # Report the conversion
+    print("Converted {:d} paired solar system bodies of the state to the catalog frame (JD {:.6f})".format(
+        len(old_bodies), jd))
+
+    return len(old_bodies)
+
+
 import matplotlib.gridspec as gridspec
 import matplotlib.ticker as ticker
 import scipy.optimize
@@ -211,7 +341,7 @@ from Utils.KalmanFilter import KalmanFilter
 
 import pyximport
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
-from RMS.Astrometry.CyFunctions import subsetCatalog, j2000FromTrueOfDate, refractionScale
+from RMS.Astrometry.CyFunctions import subsetCatalog, j2000FromTrueOfDate, refractionScale, removeAberration
 from RMS.Astrometry.MatchStars import matchStars
 from RMS.Routines.SatellitePositions import SatellitePredictor, loadTLEs, loadRobustTLEs, findClosestTLEFile, SKYFIELD_AVAILABLE
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
@@ -3019,7 +3149,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Cache for planet ephemerides (expensive astropy calls)
         self._planet_cache_time = None  # Observation time when ephemerides were computed
-        self._planet_cache_radec = []   # List of (name, ra, dec, mag) from astropy
+        self._planet_cache_radec = []   # List of (name, ra, dec, mag), see solarSystemBodiesRaDec
 
         # astrometry.net matched star markers (main window) - cyan color
         # These show catalog star positions that matched to input stars
@@ -4657,50 +4787,11 @@ class PlateTool(QtWidgets.QMainWindow):
         ff_jd = date2JD(*obs_time)
 
         # Check if we need to recompute ephemerides (expensive astropy calls)
-        # Only recompute when the observation time changes
+        # Only recompute when the observation time changes. The directions are in the catalog frame (the
+        #   annual aberration taken out), so they are projected and fitted the way catalog stars are
         if self._planet_cache_time != obs_time[:6]:
-            # Convert to astropy Time
-            dt = datetime.datetime(*obs_time[:6])
-            t = Time(dt)
-
-            # Observer location
-            loc = EarthLocation(lat=self.platepar.lat, lon=self.platepar.lon,
-                               height=self.platepar.elev)
-
-            # Bodies to display (name, display_name)
-            bodies = [
-                ('sun', 'Sun'),
-                ('moon', 'Moon'),
-                ('mercury', 'Mercury'),
-                ('venus', 'Venus'),
-                ('mars', 'Mars'),
-                ('jupiter', 'Jupiter'),
-                ('saturn', 'Saturn'),
-                ('uranus', 'Uranus'),
-                ('neptune', 'Neptune'),
-            ]
-
-            # Get sun position for magnitude calculations
-            sun = get_sun(t)
-
-            # Compute and cache ephemerides
-            self._planet_cache_radec = []
-            for body_name, display_name in bodies:
-                try:
-                    # Get body position (GCRS apparent coordinates)
-                    body = get_body(body_name, t, loc)
-                    ra_deg = body.ra.deg
-                    dec_deg = body.dec.deg
-
-                    # Compute apparent magnitude
-                    mag = computeSolarSystemMagnitude(body_name, body, sun, t)
-
-                    self._planet_cache_radec.append((display_name, ra_deg, dec_deg, mag))
-
-                except Exception as e:
-                    # Skip bodies that fail (e.g., if ephemeris data is missing)
-                    pass
-
+            self._planet_cache_radec = solarSystemBodiesRaDec(obs_time, self.platepar.lat, self.platepar.lon,
+                self.platepar.elev)
             self._planet_cache_time = obs_time[:6]
 
         # Now compute x/y positions from cached RA/Dec (this is fast and depends on platepar)
@@ -9398,7 +9489,13 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def savePairs(self):
         """ Save the current image's matched star pairs into the folder-level pairs file,
-            keyed by image. Pairs saved for other images in the folder are preserved. """
+            keyed by image. Pairs saved for other images in the folder are preserved.
+
+            Version 2 of the file: the solar system bodies are saved in the catalog frame (see
+            solarSystemBodiesRaDec) with their name and a catalog_frame marker. Version 1 saved the apparent
+            directions without the marker, which loadPairs converts. The keys of the pairs are unchanged, so
+            older readers still load the file.
+        """
 
         if len(self.paired_stars) == 0:
             qmessagebox(message="No matched pairs on the current image to save.",
@@ -9414,16 +9511,24 @@ class PlateTool(QtWidgets.QMainWindow):
                 n_skipped += 1
                 continue
             ra, dec, mag = obj.coords()
-            pairs.append({'x': float(x), 'y': float(y), 'fwhm': float(fwhm),
-                          'intens_acc': float(intens_acc), 'snr': float(snr),
-                          'saturated': bool(saturated),
-                          'ra': float(ra), 'dec': float(dec), 'mag': float(mag),
-                          'type': getattr(obj, 'pick_type', 'star')})
+            pair = {'x': float(x), 'y': float(y), 'fwhm': float(fwhm),
+                    'intens_acc': float(intens_acc), 'snr': float(snr),
+                    'saturated': bool(saturated),
+                    'ra': float(ra), 'dec': float(dec), 'mag': float(mag),
+                    'type': getattr(obj, 'pick_type', 'star')}
+
+            # A solar system body keeps its name and the frame of its direction: the marker is only set
+            #   when the direction is in the catalog frame, so loadPairs converts any that is not
+            if pair['type'] == 'planet':
+                pair['name'] = obj.name
+                pair['catalog_frame'] = bool(getattr(obj, 'catalog_frame', False))
+
+            pairs.append(pair)
 
         path = self._pairsFilePath()
 
         # Merge into the existing folder-level file so other images' pairs are kept
-        data = {'format': 'skyfit_matched_pairs', 'version': 1, 'images': {}}
+        data = {'format': 'skyfit_matched_pairs', 'version': 2, 'images': {}}
         if os.path.isfile(path):
             try:
                 with open(path) as f:
@@ -9433,6 +9538,10 @@ class PlateTool(QtWidgets.QMainWindow):
                     data.setdefault('images', {})
             except Exception:
                 pass  # corrupt/unreadable - start fresh
+
+        # The file now has pairs of version 2. The pairs of other images saved in version 1 keep their
+        #   apparent bodies without the marker, which loadPairs converts when they are loaded
+        data['version'] = 2
 
         key = self._currentImageKey()
         try:
@@ -9453,7 +9562,13 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def loadPairs(self):
         """ Load matched pairs for the CURRENT image from the folder-level pairs file.
-            Pairs are per-image, so only the current image's saved entry is restored. """
+            Pairs are per-image, so only the current image's saved entry is restored.
+
+            A solar system body saved without the catalog_frame marker (a version 1 file, or a pair written
+            into a newer file by an older SkyFit2) holds the apparent direction, which a plate that models the
+            aberration would aberrate a second time (up to 20.5 arcsec). The aberration is taken out of it at
+            the time of its image (see savePairs). Star pairs are loaded as saved.
+        """
 
         path = self._pairsFilePath()
         if not os.path.isfile(path):
@@ -9478,9 +9593,42 @@ class PlateTool(QtWidgets.QMainWindow):
                         title="Load pairs", message_type="warning")
             return
 
+        # The time of the image the pairs were saved for, else the time of the current image (the same image)
+        jd = images[key].get('jd')
+        if jd is None:
+            try:
+                jd = date2JD(*self.img_handle.currentTime())
+            except Exception:
+                jd = None
+
         new_pairs = PairedStars()
+        n_converted = 0
         for p in images[key].get('pairs', []):
-            star = CatalogStar(p['ra'], p['dec'], p['mag'])
+
+            # A solar system body is restored in the catalog frame, its apparent direction converted at the
+            #   time of the image if it was saved without the marker
+            if p.get('type') == 'planet':
+
+                ra, dec = p['ra'], p['dec']
+                catalog_frame = bool(p.get('catalog_frame', False))
+                if (not catalog_frame) and (jd is not None):
+                    ra, dec = removeAberration(np.radians(ra), np.radians(dec), jd)
+                    ra, dec = np.degrees(ra), np.degrees(dec)
+                    catalog_frame = True
+                    n_converted += 1
+
+                elif not catalog_frame:
+                    print("WARNING: No time to convert the saved pair of {} to the catalog frame, it keeps "
+                        "its apparent direction".format(p.get('name', 'a solar system body')))
+
+                # The marker tells whether the direction is in the catalog frame now
+                star = PlanetPoint(p.get('name', 'Planet'), ra, dec, p['mag'])
+                star.catalog_frame = catalog_frame
+
+            # Catalog stars as saved
+            else:
+                star = CatalogStar(p['ra'], p['dec'], p['mag'])
+
             new_pairs.addPair(p['x'], p['y'], p['fwhm'], p['intens_acc'], star,
                               snr=p.get('snr', 0), saturated=p.get('saturated', False))
 
@@ -9488,6 +9636,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.updatePairedStars()
 
         msg = "Loaded {} matched pairs for '{}'".format(len(new_pairs), key)
+        if n_converted:
+            msg += " ({} solar system bodies converted to the catalog frame)".format(n_converted)
         print(msg)
         self.status_bar.showMessage(msg)
 
@@ -9597,6 +9747,9 @@ class PlateTool(QtWidgets.QMainWindow):
 
             if not hasattr(self.platepar, "measurement_apparent_to_true_refraction"):
                 self.platepar.measurement_apparent_to_true_refraction = False
+
+            if not hasattr(self.platepar, "aberration"):
+                self.platepar.aberration = False
 
 
             # Update platepar distortion indices
@@ -9731,6 +9884,11 @@ class PlateTool(QtWidgets.QMainWindow):
             if not hasattr(self.geo_points_obj, "ra_plate_data"):
                 self.geo_points_obj.ra_plate_data = self.geo_points_obj.ra_data
                 self.geo_points_obj.dec_plate_data = self.geo_points_obj.dec_data
+
+        # The solar system bodies are computed again: a state saved before their directions were given in the
+        #   catalog frame holds the apparent ones (its paired bodies are converted below)
+        self._planet_cache_time = None
+        self._planet_cache_radec = []
 
         # Update the possibly missing params
         if not hasattr(self, "geo_marker_scale"):
@@ -9871,6 +10029,11 @@ class PlateTool(QtWidgets.QMainWindow):
                 # If the FWHM is missing, add it to the 3rd index
                 if len(paired_star) == 6:
                     paired_star.insert(2, 0.0)
+
+        # The paired solar system bodies of a state saved before their directions were given in the catalog
+        #   frame hold the apparent ones: convert them at the time the bodies were computed for in that state
+        #   (read from the loaded variables, the cache itself was cleared above)
+        migrateStatePlanetPairs(self.paired_stars, variables.get('_planet_cache_time'), self.platepar)
 
 
         if self.platepar is not None:
@@ -12935,7 +13098,8 @@ class PlateTool(QtWidgets.QMainWindow):
                     first_platepar_fit=True,
                     use_nn_cost=True,
                     final_catalog_stars=tuned_catalog,
-                    iteration_callback=iteration_callback
+                    iteration_callback=iteration_callback,
+                    fit_by='SkyFit2 auto'
                 )
                 print("  NN fit complete: RA={:.2f} Dec={:.2f} Scale={:.3f} arcmin/px".format(
                     self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale))
@@ -13131,6 +13295,9 @@ class PlateTool(QtWidgets.QMainWindow):
         self.platepar.Ho = pp_aligned.Ho
         self.platepar.rotation_from_horiz = rotationWrtHorizon(self.platepar)
         self.platepar.updateRefAltAz()
+
+        # Record the pointing fit of the alignment
+        self.platepar.recordFit(pointing=True, fit_by='SkyFit2 align')
 
         # Update display
         self.updateStars()
@@ -13913,7 +14080,8 @@ class PlateTool(QtWidgets.QMainWindow):
                     first_platepar_fit=True,
                     use_nn_cost=True,
                     final_catalog_stars=tuned_catalog,
-                    iteration_callback=iteration_callback
+                    iteration_callback=iteration_callback,
+                    fit_by='SkyFit2 auto'
                 )
                 print("  NN fit complete: RA={:.2f} Dec={:.2f} Scale={:.3f} arcmin/px".format(
                     self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale))
@@ -15304,9 +15472,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
                 ra_array, dec_array = np.array(ra_array), np.array(dec_array)
 
-                # Compute image coordinates
+                # Compute image coordinates. The circle was fitted to measured directions of the picks
+                #   (measurement=True above), which are not aberrated, so it is projected the same way
                 x_array, y_array = raDecToXYPP(ra_array, dec_array, \
-                    datetime2JD(self.img_handle.currentFrameTime(dt_obj=True)), self.platepar)
+                    datetime2JD(self.img_handle.currentFrameTime(dt_obj=True)), self.platepar, measurement=True)
 
                 # Remove points outside the image
                 filter_arr = (x_array >= 0) & (x_array <= self.platepar.X_res) & (y_array >= 0) \
@@ -15502,6 +15671,50 @@ class PlateTool(QtWidgets.QMainWindow):
         return overfit
 
 
+    def fitPairs(self, jd):
+        """ Fit the platepar to the paired stars, ground references and solar system bodies.
+
+            The fit models the annual aberration (Platepar.fitAstrometry turns it on where it fits), and the
+            plate coordinates of the ground references depend on it: the aberration that the plate applies is
+            taken out of them (see targetRaDecToPlateRaDec). So they are prepared for the model of the fit
+            before they are taken as fit inputs, whatever the model of the platepar before the fit. For a
+            platepar fitted before the aberration was modelled they would otherwise keep the aberration, and
+            the fit would apply it on top (up to 20.5 arcsec). After the fit they follow the platepar again.
+
+        Arguments:
+            jd: [float] Julian date of the image that is fitted.
+
+        Return:
+            (img_stars, catalog_stars): [tuple of ndarrays] The image coordinates (x, y, intensity) and the
+                sky coordinates (ra, dec, mag) of the pairs, the latter for the platepar after the fit.
+        """
+
+        # The ground references prepared for the model of the fit, with the aberration modelled. Only the
+        #   station and the refraction and aberration settings of the platepar are used for them, and the
+        #   platepar keeps its own model until the fit changes it
+        if self.geo_points_obj is not None:
+            pp_fit_model = copy.copy(self.platepar)
+            pp_fit_model.aberration = True
+            self.geo_points_obj.update(pp_fit_model, jd)
+
+        # Extract paired catalog stars and image coordinates separately
+        img_stars = np.array(self.paired_stars.imageCoords())
+        catalog_stars = np.array(self.paired_stars.skyCoords())
+
+        # Fit the platepar to the pairs. Then the ground references follow the model of the platepar, which a
+        #   fit that fails leaves as it was
+        try:
+            self.platepar.fitAstrometry(jd, img_stars, catalog_stars,
+                first_platepar_fit=self.first_platepar_fit, fit_only_pointing=self.fit_only_pointing,
+                fixed_scale=self.fixed_scale, fit_by='SkyFit2')
+
+        finally:
+            if self.geo_points_obj is not None:
+                self.geo_points_obj.update(self.platepar, jd)
+
+        return img_stars, np.array(self.paired_stars.skyCoords())
+
+
     def fitPickedStars(self):
         """ Fit stars that are manually picked. The function first only estimates the astrometry parameters
             without the distortion, then just the distortion parameters, then all together.
@@ -15526,16 +15739,11 @@ class PlateTool(QtWidgets.QMainWindow):
         print("----------------------------------------")
         print("Fitting platepar...")
 
-        # Extract paired catalog stars and image coordinates separately
-        img_stars = np.array(self.paired_stars.imageCoords())
-        catalog_stars = np.array(self.paired_stars.skyCoords())
-
         # Get the Julian date of the image that's being fit
         jd = date2JD(*self.img_handle.currentTime())
 
-        # Fit the platepar to paired stars
-        self.platepar.fitAstrometry(jd, img_stars, catalog_stars, first_platepar_fit=self.first_platepar_fit,\
-            fit_only_pointing=self.fit_only_pointing, fixed_scale=self.fixed_scale)
+        # Fit the platepar to paired stars, with the paired catalog stars and image coordinates separately
+        img_stars, catalog_stars = self.fitPairs(jd)
         self.first_platepar_fit = False
         self.platepar_modified = True
 

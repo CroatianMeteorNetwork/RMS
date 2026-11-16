@@ -290,8 +290,8 @@ def updateRaDecGrid(grid, platepar):
     dec_horiz_plot = dec_horiz_plot[filter_arr]
 
 
-    # Compute image coordinates of the horizon
-    x_horiz, y_horiz = raDecToXYPP(ra_horiz_plot, dec_horiz_plot, platepar.JD, platepar)
+    # Compute image coordinates of the horizon (a direction fixed to the Earth is not aberrated)
+    x_horiz, y_horiz = raDecToXYPP(ra_horiz_plot, dec_horiz_plot, platepar.JD, platepar, aberration=False)
 
     # Filter out all horizon points outside the image
     filter_arr = (x_horiz >= 0) & (x_horiz <= platepar.X_res) & (y_horiz >= 0) & (y_horiz <= platepar.Y_res)
@@ -331,9 +331,10 @@ def updateAzAltGrid(grid, platepar):
 
     ### COMPUTE FOV CENTRE ###
     
-    # Estimate RA,dec of the centre of the FOV
+    # Estimate RA,dec of the centre of the FOV, as the direction in the Earth's frame (no aberration) that the
+    #   alt/az grid lines are given in
     _, RA_c, dec_c, _ = xyToRaDecPP([jd2Date(platepar.JD)], [platepar.X_res/2], [platepar.Y_res/2], [1], \
-                                    platepar, extinction_correction=False)
+                                    platepar, extinction_correction=False, aberration=False)
 
     # Scale of the refraction at the station height
     refr_scale = refractionScale(platepar.elev)
@@ -383,10 +384,10 @@ def updateAzAltGrid(grid, platepar):
         az_grid_plot = az_grid_plot[filter_arr]
         alt_grid_plot = alt_grid_plot[filter_arr]
 
-        # Compute image coordinates
+        # Compute image coordinates (the alt/az lines are fixed to the Earth, so they are not aberrated)
         ra_grid_plot, dec_grid_plot = apparentAltAz2TrueRADec(az_grid_plot, alt_grid_plot, platepar.JD, \
             platepar.lat, platepar.lon, platepar.refraction, refraction_scale=refr_scale)
-        x_grid, y_grid = raDecToXYPP(ra_grid_plot, dec_grid_plot, platepar.JD, platepar)
+        x_grid, y_grid = raDecToXYPP(ra_grid_plot, dec_grid_plot, platepar.JD, platepar, aberration=False)
 
         # Filter out all points outside the image
         filter_arr = (x_grid >= 0) & (x_grid <= platepar.X_res) & (y_grid >= 0) & (y_grid <= platepar.Y_res)
@@ -414,10 +415,10 @@ def updateAzAltGrid(grid, platepar):
         alt_grid_plot = alt_grid_plot[filter_arr]
 
         
-        # Compute image coordinates
+        # Compute image coordinates (the alt/az lines are fixed to the Earth, so they are not aberrated)
         ra_grid_plot, dec_grid_plot = apparentAltAz2TrueRADec(az_grid_plot, alt_grid_plot, platepar.JD, \
             platepar.lat, platepar.lon, platepar.refraction, refraction_scale=refr_scale)
-        x_grid, y_grid = raDecToXYPP(ra_grid_plot, dec_grid_plot, platepar.JD, platepar)
+        x_grid, y_grid = raDecToXYPP(ra_grid_plot, dec_grid_plot, platepar.JD, platepar, aberration=False)
 
         
         # Filter out all points outside the image
