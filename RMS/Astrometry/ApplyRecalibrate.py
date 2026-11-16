@@ -52,6 +52,11 @@ RECALIBRATE_NEIGHBOURHOOD_SIZE = 3
 LSQ_REFINE_MAX_ROUNDS = 5
 LSQ_REFINE_CONVERGED_PX = 0.01
 
+# Least squares refinement of the pointing: the number of matched stars which the refined pointing may lose
+#   (move out of the match radius) and still be used, as a fraction of the matched stars, and the least number
+LSQ_REFINE_MAX_LOST_FRACTION = 0.02
+LSQ_REFINE_MIN_LOST = 1
+
 # Get the logger from the main module
 log = getLogger("rmslogger", level="INFO")
 
@@ -105,6 +110,33 @@ def loadRecalibratedPlatepar(dir_path, config, file_list=None, type='meteor'):
     return None
 
 
+def warnOlderAstrometryModel(platepar, name):
+    """ Warn that the detections of an image are computed with a platepar used as it is (its recalibration
+        on the image failed or was not done) which was fitted with an older astrometric model than the one of
+        the kernels (Platepar.ASTROMETRY_MODEL). Its coefficients don't mean what the kernels take them to
+        mean, as on the first night after an upgrade which changed the model, so the detections have to be
+        computed again once a platepar fitted with the current model exists.
+
+    Arguments:
+        platepar: [Platepar instance] Platepar used for the image.
+        name: [str] Name of the image (FF file) or of the file of the detections, for the log.
+
+    Return:
+        [bool] True if the platepar is of an older model and the warning was logged.
+    """
+
+    # The model of the distortion fit of the platepar, against the one of the kernels
+    model = platepar.astrometryModel()
+    if model >= Platepar.ASTROMETRY_MODEL:
+        return False
+
+    log.warning('{:s}: the platepar used without recalibration was fitted with the astrometric model {:d}, '
+                'older than the current {:d}; compute these detections again once a platepar fitted with the '
+                'current model exists'.format(name, model, Platepar.ASTROMETRY_MODEL))
+
+    return True
+
+
 def refinePointingLSQ(config, platepar, jd, star_dict_ff, catalog_stars, fit_radius, check_radius, n_check,
                       lim_mag=None):
     """ Refine the pointing (reference RA, Dec, position angle and scale) of a recalibrated platepar by least
@@ -134,8 +166,9 @@ def refinePointingLSQ(config, platepar, jd, star_dict_ff, catalog_stars, fit_rad
 
     Return:
         (platepar, matched_stars): [tuple] The refined platepar and its matched stars within check_radius, or
-            (None, None) if the refinement isn't used: too few stars, fewer stars matched, or a higher loss
-            (the robust one of the fit) on the stars matched with the given platepar.
+            (None, None) if the refinement isn't used: too few stars, more matched stars lost than allowed
+            (LSQ_REFINE_MAX_LOST_FRACTION of them, at least LSQ_REFINE_MIN_LOST), or a higher loss (the robust
+            one of the fit) on the stars matched with the given platepar.
     """
 
     # The stars matched with the given platepar, the pairs which the refinement must fit better. Too few stars
@@ -217,14 +250,23 @@ def refinePointingLSQ(config, platepar, jd, star_dict_ff, catalog_stars, fit_rad
             return None, None
         img_stars, cat_stars, _ = matched[jd]
 
-    # The refinement is used only if it matches at least as many stars, both for the fit and for the checks
-    #   after the recalibration, and has a lower loss on the stars matched with the given platepar
+    # The number of the matched stars which the refined pointing may lose. A star near the edge of the match
+    #   radius can move out of it when the pointing gets better, as the radius is about as large as the
+    #   error which the refinement removes, so losing one or a few stars is no sign of a worse fit. Losing
+    #   more than a small fraction of them is taken as a sign of a wrong fit
+    max_lost_fit = max(LSQ_REFINE_MIN_LOST, LSQ_REFINE_MAX_LOST_FRACTION*n_start)
+    max_lost_check = max(LSQ_REFINE_MIN_LOST, LSQ_REFINE_MAX_LOST_FRACTION*n_check)
+
+    # The refinement is used only if it loses at most the allowed number of the matched stars, both for the
+    #   fit and for the checks after the recalibration, and has a lower loss on the stars matched with the
+    #   given platepar
     n_fit, _, _, _ = CheckFit.matchStarsResiduals(config, refined, catalog_stars, star_dict_ff, fit_radius,
                                                   ret_nmatch=True, lim_mag=lim_mag)
     n_refined, _, _, matched_check = CheckFit.matchStarsResiduals(config, refined, catalog_stars, star_dict_ff,
                                                                   check_radius, ret_nmatch=True, lim_mag=lim_mag)
     cost_start, cost_refined = _robustCost(platepar, img_start, cat_start), _robustCost(refined, img_start, cat_start)
-    if (n_fit < n_start) or (n_refined < n_check) or (jd not in matched_check) or (cost_refined > cost_start):
+    if ((n_start - n_fit) > max_lost_fit) or ((n_check - n_refined) > max_lost_check) \
+            or (jd not in matched_check) or (cost_refined > cost_start):
 
         log.info('Least squares refinement of the pointing not used: stars within {:.2f} px {:d} (before {:d}), '
                  'within {:.2f} px {:d} (before {:d}), loss on the first pairs {:.3f} (before {:.3f})'.format(
@@ -238,6 +280,9 @@ def refinePointingLSQ(config, platepar, jd, star_dict_ff, catalog_stars, fit_rad
                                            refined.dec_d - platepar.dec_d,
                                            refined.pos_angle_ref - platepar.pos_angle_ref,
                                            refined.F_scale - platepar.F_scale))
+
+    # Record the pointing fit
+    refined.recordFit(pointing=True, fit_by='refinePointingLSQ')
 
     return refined, matched_check
 
@@ -288,6 +333,11 @@ def recalibrateFF(
     """
 
     working_platepar = copy.deepcopy(working_platepar)
+
+    # The recalibration models the aberration. A plate that had absorbed it instead has to be refitted
+    #   at least once before it can be accepted, however well it matches the stars already
+    aberration_refit = not working_platepar.aberration
+    working_platepar.aberration = True
 
     # Resolve the coverage gate threshold from the config unless explicitly given
     if min_match_fraction is None:
@@ -389,6 +439,7 @@ def recalibrateFF(
     # Go through all radii and match the stars
     min_match_radius = None
     matched_stars_good = None
+    lsq_refined = False
     for match_radius in radius_list:
 
         # Skip radiuses that are too small if the radius filter is on
@@ -402,7 +453,7 @@ def recalibrateFF(
                 break
 
         # If the platepar is good and the radius is below a pixel, don't recalibrate anymore
-        if (match_radius < 1.0) and CheckFit.checkFitGoodness(
+        if (match_radius < 1.0) and (not aberration_refit) and CheckFit.checkFitGoodness(
             config, working_platepar, catalog_stars, star_dict_ff, match_radius, verbose=True
         ):
             log.info('The fit is good enough!')
@@ -501,6 +552,7 @@ def recalibrateFF(
 
             # Keep track of the minimum match radius
             min_match_radius = match_radius
+            aberration_refit = False
 
             # Keep the matched stars from this successful iteration - a later iteration that fails
             #   overwrites matched_stars with matches of a platepar that was never accepted, and
@@ -543,6 +595,7 @@ def recalibrateFF(
                                                                goodness_check_radius):
             working_platepar = refined
             matched_stars_good = matched_refined
+            lsq_refined = True
 
     # If the platepar is good, store it
     if (
@@ -643,6 +696,10 @@ def recalibrateFF(
         working_platepar.star_list = []
         for star_vals, ra, dec, mag in zip(image_stars, ra_catalog, dec_catalog, catalog_mags):
             working_platepar.star_list.append([jd] + list(star_vals[:3]) + [ra, dec, mag])
+
+        # Record the pointing fit: the search, refined by least squares if it was
+        working_platepar.recordFit(pointing=True,
+                                   fit_by=('recalibrateFF+LSQ' if lsq_refined else 'recalibrateFF'))
 
         # Store the platepar to the list of recalibrated platepars
         result = working_platepar
@@ -940,10 +997,8 @@ def recalibratePlateparsForFF(
         # Store the platepar if the fit succeeded
         if result is not None:
 
-            # Recompute alt/az of the FOV centre (apparent, epoch-of-date) using the platepar's own
-            #   method, so the az/alt fields match the convention used by SkyFit/Platepar/ECSV. A plain
-            #   raDec2AltAz here lacks precession and leaves az_centre ~0.3 deg off on aged platepars.
-            working_platepar.updateRefAltAz()
+            # Recompute alt/az of the FOV centre, refracted for the station height as the kernels do
+            working_platepar.az_centre, working_platepar.alt_centre = working_platepar.computeRefAltAz()
 
             # Recompute the rotation wrt horizon
             working_platepar.rotation_from_horiz = rotationWrtHorizon(working_platepar)
@@ -1727,13 +1782,20 @@ def recalibrateIndividualFFsAndApplyAstrometry(
                 ff_name, closest_calstars_ff_name, time_diff_s
             ))
 
-            # Choose the platepar that will be applied to this FF file
+            # Choose the platepar that will be applied to this FF file (one whose recalibration failed is the
+            #   previous platepar used as it is)
             if closest_calstars_ff_name in recalibrated_platepars:
                 working_platepar = recalibrated_platepars[closest_calstars_ff_name]
+                used_as_is = not getattr(working_platepar, 'auto_recalibrated', False)
 
             else:
                 log.info('Could not find a recalibrated platepar for: {:s}, using default platepar.'.format(ff_name))
                 working_platepar = platepar
+                used_as_is = True
+
+            # A platepar used as it is, fitted with an older astrometric model, needs these detections redone
+            if used_as_is:
+                warnOlderAstrometryModel(working_platepar, ff_name)
 
             # Apply the recalibrated platepar to meteor centroids
             meteor_picks = applyPlateparToCentroids(
@@ -1778,6 +1840,10 @@ def recalibrateIndividualFFsAndApplyAstrometry(
         if len(recalibrated_platepars) == 0:
 
             log.info('No FF images were used for recalibration, using the single platepar calibration function...')
+
+            # The initial platepar is used as it is, if it was fitted with an older astrometric model the
+            #   detections have to be redone later
+            warnOlderAstrometryModel(platepar, ftpdetectinfo_file)
 
             # Use the initial platepar for calibration
             applyAstrometryFTPdetectinfo(dir_path, ftpdetectinfo_file, None, platepar=platepar)

@@ -10,6 +10,7 @@ than the tolerance of the search.
 """
 
 import copy
+import types
 
 import numpy as np
 
@@ -22,6 +23,13 @@ from RMS.Formats.Platepar import Platepar
 # Number of stars of the synthetic image, and the noise of their positions (px)
 N_STARS = 150
 NOISE_PX = 0.05
+
+# Smallest match radius of the recalibration of a 1280x720 image (px), the offset of the starting pointing
+#   in the tests of the stars lost by the refinement (px), and how far inside the match radius the lost stars
+#   sit at the start (px)
+MATCH_RADIUS = 0.5
+START_OFFSET_PX = 0.2
+EDGE_MARGIN_PX = 0.05
 
 
 def makePlatepar():
@@ -61,9 +69,13 @@ def makeConfig():
     return config
 
 
-def makeImage(pp, seed=0):
+def makeImage(pp, seed=0, n_stars=N_STARS):
     """ A synthetic image: catalog stars spread over the image (at least 20 px apart, so every star has one
         match), and the image stars at their positions with the noise.
+
+    Keyword arguments:
+        seed: [int] Seed of the random numbers. 0 by default.
+        n_stars: [int] Number of stars. N_STARS by default.
 
     Return:
         (catalog_stars, star_rows): [tuple] Catalog stars (ra, dec, mag) and the image stars as rows of a
@@ -74,7 +86,7 @@ def makeImage(pp, seed=0):
 
     # Random image positions far enough apart
     xy = []
-    while len(xy) < N_STARS:
+    while len(xy) < n_stars:
         x, y = rng.uniform(30, pp.X_res - 30), rng.uniform(30, pp.Y_res - 30)
         if all(np.hypot(x - xi, y - yi) > 20 for xi, yi in xy):
             xy.append((x, y))
@@ -82,18 +94,18 @@ def makeImage(pp, seed=0):
 
     # Their sky positions are the catalog, the image stars are where the platepar puts the catalog stars (the
     #   forward mapping, which is the one the recalibration fits), with the noise
-    _, ra, dec, _ = xyToRaDecPP(np.full(N_STARS, pp.JD), x, y, np.ones(N_STARS), pp, extinction_correction=False,
-                                jd_time=True)
+    _, ra, dec, _ = xyToRaDecPP(np.full(n_stars, pp.JD), x, y, np.ones(n_stars), pp,
+                                extinction_correction=False, jd_time=True)
     ra, dec = np.asarray(ra), np.asarray(dec)
-    mag = rng.uniform(2.0, 6.0, N_STARS)
+    mag = rng.uniform(2.0, 6.0, n_stars)
     x_img, y_img = raDecToXYPP(ra, dec, pp.JD, pp)
-    x_img = x_img + rng.normal(0, NOISE_PX, N_STARS)
-    y_img = y_img + rng.normal(0, NOISE_PX, N_STARS)
+    x_img = x_img + rng.normal(0, NOISE_PX, n_stars)
+    y_img = y_img + rng.normal(0, NOISE_PX, n_stars)
 
     # The intensities follow the photometry of the platepar
     intensity = 10**((pp.mag_lev - mag)/2.5)
-    rows = np.column_stack([y_img, x_img, intensity, intensity/10, np.full(N_STARS, 2.5), np.full(N_STARS, 10.0),
-                            np.full(N_STARS, 50.0), np.zeros(N_STARS)])
+    rows = np.column_stack([y_img, x_img, intensity, intensity/10, np.full(n_stars, 2.5),
+                            np.full(n_stars, 10.0), np.full(n_stars, 50.0), np.zeros(n_stars)])
 
     return np.column_stack([ra, dec, mag]), rows
 
@@ -269,3 +281,144 @@ def test_forced_fallback_not_refined(monkeypatch):
     result, _ = ApplyRecalibrate.recalibrateFF(config, perturbed(pp), jd, {jd: rows}, catalog_stars,
                                                max_match_radius=1.5, force_platepar_save=True)
     assert result is not None
+
+
+
+def makeLostStarsImage(pp, n_stars, n_lost, seed=0):
+    """ A synthetic image on which the refinement loses some of the stars matched with the starting platepar.
+        The start is off the true pointing by START_OFFSET_PX and n_lost image stars sit just inside the match
+        radius from where the start puts their catalog stars, on the side away from the true position, so they
+        are matched at the start and are out of the match radius once the pointing is refined.
+
+    Arguments:
+        pp: [Platepar instance] The true platepar.
+        n_stars: [int] Number of stars.
+        n_lost: [int] Number of stars which the refinement loses.
+
+    Keyword arguments:
+        seed: [int] Seed of the random numbers. 0 by default.
+
+    Return:
+        (pp_start, catalog_stars, star_rows): [tuple] The starting platepar, the catalog stars (ra, dec, mag)
+            and the image stars as rows of a CALSTARS file.
+    """
+
+    catalog_stars, rows = makeImage(pp, seed=seed, n_stars=n_stars)
+
+    # The start is off the true pointing in declination
+    pp_start = copy.deepcopy(pp)
+    pp_start.dec_d -= START_OFFSET_PX/pp.F_scale
+
+    # Where the true and the starting platepar put the catalog stars
+    x_true, y_true = raDecToXYPP(catalog_stars[:, 0], catalog_stars[:, 1], pp.JD, pp)
+    x_start, y_start = raDecToXYPP(catalog_stars[:, 0], catalog_stars[:, 1], pp.JD, pp_start)
+
+    # The stars to be lost are moved from the start position further away from the true one, to just inside
+    #   the match radius
+    dx, dy = x_start - x_true, y_start - y_true
+    dist = np.hypot(dx, dy)
+    edge = MATCH_RADIUS - EDGE_MARGIN_PX
+    rows = rows.copy()
+    rows[:n_lost, 1] = x_start[:n_lost] + edge*dx[:n_lost]/dist[:n_lost]
+    rows[:n_lost, 0] = y_start[:n_lost] + edge*dy[:n_lost]/dist[:n_lost]
+
+    return pp_start, catalog_stars, rows
+
+
+def refineFromStart(pp_start, rows, catalog_stars, config):
+    """ The refinement called directly from the starting platepar, with the smallest match radius both for the
+        fit and for the checks after the recalibration.
+
+    Return:
+        (refined, matched, n_start): [tuple] The refined platepar and its matched stars (None, None if the
+            refinement isn't used), and the number of stars matched with the starting platepar.
+    """
+
+    jd = pp_start.JD
+    star_dict = {jd: rows}
+
+    # The stars matched at the start, the count which the refinement compares its own with
+    n_start, _, _, _ = ApplyRecalibrate.CheckFit.matchStarsResiduals(config, pp_start, catalog_stars,
+                                                                     star_dict, MATCH_RADIUS, ret_nmatch=True)
+
+    refined, matched = ApplyRecalibrate.refinePointingLSQ(config, pp_start, jd, star_dict, catalog_stars,
+                                                          MATCH_RADIUS, MATCH_RADIUS, n_start)
+
+    return refined, matched, n_start
+
+
+def test_refinement_used_when_one_star_of_100_is_lost():
+    """ A refinement which lowers the loss and moves one of 100 matched stars out of the match radius (fewer
+        than the allowed 2 %) is used, and it finds the true pointing. """
+
+    pp = makePlatepar()
+    config = makeConfig()
+    pp_start, catalog_stars, rows = makeLostStarsImage(pp, 100, 1, seed=7)
+
+    refined, matched, n_start = refineFromStart(pp_start, rows, catalog_stars, config)
+
+    # All stars are matched at the start, one fewer with the refined pointing, which is the true one
+    assert n_start == 100
+    assert refined is not None
+    assert len(matched[pp.JD][0]) == 99
+    assert displacement(pp, refined, catalog_stars) < 0.03
+
+
+def test_refinement_not_used_when_3_stars_of_100_are_lost():
+    """ A refinement which lowers the loss but moves 3 of 100 matched stars out of the match radius (more than
+        the allowed 2 %) is not used. """
+
+    pp = makePlatepar()
+    config = makeConfig()
+    pp_start, catalog_stars, rows = makeLostStarsImage(pp, 100, 3, seed=8)
+
+    refined, matched, n_start = refineFromStart(pp_start, rows, catalog_stars, config)
+
+    assert n_start == 100
+    assert (refined is None) and (matched is None)
+
+
+def test_refinement_used_when_one_star_of_20_is_lost():
+    """ With few stars, where 2 % of them is less than one star, the refinement may still lose one. The
+        minimum number of matched stars is lowered so that 19 stars are enough for the recalibration. """
+
+    pp = makePlatepar()
+    config = makeConfig()
+    config.min_matched_stars = 10
+    pp_start, catalog_stars, rows = makeLostStarsImage(pp, 20, 1, seed=9)
+
+    refined, matched, n_start = refineFromStart(pp_start, rows, catalog_stars, config)
+
+    assert n_start == 20
+    assert refined is not None
+    assert len(matched[pp.JD][0]) == 19
+    assert displacement(pp, refined, catalog_stars) < 0.05
+
+
+def test_refinement_not_used_with_a_higher_loss(monkeypatch):
+    """ A refinement which loses no stars but has a higher loss on the stars matched at the start is not used.
+        The fit is replaced by one which moves the true pointing by a quarter of a pixel, so all stars stay
+        matched and fit worse. """
+
+    pp = makePlatepar()
+    config = makeConfig()
+    catalog_stars, rows = makeImage(pp, seed=10, n_stars=100)
+
+    calls = []
+
+    def _offFit(fun, x0, **kwargs):
+        """ A fit which moves the pointing by 0.25 px in RA in the first round and doesn't move it after. """
+
+        x = np.zeros_like(x0)
+        if not calls:
+            x[0] = 0.25
+        calls.append(x)
+
+        return types.SimpleNamespace(x=x)
+
+    # The refinement from the true pointing with the fit replaced
+    monkeypatch.setattr(ApplyRecalibrate.scipy.optimize, 'least_squares', _offFit)
+    refined, matched, n_start = refineFromStart(pp, rows, catalog_stars, config)
+
+    assert n_start == 100
+    assert (refined is None) and (matched is None)
