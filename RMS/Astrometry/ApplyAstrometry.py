@@ -1540,7 +1540,7 @@ def geoHt2XY(platepar, lat, lon, h):
     return x, y
 
 
-def fovEdgePolygon(platepar, jd, side_sample=10, trim_px=2):
+def fovEdgePolygon(platepar, jd, side_sample=10, trim_px=2, aberration=None):
     """ Compute the polygon describing the edges of the FOV in RA and Dec, with side_sample points on each 
         side. The FOV polygon is trimmed on each end to minimize the effect of the distortion near the edges.
 
@@ -1551,6 +1551,9 @@ def fovEdgePolygon(platepar, jd, side_sample=10, trim_px=2):
     Keyword arguments:
         side_sample: [int] Number of points on each side of the FOV. 10 by default.
         trim_px: [int] Number of pixels to trim on each side. 2 by default.
+        aberration: [bool] Passed to xyToRaDecPP: None (the default) gives the edges as catalog directions,
+            in the frame of the stars; False gives them as geometric directions in the Earth's frame, the
+            frame of targets on the ground or in the atmosphere.
 
     Return:
         (x_vert, y_vert, ra_vert, dec_vert): [tuple of ndarrays] Image X and Y coordinates and RA/Dec of the
@@ -1595,10 +1598,10 @@ def fovEdgePolygon(platepar, jd, side_sample=10, trim_px=2):
     x_vert += [trim_px]*y_samples
     y_vert += reversed([i*y/y_samples for i in range(y_samples)])
 
-    # Convert the polygon to RA/Dec
+    # Convert the polygon to RA/Dec, in the frame the caller compares it in
     _, ra_vert, dec_vert, _ = xyToRaDecPP(
         [float(jd)]*len(x_vert), x_vert, y_vert, [1]*len(x_vert), platepar, 
-        extinction_correction=False, jd_time=True, precompute_pointing_corr=True
+        extinction_correction=False, jd_time=True, precompute_pointing_corr=True, aberration=aberration
         )
 
     return x_vert, y_vert, ra_vert, dec_vert
@@ -1653,8 +1656,10 @@ def geoHt2XYInsideFOV(platepar, lat_arr, lon_arr, h_att, side_sample=10):
             h_att = np.array([h_att]*arr_len)
 
 
-    # Compute the polygon describing the edges of the FOV, with side_sample points on each side
-    _, _, ra_vert, dec_vert = fovEdgePolygon(platepar, platepar.JD, side_sample=side_sample)
+    # Compute the polygon describing the edges of the FOV, with side_sample points on each side, as geometric
+    #   directions in the Earth's frame like the targets below (geoHt2RaDec), so the two are compared in one
+    #   frame
+    _, _, ra_vert, dec_vert = fovEdgePolygon(platepar, platepar.JD, side_sample=side_sample, aberration=False)
 
     # Compute the ra, dec of the target
     ra_arr = []

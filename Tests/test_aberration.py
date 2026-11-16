@@ -478,5 +478,43 @@ class TestAberration(unittest.TestCase):
                     self.assertLess(nonrigid, 0.1, where)
 
 
+    def testGroundBoundaryInTheFrameOfTheGroundTargets(self):
+        """ The edges of the field that ground targets are tested against are geometric directions in the
+            Earth's frame, like the targets (geoHt2RaDec): projected back without the aberration they land on
+            the edge pixels, while the catalog-frame edges are off by the aberration. """
+
+        from RMS.Astrometry import ApplyAstrometry
+
+        pp = Platepar()
+        pp.read(TEMPLATE)
+        pp.aberration = True
+        pp.lat, pp.lon, pp.elev = 40.0, -100.0, 300.0
+        pp.alt_centre, pp.az_centre, pp.pos_angle_ref = 50.0, 0.0, 15.0
+        pp.updateRefRADec(skip_rot_update=True)
+        pp.resetDistortionParameters()
+
+        # The edges in both frames, and the geometric ones projected back the way the ground targets are
+        x_v, y_v, ra_cat, dec_cat = ApplyAstrometry.fovEdgePolygon(pp, pp.JD)
+        _, _, ra_geo, dec_geo = ApplyAstrometry.fovEdgePolygon(pp, pp.JD, aberration=False)
+        x_b, y_b = raDecToXYPP(np.array(ra_geo), np.array(dec_geo), pp.JD, pp, aberration=False)
+        self.assertLess(np.max(np.hypot(x_b - np.array(x_v), y_b - np.array(y_v))), 0.05)
+        self.assertGreater(np.median(separationArcsec(ra_cat, dec_cat, ra_geo, dec_geo)), 5.0)
+
+        # The ground test uses the geometric edges
+        calls = []
+        original = ApplyAstrometry.fovEdgePolygon
+
+        def _spy(*args, **kwargs):
+            calls.append(kwargs.get('aberration'))
+            return original(*args, **kwargs)
+
+        ApplyAstrometry.fovEdgePolygon = _spy
+        try:
+            ApplyAstrometry.geoHt2XYInsideFOV(pp, pp.lat, pp.lon, 100.0e3)
+        finally:
+            ApplyAstrometry.fovEdgePolygon = original
+        self.assertEqual(calls, [False])
+
+
 if __name__ == "__main__":
     unittest.main()
