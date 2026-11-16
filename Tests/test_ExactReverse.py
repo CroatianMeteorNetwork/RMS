@@ -219,6 +219,55 @@ def test_a_point_past_the_first_fold_has_no_image(decentering):
     assert np.hypot(x[1] - gx[1], y[1] - gy[1]) < 1e-6
 
 
+def test_decentering_that_lowers_the_maximum_leaves_no_image_past_the_fold():
+    """ The same fold with a decentering term (p1 = -0.02), which on the right of the centre lowers the maximum of
+        the corrected radius below that of the radial part alone. Image points on the far sheet, 0.826 to 0.830
+        half widths left of the centre, map to corrected points on the right near that maximum. Those below it
+        have an image before the fold; those above it, between the two maxima, have none, although the inverse
+        of the radial part gives them a seed on its rising branch, from which Newton's method can end on the
+        far sheet, inside the frame. The maximum is taken from the forward mapping along the ray. """
+
+    from RMS.Math import angularSeparation
+
+    # No offset of the distortion centre, k1 = -2, and only the first decentering coefficient
+    pp = _platepar("radial3-odd", decentering=True, refraction=False)
+    pp.x_poly_fwd[:] = 0.0
+    pp.x_poly_fwd[2] = -2.0
+    pp.x_poly_fwd[3] = -0.02
+    pp.x_poly_rev = np.array(pp.x_poly_fwd)
+
+    def _sky(u):
+        # Sky points of image points on the horizontal line through the centre (u in half widths from it)
+        _, ra, dec, _ = astrometry.xyToRaDecPP(np.full(len(u), JD), pp.X_res/2.0*(1 + u),
+            np.full(len(u), pp.Y_res/2.0), np.ones(len(u)), pp, extinction_correction=False, jd_time=True)
+        return np.array(ra), np.array(dec)
+
+    # The distance from the sky point of the distortion centre, which grows with the corrected radius
+    ra_c, dec_c = _sky(np.zeros(1))
+
+    def _sep(ra, dec):
+        return angularSeparation(np.radians(ra_c[0]), np.radians(dec_c[0]), np.radians(ra), np.radians(dec))
+
+    # The fold on the right: the largest distance reached before it, and where
+    t = np.linspace(0.0, 0.5, 50001)
+    sep_t = _sep(*_sky(t))
+    r_fold, sep_max = t[np.argmax(sep_t)], np.max(sep_t)
+
+    # The far-sheet points mapped back
+    u = np.linspace(-0.830, -0.826, 4001)
+    ra, dec = _sky(u)
+    sep = _sep(ra, dec)
+    x, y = astrometry.raDecToXYPP(ra, dec, JD, pp)
+    ux = (x - pp.X_res/2.0)/(pp.X_res/2.0)
+
+    # Both kinds are present, the sky points within reach come back before the fold, and the others have no image
+    reach = sep < sep_max
+    assert 0 < np.count_nonzero(reach) < len(u)
+    assert np.all(np.isfinite(ux[reach]))
+    assert np.all((ux[reach] > 0) & (ux[reach] <= r_fold))
+    assert np.all(np.isnan(ux[~reach]))
+
+
 def test_decentering_keeps_points_beyond_the_radial_maximum_that_have_an_image():
     """ The decentering can carry the mapping past the maximum of its radial part alone while the whole mapping
         still rises (near the edge of the frame): such points have an image and come back to it. """

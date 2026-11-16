@@ -1145,6 +1145,11 @@ cdef double RADIAL_STEP_TOL = 1e-10
 #   of the radial inverse, which show whether a fold of the mapping lies in between
 cdef int FOLD_SAMPLES = 32
 
+# Distance (in half widths of the image) that Newton's method may move a radial model with decentering from the
+#   seed given by its radial part, with only the end point checked for a fold. The decentering of fitted plates
+#   moves it by a few thousandths at most; farther moves are checked along the whole ray
+cdef double FOLD_FREE_MOVE = 0.01
+
 
 # A distortion model of cyXYToRADec, unpacked for the exact inverse
 cdef struct ForwardModel:
@@ -1622,7 +1627,7 @@ cdef double invertDistortionNewton(ForwardModel *m, double x_corr, double y_corr
 
 
 @cython.cdivision(True)
-cdef bint beforeFirstFold(ForwardModel *m, double x_img, double y_img):
+cdef bint beforeFirstFold(ForwardModel *m, double x_img, double y_img, int n_samples):
     """ Whether an image point of a radial model lies before the first fold of its forward distortion, i.e. on
         the sheet of the mapping that holds the image of the sky. The distortion centre goes to the corrected
         origin, and along the ray from it to the point the corrected point has to move away from that origin
@@ -1634,6 +1639,7 @@ cdef bint beforeFirstFold(ForwardModel *m, double x_img, double y_img):
         m: [ForwardModel pointer] The distortion model, a radial one.
         x_img: [float] Image X coordinate relative to the image centre (px).
         y_img: [float] Image Y coordinate relative to the image centre (px).
+        n_samples: [int] Number of samples, the last one at the point (1 checks only the point itself).
 
     Return:
         [bool] True if no fold lies between the distortion centre and the point.
@@ -1650,8 +1656,8 @@ cdef bint beforeFirstFold(ForwardModel *m, double x_img, double y_img):
     # The squared distance of the corrected point from the corrected origin has to grow from each sample to
     #   the next, and its derivative along the ray (the corrected point dotted with the Jacobian times the
     #   direction of the ray) has to be positive at each sample
-    for i in range(1, FOLD_SAMPLES + 1):
-        t = <double>i/FOLD_SAMPLES
+    for i in range(1, n_samples + 1):
+        t = <double>i/n_samples
         forwardJacobian(m, m.x0 + t*dx, m.y0 + t*dy, out)
         dist2 = out[0]*out[0] + out[1]*out[1]
         outward = out[0]*(out[2]*dx + out[3]*dy) + out[1]*(out[4]*dx + out[5]*dy)
@@ -1724,7 +1730,8 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
     cdef double pos_angle_ref_in = pos_angle_ref
     cdef double radius, sin_ang, cos_ang, theta, x, y, r, dx, dy, x_img, y_img, r_corr, r_scale
     cdef double x0, y0, xy, a1, a2, k1 = 0, k2 = 0, k3 = 0, k4 = 0, k5 = 0
-    cdef double r_end = 0, f_end = 0, asym_factor = 1
+    cdef double r_end = 0, f_end = 0, asym_factor = 1, seed_x, seed_y
+    cdef int fold_samples
     cdef double lin_xx = 1, lin_xy = 0, lin_yx = 0, lin_yy = 1, lin_det = 1
     cdef double img[2]
     cdef bint seed_beyond_radial = False
@@ -1963,7 +1970,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
                     img[1] = y
                     invertDistortionNewton(&model, x, y, img)
                     if (img[0] == img[0]) and ((fabs(img[0]) > 0.75*x_res) or (fabs(img[1]) > 0.75*y_res)
-                        or (not beforeFirstFold(&model, img[0], img[1]))):
+                        or (not beforeFirstFold(&model, img[0], img[1], FOLD_SAMPLES))):
 
                         img[0] = NAN_VALUE
                         img[1] = NAN_VALUE
@@ -1979,8 +1986,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
                     # Beyond the maximum of the radial part alone the decentering can still keep the whole
                     #   mapping rising (near the edge of the frame), so there (and with a negative asymmetry
                     #   factor) the solution is searched from the corrected position instead, and kept only
-                    #   within 1.5 times the frame and with no fold of the mapping between it and the
-                    #   distortion centre, checked along that ray
+                    #   within 1.5 times the frame
                     if img[0] != img[0]:
                         img[0] = x
                         img[1] = y
@@ -1992,14 +1998,30 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
                     img[0] = x
                     img[1] = y
 
+                seed_x = img[0]
+                seed_y = img[1]
                 if img[0] == img[0]:
                     invertDistortionNewton(&model, x, y, img)
 
-                if seed_beyond_radial and (img[0] == img[0]) and ((fabs(img[0]) > 0.75*x_res)
-                    or (fabs(img[1]) > 0.75*y_res) or (not beforeFirstFold(&model, img[0], img[1]))):
+                # The decentering can also lower the maximum of the whole mapping below that of its radial part,
+                #   so even from a seed on the rising branch Newton's method can end past the first fold, on a
+                #   sheet that is not the image of the sky. A solution of a radial model is kept only with no
+                #   fold between it and the distortion centre: checked along the whole ray when it was searched
+                #   from beyond the radial maximum or moved far from its seed, otherwise at the solution alone
+                #   (just past a fold near the seed the corrected point runs back toward the origin there)
+                if (model.poly_radial < 0) and (img[0] == img[0]):
+                    if seed_beyond_radial or (sqrt((img[0] - seed_x)**2 + (img[1] - seed_y)**2)
+                        > FOLD_FREE_MOVE*0.5*x_res):
 
-                    img[0] = NAN_VALUE
-                    img[1] = NAN_VALUE
+                        fold_samples = FOLD_SAMPLES
+                    else:
+                        fold_samples = 1
+
+                    if (seed_beyond_radial and ((fabs(img[0]) > 0.75*x_res) or (fabs(img[1]) > 0.75*y_res))) \
+                        or (not beforeFirstFold(&model, img[0], img[1], fold_samples)):
+
+                        img[0] = NAN_VALUE
+                        img[1] = NAN_VALUE
 
             x_img = img[0]
             y_img = img[1]
