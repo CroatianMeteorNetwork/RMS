@@ -31,7 +31,7 @@ import matplotlib.gridspec as gridspec
 from mpl_toolkits.mplot3d import Axes3D
 
 # RMS imports
-from RMS.Astrometry.Conversions import jd2Date, raDec2AltAz
+from RMS.Astrometry.Conversions import jd2Date, trueRaDec2ApparentAltAz
 import RMS.ConfigReader as cr
 from RMS.DetectionTools import getThresholdedStripe3DPoints, loadImageCalibration, binImageCalibration, \
     dilateCoordinates
@@ -1981,7 +1981,10 @@ if __name__ == "__main__":
                 alt_array = []
                 for jd, ra, dec in zip(jd_array, ra_array, dec_array):
 
-                    azim, alt = raDec2AltAz(ra, dec, jd, np.degrees(ast.lat), np.degrees(ast.lon))
+                    # The RA/Dec are J2000, so they go back through the frame of date (no refraction, as
+                    #   in xyToRaDecAST)
+                    azim, alt = trueRaDec2ApparentAltAz(ra, dec, jd, np.degrees(ast.lat), np.degrees(ast.lon),
+                        refraction=False)
 
                     azim_array.append(azim)
                     alt_array.append(alt)
