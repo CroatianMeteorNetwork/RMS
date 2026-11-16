@@ -3631,6 +3631,7 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.param_manager.sigEqAspectToggled.connect(self.onFitParametersChanged)
         self.tab.param_manager.sigForceDistortionToggled.connect(self.onFitParametersChanged)
         self.tab.param_manager.sigDecenteringCorrToggled.connect(self.onFitParametersChanged)
+        self.tab.param_manager.sigExactReverseToggled.connect(self.onFitParametersChanged)
         self.tab.param_manager.sigOnVignettingFixedToggled.connect(self.onVignettingChanged)
 
         # Connect astrometry & photometry buttons to functions
@@ -15868,7 +15869,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
         # Compute RMSD errors.
-        #   rmsd_img    = reverse residual (catalog sky -> image, via x_poly_rev), in px
+        #   rmsd_img    = reverse residual (catalog sky -> image, via x_poly_rev, or with exact_reverse the
+        #                 exact inverse of x_poly_fwd), in px
         #   rmsd_angular= forward residual (image -> sky, via x_poly_fwd), in arcmin
         rmsd_angular = 60*RMSD([entry[4] for entry in residuals])
         rmsd_img = RMSD([entry[3] for entry in residuals])

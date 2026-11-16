@@ -275,6 +275,10 @@ class Platepar(object):
         #   arrays. Off by default
         self.decentering_corr = False
 
+        # Take the sky to the image as the exact inverse of the forward distortion, instead of through the
+        #   separately fitted reverse one, so that the two directions agree exactly. Off by default
+        self.exact_reverse = False
+
         # Station coordinates
         self.lat = self.lon = self.elev = 0
 
@@ -573,6 +577,22 @@ class Platepar(object):
         # Return center in pixel coordinates (image center + offset)
         return self.X_res / 2.0 + x0, self.Y_res / 2.0 + y0
 
+    def _withReverseProjection(self, func, *args, **kwargs):
+        """ Call func with the sky -> image projection through the reverse polynomial, as without exact_reverse,
+            so that x_poly_rev is fitted with the meaning it has for readers that do not know the option. The
+            residual functions copy the platepar on every call, and the copies inherit the switch.
+        """
+
+        exact = getattr(self, "exact_reverse", False)
+        self.exact_reverse = False
+
+        try:
+            return func(*args, **kwargs)
+
+        finally:
+            self.exact_reverse = exact
+
+
     def recordFit(self, pointing=True, distortion=False, fit_by='fitAstrometry'):
         """ Record a fit made now by this code in the fit record (see fitRecordEntry).
 
@@ -659,8 +679,12 @@ class Platepar(object):
             # Get image coordinates of catalog stars
             catalog_x, catalog_y, catalog_mag = getCatalogStarsImagePositions(catalog_stars, jd, pp_copy)
 
-            # Calculate the sum of squared distances between image stars and catalog stars
-            dist_sum = np.sum((catalog_x - img_x) ** 2 + (catalog_y - img_y) ** 2)
+            # Calculate the sum of squared distances between image stars and catalog stars. A catalog star
+            #   which has no image (beyond the reach of the exact inverse of the distortion) counts as off by
+            #   the image diagonal, so the sum stays finite and the fit is not drawn to lose stars
+            dist_sq = (catalog_x - img_x) ** 2 + (catalog_y - img_y) ** 2
+            dist_sq[~np.isfinite(dist_sq)] = platepar.X_res ** 2 + platepar.Y_res ** 2
+            dist_sum = np.sum(dist_sq)
 
             return dist_sum
 
@@ -1287,6 +1311,10 @@ class Platepar(object):
         # print('DIS_Y', _calcImageResidualsDistortion(self.y_poly_rev,  catalog_stars, \
         #     img_stars, 'y'))
 
+        # The distortion is fitted below unless only the pointing is fitted, or there are too few stars for it
+        min_fit_stars = self.poly_length + 1
+        fit_distortion = (len(img_stars) >= min_fit_stars) and (not fit_only_pointing)
+
         # The fit models the aberration, whatever the plate had absorbed before: the flag is turned on below
         #   where the pointing is fitted. The flag before the fit is kept for the fits that stop without a
         #   result
@@ -1309,7 +1337,17 @@ class Platepar(object):
             # The pointing is fitted with the aberration modelled
             self.aberration = True
 
-            self.fitPointing(jd, img_stars, catalog_stars, fixed_scale=fixed_scale, fit_by=fit_by)
+            # With the exact reverse, the polynomial models first go through their usual sequence, which needs
+            #   the reverse polynomial (see the refinement after the forward fit). A fit of the pointing alone
+            #   (also with too few stars for the distortion) goes through the mapping of the platepar
+            if getattr(self, "exact_reverse", False) and self.distortion_type.startswith("poly") \
+                and fit_distortion:
+
+                self._withReverseProjection(self.fitPointing, jd, img_stars, catalog_stars, fixed_scale=fixed_scale,
+                    fit_by=fit_by)
+
+            else:
+                self.fitPointing(jd, img_stars, catalog_stars, fixed_scale=fixed_scale, fit_by=fit_by)
             pointing_fitted = True
 
         ### ###
@@ -1317,9 +1355,7 @@ class Platepar(object):
         ### DISTORTION FIT ###
 
         # Fit the polynomial distortion parameters if there are enough picked stars
-        min_fit_stars = self.poly_length + 1
-
-        if (len(img_stars) >= min_fit_stars) and (not fit_only_pointing):
+        if fit_distortion:
 
             # The distortion, and with the radial models the pointing as well, is fitted with the aberration
             #   modelled
@@ -1334,7 +1370,8 @@ class Platepar(object):
                 ### REVERSE MAPPING FIT ###
 
                 # Fit distortion parameters in X direction, reverse mapping
-                res = _lstsqFit(
+                res = self._withReverseProjection(
+                    _lstsqFit,
                     _calcImageResidualsDistortionVect,
                     self.x_poly_rev,
                     (self, jd, catalog_stars, img_stars, 'x'),
@@ -1344,7 +1381,8 @@ class Platepar(object):
                 self.x_poly_rev = res.x
 
                 # Fit distortion parameters in Y direction, reverse mapping
-                res = _lstsqFit(
+                res = self._withReverseProjection(
+                    _lstsqFit,
                     _calcImageResidualsDistortionVect,
                     self.y_poly_rev,
                     (self, jd, catalog_stars, img_stars, 'y'),
@@ -1386,6 +1424,55 @@ class Platepar(object):
 
                 # IMPORTANT NOTE - the X polynomial is used to store the fit parameters
                 self.y_poly_fwd = res.x
+
+                # With the exact reverse, the pointing above was fitted through the reverse polynomial. Fit it
+                #   through the exact inverse, and the forward polynomial on the sky with it, in turn until
+                #   neither moves: the two then describe one mapping
+                if getattr(self, "exact_reverse", False):
+
+                    for _ in range(10):
+
+                        prev = np.concatenate([[self.RA_d, self.dec_d, self.pos_angle_ref],
+                            self.x_poly_fwd, self.y_poly_fwd])
+
+                        self.fitPointing(jd, img_stars, catalog_stars, fixed_scale=fixed_scale)
+
+                        res = _lstsqFit(
+                            _calcSkyResidualsDistortionVect,
+                            self.x_poly_fwd,
+                            (self, jd, catalog_stars, img_stars, 'x'),
+                        )
+                        self.x_poly_fwd = res.x
+
+                        res = _lstsqFit(
+                            _calcSkyResidualsDistortionVect,
+                            self.y_poly_fwd,
+                            (self, jd, catalog_stars, img_stars, 'y'),
+                        )
+                        self.y_poly_fwd = res.x
+
+                        change = np.max(np.abs(np.concatenate([[self.RA_d, self.dec_d, self.pos_angle_ref],
+                            self.x_poly_fwd, self.y_poly_fwd]) - prev))
+                        if change < 1e-9:
+                            break
+
+                    # Refit the reverse polynomial to the final pointing, as it is fitted without the option, for
+                    #   readers that do not know it (the pointing moved since the reverse fit above)
+                    res = self._withReverseProjection(
+                        _lstsqFit,
+                        _calcImageResidualsDistortionVect,
+                        self.x_poly_rev,
+                        (self, jd, catalog_stars, img_stars, 'x'),
+                    )
+                    self.x_poly_rev = res.x
+
+                    res = self._withReverseProjection(
+                        _lstsqFit,
+                        _calcImageResidualsDistortionVect,
+                        self.y_poly_rev,
+                        (self, jd, catalog_stars, img_stars, 'y'),
+                    )
+                    self.y_poly_rev = res.x
 
                 ### ###
 
@@ -1935,7 +2022,8 @@ class Platepar(object):
                         # cameras with extreme distortion center offset where the optimizer
                         # can diverge when starting from zeros
                         rev_init = self.x_poly_fwd.copy()
-                        res_rev = _lstsqFit(
+                        res_rev = self._withReverseProjection(
+                            _lstsqFit,
                             _calcImageResidualsDistortionVect,
                             rev_init,
                             (self, jd, catalog_stars, img_stars, 'radial'),
@@ -1962,14 +2050,30 @@ class Platepar(object):
                     # pointing slightly off for the pixel residual (forward/reverse mappings are
                     # not exact inverses), which showed up as a worse RMSD with least_squares.
                     # This recovers the old Nelder-Mead pixel accuracy while keeping the speedup.
+                    # With the exact reverse the image residual goes through the forward distortion, and the
+                    #   reverse polynomial plays no part in it: only the pointing is refined
+                    exact_reverse = getattr(self, "exact_reverse", False)
+                    rev_fixed = self.x_poly_rev.tolist()
+
+                    def _calcImageResidualsAstroVect(params, *args):
+                        res = _calcImageResidualsAstroAndDistortionRadialVect(list(params) + rev_fixed, *args)
+
+                        # A catalog star with no image (beyond the reach of the exact inverse) counts as off by
+                        #   the image diagonal, as in the pointing fit, so the residuals stay finite for least
+                        #   squares
+                        res[~np.isfinite(res)] = np.hypot(self.X_res, self.Y_res)/np.sqrt(2)
+
+                        return res
+
                     p_final = [self.RA_d/360.0, self.dec_d/90.0, self.pos_angle_ref/360.0,
-                               abs(self.F_scale)] + self.x_poly_rev.tolist()
+                               abs(self.F_scale)] + ([] if exact_reverse else self.x_poly_rev.tolist())
                     res_final = _lstsqFit(
-                        _calcImageResidualsAstroAndDistortionRadialVect,
+                        _calcImageResidualsAstroVect if exact_reverse
+                            else _calcImageResidualsAstroAndDistortionRadialVect,
                         p_final,
                         (self, jd, catalog_stars, img_stars),
                     )
-                    xf = res_final.x
+                    xf = np.concatenate([res_final.x, rev_fixed]) if exact_reverse else res_final.x
                     self.RA_d = (360*xf[0]) % 360
                     self.dec_d = -90 + (90*xf[1] + 90) % (180.000001)
                     self.pos_angle_ref = (360*xf[2]) % 360
@@ -1988,6 +2092,17 @@ class Platepar(object):
                         (self, jd, catalog_stars, img_stars, 'radial'),
                     )
                     self.x_poly_fwd = res_fwd.x
+
+                    # With the exact reverse, refit the reverse polynomial to the final pointing, as it is fitted
+                    #   without the option, for readers that do not know it
+                    if exact_reverse:
+                        res_rev = self._withReverseProjection(
+                            _lstsqFit,
+                            _calcImageResidualsDistortionVect,
+                            self.x_poly_fwd.copy(),
+                            (self, jd, catalog_stars, img_stars, 'radial'),
+                        )
+                        self.x_poly_rev = res_rev.x
 
                 ### ###
 
@@ -2307,6 +2422,10 @@ class Platepar(object):
         if 'decentering_corr' not in self.__dict__:
             self.decentering_corr = False
 
+        # The exact reverse mapping (platepars pickled before it existed have none)
+        if 'exact_reverse' not in self.__dict__:
+            self.exact_reverse = False
+
         # The aberration flag: a platepar pickled before it existed was fitted without the aberration modelled
         #   and has absorbed it, as when a platepar file without the flag is loaded
         if 'aberration' not in self.__dict__:
@@ -2359,6 +2478,10 @@ class Platepar(object):
         # Add the decentering correction (platepars from before it existed have none)
         if not 'decentering_corr' in self.__dict__:
             self.decentering_corr = False
+
+        # Add the exact reverse mapping (platepars from before it existed have none)
+        if not 'exact_reverse' in self.__dict__:
+            self.exact_reverse = False
 
         # Add forcing distortion centre to image center
         if not 'force_distortion_centre' in self.__dict__:
