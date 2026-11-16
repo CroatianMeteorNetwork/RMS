@@ -2092,13 +2092,20 @@ class Platepar(object):
 
     def __setstate__(self, state):
         """ Restore a pickled platepar (e.g. from a SkyFit2 state file). A platepar pickled before an option existed
-            gets its default, as when a platepar file is loaded (see loadFromDict).
+            gets its default, and the reference hour angle is recomputed from the reference time, as when a
+            platepar file is loaded (see loadFromDict).
 
         Arguments:
             state: [dict] The attributes of the pickled platepar.
         """
 
         self.__dict__.update(state)
+
+        # The reference hour angle is a function of the reference time only, so it is recomputed as in
+        #   loadFromDict: a platepar pickled with the mean sidereal time keeps pointing where it was fitted, and
+        #   gives the same coordinates as the same calibration loaded from its platepar file
+        if 'JD' in self.__dict__:
+            self.Ho = JD2HourAngle(self.JD)
 
         # The decentering correction (platepars pickled before it existed have none)
         if 'decentering_corr' not in self.__dict__:
