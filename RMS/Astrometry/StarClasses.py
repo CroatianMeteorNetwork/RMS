@@ -93,6 +93,11 @@ class PlanetPoint(object):
         self.dec = dec
         self.mag = mag
 
+        # The direction is in the catalog frame. A point restored from a state saved before this marker
+        #   existed does not have it: its direction is the apparent one, with the annual aberration in it,
+        #   until SkyFit2.migrateStatePlanetPairs converts it
+        self.catalog_frame = True
+
 
     def coords(self):
         """ Return sky coordinates.

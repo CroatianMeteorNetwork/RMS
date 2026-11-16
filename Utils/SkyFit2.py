@@ -195,6 +195,64 @@ def solarSystemBodiesRaDec(obs_time, lat, lon, elev):
     return body_radec
 
 
+def migrateStatePlanetPairs(paired_stars, cache_time, platepar):
+    """ Convert the solar system bodies paired in a state saved before their directions were given in the
+        catalog frame (see solarSystemBodiesRaDec) to that frame, once.
+
+        Such a state holds astropy's apparent directions of the paired bodies, with the annual aberration in
+        them, which a plate that models the aberration would apply a second time (up to 20.5 arcsec). The
+        aberration is taken out at the time of the ephemerides the bodies were picked from: the time the
+        bodies were last computed for, which the state keeps (_planet_cache_time). That is the time of the
+        image the pairs belong to, as the pairs are cleared when the image changes; in the manual reduction
+        mode it is the time of the current frame, at most the length of the video away. A state without it
+        falls back to the reference time of the platepar, set to the time of the image when the platepar is
+        made or automatically aligned in SkyFit2. The aberration turns with the motion of the Earth by about
+        0.015 arcsec an hour and 0.35 arcsec a day, so a time an hour off changes the converted directions
+        by 0.015 arcsec. The converted bodies are marked as being in the catalog frame, so a state saved
+        again is not converted twice; bodies picked after the change are marked when they are picked.
+
+    Arguments:
+        paired_stars: [PairedStars] The pairs of the loaded state, changed in place.
+        cache_time: [tuple] The time the bodies were last computed for (year, month, day, hour, minute,
+            second), UTC, as saved in the state. None if the state does not have it.
+        platepar: [Platepar] The platepar of the state, its reference time is the fallback. None if there
+            is none.
+
+    Return:
+        n_converted: [int] Number of the bodies converted to the catalog frame.
+    """
+
+    # The paired bodies that are still in the apparent frame
+    old_bodies = [entry[4] for entry in paired_stars.paired_stars
+        if (getattr(entry[4], 'pick_type', None) == 'planet')
+            and (not getattr(entry[4], 'catalog_frame', False))]
+
+    if not old_bodies:
+        return 0
+
+    # The time of the ephemerides the bodies were picked from, else the reference time of the platepar
+    if cache_time is not None:
+        jd = date2JD(*cache_time)
+    elif platepar is not None:
+        jd = platepar.JD
+    else:
+        print("WARNING: The paired solar system bodies of the state could not be converted to the catalog "
+            "frame, there is no time to do it for")
+        return 0
+
+    # Take the annual aberration out of the apparent directions, as solarSystemBodiesRaDec does
+    for body in old_bodies:
+        ra, dec = removeAberration(np.radians(body.ra), np.radians(body.dec), jd)
+        body.ra, body.dec = np.degrees(ra), np.degrees(dec)
+        body.catalog_frame = True
+
+    # Report the conversion
+    print("Converted {:d} paired solar system bodies of the state to the catalog frame (JD {:.6f})".format(
+        len(old_bodies), jd))
+
+    return len(old_bodies)
+
+
 import matplotlib.gridspec as gridspec
 import matplotlib.ticker as ticker
 import scipy.optimize
@@ -9769,7 +9827,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 self.geo_points_obj.dec_plate_data = self.geo_points_obj.dec_data
 
         # The solar system bodies are computed again: a state saved before their directions were given in the
-        #   catalog frame holds the apparent ones
+        #   catalog frame holds the apparent ones (its paired bodies are converted below)
         self._planet_cache_time = None
         self._planet_cache_radec = []
 
@@ -9912,6 +9970,11 @@ class PlateTool(QtWidgets.QMainWindow):
                 # If the FWHM is missing, add it to the 3rd index
                 if len(paired_star) == 6:
                     paired_star.insert(2, 0.0)
+
+        # The paired solar system bodies of a state saved before their directions were given in the catalog
+        #   frame hold the apparent ones: convert them at the time the bodies were computed for in that state
+        #   (read from the loaded variables, the cache itself was cleared above)
+        migrateStatePlanetPairs(self.paired_stars, variables.get('_planet_cache_time'), self.platepar)
 
 
         if self.platepar is not None:

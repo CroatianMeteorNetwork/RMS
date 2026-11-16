@@ -445,6 +445,158 @@ class TestAberration(unittest.TestCase):
         self.assertGreater(max(shifts), 15.0)
 
 
+    def _solarSystemPairs(self):
+        """ Helper: the solar system bodies paired on an image, as a pick gives them now (catalog frame) and
+            as a state saved before the change holds them (astropy's apparent directions, no frame marker),
+            with a platepar referenced at the time of the image. Skips the test without SkyFit2 or astropy.
+
+        Return:
+            (catalog, apparent, pp, obs_time): [tuple] The fresh picks and the old ones
+                ({name: (ra, dec, mag)}, deg), the platepar and the time of the image.
+        """
+
+        import datetime
+
+        # SkyFit2 needs its GUI libraries, the ephemerides need astropy
+        try:
+            from Utils.SkyFit2 import solarSystemBodiesRaDec, ASTROPY_AVAILABLE
+        except Exception as e:
+            self.skipTest("SkyFit2 cannot be imported: {}".format(e))
+        if not ASTROPY_AVAILABLE:
+            self.skipTest("astropy not installed")
+
+        from astropy.coordinates import get_body, EarthLocation
+        from astropy.time import Time
+
+        # The bodies as a pick gives them now, and as an old pick gave them (astropy's apparent directions)
+        lat, lon, elev = 43.19, -81.32, 300.0
+        obs_time = (2026, 5, 1, 3, 0, 0)
+        loc = EarthLocation(lat=lat, lon=lon, height=elev)
+        t = Time(datetime.datetime(*obs_time))
+        catalog, apparent = {}, {}
+        for name, ra, dec, mag in solarSystemBodiesRaDec(obs_time, lat, lon, elev):
+            body = get_body(name.lower(), t, loc)
+            catalog[name] = (ra, dec, mag)
+            apparent[name] = (body.ra.deg, body.dec.deg, mag)
+
+        # The platepar of the state, referenced at the time of the image
+        pp = Platepar()
+        pp.read(TEMPLATE)
+        pp.lat, pp.lon, pp.elev = lat, lon, elev
+        pp.JD = date2JD(*obs_time)
+        pp.Ho = JD2HourAngle(pp.JD)
+        pp.aberration = True
+
+        return catalog, apparent, pp, obs_time
+
+
+    def _loadSkyFit2State(self, dir_path, pairs, pp, cache_time):
+        """ Helper: save a SkyFit2 state with the given solar system pairs and load it with
+            PlateTool.loadState, without a window: the tool is a mock that takes the variables of the state,
+            so they are unpickled and updated as in SkyFit2.
+
+        Arguments:
+            dir_path: [str] Directory of the state file.
+            pairs: [list] PlanetPoint objects to pair.
+            pp: [Platepar] Platepar of the state.
+            cache_time: [tuple] The time the bodies were last computed for, None to leave it out of the state.
+
+        Return:
+            bodies: [dict] The loaded PlanetPoint objects by name.
+        """
+
+        from unittest import mock
+        from RMS.Astrometry.StarClasses import PairedStars
+        from RMS.Pickling import savePickle
+        from Utils.SkyFit2 import PlateTool
+
+        # The pairs at made-up image positions
+        paired_stars = PairedStars()
+        for i, body in enumerate(pairs):
+            paired_stars.addPair(100.0 + 10*i, 200.0, 2.0, 1000.0, body, snr=10.0)
+
+        # The variables of the tool that loadState does not take from the window
+        state = {'paired_stars': paired_stars, 'platepar': pp, 'platepar_file': None, 'input_path': ''}
+        if cache_time is not None:
+            state['_planet_cache_time'] = cache_time
+
+        savePickle(state, dir_path, 'skyFitMR_latest.state')
+
+        tool = mock.MagicMock()
+        PlateTool.loadState(tool, dir_path, 'skyFitMR_latest.state')
+
+        return {entry[4].name: entry[4] for entry in tool.paired_stars.paired_stars}
+
+
+    def testOldStatePlanetPairsConvertedOnce(self):
+        """ A state saved before the solar system bodies were given in the catalog frame holds the apparent
+            directions of its paired bodies, which the fit would aberrate a second time. Loading it converts
+            them to what a pick gives now within 0.01 arcsec, at the time the bodies were computed for in the
+            state, else at the reference time of the platepar. A state saved again is not converted twice. """
+
+        import tempfile
+        from RMS.Astrometry.StarClasses import PlanetPoint
+
+        catalog, apparent, pp, obs_time = self._solarSystemPairs()
+
+        def oldPicks():
+            # Bodies picked before the change: apparent directions and no frame marker
+            picks = []
+            for name, (ra, dec, mag) in apparent.items():
+                body = PlanetPoint(name, ra, dec, mag)
+                body.__dict__.pop('catalog_frame', None)
+                picks.append(body)
+            return picks
+
+        def assertCatalogFrame(bodies):
+            # Every loaded body where a pick gives it now
+            self.assertEqual(sorted(bodies), sorted(catalog))
+            for name, body in bodies.items():
+                ra, dec, _ = catalog[name]
+                sep = separationArcsec(np.radians(body.ra), np.radians(body.dec), np.radians(ra),
+                    np.radians(dec))
+                self.assertLess(sep, 0.01, name)
+
+        # The old directions are up to 20 arcsec away from the catalog frame on this date
+        shifts = [separationArcsec(np.radians(apparent[name][0]), np.radians(apparent[name][1]),
+            np.radians(catalog[name][0]), np.radians(catalog[name][1])) for name in catalog]
+        self.assertGreater(max(shifts), 15.0)
+
+        with tempfile.TemporaryDirectory() as dir_path:
+
+            # An old state with the time the bodies were computed for
+            bodies = self._loadSkyFit2State(dir_path, oldPicks(), pp, obs_time)
+            assertCatalogFrame(bodies)
+
+            # Saved again (with a time to convert at) and loaded: the directions do not change
+            converted = {name: (body.ra, body.dec) for name, body in bodies.items()}
+            bodies = self._loadSkyFit2State(dir_path, list(bodies.values()), pp, obs_time)
+            for name, body in bodies.items():
+                self.assertEqual((body.ra, body.dec), converted[name], name)
+
+            # An old state without that time is converted at the reference time of the platepar
+            bodies = self._loadSkyFit2State(dir_path, oldPicks(), pp, None)
+            assertCatalogFrame(bodies)
+
+
+    def testNewStatePlanetPairsUnchanged(self):
+        """ The paired solar system bodies of a state saved after the change are in the catalog frame already,
+            so a save and load leaves their directions bit-identical. """
+
+        import tempfile
+        from RMS.Astrometry.StarClasses import PlanetPoint
+
+        catalog, _, pp, obs_time = self._solarSystemPairs()
+
+        with tempfile.TemporaryDirectory() as dir_path:
+            picks = [PlanetPoint(name, ra, dec, mag) for name, (ra, dec, mag) in catalog.items()]
+            bodies = self._loadSkyFit2State(dir_path, picks, pp, obs_time)
+
+        self.assertEqual(sorted(bodies), sorted(catalog))
+        for name, body in bodies.items():
+            self.assertEqual((body.ra, body.dec, body.mag), catalog[name], name)
+
+
     @unittest.skipIf(erfa is None, "pyerfa not installed")
     def testStarGridOverNight(self):
         """ The star fit as in real life, on a distortion-free camera fixed in alt/az and referenced at the start of
