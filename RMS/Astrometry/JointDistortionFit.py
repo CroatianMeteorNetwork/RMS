@@ -28,6 +28,11 @@ is radial). The decentering correction applies only to the radial types.
 The stars are those of the CALSTARS files, which RMS measures on dark-subtracted and flat-fielded images (if the
 flat is used, see use_flat in the config). The photometry of the starting platepar (including its vignetting
 coefficient) is kept as it is, it isn't fitted here.
+
+Stars brighter than a catalog magnitude can be left out of the fit and of its residuals (bright_mag, by default
+auto_calibration_bright_star_mag of the config): on some sensors the centroids of bright stars are shifted along the
+rows, which would bend the fitted distortion. They are still used in the recalibration of the pointing of every
+chunk, as in the processing, where they are a small share of the stars.
 """
 
 from __future__ import print_function, division, absolute_import
@@ -513,7 +518,7 @@ def heldOutNights(nights, holdout):
     return set(i for i, night in enumerate(nights) if _norm(night['dir']) in held_dirs)
 
 
-def matchStars(platepar, jd, stars, catalog_stars, match_radius, lim_mag):
+def matchStars(platepar, jd, stars, catalog_stars, match_radius, lim_mag, bright_mag=None):
     """ Match the stars of a chunk one to one to isolated catalog stars.
 
     Arguments:
@@ -523,6 +528,10 @@ def matchStars(platepar, jd, stars, catalog_stars, match_radius, lim_mag):
         catalog_stars: [ndarray] Catalog stars (ra, dec, mag).
         match_radius: [float] A star is matched to a catalog star within this distance (px).
         lim_mag: [float] Limiting magnitude of the catalog stars.
+
+    Keyword arguments:
+        bright_mag: [float] The stars matched to catalog stars brighter than this magnitude are left out. None by
+            default (all are kept).
 
     Return:
         [ndarray] The matched stars, one row per star: x, y, intensity, SNR, catalog RA, Dec, magnitude, and the
@@ -567,6 +576,11 @@ def matchStars(platepar, jd, stars, catalog_stars, match_radius, lim_mag):
     counts = np.bincount(idx[matched], minlength=len(catalog_fov))
     matched[matched] &= counts[idx[matched]] == 1
 
+    # The stars matched to bright catalog stars are left out only now: as catalog stars they still make their
+    #   neighbours not isolated, as a faint star next to a bright one is measured blended with it
+    if bright_mag is not None:
+        matched[matched] &= catalog_fov[idx[matched], 2] >= bright_mag
+
     # The matched stars with their catalog stars
     j = idx[matched]
     s = stars[matched]
@@ -579,7 +593,7 @@ def matchStars(platepar, jd, stars, catalog_stars, match_radius, lim_mag):
 _worker_data = {}
 
 
-def _setWorkerData(catalog_stars, match_catalog_stars, config, match_radius, lim_mag):
+def _setWorkerData(catalog_stars, match_catalog_stars, config, match_radius, lim_mag, bright_mag=None):
     """ Set the data which the recalibration of the chunks shares (see _recalibrateWorker).
 
     Arguments:
@@ -589,13 +603,17 @@ def _setWorkerData(catalog_stars, match_catalog_stars, config, match_radius, lim
         match_radius: [float] Match radius of the stars (px).
         lim_mag: [float] Limiting magnitude of the matched catalog stars.
 
+    Keyword arguments:
+        bright_mag: [float] The matched stars brighter than this catalog magnitude are left out (see matchStars).
+            None by default (all are kept).
+
     Return:
         None
     """
 
     _worker_data.clear()
     _worker_data.update(catalog_stars=catalog_stars, match_catalog_stars=match_catalog_stars, config=config,
-                        match_radius=match_radius, lim_mag=lim_mag)
+                        match_radius=match_radius, lim_mag=lim_mag, bright_mag=bright_mag)
 
 
 def _initPoolWorker(*args):
@@ -636,7 +654,7 @@ def _recalibrateWorker(task):
     # The matched stars are kept separately, the platepar doesn't need its list of the recalibration's stars
     recalibrated.star_list = []
     matched = matchStars(recalibrated, jd, stars, data['match_catalog_stars'], data['match_radius'],
-                         data['lim_mag'])
+                         data['lim_mag'], bright_mag=data.get('bright_mag'))
 
     return key, recalibrated, matched
 
@@ -919,7 +937,7 @@ def fitDistortion(platepars, matched_stars, jds, distortion_type, max_stars, see
 def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdout=None, n_iter=4, snr_min=10.0,
                        max_stars=20000, chunk_step=2, match_radius=None, lim_mag=None, nproc=None, decentering=None,
                        holdout_chunks=None, holdout_names=None, max_chunks=None, qc=True, qc_options=None,
-                       holdout_baseline='night', mask=None, fit_by='JointDistortionFit'):
+                       holdout_baseline='night', mask=None, fit_by='JointDistortionFit', bright_mag=None):
     """ Fit one distortion on the stars of many nights, with the pointing of every chunk fitted separately (see
         the description of the module).
 
@@ -963,6 +981,11 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
             held-out chunks it judges. None by default (no mask).
         fit_by: [str] Short label of what made the fit, for the fit record of the fitted platepar.
             'JointDistortionFit' by default.
+        bright_mag: [float] Stars brighter than this catalog magnitude are left out of the fit and of its
+            residuals, but not of the recalibration of the pointing (see the description of the module). None by
+            default, in which case config.auto_calibration_bright_star_mag is used (None there keeps all stars).
+            It must be brighter than the limiting magnitude of the matched stars, otherwise a ValueError is
+            raised.
 
     Return:
         (platepar, report): [tuple] The fitted platepar (the distortion of the last fit with the pointing of the
@@ -1001,9 +1024,18 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
         log.info("The decentering correction is switched {:s} for the fit (starting platepar: {:s})".format(
             'on' if decentering else 'off', 'on' if start_decentering else 'off'))
 
-    # The catalog depth and number of workers not given are those of the config and the machine
+    # The catalog depth, the magnitude of the bright stars left out and the number of workers not given are those
+    #   of the config and the machine
     if lim_mag is None:
         lim_mag = config.catalog_mag_limit
+
+    if bright_mag is None:
+        bright_mag = getattr(config, 'auto_calibration_bright_star_mag', None)
+
+    # Leaving out all stars at least as bright as the faintest matched ones would leave none
+    if (bright_mag is not None) and (bright_mag >= lim_mag):
+        raise ValueError("The stars brighter than mag {:.1f} can't be left out of a fit on the stars to mag {:.1f}"
+                         "".format(bright_mag, lim_mag))
 
     if nproc is None:
         nproc = multiprocessing.cpu_count()
@@ -1118,7 +1150,7 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
 
     # The workers of the recalibration, which share the catalogs and the config. Without a pool the data is set
     #   here (the log is kept quiet only while recalibrating, see recalibrateChunks)
-    init_args = (catalog_stars, match_catalog_stars, config, match_radius, lim_mag)
+    init_args = (catalog_stars, match_catalog_stars, config, match_radius, lim_mag, bright_mag)
     pool = None
     if nproc > 1:
         pool = multiprocessing.Pool(nproc, initializer=_initPoolWorker, initargs=init_args)
@@ -1127,7 +1159,7 @@ def jointDistortionFit(dir_paths, platepar, config, distortion_type=None, holdou
 
     report = {'nights': [night['dir'] for night in nights], 'held_out': sorted(nights[n]['dir'] for n in held),
               'distortion_type': distortion_type, 'decentering': decentering, 'match_radius': match_radius,
-              'lim_mag': lim_mag,
+              'lim_mag': lim_mag, 'bright_mag': bright_mag,
               'snr_min': snr_min, 'chunks': len(train_keys), 'held_chunks': len(held_keys), 'iterations': []}
     width, height = platepar.X_res, platepar.Y_res
 
@@ -1629,6 +1661,9 @@ def formatReport(report):
     lines.append('{:d} nights, {:d} held out, {:d} chunks in the fit; match radius {:.2f} px, catalog to mag '
                  '{:.1f}, SNR >= {:.1f}'.format(len(report['nights']), len(report['held_out']), report['chunks'],
                                                 report['match_radius'], report['lim_mag'], report['snr_min']))
+    if report.get('bright_mag') is not None:
+        lines.append('Stars brighter than mag {:.1f} left out of the fit and the residuals'.format(
+            report['bright_mag']))
     if 'reference' in report:
         lines.append('Reference chunk: {:s} {:s}'.format(*report['reference']))
     lines.append('All residuals in arcseconds, after the recalibration of the pointing of every chunk.')
@@ -1801,6 +1836,11 @@ def main(argv=None):
                             help="Limiting magnitude of the matched catalog stars. catalog_mag_limit of the config "
                             "by default.")
 
+    arg_parser.add_argument('--brightmag', metavar='BRIGHT_MAG', type=float,
+                            help="Leave the stars brighter than this catalog magnitude out of the fit (their "
+                            "centroids are shifted on some sensors). auto_calibration_bright_star_mag of the config "
+                            "by default.")
+
     arg_parser.add_argument('--pointing', metavar='PLATEPAR', type=str,
                             help="Write the fitted distortion with the pointing of this platepar (e.g. the latest "
                             "one of the camera) instead of the pointing of the reference chunk.")
@@ -1847,6 +1887,7 @@ def main(argv=None):
                                                 n_iter=cml_args.iter, snr_min=cml_args.snrmin,
                                                 max_stars=cml_args.maxstars, chunk_step=cml_args.step,
                                                 match_radius=cml_args.radius, lim_mag=cml_args.limmag,
+                                                bright_mag=cml_args.brightmag,
                                                 nproc=cml_args.nproc,
                                                 decentering=(None if cml_args.decentering is None
                                                              else cml_args.decentering == 'on'),
