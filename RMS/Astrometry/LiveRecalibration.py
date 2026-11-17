@@ -14,7 +14,7 @@ import hashlib
 import json
 
 
-from RMS.Astrometry.ApplyAstrometry import applyPlateparToCentroids
+from RMS.Astrometry.ApplyAstrometry import applyPlateparToCentroids, brightShiftOptions
 from RMS.Astrometry.ApplyRecalibrate import recalibratePlateparsForFF
 from RMS.Formats.FFfile import filenameToDatetime
 from RMS.Formats.FTPdetectinfo import writeFTPdetectinfo
@@ -507,8 +507,7 @@ class LiveRecalibration(threading.Thread):
         #   if the camera has one
         meteor_picks = applyPlateparToCentroids(
             ff_name, self.config.fps, meteor_meas, working_platepar, add_calstatus=True,
-            bright_shift=self.config.centroid_bright_shift,
-            bright_shift_mag_limit=self.config.centroid_bright_shift_mag_limit
+            **brightShiftOptions(self.config)
             )
         
         return meteor_picks

@@ -1182,21 +1182,41 @@ def plateAberration(platepar, measurement, aberration):
 
 
 
-def correctBrightShift(x_data, y_data, magnitudes, bright_shift, mag_limit=3.0):
+# The intensity (ADU) the intensity basis of the brightness-dependent centroid shift is measured in units of (see
+#   correctBrightShift)
+BRIGHT_SHIFT_INTENSITY_UNIT = 1e5
+
+
+def correctBrightShift(x_data, y_data, magnitudes, bright_shift, mag_limit=3.0, intensities=None, basis='magnitude',
+                       knees=(0.0, 0.0), intensity_limit=2.5e5):
     """ Remove the brightness-dependent shift of measured centroids: a bright source is measured off its true
-        position by A*F + C*F^2 pixels along each image axis, with F = 10^(-0.4*(mag - 5)) its brightness relative
-        to magnitude 5.
+        position along each image axis by an amount that grows with its brightness, given by one of two models
+        (basis):
+        - 'magnitude': A*F + C*F^2 pixels, with F = 10^(-0.4*(mag - 5)) the brightness relative to magnitude 5.
+        - 'intensity': A*u + C*v^2 pixels, with u = (I - k_lin)/1e5 and v = (I - k_quad)/1e5 the intensity of the
+          measurement (the sum of its pixels above the background in a frame, ADU) above the knee of each term (0
+          below it). The shift is made by the charge in the sensor, which the intensity measures directly; the
+          magnitude also carries the photometric zero point, which changes with the conditions. The knees let the
+          model follow a shift that grows from faint levels (knees at 0) or sets in at a level, and leave the
+          measurements below them as they are.
 
     Arguments:
         x_data: [ndarray] Measured X image coordinates (px).
         y_data: [ndarray] Measured Y image coordinates (px).
-        magnitudes: [ndarray] Magnitudes of the measurements. A measurement without a finite magnitude is not
-            corrected.
+        magnitudes: [ndarray] Magnitudes of the measurements (the magnitude basis). A measurement without a finite
+            magnitude is not corrected.
         bright_shift: [list] The coefficients [A_x, C_x, A_y, C_y] (px).
 
     Keyword arguments:
-        mag_limit: [float] Sources brighter than this magnitude get the shift at this magnitude, to keep the model
-            inside the range of brightness it was measured on. 3.0 by default.
+        mag_limit: [float] Magnitude basis: sources brighter than this magnitude get the shift at this magnitude,
+            to keep the model inside the range of brightness it was measured on. 3.0 by default.
+        intensities: [ndarray] Intensities of the measurements (ADU), for the intensity basis. A measurement without
+            a finite positive intensity is not corrected. None by default.
+        basis: [str] 'magnitude' (default) or 'intensity', see above.
+        knees: [tuple] Intensity basis: the intensities (ADU) above which the linear and the quadratic terms grow
+            (k_lin, k_quad). (0, 0) by default.
+        intensity_limit: [float] Intensity basis: measurements brighter than this (ADU) get the shift at this
+            intensity, to keep the model inside the range it was measured on. 2.5e5 by default.
 
     Return:
         (x_corr, y_corr): [tuple of ndarrays] The corrected image coordinates.
@@ -1206,17 +1226,55 @@ def correctBrightShift(x_data, y_data, magnitudes, bright_shift, mag_limit=3.0):
     y_data = np.asarray(y_data, dtype=np.float64)
     a_x, c_x, a_y, c_y = [float(v) for v in bright_shift]
 
-    # The brightness relative to magnitude 5, held at the limiting magnitude; no shift without a magnitude
-    mags = np.asarray(magnitudes, dtype=np.float64)
-    finite = np.isfinite(mags)
-    f = np.zeros_like(mags)
-    f[finite] = 10**(-0.4*(np.maximum(mags[finite], mag_limit) - 5.0))
+    if basis == 'intensity':
 
-    return x_data - (a_x*f + c_x*f**2), y_data - (a_y*f + c_y*f**2)
+        # The intensity held at the limit, above the knee of each term, in units of 1e5 ADU; no shift without a
+        #   positive intensity
+        k_lin, k_quad = [float(v) for v in knees]
+        inten = np.asarray(intensities, dtype=np.float64)
+        valid = np.isfinite(inten) & (inten > 0)
+        held = np.minimum(np.where(valid, inten, 0.0), intensity_limit)
+        f = np.where(valid, np.maximum(held - k_lin, 0.0), 0.0)/BRIGHT_SHIFT_INTENSITY_UNIT
+        g = np.where(valid, np.maximum(held - k_quad, 0.0), 0.0)/BRIGHT_SHIFT_INTENSITY_UNIT
+
+    elif basis == 'magnitude':
+
+        # The brightness relative to magnitude 5, held at the limiting magnitude; no shift without a magnitude
+        mags = np.asarray(magnitudes, dtype=np.float64)
+        finite = np.isfinite(mags)
+        f = np.zeros_like(mags)
+        f[finite] = 10**(-0.4*(np.maximum(mags[finite], mag_limit) - 5.0))
+        g = f
+
+    else:
+        raise ValueError("Unknown basis of the brightness shift: {}".format(basis))
+
+    return x_data - (a_x*f + c_x*g**2), y_data - (a_y*f + c_y*g**2)
+
+
+def brightShiftOptions(config):
+    """ The arguments of applyPlateparToCentroids and applyAstrometryFTPdetectinfo for the brightness-dependent
+        centroid shift of a camera, from its config (centroid_bright_shift*).
+
+    Arguments:
+        config: [Config] Configuration object.
+
+    Return:
+        [dict] bright_shift, bright_shift_mag_limit, bright_shift_basis, bright_shift_knees and
+            bright_shift_intensity_limit.
+    """
+
+    # (a config made before an option existed has its default)
+    return dict(bright_shift=getattr(config, 'centroid_bright_shift', None),
+                bright_shift_mag_limit=getattr(config, 'centroid_bright_shift_mag_limit', 3.0),
+                bright_shift_basis=getattr(config, 'centroid_bright_shift_basis', 'magnitude'),
+                bright_shift_knees=getattr(config, 'centroid_bright_shift_knees', [0.0, 0.0]),
+                bright_shift_intensity_limit=getattr(config, 'centroid_bright_shift_intensity_limit', 2.5e5))
 
 
 def applyPlateparToCentroids(ff_name, fps, meteor_meas, platepar, add_calstatus=False, exp_mag_corr=0.0,
-                             bright_shift=None, bright_shift_mag_limit=3.0):
+                             bright_shift=None, bright_shift_mag_limit=3.0, bright_shift_basis='magnitude',
+                             bright_shift_knees=(0.0, 0.0), bright_shift_intensity_limit=2.5e5):
     """ Given the meteor centroids and a platepar file, compute meteor astrometry and photometry (RA/Dec,
         alt/az, mag).
     
@@ -1235,6 +1293,12 @@ def applyPlateparToCentroids(ff_name, fps, meteor_meas, platepar, add_calstatus=
             correction. The returned image coordinates are the measured ones.
         bright_shift_mag_limit: [float] Magnitude brighter than which the shift is held at its value at that
             magnitude. 3.0 by default.
+        bright_shift_basis: [str] 'magnitude' (default) or 'intensity' (from the intensity of every centroid),
+            see correctBrightShift.
+        bright_shift_knees: [tuple] Intensity basis: the knees of the linear and the quadratic terms (ADU). (0, 0)
+            by default.
+        bright_shift_intensity_limit: [float] Intensity basis: the intensity (ADU) above which the shift is held
+            at its value there. 2.5e5 by default.
 
     Return:
         meteor_picks: [ndarray] A numpy 2D array of: [frames, X_data, Y_data, RA_data, dec_data, az_data,
@@ -1283,14 +1347,16 @@ def applyPlateparToCentroids(ff_name, fps, meteor_meas, platepar, add_calstatus=
     # Apply exposure time magnitude correction
     magnitudes += exp_mag_corr
 
-    # Remove the brightness-dependent shift of the centroids, which needs the magnitudes, and redo the astrometry
-    #   with the corrected coordinates (the magnitudes are kept, the shift of a fraction of a pixel doesn't change
-    #   them); the output keeps the measured image coordinates, so the correction is made again from the same
-    #   numbers whenever the astrometry is redone
+    # Remove the brightness-dependent shift of the centroids, which needs the magnitudes or the intensities, and
+    #   redo the astrometry with the corrected coordinates (the magnitudes are kept, the shift of a fraction of a
+    #   pixel doesn't change them); the output keeps the measured image coordinates, so the correction is made
+    #   again from the same numbers whenever the astrometry is redone
     if (bright_shift is not None) and np.any(np.asarray(bright_shift, dtype=np.float64) != 0):
 
         X_corr, Y_corr = correctBrightShift(X_data, Y_data, magnitudes, bright_shift,
-                                            mag_limit=bright_shift_mag_limit)
+                                            mag_limit=bright_shift_mag_limit, intensities=level_data,
+                                            basis=bright_shift_basis, knees=bright_shift_knees,
+                                            intensity_limit=bright_shift_intensity_limit)
 
         _, RA_data, dec_data, _ = xyToRaDecPP(np.array(time_data), X_corr, Y_corr, level_data, platepar,
                                               measurement=True)
@@ -1841,7 +1907,8 @@ def geoHt2XYInsideFOV(platepar, lat_arr, lon_arr, h_att, side_sample=10):
 
 def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file, 
                                  UT_corr=0, platepar=None, radec_input=False, exp_mag_corr=0.0,
-                                 bright_shift=None, bright_shift_mag_limit=3.0):
+                                 bright_shift=None, bright_shift_mag_limit=3.0, bright_shift_basis='magnitude',
+                                 bright_shift_knees=(0.0, 0.0), bright_shift_intensity_limit=2.5e5):
     """ Use the given platepar to calculate the celestial coordinates of detected meteors from a FTPdetectinfo
         file and save the updates values.
 
@@ -1865,6 +1932,11 @@ def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file,
             by default: no correction.
         bright_shift_mag_limit: [float] Magnitude brighter than which the shift is held at its value at that
             magnitude. 3.0 by default.
+        bright_shift_basis: [str] 'magnitude' (default) or 'intensity', see correctBrightShift.
+        bright_shift_knees: [tuple] Intensity basis: the knees of the linear and the quadratic terms (ADU). (0, 0)
+            by default.
+        bright_shift_intensity_limit: [float] Intensity basis: the intensity (ADU) above which the shift is held
+            at its value there. 2.5e5 by default.
 
     Return:
         None
@@ -1913,7 +1985,10 @@ def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file,
             # Use X, Y coordinates as input to compute spherical coordinates and photometry
             meteor_picks = applyPlateparToCentroids(ff_name, fps, meteor_meas, platepar, 
                                                     exp_mag_corr=exp_mag_corr, bright_shift=bright_shift,
-                                                    bright_shift_mag_limit=bright_shift_mag_limit)
+                                                    bright_shift_mag_limit=bright_shift_mag_limit,
+                                                    bright_shift_basis=bright_shift_basis,
+                                                    bright_shift_knees=bright_shift_knees,
+                                                    bright_shift_intensity_limit=bright_shift_intensity_limit)
 
         # Add the calculated values to the final list
         meteor_list.append([ff_name, meteor_No, rho, phi, meteor_picks])

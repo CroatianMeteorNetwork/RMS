@@ -296,6 +296,11 @@ class Config:
         #   at its value at that magnitude (see .config)
         self.centroid_bright_shift = [0.0, 0.0, 0.0, 0.0]
         self.centroid_bright_shift_mag_limit = 3.0
+        # What the shift is a function of: 'magnitude' or 'intensity' (the charge, ADU), and for the intensity, the
+        #   knees of its linear and quadratic terms and the intensity above which it is held (ADU)
+        self.centroid_bright_shift_basis = 'magnitude'
+        self.centroid_bright_shift_knees = [0.0, 0.0]
+        self.centroid_bright_shift_intensity_limit = 2.5e5
 
         self.mask_file = "mask.bmp"
 
@@ -1733,6 +1738,33 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "centroid_bright_shift_mag_limit"):
         config.centroid_bright_shift_mag_limit = parser.getfloat(section, "centroid_bright_shift_mag_limit")
+
+    # What the shift is a function of: 'magnitude' or 'intensity'; anything else is an error, and the magnitude
+    #   is kept
+    if parser.has_option(section, "centroid_bright_shift_basis"):
+        basis = parser.get(section, "centroid_bright_shift_basis").strip().lower()
+        if basis in ('magnitude', 'intensity'):
+            config.centroid_bright_shift_basis = basis
+        else:
+            log.error("centroid_bright_shift_basis must be magnitude or intensity, got: {:s}; magnitude used"
+                      .format(basis))
+
+    # The knees of the linear and the quadratic terms of the intensity basis: two numbers, or the option is ignored
+    if parser.has_option(section, "centroid_bright_shift_knees"):
+        knees_str = parser.get(section, "centroid_bright_shift_knees")
+        try:
+            knees = [float(v) for v in knees_str.replace(",", " ").split()]
+        except ValueError:
+            knees = []
+        if len(knees) == 2:
+            config.centroid_bright_shift_knees = knees
+        else:
+            log.error("centroid_bright_shift_knees needs 2 numbers (linear, quadratic; ADU), got: {:s}; 0, 0 used"
+                      .format(knees_str))
+
+    if parser.has_option(section, "centroid_bright_shift_intensity_limit"):
+        config.centroid_bright_shift_intensity_limit = parser.getfloat(section,
+                                                                       "centroid_bright_shift_intensity_limit")
 
     if parser.has_option(section, "mask"):
         config.mask_file = os.path.basename(parser.get(section, "mask"))
