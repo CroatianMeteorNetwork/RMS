@@ -31,6 +31,7 @@ from RMS.Astrometry.JointDistortionFit import (QC_DEFAULTS, heldOutNights, joint
 from RMS.Formats import CALSTARS
 from RMS.Formats.FFfile import getMiddleTimeFF
 from RMS.Formats.Platepar import Platepar
+from RMS.Misc import getRmsRootDir
 
 
 # Noise of the measured star positions (px), and the faintest synthetic star
@@ -156,7 +157,7 @@ def chunkName(jd):
         year, month, day, hour, minute, int(second), int(millisecond))
 
 
-def chunkStars(pp, jd, catalog_stars, rng, noise=NOISE_PX):
+def chunkStars(pp, jd, catalog_stars, rng, noise=NOISE_PX, shift=None):
     """ The stars of a chunk as CALSTARS rows: the catalog stars on the image with the platepar, with the noise.
 
     Arguments:
@@ -167,6 +168,8 @@ def chunkStars(pp, jd, catalog_stars, rng, noise=NOISE_PX):
 
     Keyword arguments:
         noise: [float] Noise of the positions (px). NOISE_PX by default.
+        shift: [function] Shift of the measured x of the stars (px) from their x, y and magnitude, e.g. of the
+            bright ones. None by default (no shift).
 
     Return:
         [ndarray] The stars as CALSTARS rows.
@@ -186,6 +189,8 @@ def chunkStars(pp, jd, catalog_stars, rng, noise=NOISE_PX):
     x, y, mag = x[inside], y[inside], mag[inside]
     x = x + rng.normal(0, noise, x.size)
     y = y + rng.normal(0, noise, y.size)
+    if shift is not None:
+        x = x + shift(x, y, mag)
 
     # The intensities follow the photometry of the platepar
     intensity = 10**((pp.mag_lev - mag)/2.5)
@@ -196,7 +201,7 @@ def chunkStars(pp, jd, catalog_stars, rng, noise=NOISE_PX):
 
 
 def makeNights(tmp_path_factory, config, truth, start, prefix, n_nights=N_NIGHTS, n_chunks=N_CHUNKS,
-               noise=NOISE_PX):
+               noise=NOISE_PX, shift=None):
     """ Synthetic nights: a directory per night with a CALSTARS file of stars put on the images by the known
         distortion with the night's pointing, and a platepar with the night's pointing on the starting distortion.
 
@@ -211,6 +216,7 @@ def makeNights(tmp_path_factory, config, truth, start, prefix, n_nights=N_NIGHTS
         n_nights: [int] Number of nights. N_NIGHTS by default.
         n_chunks: [int] Number of chunks of every night. N_CHUNKS by default.
         noise: [float] Noise of the star positions (px). NOISE_PX by default.
+        shift: [function] Shift of the measured x of the stars (see chunkStars). None by default.
 
     Return:
         (dirs, pointings): the directories and the true platepar of every night.
@@ -231,7 +237,8 @@ def makeNights(tmp_path_factory, config, truth, start, prefix, n_nights=N_NIGHTS
         for c in range(n_chunks):
             name = chunkName(jd_night + c*CHUNK_MINUTES/1440.0)
             jd = date2JD(*getMiddleTimeFF(name, config.fps, ret_milliseconds=True, ff_frames=256))
-            star_list.append([name, chunkStars(pointing, jd, catalog_stars, rng, noise=noise).tolist()])
+            star_list.append([name, chunkStars(pointing, jd, catalog_stars, rng, noise=noise,
+                                               shift=shift).tolist()])
 
         # The directory of the night, with the night's pointing on the starting distortion
         dir_path = str(tmp_path_factory.mktemp("{:s}_{:d}".format(prefix, n)))
@@ -1082,3 +1089,109 @@ def test_chunks_timed_by_the_frame_rate_of_the_header(tmp_path):
                                      abs=1e-9)
     assert chunk[3] == 128
     assert chunk[4] == pytest.approx(12.8)
+
+
+# Stars brighter than this magnitude are shifted along the rows in the synthetic nights of the bright stars, by up to
+#   BRIGHT_SHIFT_PX on one side of the image (a shift which changes across the image bends the fitted distortion)
+BRIGHT_MAG = 4.0
+BRIGHT_SHIFT_PX = 1.0
+
+
+@pytest.fixture(scope="module")
+def bright_nights(tmp_path_factory):
+    """ The synthetic nights (see the fixture nights) with the bright stars shifted along the rows, more on the left
+        of the image than on the right. """
+
+    config = makeConfig()
+    truth = makePlatepar()
+    start = wrongDistortion(truth)
+
+    def _shift(x, y, mag):
+        return np.where(mag < BRIGHT_MAG, BRIGHT_SHIFT_PX*(1 - x/truth.X_res), 0.0)
+
+    dirs, pointings = makeNights(tmp_path_factory, config, truth, start, "bright", shift=_shift)
+
+    return config, truth, start, dirs, pointings
+
+
+def test_match_stars_leaves_out_bright_stars():
+    """ The stars matched to catalog stars brighter than bright_mag are left out, and a bright catalog star still
+        keeps a faint star next to it from being matched (the two are measured blended). """
+
+    pp = makePlatepar()
+    jd = pp.JD
+
+    # Isolated bright and faint catalog stars, and a faint one next to a bright one
+    cat_xy = np.array([[400.0, 300.0], [700.0, 400.0], [900.0, 200.0], [902.0, 200.0]])
+    mags = np.array([3.0, 5.0, 3.0, 5.0])
+    _, ra, dec, _ = xyToRaDecPP(np.full(len(cat_xy), jd), cat_xy[:, 0], cat_xy[:, 1], np.ones(len(cat_xy)), pp,
+                                extinction_correction=False, jd_time=True)
+    catalog_stars = np.column_stack([ra, dec, mags])
+    x_cat, y_cat = raDecToXYPP(np.array(ra), np.array(dec), jd, pp)
+
+    # A star on every catalog star but the bright one of the pair
+    star_xy = [(x_cat[i] + 0.2, y_cat[i]) for i in (0, 1, 3)]
+    stars = np.array([[y, x, 1000, 100, 2.5, 10, 50, 0] for x, y in star_xy], dtype=np.float64)
+
+    # Without the limit the two isolated stars are matched, the faint star of the pair isn't
+    matched = matchStars(pp, jd, stars, catalog_stars, 1.0, 6.0)
+    assert sorted(matched[:, 6]) == [3.0, 5.0]
+
+    # With it only the faint isolated star
+    matched = matchStars(pp, jd, stars, catalog_stars, 1.0, 6.0, bright_mag=BRIGHT_MAG)
+    assert len(matched) == 1
+    assert matched[0, 6] == 5.0
+    assert np.allclose(matched[0, :2], star_xy[1])
+
+
+def test_bright_stars_left_out_of_the_fit(bright_nights):
+    """ With the bright stars shifted along the rows, the fit on all stars is bent by them; with the bright stars
+        left out (by the config) the fit recovers the known distortion and its stars and residuals have no bright
+        star. """
+
+    config, truth, start, dirs, pointings = bright_nights
+
+    # All stars
+    fitted_all, report_all = jointDistortionFit(dirs, start, config, distortion_type="radial7-odd", n_iter=2,
+                                                chunk_step=1, nproc=4)
+    assert report_all['bright_mag'] is None
+    assert np.min(report_all['stars']['fit'][:, 6]) < BRIGHT_MAG
+
+    # The bright stars left out by the config
+    config = copy.deepcopy(config)
+    config.auto_calibration_bright_star_mag = BRIGHT_MAG
+    fitted, report = jointDistortionFit(dirs, start, config, distortion_type="radial7-odd", n_iter=2,
+                                        chunk_step=1, nproc=4)
+    assert report['bright_mag'] == BRIGHT_MAG
+    assert np.min(report['stars']['fit'][:, 6]) >= BRIGHT_MAG
+    assert 'brighter than mag {:.1f} left out'.format(BRIGHT_MAG) in JointDistortionFit.formatReport(report)
+
+    # The fit without the bright stars puts the stars where the known distortion does, the one with them doesn't
+    error_all = max(gridDifference(pointing, transferPointing(fitted_all, pointing)[0]) for pointing in pointings)
+    error = max(gridDifference(pointing, transferPointing(fitted, pointing)[0]) for pointing in pointings)
+    assert error < 0.5*error_all
+    assert error < 0.4*NOISE_PX
+
+
+def test_bright_stars_brighter_than_the_limit(nights):
+    """ Leaving out the stars as bright as the faintest matched ones would leave none, which is an error. """
+
+    config, truth, start, dirs, pointings = nights
+
+    with pytest.raises(ValueError):
+        jointDistortionFit(dirs, start, config, n_iter=1, nproc=1, bright_mag=LIM_MAG)
+
+
+@pytest.mark.parametrize("value, expected", [(None, None), ("none", None), ("4.5", 4.5), ("bright", None)])
+def test_bright_star_mag_option(tmp_path, value, expected):
+    """ The option auto_calibration_bright_star_mag: none (the default) keeps all stars, a magnitude leaves out the
+        brighter ones, anything else is an error which keeps all stars. """
+
+    text = open(os.path.join(getRmsRootDir(), '.config')).read()
+    if value is not None:
+        text = text.replace('auto_calibration_bright_star_mag: none',
+                            'auto_calibration_bright_star_mag: {:s}'.format(value))
+    path = tmp_path/'test.config'
+    path.write_text(text)
+
+    assert cr.parse(str(path)).auto_calibration_bright_star_mag == expected

@@ -852,6 +852,11 @@ class Config:
         self.auto_calibration_refit_days = 7.0
         self.auto_calibration_refit_nights = 14
 
+        # Stars brighter than this catalog magnitude are left out of the joint fits of the lens distortion over
+        #   many nights (at the end of the night and in the periodic refit), as their centroids are shifted along
+        #   the rows on some sensors. None keeps all stars
+        self.auto_calibration_bright_star_mag = None
+
 
         self.catalog_mag_limit = 5.5
 
@@ -2593,6 +2598,19 @@ def parseCalibration(config, parser):
 
     if parser.has_option(section, "auto_calibration_refit_nights"):
         config.auto_calibration_refit_nights = parser.getint(section, "auto_calibration_refit_nights")
+
+    # The magnitude of the bright stars left out of the joint fits, none (or empty) to keep all stars
+    if parser.has_option(section, "auto_calibration_bright_star_mag"):
+        value = parser.get(section, "auto_calibration_bright_star_mag").strip()
+        if value.lower() in ('', 'none'):
+            config.auto_calibration_bright_star_mag = None
+        else:
+            try:
+                config.auto_calibration_bright_star_mag = float(value)
+            except ValueError:
+                log.error("The auto_calibration_bright_star_mag must be a magnitude or none, not {:s}; all stars "
+                          "are kept".format(value))
+                config.auto_calibration_bright_star_mag = None
 
 
 
