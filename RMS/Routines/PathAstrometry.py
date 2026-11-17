@@ -197,15 +197,14 @@ def stackName(station_id, t_start):
 
 
 
-def makeStacks(source, t0, t1, stack_frames=STACK_FRAMES, dark=None, flat_struct=None):
-    """ The frames between t0 and t1 averaged into stacks of consecutive frames, with the dark and the flat
-        applied.
+def stacksOfFrames(source, indices, times, stack_frames=STACK_FRAMES, dark=None, flat_struct=None):
+    """ Given frames averaged into stacks of consecutive frames, with the dark and the flat applied.
 
     Arguments:
         source: [RawFrames] The raw frames (see RMS.Routines.TrackShape.openRawSource), or any object with the
-            methods framesBetween and frame.
-        t0: [float] Beginning (Unix s).
-        t1: [float] End (Unix s).
+            method frame.
+        indices: [ndarray] Frame numbers, in time order.
+        times: [ndarray] Their times (Unix s).
 
     Keyword arguments:
         stack_frames: [int] Frames per stack. STACK_FRAMES by default.
@@ -214,12 +213,11 @@ def makeStacks(source, t0, t1, stack_frames=STACK_FRAMES, dark=None, flat_struct
 
     Return:
         [list] Stacks, each a dict with the image ('img', float32), the mean time of its frames ('t', Unix s), the
-            time of its first and last frame ('t_first', 't_last') and the number of frames ('n_frames').
+            time of its first and last frame ('t_first', 't_last') and the number of frames ('n_frames'). Frames
+            left over at the end which don't fill a stack are not used.
     """
 
     from RMS.Routines.Image import applyDark, applyFlat
-
-    indices, times = source.framesBetween(t0, t1)
 
     stacks = []
     for k in range(0, len(indices) - stack_frames + 1, stack_frames):
@@ -249,6 +247,31 @@ def makeStacks(source, t0, t1, stack_frames=STACK_FRAMES, dark=None, flat_struct
                            n_frames=n))
 
     return stacks
+
+
+
+def makeStacks(source, t0, t1, stack_frames=STACK_FRAMES, dark=None, flat_struct=None):
+    """ The frames between t0 and t1 averaged into stacks of consecutive frames, with the dark and the flat
+        applied (see stacksOfFrames).
+
+    Arguments:
+        source: [RawFrames] The raw frames (see RMS.Routines.TrackShape.openRawSource), or any object with the
+            methods framesBetween and frame.
+        t0: [float] Beginning (Unix s).
+        t1: [float] End (Unix s).
+
+    Keyword arguments:
+        stack_frames: [int] Frames per stack. STACK_FRAMES by default.
+        dark: [ndarray] Dark frame, None (default) for none.
+        flat_struct: [Flat struct] Flat field, None (default) for none.
+
+    Return:
+        [list] Stacks (see stacksOfFrames).
+    """
+
+    indices, times = source.framesBetween(t0, t1)
+
+    return stacksOfFrames(source, indices, times, stack_frames=stack_frames, dark=dark, flat_struct=flat_struct)
 
 
 
@@ -324,6 +347,42 @@ def recalibrateStacks(stacks, platepar, config, catalog_stars, stack_frames=STAC
                 stack['platepar'] = recalibrated
     finally:
         rms_log.setLevel(level)
+
+
+
+### Directions as measurements ###
+
+def measurementToXY(ra, dec, jd, platepar):
+    """ Image positions of directions given as measurements of the camera, i.e. as xyToRaDecPP gives them with
+        measurement=True: the inverse of that conversion. A plate fitted without the refraction whose measurements
+        are corrected for it afterwards (measurement_apparent_to_true_refraction) gets the refraction put back
+        before the projection, which raDecToXYPP doesn't do.
+
+    Arguments:
+        ra: [ndarray] Right ascensions (deg).
+        dec: [ndarray] Declinations (deg).
+        jd: [float] Julian date.
+        platepar: [Platepar] Platepar.
+
+    Return:
+        (x, y): [tuple of ndarrays] Image coordinates.
+    """
+
+    from RMS.Astrometry.ApplyAstrometry import raDecToXYPP, refractionScale
+    from RMS.Astrometry.CyFunctions import eqRefractionTrueToApparent
+
+    ra = np.array(np.atleast_1d(ra), dtype=np.float64)
+    dec = np.array(np.atleast_1d(dec), dtype=np.float64)
+
+    # The refraction which the conversion of the measurements removed afterwards, put back
+    if (not platepar.refraction) and getattr(platepar, 'measurement_apparent_to_true_refraction', False):
+        scale = refractionScale(platepar.elev)
+        for i in range(len(ra)):
+            ra_app, dec_app = eqRefractionTrueToApparent(np.radians(ra[i]), np.radians(dec[i]), float(jd),
+                                                         np.radians(platepar.lat), np.radians(platepar.lon), scale)
+            ra[i], dec[i] = np.degrees(ra_app), np.degrees(dec_app)
+
+    return raDecToXYPP(ra, dec, jd, platepar, measurement=True)
 
 
 
@@ -565,7 +624,7 @@ def measureGroup(stacks, path, fit_half=FIT_HALF, search_radius=SEARCH_RADIUS, m
             Earth's frame (as for the detections), 0 if it has absorbed it (RA and Dec relative to the stars).
     """
 
-    from RMS.Astrometry.ApplyAstrometry import raDecToXYPP, xyToRaDecPP
+    from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
 
     # The predicted position of the source in every stack, as a measurement of the camera
     pred = []
@@ -573,7 +632,7 @@ def measureGroup(stacks, path, fit_half=FIT_HALF, search_radius=SEARCH_RADIUS, m
         ra, dec = path.at(stack['t'])
         if not np.isfinite(ra[0]):
             return None
-        x, y = raDecToXYPP(ra, dec, unixToJD(stack['t']), stack['platepar'], measurement=True)
+        x, y = measurementToXY(ra, dec, unixToJD(stack['t']), stack['platepar'])
         pred.append((float(x[0]), float(y[0])))
 
     # The middle stack of the group, which the others are shifted onto
@@ -644,8 +703,6 @@ def windowMotion(stacks, path):
         [float] The largest distance between the mapped positions (px).
     """
 
-    from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
-
     ref = stacks[len(stacks)//2]
     ref_jd = unixToJD(ref['t'])
 
@@ -654,7 +711,7 @@ def windowMotion(stacks, path):
     ok = np.isfinite(ra)
     if np.count_nonzero(ok) < 2:
         return 0.0
-    x, y = raDecToXYPP(ra[ok], dec[ok], ref_jd, ref['platepar'], measurement=True)
+    x, y = measurementToXY(ra[ok], dec[ok], ref_jd, ref['platepar'])
 
     return float(np.max(np.hypot(x - x[0], y - y[0])))
 
@@ -699,15 +756,22 @@ def measurePath(source, path, platepar, config, catalog_stars=None, dark=None, f
     if catalog_stars is None:
         catalog_stars = loadCatalogStars(config, config.catalog_mag_limit, jd=unixToJD(0.5*(t0 + t1)))
 
-    stacks = makeStacks(source, t0, t1, stack_frames=stack_frames, dark=dark, flat_struct=flat_struct)
-    recalibrateStacks(stacks, platepar, config, catalog_stars, stack_frames=stack_frames, mask=mask)
-    good = [s for s in stacks if s['platepar'] is not None]
-    info = dict(stacks=len(stacks), recalibrated=len(good), windows=0, windows_static=0)
+    # The frames of the path, read a window at a time so that only the stacks of one window are kept
+    indices, times = source.framesBetween(t0, t1)
+    window_frames = window_stacks*stack_frames
+    info = dict(stacks=0, recalibrated=0, windows=0, windows_static=0)
 
     width, height = int(platepar.X_res), int(platepar.Y_res)
     measurements = []
-    for k in range(0, len(good), window_stacks):
-        window = good[k:k + window_stacks]
+    for k in range(0, len(indices), window_frames):
+
+        # The stacks of the window, recalibrated; those whose recalibration failed are left out
+        stacks = stacksOfFrames(source, indices[k:k + window_frames], times[k:k + window_frames],
+                                stack_frames=stack_frames, dark=dark, flat_struct=flat_struct)
+        recalibrateStacks(stacks, platepar, config, catalog_stars, stack_frames=stack_frames, mask=mask)
+        window = [s for s in stacks if s['platepar'] is not None]
+        info['stacks'] += len(stacks)
+        info['recalibrated'] += len(window)
         if len(window) < MIN_WINDOW_STACKS:
             continue
         info['windows'] += 1
@@ -727,7 +791,7 @@ def measurePath(source, path, platepar, config, catalog_stars=None, dark=None, f
                 measurements.append(meas)
 
         # The images of the window are not needed any more
-        for stack in window:
+        for stack in stacks:
             stack.pop('img', None)
             stack.pop('residual', None)
 

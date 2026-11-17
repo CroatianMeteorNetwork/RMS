@@ -295,6 +295,31 @@ def test_stack_mapping(setup):
 
 
 
+def test_measurement_projection():
+    """ A direction converted from the image as a measurement is projected back onto the same pixel, also for a plate
+        fitted without the refraction whose measurements are corrected for it afterwards (which raDecToXYPP alone
+        doesn't undo). """
+
+    pp = makePlatepar()
+    jd = PA.unixToJD(T_START)
+    x0, y0 = np.array([30.0, 320.0, 610.0]), np.array([450.0, 240.0, 20.0])
+
+    for refraction in (True, False):
+        plate = copy.deepcopy(pp)
+        plate.refraction = refraction
+        plate.measurement_apparent_to_true_refraction = True
+        _, ra, dec, _ = xyToRaDecPP(np.full(3, jd), x0, y0, np.ones(3), plate, extinction_correction=False,
+                                    measurement=True, jd_time=True)
+        x, y = PA.measurementToXY(np.array(ra), np.array(dec), jd, plate)
+        assert np.max(np.hypot(x - x0, y - y0)) < 0.01
+
+        # Without the refraction put back the projection is off by the refraction
+        if not refraction:
+            xr, yr = raDecToXYPP(np.array(ra), np.array(dec), jd, plate, measurement=True)
+            assert np.max(np.hypot(xr - x0, yr - y0)) > 0.1
+
+
+
 def test_measure_path(setup):
     """ The source is found along its path in the synthetic frames, at its offset from the path, and converted to
         the sky with the recalibrated platepar of the middle stack of its group. """
