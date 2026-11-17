@@ -503,9 +503,12 @@ class LiveRecalibration(threading.Thread):
                 log.warning(f"Time difference ({closest_time} seconds) exceeds limit ({pp_time_diff_limit} seconds).")
                 return None
 
-        # Apply the platepar to the meteor measurements
+        # Apply the platepar to the meteor measurements, without the brightness-dependent shift of the centroids
+        #   if the camera has one
         meteor_picks = applyPlateparToCentroids(
-            ff_name, self.config.fps, meteor_meas, working_platepar, add_calstatus=True
+            ff_name, self.config.fps, meteor_meas, working_platepar, add_calstatus=True,
+            bright_shift=self.config.centroid_bright_shift,
+            bright_shift_mag_limit=self.config.centroid_bright_shift_mag_limit
             )
         
         return meteor_picks

@@ -1797,9 +1797,12 @@ def recalibrateIndividualFFsAndApplyAstrometry(
             if used_as_is:
                 warnOlderAstrometryModel(working_platepar, ff_name)
 
-            # Apply the recalibrated platepar to meteor centroids
+            # Apply the recalibrated platepar to meteor centroids, without the brightness-dependent shift of the
+            #   centroids if the camera has one
             meteor_picks = applyPlateparToCentroids(
-                ff_name, fps_meteor, meteor_meas, working_platepar, add_calstatus=True
+                ff_name, fps_meteor, meteor_meas, working_platepar, add_calstatus=True,
+                bright_shift=config.centroid_bright_shift,
+                bright_shift_mag_limit=config.centroid_bright_shift_mag_limit
             )
 
             # Carry the per-meteor fps so the rewritten FTPdetectinfo header reflects the measured fps
@@ -1846,7 +1849,9 @@ def recalibrateIndividualFFsAndApplyAstrometry(
             warnOlderAstrometryModel(platepar, ftpdetectinfo_file)
 
             # Use the initial platepar for calibration
-            applyAstrometryFTPdetectinfo(dir_path, ftpdetectinfo_file, None, platepar=platepar)
+            applyAstrometryFTPdetectinfo(dir_path, ftpdetectinfo_file, None, platepar=platepar,
+                                         bright_shift=config.centroid_bright_shift,
+                                         bright_shift_mag_limit=config.centroid_bright_shift_mag_limit)
 
             return recalibrated_platepars, ftpdetectinfo_file_list
 
