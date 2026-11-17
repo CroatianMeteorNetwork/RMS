@@ -1182,7 +1182,41 @@ def plateAberration(platepar, measurement, aberration):
 
 
 
-def applyPlateparToCentroids(ff_name, fps, meteor_meas, platepar, add_calstatus=False, exp_mag_corr=0.0):
+def correctBrightShift(x_data, y_data, magnitudes, bright_shift, mag_limit=3.0):
+    """ Remove the brightness-dependent shift of measured centroids: a bright source is measured off its true
+        position by A*F + C*F^2 pixels along each image axis, with F = 10^(-0.4*(mag - 5)) its brightness relative
+        to magnitude 5.
+
+    Arguments:
+        x_data: [ndarray] Measured X image coordinates (px).
+        y_data: [ndarray] Measured Y image coordinates (px).
+        magnitudes: [ndarray] Magnitudes of the measurements. A measurement without a finite magnitude is not
+            corrected.
+        bright_shift: [list] The coefficients [A_x, C_x, A_y, C_y] (px).
+
+    Keyword arguments:
+        mag_limit: [float] Sources brighter than this magnitude get the shift at this magnitude, to keep the model
+            inside the range of brightness it was measured on. 3.0 by default.
+
+    Return:
+        (x_corr, y_corr): [tuple of ndarrays] The corrected image coordinates.
+    """
+
+    x_data = np.asarray(x_data, dtype=np.float64)
+    y_data = np.asarray(y_data, dtype=np.float64)
+    a_x, c_x, a_y, c_y = [float(v) for v in bright_shift]
+
+    # The brightness relative to magnitude 5, held at the limiting magnitude; no shift without a magnitude
+    mags = np.asarray(magnitudes, dtype=np.float64)
+    finite = np.isfinite(mags)
+    f = np.zeros_like(mags)
+    f[finite] = 10**(-0.4*(np.maximum(mags[finite], mag_limit) - 5.0))
+
+    return x_data - (a_x*f + c_x*f**2), y_data - (a_y*f + c_y*f**2)
+
+
+def applyPlateparToCentroids(ff_name, fps, meteor_meas, platepar, add_calstatus=False, exp_mag_corr=0.0,
+                             bright_shift=None, bright_shift_mag_limit=3.0):
     """ Given the meteor centroids and a platepar file, compute meteor astrometry and photometry (RA/Dec,
         alt/az, mag).
     
@@ -1196,6 +1230,11 @@ def applyPlateparToCentroids(ff_name, fps, meteor_meas, platepar, add_calstatus=
         add_calstatus: [bool] Add a column with calibration status at the beginning. False by default.
         exp_mag_corr: [float] Magnitude correction to apply to the computed magnitudes (e.g. for exposure
             time correction). 0.0 by default.
+        bright_shift: [list] Coefficients [A_x, C_x, A_y, C_y] of the brightness-dependent centroid shift
+            (see correctBrightShift), removed before the astrometry. None (or all zero) by default: no
+            correction. The returned image coordinates are the measured ones.
+        bright_shift_mag_limit: [float] Magnitude brighter than which the shift is held at its value at that
+            magnitude. 3.0 by default.
 
     Return:
         meteor_picks: [ndarray] A numpy 2D array of: [frames, X_data, Y_data, RA_data, dec_data, az_data,
@@ -1243,6 +1282,18 @@ def applyPlateparToCentroids(ff_name, fps, meteor_meas, platepar, add_calstatus=
 
     # Apply exposure time magnitude correction
     magnitudes += exp_mag_corr
+
+    # Remove the brightness-dependent shift of the centroids, which needs the magnitudes, and redo the astrometry
+    #   with the corrected coordinates (the magnitudes are kept, the shift of a fraction of a pixel doesn't change
+    #   them); the output keeps the measured image coordinates, so the correction is made again from the same
+    #   numbers whenever the astrometry is redone
+    if (bright_shift is not None) and np.any(np.asarray(bright_shift, dtype=np.float64) != 0):
+
+        X_corr, Y_corr = correctBrightShift(X_data, Y_data, magnitudes, bright_shift,
+                                            mag_limit=bright_shift_mag_limit)
+
+        _, RA_data, dec_data, _ = xyToRaDecPP(np.array(time_data), X_corr, Y_corr, level_data, platepar,
+                                              measurement=True)
 
     # Compute azimuth and altitude of centroids
     az_data = np.zeros_like(RA_data)
@@ -1789,7 +1840,8 @@ def geoHt2XYInsideFOV(platepar, lat_arr, lon_arr, h_att, side_sample=10):
 
 
 def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file, 
-                                 UT_corr=0, platepar=None, radec_input=False, exp_mag_corr=0.0):
+                                 UT_corr=0, platepar=None, radec_input=False, exp_mag_corr=0.0,
+                                 bright_shift=None, bright_shift_mag_limit=3.0):
     """ Use the given platepar to calculate the celestial coordinates of detected meteors from a FTPdetectinfo
         file and save the updates values.
 
@@ -1808,6 +1860,11 @@ def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file,
         exp_mag_corr: [float] Magnitude correction to be applied to the computed magnitudes (e.g. for
             exposure time correction between stars on long exposure images and meteors on short segments). 
             0.0 by default.
+        bright_shift: [list] Coefficients [A_x, C_x, A_y, C_y] of the brightness-dependent centroid shift
+            (config.centroid_bright_shift, see correctBrightShift), used with image coordinates as input. None
+            by default: no correction.
+        bright_shift_mag_limit: [float] Magnitude brighter than which the shift is held at its value at that
+            magnitude. 3.0 by default.
 
     Return:
         None
@@ -1855,7 +1912,8 @@ def applyAstrometryFTPdetectinfo(dir_path, ftp_detectinfo_file, platepar_file,
         else:
             # Use X, Y coordinates as input to compute spherical coordinates and photometry
             meteor_picks = applyPlateparToCentroids(ff_name, fps, meteor_meas, platepar, 
-                                                    exp_mag_corr=exp_mag_corr)
+                                                    exp_mag_corr=exp_mag_corr, bright_shift=bright_shift,
+                                                    bright_shift_mag_limit=bright_shift_mag_limit)
 
         # Add the calculated values to the final list
         meteor_list.append([ff_name, meteor_No, rho, phi, meteor_picks])

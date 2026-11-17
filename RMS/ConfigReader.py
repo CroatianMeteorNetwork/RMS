@@ -290,6 +290,13 @@ class Config:
         #   processing (true time = timestamp + correction), see .config
         self.frame_time_offset = 0.0
 
+        # Brightness-dependent shift of the measured centroids (px): a bright source is measured off its true
+        #   position by A*F + C*F^2 along each image axis, with F = 10^(-0.4*(mag - 5)); the coefficients
+        #   [A_x, C_x, A_y, C_y] (all zero: no correction) and the magnitude brighter than which the shift is held
+        #   at its value at that magnitude (see .config)
+        self.centroid_bright_shift = [0.0, 0.0, 0.0, 0.0]
+        self.centroid_bright_shift_mag_limit = 3.0
+
         self.mask_file = "mask.bmp"
 
         self.data_dir = "~/RMS_data"
@@ -1710,6 +1717,22 @@ def parseCapture(config, parser):
 
     if parser.has_option(section, "frame_time_offset"):
         config.frame_time_offset = parser.getfloat(section, "frame_time_offset")
+
+    # The brightness-dependent centroid shift: four coefficients, or the option is ignored
+    if parser.has_option(section, "centroid_bright_shift"):
+        shift_str = parser.get(section, "centroid_bright_shift")
+        try:
+            shift = [float(v) for v in shift_str.replace(",", " ").split()]
+        except ValueError:
+            shift = []
+        if len(shift) == 4:
+            config.centroid_bright_shift = shift
+        else:
+            log.error("centroid_bright_shift needs 4 numbers (A_x, C_x, A_y, C_y), got: {:s}; no correction"
+                      .format(shift_str))
+
+    if parser.has_option(section, "centroid_bright_shift_mag_limit"):
+        config.centroid_bright_shift_mag_limit = parser.getfloat(section, "centroid_bright_shift_mag_limit")
 
     if parser.has_option(section, "mask"):
         config.mask_file = os.path.basename(parser.get(section, "mask"))
