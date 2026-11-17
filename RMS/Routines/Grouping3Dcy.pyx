@@ -16,6 +16,10 @@ cimport cython
 UINT16_TYPE = np.uint16
 ctypedef np.uint16_t UINT16_TYPE_t
 
+# Point clouds (x, y, frame) are signed 32-bit, so frame numbers above 65535 (long videos) don't wrap around
+POINT_TYPE = np.int32
+ctypedef np.int32_t POINT_TYPE_t
+
 UINT8_TYPE = np.uint8
 ctypedef np.uint8_t UINT8_TYPE_t
 
@@ -128,7 +132,7 @@ cdef class Line:
 
 
 @cython.boundscheck(False)
-def getAllPoints(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, z2, distance_threshold, gap_threshold, max_array_size=0):
+def getAllPoints(np.ndarray[POINT_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, z2, distance_threshold, gap_threshold, max_array_size=0):
     """ Returns all points describing a particular line. 
     
     @param point_list: [ndarray] list of all points
@@ -149,7 +153,7 @@ def getAllPoints(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y
     if point_list_size == 0:
         return np.array([[]])
 
-    def propagateLine(np.ndarray[UINT16_TYPE_t, ndim=2] max_line_points, np.ndarray[UINT16_TYPE_t, ndim=2] propagation_list, int i):
+    def propagateLine(np.ndarray[POINT_TYPE_t, ndim=2] max_line_points, np.ndarray[POINT_TYPE_t, ndim=2] propagation_list, int i):
         """ Finds all points present on a line starting from a point on that line.
         """
 
@@ -192,7 +196,7 @@ def getAllPoints(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y
         max_array_size = point_list_size
 
     # Get all points belonging to the best line
-    cdef np.ndarray[UINT16_TYPE_t, ndim=2] max_line_points = np.zeros(shape=(max_array_size, 3), dtype=UINT16_TYPE)
+    cdef np.ndarray[POINT_TYPE_t, ndim=2] max_line_points = np.zeros(shape=(max_array_size, 3), dtype=POINT_TYPE)
 
     # Get the index of the first point
     point1_index = np.where(np.all(point_list == np.array((x1, y1, z1)), axis=1))[0]
@@ -226,7 +230,7 @@ def getAllPoints(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y
 
 
 
-def remove3DPoints(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, Line max_line, distance_threshold, gap_threshold):
+def remove3DPoints(np.ndarray[POINT_TYPE_t, ndim=2] point_list, Line max_line, distance_threshold, gap_threshold):
     """ Remove points from a point list that belong to the given line.
     
     @param point_list: [ndarray] list of all points
@@ -279,17 +283,21 @@ def _formatLine(line, first_frame, last_frame):
 
 @cython.boundscheck(False)
 @cython.wraparound(False) 
-def find3DLines(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, start_time, config, get_single=False, line_list=[]):
+def find3DLines(np.ndarray[POINT_TYPE_t, ndim=2] point_list, start_time, config, get_single=False, line_list=None):
     """ Iteratively find N straight lines in 3D space.
     
     @param point_list: [ndarray] list of all points
     @param start_time: [time.time() object] starting time of the loop
     @param config: [config object] defines configuration parameters fro the config file
     @param get_single: [bool] returns only 1 line, does not perform recusrive line searching
-    @param line_list: [list] list of lines found previously
+    @param line_list: [list] list of lines found previously (None to start a new list)
     
     @return: list of found lines
     """
+
+    # Start a new list of lines on the first call (a default [] would be shared between calls)
+    if line_list is None:
+        line_list = []
 
     # Load config parameters
     cdef float distance_threshold = config.distance_threshold
@@ -413,8 +421,8 @@ def find3DLines(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, start_time, config
     if not max_line_points.size:
         return None
 
-    # Get the first and the last frame from the max_line point cloud. Convert them to plain ints, as
-    #   uint16 scalars wrap around under NumPy 2 when the frame range is extended (e.g. 1 - 3 -> 65534)
+    # Get the first and the last frame from the max_line point cloud. Convert them to plain ints, as under
+    #   NumPy 2 a NumPy scalar keeps its type in arithmetic (an unsigned one wrapped: 1 - 3 -> 65534)
     first_frame = int(max_line_points[0,2])
     last_frame = int(max_line_points[len(max_line_points) - 1,2])
 
