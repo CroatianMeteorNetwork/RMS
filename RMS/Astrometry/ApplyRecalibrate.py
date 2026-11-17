@@ -26,6 +26,7 @@ from RMS.Astrometry import CheckFit
 from RMS.Astrometry.ApplyAstrometry import (
     applyAstrometryFTPdetectinfo,
     applyPlateparToCentroids,
+    brightShiftOptions,
     extinctionCorrectionTrueToApparent,
     getFOVSelectionRadius,
     photometryFitRobust,
@@ -1800,9 +1801,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
             # Apply the recalibrated platepar to meteor centroids, without the brightness-dependent shift of the
             #   centroids if the camera has one
             meteor_picks = applyPlateparToCentroids(
-                ff_name, fps_meteor, meteor_meas, working_platepar, add_calstatus=True,
-                bright_shift=config.centroid_bright_shift,
-                bright_shift_mag_limit=config.centroid_bright_shift_mag_limit
+                ff_name, fps_meteor, meteor_meas, working_platepar, add_calstatus=True, **brightShiftOptions(config)
             )
 
             # Carry the per-meteor fps so the rewritten FTPdetectinfo header reflects the measured fps
@@ -1850,8 +1849,7 @@ def recalibrateIndividualFFsAndApplyAstrometry(
 
             # Use the initial platepar for calibration
             applyAstrometryFTPdetectinfo(dir_path, ftpdetectinfo_file, None, platepar=platepar,
-                                         bright_shift=config.centroid_bright_shift,
-                                         bright_shift_mag_limit=config.centroid_bright_shift_mag_limit)
+                                         **brightShiftOptions(config))
 
             return recalibrated_platepars, ftpdetectinfo_file_list
 

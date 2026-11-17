@@ -1,5 +1,5 @@
-""" The brightness-dependent centroid shift (config centroid_bright_shift): the correction of the image coordinates,
-    its use in the astrometry of detections, and the config option. Run with:
+""" The brightness-dependent centroid shift (config centroid_bright_shift*): the correction of the image coordinates
+    by the magnitude or by the intensity, its use in the astrometry of detections, and the config options. Run with:
     python -m pytest Tests/test_centroid_bright_shift.py """
 
 from __future__ import print_function, division, absolute_import
@@ -12,7 +12,7 @@ import unittest
 import numpy as np
 
 import RMS.ConfigReader as cr
-from RMS.Astrometry.ApplyAstrometry import correctBrightShift, applyPlateparToCentroids
+from RMS.Astrometry.ApplyAstrometry import correctBrightShift, applyPlateparToCentroids, brightShiftOptions
 from RMS.Formats.Platepar import Platepar
 from RMS.Misc import getRmsRootDir
 
@@ -83,6 +83,50 @@ class TestCorrectBrightShift(unittest.TestCase):
         np.testing.assert_array_equal(yc, y)
 
 
+class TestIntensityBasis(unittest.TestCase):
+
+    def test_model(self):
+        # A*u + C*v^2, u and v the intensity above the knee of each term (0 below it), in units of 1e5 ADU
+        x, y = np.full(5, 100.0), np.full(5, 50.0)
+        inten = np.array([5e4, 9e4, 1e5, 1.5e5, 2e5])
+        shift = [0.05, 0.4, 0.01, 0.02]
+        xc, yc = correctBrightShift(x, y, None, shift, intensities=inten, basis='intensity', knees=(8e4, 1e5),
+                                    intensity_limit=2.5e5)
+        u = np.maximum(inten - 8e4, 0)/1e5
+        v = np.maximum(inten - 1e5, 0)/1e5
+        np.testing.assert_allclose(xc, x - (0.05*u + 0.4*v**2))
+        np.testing.assert_allclose(yc, y - (0.01*u + 0.02*v**2))
+
+        # Below both knees not moved; between them only the linear term
+        self.assertEqual(xc[0], 100.0)
+        self.assertAlmostEqual(x[1] - xc[1], 0.05*0.1)
+
+        # Knees at 0: the terms grow from the faintest levels
+        xc0, _ = correctBrightShift(x, y, None, shift, intensities=inten, basis='intensity')
+        np.testing.assert_allclose(xc0, x - (0.05*inten/1e5 + 0.4*(inten/1e5)**2))
+
+    def test_limit_and_missing_intensities(self):
+        # Above the limit: the shift at the limit; no finite positive intensity: no shift
+        x, y = np.full(5, 100.0), np.full(5, 50.0)
+        xc, yc = correctBrightShift(x, y, None, [0.05, 0.4, 0.0, 0.0], intensities=[3e5, 2e5, np.nan, 0.0, -5.0],
+                                    basis='intensity', knees=(0.0, 1e5), intensity_limit=2e5)
+        self.assertAlmostEqual(xc[0], xc[1])
+        np.testing.assert_array_equal(xc[2:], 100.0)
+        np.testing.assert_array_equal(yc, 50.0)
+
+    def test_magnitudes_not_used(self):
+        # The intensity basis doesn't depend on the magnitudes
+        x, y = np.full(2, 100.0), np.full(2, 50.0)
+        a = correctBrightShift(x, y, np.array([3.0, 9.0]), SHIFT, intensities=[2e5, 2e5], basis='intensity')
+        b = correctBrightShift(x, y, None, SHIFT, intensities=[2e5, 2e5], basis='intensity')
+        np.testing.assert_array_equal(a[0], b[0])
+        self.assertAlmostEqual(a[0][0], a[0][1])
+
+    def test_unknown_basis(self):
+        with self.assertRaises(ValueError):
+            correctBrightShift([1.0], [1.0], [5.0], SHIFT, basis='peak')
+
+
 class TestApplyPlateparToCentroids(unittest.TestCase):
 
     def setUp(self):
@@ -124,6 +168,30 @@ class TestApplyPlateparToCentroids(unittest.TestCase):
         self.assertTrue(np.all((ratio > 0.5) & (ratio < 2.0)), ratio)
 
 
+    def test_intensity_basis(self):
+        # The intensity basis takes the intensity of every centroid (its level), the sky positions are the ones of
+        #   the corrected coordinates, and the output keeps the measured coordinates
+        rows = detectionRows(self.level)
+        rows[:, 8] = np.linspace(5e4, 2.5e5, len(rows))
+        shift = [0.05, 0.4, 0.0, 0.0]
+        opts = dict(bright_shift=shift, bright_shift_basis='intensity', bright_shift_knees=(8e4, 1e5),
+                    bright_shift_intensity_limit=2.5e5)
+        plain = applyPlateparToCentroids(FF_NAME, 25.0, rows, self.pp)
+        out = applyPlateparToCentroids(FF_NAME, 25.0, rows, self.pp, **opts)
+        np.testing.assert_array_equal(out[:, 1:3], plain[:, 1:3])
+        xc, yc = correctBrightShift(rows[:, 2], rows[:, 3], None, shift, intensities=rows[:, 8], basis='intensity',
+                                    knees=(8e4, 1e5), intensity_limit=2.5e5)
+        moved = rows.copy()
+        moved[:, 2], moved[:, 3] = xc, yc
+        ref = applyPlateparToCentroids(FF_NAME, 25.0, moved, self.pp)
+        self.assertLess(np.max(separationArcsec(out[:, 3], out[:, 4], ref[:, 3], ref[:, 4])), 1e-6)
+
+        # The faintest centroid (below both knees) doesn't move, the brightest does
+        sep = separationArcsec(out[:, 3], out[:, 4], plain[:, 3], plain[:, 4])
+        self.assertLess(sep[0], 1e-6)
+        self.assertGreater(sep[-1], 1.0)
+
+
 class TestConfigOption(unittest.TestCase):
 
     def setUp(self):
@@ -151,6 +219,32 @@ class TestConfigOption(unittest.TestCase):
         config = self.parse(text)
         self.assertEqual(config.centroid_bright_shift, SHIFT)
         self.assertEqual(config.centroid_bright_shift_mag_limit, 2.5)
+
+    def test_intensity_options(self):
+        text = self.base.replace('centroid_bright_shift_basis: magnitude', 'centroid_bright_shift_basis: Intensity')
+        text = text.replace('centroid_bright_shift_knees: 0, 0', 'centroid_bright_shift_knees: 80000, 100000')
+        text = text.replace('centroid_bright_shift_intensity_limit: 250000', 'centroid_bright_shift_intensity_limit: 210000')
+        config = self.parse(text)
+        self.assertEqual(config.centroid_bright_shift_basis, 'intensity')
+        self.assertEqual(config.centroid_bright_shift_knees, [8e4, 1e5])
+        self.assertEqual(config.centroid_bright_shift_intensity_limit, 2.1e5)
+
+        # The arguments of the astrometry from the config
+        opts = brightShiftOptions(config)
+        self.assertEqual(opts['bright_shift_basis'], 'intensity')
+        self.assertEqual(opts['bright_shift_knees'], [8e4, 1e5])
+        self.assertEqual(opts['bright_shift_intensity_limit'], 2.1e5)
+        self.assertEqual(opts['bright_shift'], config.centroid_bright_shift)
+
+    def test_default_basis_and_unknown_basis(self):
+        config = self.parse(self.base)
+        self.assertEqual(config.centroid_bright_shift_basis, 'magnitude')
+        self.assertEqual(config.centroid_bright_shift_knees, [0.0, 0.0])
+        self.assertEqual(config.centroid_bright_shift_intensity_limit, 2.5e5)
+        config = self.parse(self.base.replace('centroid_bright_shift_basis: magnitude', 'centroid_bright_shift_basis: peak')
+                            .replace('centroid_bright_shift_knees: 0, 0', 'centroid_bright_shift_knees: 80000'))
+        self.assertEqual(config.centroid_bright_shift_basis, 'magnitude')
+        self.assertEqual(config.centroid_bright_shift_knees, [0.0, 0.0])
 
     def test_wrong_count_is_ignored(self):
         config = self.parse(self.base.replace('centroid_bright_shift: 0, 0, 0, 0', 'centroid_bright_shift: 0.1, 0.2'))
