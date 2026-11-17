@@ -37,7 +37,6 @@ source as a measurement of the camera would give it), and the measurements are w
 from __future__ import print_function, division, absolute_import
 
 import argparse
-import copy
 import csv
 import datetime
 import logging
