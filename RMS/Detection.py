@@ -1297,9 +1297,9 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
         # Go through all detected and filtered lines and compute centroids
         for detected_line in filtered_lines:
 
-            # Get frame range
-            frame_min = detected_line[4]
-            frame_max = detected_line[5]
+            # Get frame range (as plain ints, unsigned NumPy scalars would wrap around below zero)
+            frame_min = int(detected_line[4])
+            frame_max = int(detected_line[5])
 
             # Check if the line covers a minimum frame range
             if (abs(frame_max - frame_min) + 1 < config.line_minimum_frame_range_det):

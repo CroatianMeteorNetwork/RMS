@@ -413,9 +413,10 @@ def find3DLines(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, start_time, config
     if not max_line_points.size:
         return None
 
-    # Get the first and the last frame from the max_line point could
-    first_frame = max_line_points[0,2]
-    last_frame = max_line_points[len(max_line_points) - 1,2]
+    # Get the first and the last frame from the max_line point cloud. Convert them to plain ints, as
+    #   uint16 scalars wrap around under NumPy 2 when the frame range is extended (e.g. 1 - 3 -> 65534)
+    first_frame = int(max_line_points[0,2])
+    last_frame = int(max_line_points[len(max_line_points) - 1,2])
 
 
     # Reject the line if all points are only in very close frames (eliminate flashes):
