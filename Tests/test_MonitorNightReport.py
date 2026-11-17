@@ -438,12 +438,16 @@ def test_plateparResidual():
                                  [1]*4, platepar, extinction_correction=False)
     x, y = raDecToXYPP(ra, dec, np.mean(jd), platepar)
 
-    # The star list stores the image coordinates as Y X
-    platepar.star_list = [[j, yy, xx, 1000, r, d, 5.0] for j, yy, xx, r, d in zip(jd, y, x, ra, dec)]
+    # The star list stores the image coordinates as X Y
+    platepar.star_list = [[j, xx, yy, 1000, r, d, 5.0] for j, xx, yy, r, d in zip(jd, x, y, ra, dec)]
     assert mnr.plateparResidual(platepar) < 0.01
 
-    # Swapped image coordinates are far off
-    platepar.star_list = [[j, xx, yy, 1000, r, d, 5.0] for j, yy, xx, r, d in zip(jd, y, x, ra, dec)]
+    # Star lists recalibrated by older versions store them as Y X, which gives the same residual
+    platepar.star_list = [[j, yy, xx, 1000, r, d, 5.0] for j, xx, yy, r, d in zip(jd, x, y, ra, dec)]
+    assert mnr.plateparResidual(platepar) < 0.01
+
+    # Image coordinates away from the catalog positions give a large residual in either order
+    platepar.star_list = [[j, xx + 50, yy - 40, 1000, r, d, 5.0] for j, xx, yy, r, d in zip(jd, x, y, ra, dec)]
     assert mnr.plateparResidual(platepar) > 10
 
 
