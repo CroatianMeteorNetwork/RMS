@@ -819,6 +819,14 @@ class Config:
         self.auto_calibration_max_mag_stddev = 0.25
         self.auto_calibration_max_zone_mag_residual = 0.3
 
+        # Limits of a sky with haze or clouds, on which a platepar whose photometry alone fails is kept and
+        #   the photometry is recorded as unreliable instead of refitted: the photometric offsets (zero
+        #   points) of the chunks scatter by more than this (mag), their median is fainter than the platepar's
+        #   by more than this (mag), or fewer than this fraction of the chunks are clear. Tuned per camera
+        self.auto_calibration_haze_zero_point_scatter = 0.1
+        self.auto_calibration_haze_zero_point_offset = 0.25
+        self.auto_calibration_haze_min_clear_fraction = 0.5
+
         # Automatic calibration of a classic camera without a platepar during the night: minutes after the first
         #   platepar before it is checked on new stars and refitted, minutes before the next attempt after a failed
         #   one, attempts per night, and workers of the joint fit at the end of the night
@@ -2486,6 +2494,32 @@ def parseCalibration(config, parser):
     if parser.has_option(section, "auto_calibration_max_zone_mag_residual"):
         config.auto_calibration_max_zone_mag_residual = parser.getfloat(section,
                                                                         "auto_calibration_max_zone_mag_residual")
+
+    # The limits of a sky with haze or clouds. A limit of the zero points which isn't positive would take
+    #   every sky as hazy, and a clear fraction outside 0-1 every sky or none: the default is kept then
+    if parser.has_option(section, "auto_calibration_haze_zero_point_scatter"):
+        value = parser.getfloat(section, "auto_calibration_haze_zero_point_scatter")
+        if value > 0:
+            config.auto_calibration_haze_zero_point_scatter = value
+        else:
+            log.warning("The auto_calibration_haze_zero_point_scatter must be positive, using {:.2f}".format(
+                config.auto_calibration_haze_zero_point_scatter))
+
+    if parser.has_option(section, "auto_calibration_haze_zero_point_offset"):
+        value = parser.getfloat(section, "auto_calibration_haze_zero_point_offset")
+        if value > 0:
+            config.auto_calibration_haze_zero_point_offset = value
+        else:
+            log.warning("The auto_calibration_haze_zero_point_offset must be positive, using {:.2f}".format(
+                config.auto_calibration_haze_zero_point_offset))
+
+    if parser.has_option(section, "auto_calibration_haze_min_clear_fraction"):
+        value = parser.getfloat(section, "auto_calibration_haze_min_clear_fraction")
+        if 0 <= value <= 1:
+            config.auto_calibration_haze_min_clear_fraction = value
+        else:
+            log.warning("The auto_calibration_haze_min_clear_fraction must be between 0 and 1, using "
+                        "{:.2f}".format(config.auto_calibration_haze_min_clear_fraction))
 
     if parser.has_option(section, "auto_calibration_check_min"):
         config.auto_calibration_check_min = parser.getfloat(section, "auto_calibration_check_min")

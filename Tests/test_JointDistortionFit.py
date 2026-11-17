@@ -832,6 +832,26 @@ def test_held_out_chunks_of_the_nights_of_the_fit(nights, fit_held_chunks):
         jointDistortionFit(dirs, start, config, holdout_chunks=1)
 
 
+def test_held_out_chunks_logged_after_the_chunk_limit(nights, caplog):
+    """ With a limit on the number of chunks, the log counts the held-out chunks of the nights of the fit among the
+        held-out chunks which are kept, never more than the kept ones. """
+
+    config, truth, start, dirs, pointings = nights
+    start = copy.deepcopy(start)
+    start.vignetting_coeff = 0.0
+    start.extinction_scale = 0.0
+
+    # The middle chunk of every night held out (one per night), at most 2 of them kept
+    with caplog.at_level(logging.INFO, logger="rmslogger"):
+        fitted, report = jointDistortionFit(dirs, start, config, distortion_type="radial7-odd", n_iter=1,
+                                            chunk_step=1, nproc=1, holdout_chunks=N_CHUNKS, max_chunks=2,
+                                            qc_options=SMALL_QC)
+
+    assert report['held_chunks'] == 2
+    lines = [record.getMessage() for record in caplog.records if 'chunks in the fit' in record.getMessage()]
+    assert lines and lines[0].endswith("2 held out (2 of them from the nights of the fit)")
+
+
 def test_chunks_held_out_by_name(nights):
     """ The chunks named in holdout_names are held out of the nights of the fit, as every N-th chunk is. """
 
@@ -1015,6 +1035,36 @@ def test_quality_control_selects_clear_chunks_with_the_mask(nights, fit_held_chu
                         mask='mask image')
     assert masks == ['mask image']
     assert 'judged on the held-out chunks' in qc['failed']
+
+
+def test_quality_control_judges_only_the_astrometry(nights, fit_held_chunks, monkeypatch):
+    """ The judgement of the quality control is of the astrometry only: the fit keeps the photometry of its
+        start, so held-out chunks on which the photometry fails (e.g. haze) don't fail a fit whose astrometry
+        is good. """
+
+    import RMS.Astrometry.AutoCalibration as ac
+
+    config, truth, start, dirs, pointings = nights
+    fitted, report = fit_held_chunks
+
+    # Clear held-out chunks on which the astrometry is good and the photometry fails
+    score = ac.CalibrationScore()
+    score.chunks = score.recalibrated = 10
+    score.zone_stars = np.full(len(score.zones), 50)
+    score.zone_share = np.full(len(score.zones), 0.95)
+    score.zone_mag_residual = np.zeros(len(score.zones))
+    score.dist = 0.2
+    score.mag_lev_stddev = np.full(10, 0.4)
+    monkeypatch.setattr(ac, 'clearChunks', lambda chunks, *args, **kwargs: chunks)
+    monkeypatch.setattr(ac, 'scorePlatepar', lambda *args, **kwargs: score)
+    monkeypatch.setattr(ac, '_loadCatalog', lambda config, jd: None)
+
+    chunks = [('FF', 0.0, np.zeros((3, 8)), 256)]*10
+    qc = qualityControl(fitted, start, report, config, dict(QC_DEFAULTS, **SMALL_QC),
+                        judge_groups=[('night', fitted, start, chunks)])
+    assert ac.judgeScore(score)[0] is False
+    check = [check for check in qc['checks'] if check['name'] == 'judged on the held-out chunks'][0]
+    assert check['ok'], check
 
 
 def test_chunks_timed_by_the_frame_rate_of_the_header(tmp_path):
