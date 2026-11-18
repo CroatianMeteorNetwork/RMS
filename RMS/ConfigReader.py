@@ -301,6 +301,10 @@ class Config:
         self.centroid_bright_shift_basis = 'magnitude'
         self.centroid_bright_shift_knees = [0.0, 0.0]
         self.centroid_bright_shift_intensity_limit = 2.5e5
+        # The factor of the position in the image which scales the shift, a cubic along each axis: 1 + B_x1*xn +
+        #   B_x2*xn^2 + B_x3*xn^3 + B_y1*yn + B_y2*yn^2 + B_y3*yn^3 with xn, yn from -1 to +1 across the image; the
+        #   coefficients [B_x1, B_x2, B_x3, B_y1, B_y2, B_y3] (all zero: the shift doesn't depend on the position)
+        self.centroid_bright_shift_position = [0.0]*6
 
         self.mask_file = "mask.bmp"
 
@@ -1770,6 +1774,19 @@ def parseCapture(config, parser):
     if parser.has_option(section, "centroid_bright_shift_intensity_limit"):
         config.centroid_bright_shift_intensity_limit = parser.getfloat(section,
                                                                        "centroid_bright_shift_intensity_limit")
+
+    # The coefficients of the position factor of the shift: six numbers, or the option is ignored
+    if parser.has_option(section, "centroid_bright_shift_position"):
+        position_str = parser.get(section, "centroid_bright_shift_position")
+        try:
+            position = [float(v) for v in position_str.replace(",", " ").split()]
+        except ValueError:
+            position = []
+        if len(position) == 6:
+            config.centroid_bright_shift_position = position
+        else:
+            log.error("centroid_bright_shift_position needs 6 numbers (B_x1, B_x2, B_x3, B_y1, B_y2, B_y3), got: "
+                      "{:s}; the shift doesn't depend on the position".format(position_str))
 
     if parser.has_option(section, "mask"):
         config.mask_file = os.path.basename(parser.get(section, "mask"))
