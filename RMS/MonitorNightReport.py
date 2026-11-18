@@ -781,7 +781,8 @@ def plateparResidual(platepar):
 
     Arguments:
         platepar: [Platepar instance] Recalibrated platepar (ApplyRecalibrate) with a star list. Its entries
-            are [jd, y, x, intensity, ra, dec, mag], as the image coordinates come from CALSTARS (Y X).
+            are [jd, x, y, intensity, ra, dec, mag]. Star lists written by ApplyRecalibrate before it stored
+            x, y (like every other platepar) have the image coordinates as y, x, and nothing marks them.
 
     Return:
         [float] Median residual in pixels.
@@ -789,11 +790,16 @@ def plateparResidual(platepar):
 
     star_list = np.array(platepar.star_list, dtype=np.float64)
 
-    jd, y, x, ra, dec = star_list[:, 0], star_list[:, 1], star_list[:, 2], star_list[:, 4], star_list[:, 5]
+    jd, ra, dec = star_list[:, 0], star_list[:, 4], star_list[:, 5]
 
     x_cat, y_cat = raDecToXYPP(ra, dec, np.mean(jd), platepar)
 
-    return float(np.median(np.hypot(x - x_cat, y - y_cat)))
+    # The residual with the image coordinates read as x, y and as y, x. Read in the wrong order they are
+    #   hundreds of pixels off, so the smaller one is the residual of the fit, whichever order the file has
+    residual_xy = np.median(np.hypot(star_list[:, 1] - x_cat, star_list[:, 2] - y_cat))
+    residual_yx = np.median(np.hypot(star_list[:, 2] - x_cat, star_list[:, 1] - y_cat))
+
+    return float(min(residual_xy, residual_yx))
 
 
 def selectBestNightPlatepar(recalibrated, use_flat=False):
