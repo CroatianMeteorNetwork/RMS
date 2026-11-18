@@ -276,6 +276,11 @@ def merge3DLines(line_list, vect_angle_thresh, last_count=0):
     if len(line_list) < 2:
         return line_list
 
+    # Sort the lines by the frames of their points, so the vector from the first point of a line to the last
+    #   point of a line after it in the list points forward in time (with a later segment first it pointed
+    #   back, about 180 deg from both lines, and the segments of one meteor were never merged)
+    line_list = sorted(line_list, key=lambda l: (l[0][2], l[1][2]))
+
     final_list = []
     paired_indices = []
 
