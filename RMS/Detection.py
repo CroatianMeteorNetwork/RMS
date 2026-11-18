@@ -276,7 +276,9 @@ def merge3DLines(line_list, vect_angle_thresh, last_count=0):
     if len(line_list) < 2:
         return line_list
 
-    # Order lines chronologically by start/end frame so v_both points forward in time
+    # Sort the lines by the frames of their points, so the vector from the first point of a line to the last
+    #   point of a line after it in the list points forward in time (with a later segment first it pointed
+    #   back, about 180 deg from both lines, and the segments of one meteor were never merged)
     line_list = sorted(line_list, key=lambda l: (l[0][2], l[1][2]))
 
     final_list = []
@@ -1326,9 +1328,9 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
         # Go through all detected and filtered lines and compute centroids
         for detected_line in filtered_lines:
 
-            # Get frame range (cast to Python int so frame_min -= frame_extension cannot underflow uint16)
-            frame_min = int(detected_line[4])
-            frame_max = int(detected_line[5])
+            # Get frame range
+            frame_min = detected_line[4]
+            frame_max = detected_line[5]
 
             # Check if the line covers a minimum frame range
             if (abs(frame_max - frame_min) + 1 < config.line_minimum_frame_range_det):
