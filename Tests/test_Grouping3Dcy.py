@@ -179,3 +179,48 @@ def testFind3DLinesDoesNotShareLinesBetweenCalls():
     assert len(first) == 1
     assert len(second) == 1
     assert (second[0][4], second[0][5]) == (50, 61)
+
+
+def _fireballTrackPoints(first_frame, last_frame, y0, x0, dy, dx, per_frame):
+    """ Event points (y, x, frame) of a straight track in the subsampled image of the fireball detection, with
+    per_frame neighbouring points on every frame.
+    """
+
+    points = []
+    for z in range(first_frame, last_frame + 1):
+        y = int(round(y0 + dy*(z - first_frame)))
+        x = int(round(x0 + dx*(z - first_frame)))
+        for k in range(per_frame):
+            points.append((y + k%2, x + k//2, z))
+
+    return points
+
+
+def testFireballSearchFindsLineNextToLineWithMostPoints():
+    """ The fireball search must go on after a line holding most of the points (e.g. the glare of a bright
+    source), so a meteor on the same frames keeps its line.
+
+    point_ratio_threshold is compared with the points on the best line over the number of candidate lines,
+    which stays far below it here. Comparing the share of all points on the best line (90% here) instead
+    stopped the search after the first line, and the meteors next to such lines lost their clips.
+    """
+
+    from time import time
+
+    from RMS.ConfigReader import Config
+    from RMS.Routines.Grouping3D import find3DLines
+
+    config = Config()
+
+    # A long track with three points on every frame and a shorter one with one point per frame, later and
+    #   elsewhere in the image
+    long_track = _fireballTrackPoints(0, 59, 5, 5, 0.5, 1.0, 3)
+    short_track = _fireballTrackPoints(150, 169, 40, 70, -0.5, -1.0, 1)
+    points = np.array(sorted(long_track + short_track, key=lambda p: p[2]))
+    assert len(long_track)/float(len(points)) > config.point_ratio_threshold
+
+    lines = find3DLines(points, time(), config)
+
+    # Both tracks are found, each with its own frame range
+    assert lines is not None
+    assert sorted((line[4], line[5]) for line in lines) == [(0, 59), (150, 169)]
