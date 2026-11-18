@@ -411,7 +411,13 @@ def find3DLines(np.ndarray[POINT_TYPE_t, ndim=2] point_list, start_time, config,
         if results_list[i].line_quality > max_line.line_quality:
             max_line = results_list[i]
 
-    # Ratio of points inside and and all points
+    # Points on the best line over the number of candidate lines (compared to point_ratio_threshold below). This
+    #   isn't the share of all points on the best line: the candidate lines grow as the square of the points, so
+    #   the ratio stays below the threshold unless only a few candidate lines are left, and the search for more
+    #   lines goes on until no line is found or max_lines are found. Dividing by the number of points instead
+    #   stops the search after a line holding most of the points, such as the glare of a bright source, and the
+    #   meteors on the same frames lose their lines (2838 FF files of 4 nights: 31 meteors lost, 4 gained), so
+    #   the ratio is kept as it is
     cdef float line_ratio = max_line.counter / results_counter
 
     # Remove points from the point cloud that belong to line with the best quality

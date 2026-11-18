@@ -536,7 +536,7 @@ class Config:
         self.gap_threshold = 16900      # maximum allowed gap between points
         self.line_minimum_frame_range = 3   # minimum range of frames that a line should cover (eliminates flash detections)
         self.line_distance_const = 4   # constant that determines the influence of average point distance on the line quality
-        self.point_ratio_threshold = 0.7# ratio of how many points must be close to the line before considering searching for another line
+        self.point_ratio_threshold = 0.7 # another line is sought while the points on the best line over the number of candidate lines are below this (see Grouping3Dcy.find3DLines)
         self.max_lines = 5             # maximum number of lines
 
         ##### MeteorDetection
