@@ -20,7 +20,7 @@ import RMS.ConfigReader as cr
 import scipy.optimize
 from RMS.Astrometry.ApplyAstrometry import (getFOVSelectionRadius, raDecToXYPP,
                                             rotationWrtHorizon, xyToRaDecPP)
-from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
+from RMS.Astrometry.Conversions import date2JD, jd2Date
 from RMS.Astrometry.NNalign import alignPlatepar
 from RMS.Formats import CALSTARS, FFfile, Platepar, StarCatalog
 from RMS.Math import angularSeparation
@@ -612,6 +612,11 @@ def autoCheckFit(config, platepar, calstars_data, _nn_refinement=False):
     radius_list = [10, 5, 3, 1.5, min_radius]
 
 
+    # The refinement models the aberration. A plate that had absorbed it instead has to be refitted at
+    #   least once before it can be accepted, however well it matches the stars already
+    aberration_refit = not platepar.aberration
+    platepar.aberration = True
+
     # Calculate the function tolerance, so the desired precision can be reached (the number is calculated
     # in the same regard as the cost function)
     fatol, xatol_ang = computeMinimizationTolerances(config, platepar, len(star_dict))
@@ -657,11 +662,13 @@ def autoCheckFit(config, platepar, calstars_data, _nn_refinement=False):
             log.info("The total number of initially matched stars is too small! Please manually redo the plate or make sure there are enough calibration stars.")
 
             # Try to refine the platepar with NN alignment and redo the ACF
+            platepar.aberration = not aberration_refit
             return _handleFailure(config, platepar, calstars_data, catalog_stars, _nn_refinement)
 
 
         # Check if the platepar is good enough and do not estimate further parameters
-        if checkFitGoodness(config, platepar, catalog_stars, star_dict, min_radius, verbose=True):
+        if (not aberration_refit) and checkFitGoodness(config, platepar, catalog_stars, star_dict, \
+            min_radius, verbose=True):
 
             # Print out notice only if the platepar is good right away
             if i == 0:
@@ -686,6 +693,7 @@ def autoCheckFit(config, platepar, calstars_data, _nn_refinement=False):
         if not res.success:
 
             # Try to refine the platepar with NN alignment and redo the ACF
+            platepar.aberration = not aberration_refit
             return _handleFailure(config, platepar, calstars_data, catalog_stars, _nn_refinement)
 
 
@@ -697,6 +705,10 @@ def autoCheckFit(config, platepar, calstars_data, _nn_refinement=False):
             platepar.dec_d = dec_ref
             platepar.pos_angle_ref = pos_angle_ref
             platepar.F_scale = F_scale
+            aberration_refit = False
+
+            # Record the pointing fit
+            platepar.recordFit(pointing=True, fit_by='autoCheckFit')
 
 
 
@@ -718,9 +730,8 @@ def autoCheckFit(config, platepar, calstars_data, _nn_refinement=False):
     # Mark the platepar to indicate that it was automatically refined with CheckFit
     platepar.auto_check_fit_refined = True
 
-    # Recompute alt/az of the FOV centre
-    platepar.az_centre, platepar.alt_centre = raDec2AltAz(platepar.RA_d, platepar.dec_d, platepar.JD, \
-        platepar.lat, platepar.lon)
+    # Recompute alt/az of the FOV centre, refracted for the station height as the kernels do
+    platepar.az_centre, platepar.alt_centre = platepar.computeRefAltAz()
 
     # Recompute the rotation wrt horizon
     platepar.rotation_from_horiz = rotationWrtHorizon(platepar)
