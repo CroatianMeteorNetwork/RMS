@@ -15,6 +15,7 @@ np = pytest.importorskip("numpy")
 import RMS.ConfigReader as cr
 from RMS.Astrometry.ApplyAstrometry import raDecToXYPP, xyToRaDecPP
 from RMS.Astrometry.ApplyRecalibrate import recalibrateFF
+from RMS.Astrometry.Conversions import JD2HourAngle
 from RMS.Formats.Platepar import Platepar
 
 
@@ -32,6 +33,11 @@ def _makePlatepar():
     pp.lon = 15.0
     pp.elev = 100.0
     pp.JD = JD_IMG
+
+    # The reference hour angle goes with the reference time, as when a platepar is fitted or loaded (left at 0,
+    #   the image would map to a sky about 66 deg away in RA from RA_d)
+    pp.Ho = JD2HourAngle(pp.JD)
+
     pp.F_scale = 15.7
     pp.az_centre = 180.0
     pp.alt_centre = 60.0
