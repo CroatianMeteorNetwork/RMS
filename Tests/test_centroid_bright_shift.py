@@ -1,6 +1,6 @@
 """ The brightness-dependent centroid shift (config centroid_bright_shift*): the correction of the image coordinates
-    by the magnitude or by the intensity, its use in the astrometry of detections, and the config options. Run with:
-    python -m pytest Tests/test_centroid_bright_shift.py """
+    by the magnitude or by the intensity, scaled by the position in the image, its use in the astrometry of
+    detections, and the config options. Run with: python -m pytest Tests/test_centroid_bright_shift.py """
 
 from __future__ import print_function, division, absolute_import
 
@@ -127,6 +127,76 @@ class TestIntensityBasis(unittest.TestCase):
             correctBrightShift([1.0], [1.0], [5.0], SHIFT, basis='peak')
 
 
+class TestPositionFactor(unittest.TestCase):
+
+    # A 512 x 512 image; the shift largest left of the centre and smaller on the right side, as measured on a real
+    #   camera
+    SIZE = (512, 512)
+    POSITION = [-1.5, -0.7, 1.5, -0.3, 0.0, 0.0]
+    SHIFT_I = [0.1, 0.24, 0.02, 0.0]
+    OPTS = dict(basis='intensity', knees=(8e4, 1e5), intensity_limit=2.1e5)
+
+    def test_factor(self):
+        # The shift of the intensity model times 1 + B_x1*xn + B_x2*xn^2 + B_x3*xn^3 + B_y1*yn + B_y2*yn^2 +
+        #   B_y3*yn^3, with xn and yn from -1 to +1 across the image, on both axes
+        x = np.array([0.0, 100.0, 145.0, 256.0, 300.0, 400.0, 512.0])
+        y = np.linspace(0.0, 512.0, len(x))
+        inten = np.full(len(x), 1.8e5)
+        position = [-3.7, -4.3, 0.2, 0.5, -0.2, 0.1]
+        plain = correctBrightShift(x, y, None, self.SHIFT_I, intensities=inten, **self.OPTS)
+        xc, yc = correctBrightShift(x, y, None, self.SHIFT_I, intensities=inten, position=position,
+                                    image_size=self.SIZE, **self.OPTS)
+        xn, yn = (x - 256.0)/256.0, (y - 256.0)/256.0
+        factor = np.maximum(1 + position[0]*xn + position[1]*xn**2 + position[2]*xn**3 + position[3]*yn
+                            + position[4]*yn**2 + position[5]*yn**3, 0)
+        np.testing.assert_allclose(x - xc, (x - plain[0])*factor)
+        np.testing.assert_allclose(y - yc, (y - plain[1])*factor)
+
+        # The factor is clipped at 0: where it would be negative the source isn't moved, never the other way
+        self.assertTrue(np.any(factor == 0))
+        np.testing.assert_array_equal(xc[factor == 0], x[factor == 0])
+        self.assertTrue(np.all(x - xc >= 0))
+
+    def test_centre_and_faint(self):
+        # At the centre of the image the factor is 1 (the shift without the position); below both knees nothing is
+        #   moved wherever the source is
+        x, y = np.array([256.0, 100.0, 140.0]), np.array([256.0, 300.0, 20.0])
+        inten = np.array([1.5e5, 5e4, 7.9e4])
+        plain = correctBrightShift(x, y, None, self.SHIFT_I, intensities=inten, **self.OPTS)
+        xc, yc = correctBrightShift(x, y, None, self.SHIFT_I, intensities=inten, position=self.POSITION,
+                                    image_size=self.SIZE, **self.OPTS)
+        self.assertAlmostEqual(xc[0], plain[0][0])
+        self.assertAlmostEqual(yc[0], plain[1][0])
+        np.testing.assert_array_equal(xc[1:], x[1:])
+        np.testing.assert_array_equal(yc[1:], y[1:])
+
+    def test_magnitude_basis(self):
+        # The factor scales the shift of the magnitude basis as well
+        x, y = np.array([145.0, 400.0]), np.array([256.0, 256.0])
+        mags = np.array([3.0, 3.0])
+        plain = correctBrightShift(x, y, mags, SHIFT, mag_limit=3.0)
+        xc, _ = correctBrightShift(x, y, mags, SHIFT, mag_limit=3.0, position=self.POSITION, image_size=self.SIZE)
+        xn = (x - 256.0)/256.0
+        factor = np.maximum(1 + self.POSITION[0]*xn + self.POSITION[1]*xn**2 + self.POSITION[2]*xn**3, 0)
+        np.testing.assert_allclose(x - xc, (x - plain[0])*factor)
+
+    def test_no_position(self):
+        # Without the coefficients, or with all of them zero, the correction is the one without the position (no
+        #   image size needed)
+        x, y = np.array([10.0, 400.0]), np.array([30.0, 500.0])
+        inten = np.array([1.5e5, 2e5])
+        ref = correctBrightShift(x, y, None, self.SHIFT_I, intensities=inten, **self.OPTS)
+        for position in (None, [0]*6):
+            out = correctBrightShift(x, y, None, self.SHIFT_I, intensities=inten, position=position, **self.OPTS)
+            np.testing.assert_array_equal(out[0], ref[0])
+            np.testing.assert_array_equal(out[1], ref[1])
+
+    def test_needs_image_size(self):
+        with self.assertRaises(ValueError):
+            correctBrightShift([100.0], [100.0], None, self.SHIFT_I, intensities=[2e5], position=self.POSITION,
+                               **self.OPTS)
+
+
 class TestApplyPlateparToCentroids(unittest.TestCase):
 
     def setUp(self):
@@ -191,6 +261,31 @@ class TestApplyPlateparToCentroids(unittest.TestCase):
         self.assertLess(sep[0], 1e-6)
         self.assertGreater(sep[-1], 1.0)
 
+    def test_position_factor(self):
+        # The position factor is relative to the image size of the platepar: the sky positions are the ones of the
+        #   coordinates corrected with it, the output keeps the measured coordinates, and zero coefficients change
+        #   nothing
+        rows = detectionRows(self.level)
+        rows[:, 8] = np.linspace(1.2e5, 2.5e5, len(rows))
+        shift = [0.05, 0.4, 0.0, 0.0]
+        position = [-1.5, -2.0, 0.5, 0.3, 0.0, 0.0]
+        opts = dict(bright_shift=shift, bright_shift_basis='intensity', bright_shift_knees=(8e4, 1e5),
+                    bright_shift_intensity_limit=2.5e5)
+        without = applyPlateparToCentroids(FF_NAME, 25.0, rows, self.pp, **opts)
+        zero = applyPlateparToCentroids(FF_NAME, 25.0, rows, self.pp, bright_shift_position=[0]*6, **opts)
+        np.testing.assert_array_equal(zero, without)
+
+        out = applyPlateparToCentroids(FF_NAME, 25.0, rows, self.pp, bright_shift_position=position, **opts)
+        np.testing.assert_array_equal(out[:, 1:3], without[:, 1:3])
+        xc, yc = correctBrightShift(rows[:, 2], rows[:, 3], None, shift, intensities=rows[:, 8], basis='intensity',
+                                    knees=(8e4, 1e5), intensity_limit=2.5e5, position=position,
+                                    image_size=(self.pp.X_res, self.pp.Y_res))
+        moved = rows.copy()
+        moved[:, 2], moved[:, 3] = xc, yc
+        ref = applyPlateparToCentroids(FF_NAME, 25.0, moved, self.pp)
+        self.assertLess(np.max(separationArcsec(out[:, 3], out[:, 4], ref[:, 3], ref[:, 4])), 1e-6)
+        self.assertGreater(np.max(separationArcsec(out[:, 3], out[:, 4], without[:, 3], without[:, 4])), 1.0)
+
 
 class TestConfigOption(unittest.TestCase):
 
@@ -249,6 +344,19 @@ class TestConfigOption(unittest.TestCase):
     def test_wrong_count_is_ignored(self):
         config = self.parse(self.base.replace('centroid_bright_shift: 0, 0, 0, 0', 'centroid_bright_shift: 0.1, 0.2'))
         self.assertEqual(config.centroid_bright_shift, [0.0, 0.0, 0.0, 0.0])
+
+    def test_position_option(self):
+        # Default: no position factor; six numbers are read and given to the astrometry; another count is ignored
+        config = self.parse(self.base)
+        self.assertEqual(config.centroid_bright_shift_position, [0.0]*6)
+        self.assertEqual(brightShiftOptions(config)['bright_shift_position'], [0.0]*6)
+        config = self.parse(self.base.replace('centroid_bright_shift_position: 0, 0, 0, 0, 0, 0',
+                                              'centroid_bright_shift_position: -1.5, -0.7, 1.5, -0.3, 0, 0.1'))
+        self.assertEqual(config.centroid_bright_shift_position, [-1.5, -0.7, 1.5, -0.3, 0.0, 0.1])
+        self.assertEqual(brightShiftOptions(config)['bright_shift_position'], [-1.5, -0.7, 1.5, -0.3, 0.0, 0.1])
+        config = self.parse(self.base.replace('centroid_bright_shift_position: 0, 0, 0, 0, 0, 0',
+                                              'centroid_bright_shift_position: -1.5, -0.7, 1.5, -0.3'))
+        self.assertEqual(config.centroid_bright_shift_position, [0.0]*6)
 
 
 if __name__ == '__main__':
