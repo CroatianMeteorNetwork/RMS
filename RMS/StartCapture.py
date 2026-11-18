@@ -620,7 +620,69 @@ def startNightDetector(config, night_data_dir, duration, nodetect=False, detect_
                 log.error("There was an error during removing the capture resume flag file: " \
                     + capture_resume_file_path)
 
+        # A camera without a platepar calibrates itself on the stars of the detection during the night
+        if not detect_end:
+            startNightCalibration(config, night_data_dir)
+
     return detector
+
+
+# The automatic calibrations of the nights running next to the capture, by night directory
+NIGHT_CALIBRATIONS = {}
+
+
+def startNightCalibration(config, night_data_dir):
+    """ Start the automatic calibration of the night (RMS.Astrometry.NightCalibration) if it is enabled and the
+        camera has no platepar, or the calibration of this night is unfinished (the capture was restarted). It reads
+        the stars of the detection as the detection runs.
+
+    Arguments:
+        config: [Config] Configuration.
+        night_data_dir: [str] Full path to the capture directory of the night.
+
+    Return:
+        None
+    """
+
+    if not config.auto_calibration:
+        return
+
+    from RMS.Astrometry.NightCalibration import NightCalibrationProcess, installPath, readState
+
+    # Only a camera without a platepar, or one whose calibration of this night was started and isn't done (the
+    #   capture was restarted after the first platepar was installed)
+    state = readState(night_data_dir)
+    unfinished = (state.get('installed') is not None) and (not state.get('done'))
+    has_platepar = os.path.isfile(installPath(config)) \
+        or os.path.isfile(os.path.join(night_data_dir, config.platepar_name))
+    if has_platepar and (not unfinished):
+        return
+
+    # The calibration never stops the capture
+    try:
+        NIGHT_CALIBRATIONS[night_data_dir] = NightCalibrationProcess(config, night_data_dir)
+    except Exception as e:
+        log.warning("The automatic calibration of the night could not be started: {:s}".format(repr(e)))
+
+
+def stopNightCalibration(night_data_dir):
+    """ Stop the automatic calibration of a night at the end of its capture, if it runs.
+
+    Arguments:
+        night_data_dir: [str] Full path to the capture directory of the night.
+
+    Return:
+        None
+    """
+
+    calibration = NIGHT_CALIBRATIONS.pop(night_data_dir, None)
+    if calibration is None:
+        return
+
+    try:
+        calibration.stop()
+    except Exception as e:
+        log.warning("The automatic calibration of the night could not be stopped: {:s}".format(repr(e)))
 
 
 
@@ -1379,6 +1441,10 @@ def runCapture(config, duration=None, video_file=None, nodetect=False, detect_en
             #   kept on failure, so the night is automatically reprocessed on the next startup
             night_archive_dir = None
             night_processed = False
+
+            # The automatic calibration of the night stops before the night is processed
+            stopNightCalibration(night_data_dir)
+
             try:
                 night_archive_dir, archive_name, imgdata_archive_name, metadata_archive_name, _ =  \
                     processNight(night_data_dir, config, detection_results=detection_results, \

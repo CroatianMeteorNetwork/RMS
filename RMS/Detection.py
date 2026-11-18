@@ -31,7 +31,7 @@ import matplotlib.gridspec as gridspec
 from mpl_toolkits.mplot3d import Axes3D
 
 # RMS imports
-from RMS.Astrometry.Conversions import jd2Date, raDec2AltAz
+from RMS.Astrometry.Conversions import jd2Date, trueRaDec2ApparentAltAz
 import RMS.ConfigReader as cr
 from RMS.DetectionTools import getThresholdedStripe3DPoints, loadImageCalibration, binImageCalibration, \
     dilateCoordinates
@@ -275,6 +275,11 @@ def merge3DLines(line_list, vect_angle_thresh, last_count=0):
     # Return if less than 2 lines
     if len(line_list) < 2:
         return line_list
+
+    # Sort the lines by the frames of their points, so the vector from the first point of a line to the last
+    #   point of a line after it in the list points forward in time (with a later segment first it pointed
+    #   back, about 180 deg from both lines, and the segments of one meteor were never merged)
+    line_list = sorted(line_list, key=lambda l: (l[0][2], l[1][2]))
 
     final_list = []
     paired_indices = []
@@ -1077,6 +1082,32 @@ def thresholdAndCorrectGammaFF(img_handle, config, mask):
 
 
 
+def extendFrameRange(frame_min, frame_max, frame_extension, total_frames):
+    """ Extend the frame range of a detected line on both sides and cap it to the frames that exist.
+
+    Arguments:
+        frame_min: [int] First frame of the line.
+        frame_max: [int] Last frame of the line.
+        frame_extension: [int] Number of frames to add on each side.
+        total_frames: [int] Total number of frames in the input.
+
+    Return:
+        (frame_min, frame_max): [tuple of ints] Extended frame range.
+    """
+
+    # Work with plain ints, as under NumPy 2 an unsigned NumPy scalar keeps its type and wraps around below
+    #   zero instead of going negative (e.g. uint16 1 - 3 -> 65534, which the cap below wouldn't catch)
+    frame_min = int(frame_min) - int(frame_extension)
+    frame_max = int(frame_max) + int(frame_extension)
+
+    # Cap the range to the first and the last frame
+    frame_min = max(frame_min, 0)
+    frame_max = min(frame_max, int(total_frames) - 1)
+
+    return frame_min, frame_max
+
+
+
 
 def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, asgard=False, debug=False, \
     diagnostics=None):
@@ -1306,12 +1337,8 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 continue
 
             # Extend the frame range for several frames, just to be sure to catch all parts of the meteor
-            frame_min -= config.frame_extension
-            frame_max += config.frame_extension
-
-            # Cap values
-            frame_min = max(frame_min, 0)
-            frame_max = min(frame_max, img_handle.total_frames - 1)
+            frame_min, frame_max = extendFrameRange(frame_min, frame_max, config.frame_extension,
+                img_handle.total_frames)
 
             logDebug(detected_line)
 
@@ -1346,7 +1373,8 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 img_thres, max_avg_corrected, flattened_weights, \
                     min_patch_intensity = thresholdAndCorrectGammaFF(img_handle, config, mask)
 
-                logDebug('Centroiding frames {:d} - {:d} and time:'.format(frame_min, frame_max, img_handle.name()))
+                logDebug('Centroiding frames {:d} - {:d} and time: {:s}'.format(frame_min, frame_max,
+                    img_handle.name()))
                 
 
 
@@ -1981,7 +2009,10 @@ if __name__ == "__main__":
                 alt_array = []
                 for jd, ra, dec in zip(jd_array, ra_array, dec_array):
 
-                    azim, alt = raDec2AltAz(ra, dec, jd, np.degrees(ast.lat), np.degrees(ast.lon))
+                    # The RA/Dec are J2000, so they go back through the frame of date (no refraction, as
+                    #   in xyToRaDecAST)
+                    azim, alt = trueRaDec2ApparentAltAz(ra, dec, jd, np.degrees(ast.lat), np.degrees(ast.lon),
+                        refraction=False)
 
                     azim_array.append(azim)
                     alt_array.append(alt)

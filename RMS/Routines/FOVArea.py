@@ -5,8 +5,8 @@ from __future__ import print_function, division, absolute_import, unicode_litera
 
 import numpy as np
 
-from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, raDec2AltAz
-from RMS.Astrometry.Conversions import jd2Date, J2000_JD, AEH2LatLonAlt
+from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP
+from RMS.Astrometry.Conversions import jd2Date, J2000_JD, AEH2LatLonAlt, trueRaDec2ApparentAltAz
 from RMS.Formats.Platepar import Platepar
 from RMS.Routines.MaskImage import loadMask, MaskStructure
 
@@ -35,12 +35,15 @@ def xyHt2Geo(platepar, x, y, area_ht, indicate_limit=False, elev_limit=5):
     """
 
     
-    # Compute RA/Dec in J2000 of the image point, at J2000 epoch time so we don't have to precess
+    # Compute RA/Dec in J2000 of the image point, at the J2000 epoch time (the camera is fixed to the Earth, so
+    #   any time gives the same alt/az). It is a direction fixed to the Earth, so the aberration is not removed
     _, ra, dec, _ = xyToRaDecPP([jd2Date(J2000_JD.days)], [x], [y], [1], platepar, \
-        extinction_correction=False)
+        extinction_correction=False, measurement=True)
 
-    # Compute alt/az of the point
-    azim, elev = raDec2AltAz(ra[0], dec[0], J2000_JD.days, platepar.lat, platepar.lon)
+    # Compute alt/az of the point, through the true equator and equinox of date (the refraction was removed
+    #   above, so the elevation is the true one)
+    azim, elev = trueRaDec2ApparentAltAz(ra[0], dec[0], J2000_JD.days, platepar.lat, platepar.lon,
+        refraction=False)
 
     # Limit the elevation to elev_limit degrees above the horizon
     limit_hit = False

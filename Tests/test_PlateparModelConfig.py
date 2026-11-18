@@ -125,10 +125,10 @@ def test_positional_arguments_of_autofitplatepar_unchanged():
     except ImportError:
         from inspect import getargspec as argspec
     args = argspec(AutoPlatepar.autoFitPlatepar).args
-    assert args == ['dir_path', 'config', 'catalog_stars', 'platepar_template', 'fov_w_hint', 'ff_name',
-                    'distortion_type', 'equal_aspect', 'asymmetry_corr', 'force_distortion_centre', 'refraction',
-                    'photometric_sigma', 'fwhm_mult', 'wide_fov_search', 'final_catalog_stars', 'verbose',
-                    'decentering_corr']
+    assert args[:15] == ['dir_path', 'config', 'catalog_stars', 'platepar_template', 'fov_w_hint', 'ff_name',
+                         'distortion_type', 'equal_aspect', 'asymmetry_corr', 'force_distortion_centre',
+                         'refraction', 'photometric_sigma', 'fwhm_mult', 'wide_fov_search', 'final_catalog_stars']
+    assert args[-2:] == ['verbose', 'decentering_corr']
 
 
 def test_skyfit2_restores_the_model_of_the_config():

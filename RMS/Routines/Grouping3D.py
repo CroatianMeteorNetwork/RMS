@@ -63,8 +63,8 @@ def getAllPoints(point_list, x1, y1, z1, x2, y2, z2, config, fireball_detection=
         distance_threshold = config.distance_threshold_det
         gap_threshold = config.gap_threshold_det
 
-    # Convert the point list to numpy array
-    point_list = np.array(point_list, dtype = np.uint16)
+    # Convert the point list to a signed 32-bit array (uint16 would wrap frame numbers above 65535)
+    point_list = np.array(point_list, dtype=np.int32)
 
     return getAllPointsCy(point_list, x1, y1, z1, x2, y2, z2, distance_threshold, gap_threshold)
 
@@ -103,8 +103,8 @@ def find3DLines(point_list, start_time, config, fireball_detection=True):
             self.line_distance_const = config.line_distance_const
 
 
-    # Convert the point list to numpy array
-    point_list = np.array(point_list, dtype = np.uint16)
+    # Convert the point list to a signed 32-bit array (uint16 would wrap frame numbers above 65535)
+    point_list = np.array(point_list, dtype=np.int32)
 
     line_list = []
 

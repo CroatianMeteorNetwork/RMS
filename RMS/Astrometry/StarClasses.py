@@ -54,14 +54,19 @@ class GeoPoint(object):
 
 
     def coords(self):
-        """ Return sky coordinates.
+        """ Return the sky coordinates to use as a plate fit reference.
+
+        These are the plate coordinates, not the true direction of the point: the light of a ground point
+        is not refracted, so the refraction that the plate applies has been taken out of them. Handing the
+        true direction to the fit instead would place the point where a star in the same direction would be
+        seen, which is a full refraction away. See ApplyAstrometry.targetRaDecToPlateRaDec.
 
         Returns:
             tuple: (ra, dec, mag) where mag is always 1.0 for geo points.
         """
 
-        ra = self.geo_points_obj.ra_data[self.geo_point_index]
-        dec = self.geo_points_obj.dec_data[self.geo_point_index]
+        ra = self.geo_points_obj.ra_plate_data[self.geo_point_index]
+        dec = self.geo_points_obj.dec_plate_data[self.geo_point_index]
         mag = 1.0
 
         return ra, dec, mag
@@ -74,8 +79,10 @@ class PlanetPoint(object):
 
         Arguments:
             name: [str] Name of the body (e.g., 'Jupiter', 'Moon').
-            ra: [float] Right ascension in degrees.
-            dec: [float] Declination in degrees.
+            ra: [float] Right ascension in degrees, in the catalog frame: the apparent direction without the
+                annual aberration, which the plate applies to it as to a catalog star (see
+                SkyFit2.solarSystemBodiesRaDec).
+            dec: [float] Declination in degrees, in the catalog frame.
             mag: [float] Apparent magnitude.
         """
 
@@ -85,6 +92,11 @@ class PlanetPoint(object):
         self.ra = ra
         self.dec = dec
         self.mag = mag
+
+        # The direction is in the catalog frame. A point restored from a state saved before this marker
+        #   existed does not have it: its direction is the apparent one, with the annual aberration in it,
+        #   until SkyFit2.migrateStatePlanetPairs converts it
+        self.catalog_frame = True
 
 
     def coords(self):
