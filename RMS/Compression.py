@@ -31,7 +31,8 @@ import cv2
 from RMS.VideoExtraction import Extractor
 from RMS.Formats import FFfile, FFStruct
 from RMS.Formats import FieldIntensities
-from RMS.Logger import getLogger, getLoggingQueue, initChildProcess
+from RMS.Logger import getLogger, getLoggingQueue, initChildProcess, flushChildLogging, \
+    LOG_CHILD_EXIT_FLUSH_TIMEOUT
 from RMS.Misc import UTCFromTimestamp, frameBufferShape, AtomicFlag, stableDoubleRead
 from RMS.Routines.Image import saveImage
 
@@ -298,6 +299,13 @@ class Compressor(multiprocessing.Process):
 
         log.debug('Compression joined!')
 
+        # A compressor which finished its work may still be writing out its last log records. Killing it in the
+        #   middle of a write would leave the logging queue's shared write lock taken for good and wedge the logging
+        #   of every other process, so it gets as long as its flush may take (the flush gives up by itself once the
+        #   queue was abandoned, or at its time limit)
+        if self.run_exited.is_set() and self.is_alive():
+            self.join(LOG_CHILD_EXIT_FLUSH_TIMEOUT + 5)
+
         # If process didn't exit cleanly, send graceful interrupt
         if self.is_alive():
             log.info("Compression process still alive, sending interrupt signal...")
@@ -408,6 +416,10 @@ class Compressor(multiprocessing.Process):
                     log.debug('Compression run exit')
 
                     self.run_exited.set()
+
+                    # os._exit() skips the logging queue's feeder thread, so push the buffered records out
+                    #   first or the last ones never reach the log (stop() waits for the flush)
+                    flushChildLogging()
                     os._exit(0)
 
                 time.sleep(0.1)
@@ -540,6 +552,10 @@ class Compressor(multiprocessing.Process):
 
         time.sleep(1.0)
         self.run_exited.set()
+
+        # os._exit() below skips the logging queue's feeder thread, so push the buffered records out first
+        #   or the last ones of the night never reach the log (stop() waits for the flush)
+        flushChildLogging()
 
         # Force-exit the process. The forked QueuedPool Manager proxy threads
         # hold open socket connections that survive even after dropping all

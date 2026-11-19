@@ -197,3 +197,50 @@ def testPlotStarsMarksFittedPositions(monkeypatch):
     assert len(ax.lines) == 1
     assert list(ax.lines[0].get_xdata()) == [3.25]
     assert list(ax.lines[0].get_ydata()) == [4.25]
+
+
+def testPooledJobsCarryOnlyFileNames(monkeypatch, tmp_path):
+    pools = []
+
+    config = SimpleNamespace(stationID='XX0001', height=32, width=32, num_cores=2)
+    calibration = ('mask', 'dark', 'flat')
+
+    monkeypatch.setattr(ExtractStars, 'loadImageCalibration', lambda *args: calibration)
+    monkeypatch.setattr(ExtractStars.os, 'listdir', lambda path: ['FF_b.bin', 'FF_a.bin'])
+    monkeypatch.setattr(ExtractStars.FFfile, 'validFFName', lambda name: True)
+    monkeypatch.setattr(ExtractStars.CALSTARS, 'writeCALSTARS', lambda *args: None)
+
+    class RecordingPool(object):
+        def __init__(self, func, **kwargs):
+            self.func_kwargs = kwargs['func_kwargs']
+            self.jobs = []
+            pools.append(self)
+
+        def addJob(self, job):
+            self.jobs.append(job)
+
+        def startPool(self):
+            pass
+
+        def closePool(self):
+            pass
+
+        def getResults(self):
+            return [
+                (job[1], [1], [2], [3], [4], [5], [6], [7], [8]) for job in self.jobs
+            ]
+
+        def shutdownManager(self):
+            pass
+
+        def deleteBackupFiles(self):
+            pass
+
+    monkeypatch.setattr(ExtractStars, 'QueuedPool', RecordingPool)
+
+    ExtractStars.extractStarsAndSave(config, str(tmp_path))
+
+    # The calibration is given to the workers once, not pickled into every queued job
+    pool = pools[0]
+    assert pool.jobs == [[str(tmp_path), 'FF_a.bin'], [str(tmp_path), 'FF_b.bin']]
+    assert pool.func_kwargs == {'flat_struct': 'flat', 'dark': 'dark', 'mask': 'mask', 'config': config}

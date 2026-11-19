@@ -8,6 +8,8 @@ import errno
 import logging
 import logging.handlers
 import multiprocessing
+import multiprocessing.queues
+import multiprocessing.util
 import datetime
 import threading
 import atexit
@@ -146,6 +148,119 @@ class InRmsFilter(logging.Filter):
 
         # accept RMS tree **or** external scripts directory
         return any(_inside(p, root) for root in self.allowed_dirs)
+
+
+class EarlyRecordBuffer(logging.Handler):
+    """ Keep the log records emitted before logging is initialized, so initLogging can write them into the
+        night log. Every entry point parses the config before it initializes logging, so the warnings of the
+        config parser (e.g. a limited FPS, a bad binning factor, the upload disabled on the default station
+        code) would otherwise only be printed on the console and never reach the uploaded night log.
+    """
+
+    def __init__(self, capacity=200):
+        """
+        Keyword arguments:
+            capacity: [int] Maximum number of records kept, later ones are only counted. 200 by default.
+        """
+
+        logging.Handler.__init__(self)
+
+        self.capacity = capacity
+        self.records = []
+        self.dropped = 0
+
+
+    def emit(self, record):
+        """ Keep the record, or count it as dropped if the buffer is full.
+
+        Arguments:
+            record: [logging.LogRecord] The record to keep.
+        """
+
+        # A full buffer stops keeping records, a handler must never raise
+        if len(self.records) < self.capacity:
+            self.records.append(record)
+
+        else:
+            self.dropped += 1
+
+
+class _SuppressReplayedOnConsole(logging.Filter):
+    """ Skip the records replayed from the early buffer on the console. They were already printed there before
+        logging was initialized, and are replayed only to get them into the night log file.
+    """
+
+    def filter(self, record):
+        """ Return False for a record replayed from the early buffer.
+
+        Arguments:
+            record: [logging.LogRecord] The record to check.
+
+        Return:
+            [bool] True if the record is shown on the console.
+        """
+
+        return not getattr(record, "replayed_from_early_buffer", False)
+
+
+def installEarlyLogBuffer(level=logging.WARNING):
+    """ Attach a buffer to the root logger which keeps the records emitted before logging is initialized (see
+        EarlyRecordBuffer). It is called at the start of config parsing (ConfigReader.parse), which every entry
+        point runs before it initializes logging. A second call returns the same buffer. Once logging is
+        initialized (a queue handler is on the root logger), nothing is installed, as the records already reach
+        the night log and the buffer would never be emptied.
+
+    Keyword arguments:
+        level: [int] Lowest level of the records kept. logging.WARNING by default, so the buffer is not filled
+            with the messages of other libraries.
+
+    Return:
+        [EarlyRecordBuffer or None] The buffer on the root logger, None if logging is already initialized.
+    """
+
+    root = logging.getLogger()
+
+    # Logging is already initialized, the records reach the night log directly
+    for handler in root.handlers:
+        if isinstance(handler, logging.handlers.QueueHandler):
+            return None
+
+    # Reuse the buffer installed by an earlier call
+    for handler in root.handlers:
+        if isinstance(handler, EarlyRecordBuffer):
+            return handler
+
+    # Attach a new buffer
+    buffer_handler = EarlyRecordBuffer()
+    buffer_handler.setLevel(level)
+    root.addHandler(buffer_handler)
+
+    return buffer_handler
+
+
+def _drainEarlyLogBuffer():
+    """ Take the records off the early buffers on the root logger and empty them.
+
+    Return:
+        (records, dropped): [tuple]
+            - records: [list] The kept records, oldest first.
+            - dropped: [int] The number of records which did not fit into the buffer.
+    """
+
+    root = logging.getLogger()
+
+    records = []
+    dropped = 0
+
+    # Collect and empty every early buffer
+    for handler in root.handlers:
+        if isinstance(handler, EarlyRecordBuffer):
+            records.extend(handler.records)
+            dropped += handler.dropped
+            handler.records = []
+            handler.dropped = 0
+
+    return records, dropped
 
 
 # Reproduced from RMS.Misc due to circular import issue
@@ -380,8 +495,92 @@ LOG_RESTART_BACKOFF_MAX = 3600
 # Interval of the manager's own always-on health thread
 LOG_HEALTH_INTERVAL = 60
 
+# Maximum time a child process waits at exit for its buffered log records to reach the listener, while the
+#   queue was not abandoned. It is longer than the watchdog needs to abandon a stalled queue (a first check, then
+#   LOG_STALL_STRIKES checks LOG_HEALTH_INTERVAL apart), so a child gives up on its own only when no watchdog
+#   runs, or the watchdog holds back a restart after earlier ones
+LOG_CHILD_EXIT_FLUSH_TIMEOUT = LOG_HEALTH_INTERVAL*(LOG_STALL_STRIKES + 2)
+
+# Step of the wait for a child's exit flush, at which the abandoned flag of the queue is checked
+LOG_CHILD_EXIT_FLUSH_STEP = 0.1
+
 # The most recently initialized LoggingManager, used by the module-level health check
 _active_manager = None
+
+
+class _LoggingQueue(multiprocessing.queues.Queue):
+    """ The bounded logging queue, with a shared flag telling every process which writes into it that nobody will
+        read the queue any more.
+
+    A process may only give up the records it still has buffered for the queue (exit while its feeder thread is
+    blocked on the full pipe) once nobody will read the queue any more. The feeder holds the queue's shared write
+    lock while it writes into the pipe, and a process which dies in the middle of a write leaves the lock taken for
+    good: no other process can write into the queue again, and a listener which had only paused never gets another
+    record. The main process sets the flag when the logging watchdog abandons the queue and after the listener was
+    stopped at shutdown. The flag travels with the queue into child processes under every start method.
+    """
+
+    def __init__(self, maxsize, ctx):
+        """
+        Arguments:
+            maxsize: [int] Maximum number of records in the queue.
+            ctx: [multiprocessing context] Context the queue and its flag are made in.
+        """
+
+        super(_LoggingQueue, self).__init__(maxsize, ctx=ctx)
+
+        # Lock-free: set once by the main process, only read by the others
+        self._abandoned = ctx.Value('i', 0, lock=False)
+
+
+    def __getstate__(self):
+        """ Pickle the flag with the queue for a child process under forkserver/spawn. """
+
+        return super(_LoggingQueue, self).__getstate__() + (self._abandoned,)
+
+
+    def __setstate__(self, state):
+        """ Restore the queue and its flag in a child process under forkserver/spawn. """
+
+        super(_LoggingQueue, self).__setstate__(state[:-1])
+        self._abandoned = state[-1]
+
+
+    def abandon(self):
+        """ Tell every process which writes into the queue that nobody will read it any more. """
+
+        self._abandoned.value = 1
+
+
+    def isAbandoned(self):
+        """ Return True if nobody will read the queue any more. """
+
+        return bool(self._abandoned.value)
+
+
+def _abandonQueue(q):
+    """ Mark a logging queue as abandoned, if it has the flag (see _LoggingQueue).
+
+    Arguments:
+        q: [multiprocessing.Queue] Logging queue, or None.
+    """
+
+    if hasattr(q, 'abandon'):
+        q.abandon()
+
+
+def _queueAbandoned(q):
+    """ Return True if nobody will read a logging queue any more. A queue without the flag (see _LoggingQueue) is
+        never known to be abandoned.
+
+    Arguments:
+        q: [multiprocessing.Queue] Logging queue.
+
+    Return:
+        [bool] True if the queue was abandoned.
+    """
+
+    return hasattr(q, 'isAbandoned') and q.isAbandoned()
 
 
 class _DroppingQueueHandler(logging.handlers.QueueHandler):
@@ -488,6 +687,10 @@ class LoggingManager:
             if self.is_initialized:
                 return
 
+            # Take the records logged before logging was initialized (e.g. the config warnings) off the early
+            #   buffer, they are written into the night log below
+            early_records, early_dropped = _drainEarlyLogBuffer()
+
             # Remove any default handlers from the root logger
             main_logger = logging.getLogger()
             for handler in main_logger.handlers[:]:
@@ -506,6 +709,19 @@ class LoggingManager:
             main_logger.handlers = [qh]
             main_logger.setLevel(min(console_level, file_level)) # Keep root logger permissive
             main_logger.propagate = False
+
+            # Write the early records into the night log. handle() keeps the original time of each record and
+            #   still applies the handler filters. The records are marked so the console skips them, as they
+            #   were already printed there
+            for record in early_records:
+                record.replayed_from_early_buffer = True
+                main_logger.handle(record)
+
+            # Report the early records which did not fit into the buffer
+            if early_dropped:
+                main_logger.warning(
+                    "{:d} log record(s) emitted before logging was initialized were dropped".format(
+                        early_dropped))
 
             # Redirect standard streams
             sys.stderr = LoggerWriter(main_logger, logging.WARNING, stdout_captured=config.log_stdout)
@@ -537,7 +753,8 @@ class LoggingManager:
     def _spawnListener(self):
         """ Create a fresh (bounded) logging queue and start a listener process draining it. """
 
-        self.logging_queue = multiprocessing.Queue(LOG_QUEUE_MAXSIZE)
+        # The queue carries the flag which tells the child processes when it was abandoned
+        self.logging_queue = _LoggingQueue(LOG_QUEUE_MAXSIZE, ctx=multiprocessing.get_context())
 
         # Progress counter for the health check. Created fresh with every listener, so a
         # restart starts from zero. lock=False: the listener is the only writer and the health
@@ -688,6 +905,11 @@ class LoggingManager:
         # keeps its fds, thread and buffered records. The restart backoff is what bounds that
         # leak (review finding); earlier-forked children still hold their own ends.
         old_queue = self.logging_queue
+
+        # Nobody reads the old queue any more, so the child processes still writing into it may now exit
+        #   without waiting for their buffered records to be flushed (see flushChildLogging)
+        _abandonQueue(old_queue)
+
         try:
             old_queue.close()
             old_queue.cancel_join_thread()
@@ -739,6 +961,10 @@ class LoggingManager:
                     self.listener_process.terminate()
                 else:
                     listener_stopped = (self.listener_process.exitcode == 0)
+
+            # Nobody reads the queue once the listener stopped (with the sentinel or not), so the child processes
+            #   still writing into it may exit without waiting for their buffered records to be flushed
+            _abandonQueue(self.logging_queue)
 
             # Without a listener which took the sentinel, the records of this process may never get into the
             #   queue (e.g. it was wedged by a process which died holding its write lock): the exit must not wait
@@ -836,6 +1062,10 @@ def _listener_configurer(config, log_file_prefix, safedir, console_level=logging
     # Add filters to both handlers
     handler.addFilter(InRmsFilter(config))
     console.addFilter(InRmsFilter(config))
+
+    # The records replayed from the early buffer were already printed on the console, write them only into
+    #   the file
+    console.addFilter(_SuppressReplayedOnConsole())
 
     # Set common formatter for both handlers
     formatter = logging.Formatter(
@@ -1052,6 +1282,11 @@ def initChildLogging(logging_queue, config):
     top of a child process's run() so its records are forwarded to the listener process.
     A no-op if logging was never initialized (queue is None).
 
+    Like in the parent, records are dropped and counted while the queue is full, so a listener
+    which does not read cannot stop the child. At the child's exit its buffered records are
+    flushed (flushChildLogging), and given up only once the queue was abandoned, or at a time
+    limit.
+
     Arguments:
         logging_queue: [multiprocessing.Queue] The shared logging queue, or None.
         config: [Config] Config used for the InRmsFilter. If None, no filter is applied.
@@ -1065,7 +1300,11 @@ def initChildLogging(logging_queue, config):
     for handler in root.handlers[:]:
         root.removeHandler(handler)
 
-    qh = logging.handlers.QueueHandler(logging_queue)
+    # Forward everything to the listener, filtering to RMS records if a config is given. The handler
+    #   must drop records on a full queue like the parent's: a plain QueueHandler raises queue.Full,
+    #   handleError() writes the traceback to sys.stderr, which in a forked child is a LoggerWriter
+    #   feeding the same full queue, and every log call turns into an unbounded recursion
+    qh = _DroppingQueueHandler(logging_queue)
     qh.setFormatter(logging.Formatter('%(message)s'))
     if config is not None:
         qh.addFilter(InRmsFilter(config))
@@ -1079,6 +1318,84 @@ def initChildLogging(logging_queue, config):
     # from Compressor) can grab it in their own __init__ under 'forkserver'/'spawn', where
     # the module-level manager state is not inherited.
     _global_logging_manager.logging_queue = logging_queue
+
+    # Bound the child's exit. multiprocessing joins the queue's feeder thread when the child
+    #   exits, and that join never returns if the feeder is blocked on the pipe of a queue the
+    #   watchdog abandoned - the child then hangs in its exit and its parent's join() with it. This
+    #   finalizer runs before the feeder join (priority 0 runs before -5) and flushes until the
+    #   queue is abandoned or the time limit is reached instead, which also takes the place of the
+    #   unbounded join
+    multiprocessing.util.Finalize(None, flushChildLogging,
+        kwargs={'timeout': LOG_CHILD_EXIT_FLUSH_TIMEOUT}, exitpriority=0)
+
+
+def flushChildLogging(timeout=LOG_CHILD_EXIT_FLUSH_TIMEOUT):
+    """ Push a child process's buffered log records to the listener before it exits.
+
+    Records logged through a QueueHandler sit in the buffer of the multiprocessing.Queue feeder
+    thread until that thread writes them into the pipe. os._exit() kills the process without
+    giving the feeder a chance to run, so the last records a child logs (typically its own exit
+    messages) are lost. Closing the queue asks the feeder to write out its buffer and stop, and
+    join_thread() waits for that.
+
+    While the listener does not read, the feeder is blocked writing into the full pipe, holding
+    the queue's shared write lock. A process which exits then leaves the lock taken for good, and
+    no other process could ever write into the queue again, even after the listener resumes. So
+    the records still buffered are only given up once the queue was abandoned (nobody will read
+    it any more, see _LoggingQueue), or at the time limit, which is longer than the watchdog
+    needs to abandon a stalled queue. After giving up, the interpreter's own exit no longer
+    waits for the records either.
+
+    Called automatically at a normal child exit (see initChildLogging). Call it directly only
+    right before os._exit(): the queue cannot be used in this process afterwards.
+
+    Keyword arguments:
+        timeout: [float] Maximum number of seconds to wait for the flush to a queue which was not
+            abandoned. LOG_CHILD_EXIT_FLUSH_TIMEOUT by default.
+    """
+
+    # Collect the distinct queues behind the root logger's queue handlers
+    queues = []
+    for handler in logging.getLogger().handlers:
+        if isinstance(handler, logging.handlers.QueueHandler):
+            q = getattr(handler, 'queue', None)
+            if (q is not None) and all(q is not other for other in queues):
+                queues.append(q)
+
+    # Nothing to flush without a queue handler
+    if not queues:
+        return
+
+    # Close every queue and wait until its feeder thread wrote out the buffered records
+    def _drain():
+        for q in queues:
+            try:
+                q.close()
+                q.join_thread()
+            except Exception:
+                continue
+
+    # Flush in a daemon thread, which the process exit leaves behind if the flush is stuck
+    flusher = threading.Thread(target=_drain, name='rms-log-flush')
+    flusher.daemon = True
+    flusher.start()
+
+    # Wait in short steps until the flush is done, every queue was abandoned, or the time limit
+    #   is reached
+    t_end = time.monotonic() + timeout
+    while flusher.is_alive():
+        flusher.join(LOG_CHILD_EXIT_FLUSH_STEP)
+        if all(_queueAbandoned(q) for q in queues) or (time.monotonic() > t_end):
+            break
+
+    # A stuck flush gives up the records still buffered: the interpreter's exit must not wait for
+    #   them again without a bound
+    if flusher.is_alive():
+        for q in queues:
+            try:
+                q.cancel_join_thread()
+            except Exception:
+                continue
 
 
 def initChildProcess(logging_queue=None, config=None, ignore_sigint=True):

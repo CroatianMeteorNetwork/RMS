@@ -23,7 +23,6 @@ import configparser
 import cv2
 import numpy as np
 import zlib
-from PIL import Image
 
 import matplotlib.pyplot as plt
 
@@ -253,6 +252,159 @@ def migrateStatePlanetPairs(paired_stars, cache_time, platepar):
     return len(old_bodies)
 
 
+def _configSectionName(line):
+    r""" Return the section name of a config file section header line, the way configparser reads it.
+
+        configparser matches the line, stripped of comments and spaces, against \[(?P<header>.+)\] and does
+        not strip the name itself, so '[ StarExtraction ]' is a section called ' StarExtraction '.
+
+    Arguments:
+        line: [str] Config file line.
+
+    Return:
+        [str] Section name, or None if the line is not a section header.
+    """
+
+    # Comment lines are never headers, and an inline comment after a header is not part of it
+    stripped = line.strip()
+    if stripped.startswith((';', '#')):
+        return None
+    stripped = re.sub(r'\s+;.*$', '', stripped)
+
+    # The header pattern of configparser
+    section_match = re.match(r'\[(.+)\]', stripped)
+    if section_match is None:
+        return None
+
+    return section_match.group(1)
+
+
+def updateConfigLines(lines, updates):
+    """ Set the given keys in the lines of an RMS .config file, keeping everything else as it is.
+
+        A key line is recognised whatever the spelling configparser accepts ('key: value', 'key:value',
+        'key=value', 'key = value'), and the key name is compared case-insensitively like configparser
+        does. The original key spelling, delimiter, spacing, line ending (LF or CRLF) and any ';' inline
+        comment are kept. Keys that are not in the file are added at the end of their section, and
+        missing sections are appended, with the line ending the file uses.
+
+    Arguments:
+        lines: [list] Lines of the config file, with their line endings.
+        updates: [dict] {section: {key: value_str}} of the values to write.
+
+    Return:
+        new_lines: [list] Updated lines.
+    """
+
+    # A key line with its delimiter, an optional ';' inline comment and the line ending. Only spaces and
+    #   tabs are matched around the delimiter, so an empty value never swallows the line ending
+    key_re = re.compile(r'^([ \t]*)([^:=\s;#\[][^:=\r\n]*?)([ \t]*[:=][ \t]*)(.*?)([ \t]+;.*?)?(\r?\n)?$')
+
+    # The line ending of the file, for the lines that are added
+    eol_default = "\r\n" if any(line.endswith("\r\n") for line in lines) else "\n"
+
+    # The keys written so far, and the keys to write by their lower-case name, as configparser compares them
+    applied = {section: {k: False for k in keys} for section, keys in updates.items()}
+    wanted = {section: {k.lower(): k for k in keys} for section, keys in updates.items()}
+    current_section = None
+
+    # Indentation of the last key line. A line indented deeper than it is a continuation of that key's
+    #   value for configparser, not a key of its own. The continuation of a replaced value is dropped
+    last_key_indent = None
+    last_key_replaced = False
+
+    # Replace the values of the keys that already exist
+    new_lines = []
+    for line in lines:
+
+        # A section header starts a new section, and a value never continues past it
+        section_name = _configSectionName(line)
+        if section_name is not None:
+            current_section = section_name
+            last_key_indent = None
+            new_lines.append(line)
+            continue
+
+        # Blank and comment lines neither start nor end a value
+        if (not line.strip()) or line.strip().startswith((';', '#')):
+            new_lines.append(line)
+            continue
+
+        # Keep or drop a continuation line together with the value it continues
+        indent_level = len(line) - len(line.lstrip())
+        if (last_key_indent is not None) and (indent_level > last_key_indent):
+            if not last_key_replaced:
+                new_lines.append(line)
+            continue
+
+        # Any key line sets the indentation that later continuation lines are compared to
+        key_match = key_re.match(line)
+        if key_match is not None:
+            last_key_indent = indent_level
+            last_key_replaced = False
+
+        # Only the keys of the sections to update are changed
+        if current_section not in updates:
+            key_match = None
+
+        # Replace the value of a wanted key, keeping the rest of the line
+        if key_match is not None:
+
+            indent, key, delim, _, comment, eol = key_match.groups()
+            key_name = wanted[current_section].get(key.strip().lower())
+
+            # Keep the indentation, key spelling, delimiter, inline comment and line ending
+            if key_name is not None:
+                new_lines.append(indent + key + delim + updates[current_section][key_name]
+                                 + (comment or "") + (eol or eol_default))
+                applied[current_section][key_name] = True
+                last_key_replaced = True
+                continue
+
+        # Any other line is kept as it is
+        new_lines.append(line)
+
+    # Add any missing keys, at the end of their section or in a new section
+    for section, keys in updates.items():
+
+        missing_keys = [k for k, was_applied in applied[section].items() if not was_applied]
+        if not missing_keys:
+            continue
+
+        # Find the last non-comment line of the section
+        insert_idx = None
+        in_section = False
+        for i, line in enumerate(new_lines):
+
+            section_name = _configSectionName(line)
+            if section_name is not None:
+                if in_section:
+                    break
+                in_section = (section_name == section)
+                if in_section:
+                    insert_idx = i + 1
+
+            elif in_section and line.strip() and not line.strip().startswith((';', '#')):
+                insert_idx = i + 1
+
+        # Append a whole new section if it does not exist
+        if insert_idx is None:
+            if new_lines and not new_lines[-1].endswith("\n"):
+                new_lines[-1] += eol_default
+            new_lines.append("{:s}[{:s}]{:s}".format(eol_default, section, eol_default))
+            for key in missing_keys:
+                new_lines.append("{:s}: {:s}{:s}".format(key, updates[section][key], eol_default))
+
+        # Insert the keys after the last line of the existing section
+        else:
+            if not new_lines[insert_idx - 1].endswith("\n"):
+                new_lines[insert_idx - 1] += eol_default
+            for key in reversed(missing_keys):
+                new_lines.insert(insert_idx, "{:s}: {:s}{:s}".format(key, updates[section][key], eol_default))
+
+    return new_lines
+
+
 import matplotlib.gridspec as gridspec
 import matplotlib.ticker as ticker
 import scipy.optimize
@@ -321,7 +473,7 @@ import RMS.ConfigReader as cr
 from RMS.ExtractStars import extractStarsAndSave, extractStarsFF
 import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.Platepar import Platepar, getCatalogStarsImagePositions
-from RMS.Formats.FFfile import convertFRNameToFF, constructFFName
+from RMS.Formats.FFfile import convertFRNameToFF, constructFFName, ffStructFromImage
 from RMS.Formats.FrameInterface import detectInputTypeFolder, detectInputTypeFile
 from RMS.Formats.FTPdetectinfo import writeFTPdetectinfo
 from RMS.Formats import StarCatalog
@@ -2126,24 +2278,34 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                     # Only write the catalog LM if it was tuned and the user kept it checked
                     catalog_lm = pt.tuned_cat_lim_mag if save_lm else None
 
-                    if os.path.realpath(src) != os.path.realpath(dest):
-                        # Copy the config to the target, then write overrides into the copy
-                        shutil.copy2(src, dest)
+                    # Is the target the loaded config file itself
+                    is_loaded_config = (os.path.realpath(src) == os.path.realpath(dest))
+
+                    # A config that already exists at the target belongs to that station (its ID,
+                    #   coordinates, camera and upload settings). Only patch the star detection keys in it,
+                    #   after backing it up. A new target starts as a copy of the loaded config, which needs
+                    #   no backup. A failed write raises and is reported below, not as saved
+                    if os.path.exists(dest):
                         pt._writeStarDetectionConfig(dest, catalog_mag_limit=catalog_lm)
                     else:
-                        # Same file — write overrides in-place (backup handled by _writeStarDetectionConfig)
-                        pt._writeStarDetectionConfig(dest, catalog_mag_limit=catalog_lm)
-                    # Sync in-memory config attrs so modified state is cleared
-                    pt.config.intensity_threshold = pt.override_intensity_threshold
-                    pt.config.neighborhood_size = pt.override_neighborhood_size
-                    pt.config.max_stars = pt.configMaxStars()
-                    pt.config.segment_radius = pt.override_segment_radius
-                    pt.config.max_feature_ratio = pt.override_max_feature_ratio
-                    pt.config.roundness_threshold = pt.override_roundness_threshold
-                    if catalog_lm is not None:
-                        # Match the one decimal the file holds
-                        pt.config.catalog_mag_limit = round(catalog_lm, 1)
-                    pt._updateConfigSaveButtonState()
+                        shutil.copy2(src, dest)
+                        pt._writeStarDetectionConfig(dest, catalog_mag_limit=catalog_lm, backup=False)
+
+                    # Sync the in-memory config only when the loaded config file itself was written, so
+                    #   the modified state still shows while the loaded file holds the old values
+                    if is_loaded_config:
+                        pt.config.intensity_threshold = pt.override_intensity_threshold
+                        pt.config.neighborhood_size = pt.override_neighborhood_size
+                        pt.config.max_stars = pt.configMaxStars()
+                        pt.config.segment_radius = pt.override_segment_radius
+                        pt.config.max_feature_ratio = pt.override_max_feature_ratio
+                        pt.config.roundness_threshold = pt.override_roundness_threshold
+                        if catalog_lm is not None:
+                            # Match the one decimal the file holds
+                            pt.config.catalog_mag_limit = round(catalog_lm, 1)
+                        pt._updateConfigSaveButtonState()
+
+                    # Only reached when the write succeeded
                     results.append("Config saved to: " + dest)
                 except Exception as e:
                     results.append("Config save to {} failed: {}".format(target_dir, repr(e)))
@@ -2621,6 +2783,11 @@ class PlateTool(QtWidgets.QMainWindow):
         # Store the mask
         self.mask = mask
 
+        # Mask given at startup (--mask, or found in the RMS root or the working directory). The mask editor
+        #   edits it when the data directory has no mask.bmp of its own, instead of replacing it with an empty
+        #   mask. It is only used by the first initialization of the editor, a station change clears the mask
+        self.startup_mask = mask
+
         # Last directory used for loading masks (for file dialog)
         self.last_mask_dir = None
 
@@ -2683,10 +2850,6 @@ class PlateTool(QtWidgets.QMainWindow):
         self.auto_compute_sattracks = show_sattracks  # Enable auto-compute if satellite tracks requested
         self.tle_file = tle_file
         self.satellite_tracks = []
-        
-        # Cache for FOV polygon to avoid recomputation
-        self.fov_poly_cache = None
-        self.fov_poly_jd = None
 
         self.sat_track_curves = []
         self.sat_track_labels = []
@@ -3731,11 +3894,11 @@ class PlateTool(QtWidgets.QMainWindow):
         if self.hasData():
             self.updateLeftLabels()
             self.updateImageNavigationDisplay()
+            self.initMaskFromFile()
             self.updateStars()
             self.updateDistortion()
             self.tab.param_manager.updatePlatepar()
             self.initStarDetectionOverrides()
-            self.initMaskFromFile()
             self.updateFindBestFrameButton()
             self.changeMode(self.mode)
 
@@ -3795,6 +3958,8 @@ class PlateTool(QtWidgets.QMainWindow):
             self.cursor.hide()
             self.cursor2.hide()
             self.fr_box.hide()
+            self.distortion_center_marker.show()
+            self.distortion_center_marker2.show()
 
             if not first_time and self.img.img_handle.input_type != 'dfn':
                 self.img_zoom.loadImage(self.mode, self.img_type_flag)
@@ -3834,9 +3999,12 @@ class PlateTool(QtWidgets.QMainWindow):
             self.skyfit_button.setDisabled(False)
             self.manualreduction_button.setDisabled(True)
 
-            # The pointing indicator is only relevant in skyfit mode
+            # The pointing indicator and the optical axis cross under it are only relevant in skyfit mode, and
+            #   the cross looks like a pick
             if hasattr(self, 'pointing_indicator'):
                 self.pointing_indicator.hide()
+                self.distortion_center_marker.hide()
+                self.distortion_center_marker2.hide()
 
             self.img_type_flag = 'avepixel'
             self.tab.settings.updateMaxAvePixel()
@@ -4528,8 +4696,7 @@ class PlateTool(QtWidgets.QMainWindow):
             for orig_idx, star_xy, star_radec, star_spec, star_name, common_name in iterator:
 
                 # Make sure that the dimensions of the mask match the image dimensions
-                if (self.mask.img.shape[0] == self.img.data.shape[0]) or \
-                   (self.mask.img.shape[1] == self.img.data.shape[1]):
+                if self.mask.checkResolution(self.platepar.X_res, self.platepar.Y_res):
 
                     # Check if the star is inside the mask
                     if self.mask.img[int(star_xy[1]), int(star_xy[0])] != 0:
@@ -4889,18 +5056,33 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.param_manager.updatePairedStars(min_fit_stars=self.getMinFitStars())
 
 
+    def getDetectedStars(self):
+        """ Return the stars detected on the current image, in the CALSTARS column order
+            Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7).
+
+        The stars re-detected in the Star Detection tab take precedence over CALSTARS while the override is
+        enabled. Every consumer reads the detections through this method, so they all see the same list.
+
+        Return:
+            star_data: [ndarray] The detected stars, or None if neither source has an entry for the image.
+        """
+
+        # FR files are looked up under the name of their FF file
+        ff_name = convertFRNameToFF(self.img_handle.name())
+
+        if self.star_detection_override_enabled and (ff_name in self.star_detection_override_data):
+            return np.array(self.star_detection_override_data[ff_name])
+
+        if ff_name in self.calstars:
+            return np.array(self.calstars[ff_name])
+
+        return None
+
+
     def updateCalstars(self):
         """ Draw extracted stars on the current image. """
 
-        # Handle using FR files
-        ff_name_c = convertFRNameToFF(self.img_handle.name())
-
-        # Choose data source: override detections or original CALSTARS
-        star_data = None
-        if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
-            star_data = np.array(self.star_detection_override_data[ff_name_c])
-        elif ff_name_c in self.calstars:
-            star_data = np.array(self.calstars[ff_name_c])
+        star_data = self.getDetectedStars()
 
         if star_data is not None and len(star_data) > 0:
             # Get star coordinates
@@ -5089,6 +5271,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Ensure unsaved mask polygons are applied to the detection
         self.mask = MaskStructure(self.generateMaskImage())
+        self.updateStars(only_update_catalog=True)
 
         # Call extractStarsFF with override parameters
         try:
@@ -5175,6 +5358,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Ensure unsaved mask polygons are applied to the detection
         self.mask = MaskStructure(self.generateMaskImage())
+        self.updateStars(only_update_catalog=True)
 
         # Get list of all FF files that exist on disk, excluding placeholders
         ff_files = [f for f in self.calstars.keys()
@@ -6342,11 +6526,12 @@ class PlateTool(QtWidgets.QMainWindow):
         return final_lm
 
 
-    def _writeStarDetectionConfig(self, config_path, catalog_mag_limit=None):
-        """Write star detection parameters to the specified config file.
+    def _writeStarDetectionConfig(self, config_path, catalog_mag_limit=None, backup=True):
+        """ Write the star detection override parameters to the given config file, backing it up first.
 
-        Preserves comments and formatting by doing surgical line updates.
-        Uses ': ' separator like the RMS config format.
+            Preserves comments and formatting by doing surgical line updates (see updateConfigLines).
+            Missing keys and sections are appended. Errors are not caught: the caller must report them
+            and must not treat the settings as saved.
 
         Arguments:
             config_path: [str] Path to the config file to update.
@@ -6354,12 +6539,27 @@ class PlateTool(QtWidgets.QMainWindow):
         Keyword arguments:
             catalog_mag_limit: [float] Catalog limiting magnitude to write. None (default) leaves
                 the one in the config alone.
+            backup: [bool] Copy an existing file to a timestamped backup before changing it. True by
+                default.
+
+        Return:
+            backup_path: [str] Path of the backup, None if no backup was made.
         """
-        import re
+
         from datetime import datetime
 
-        # Backup existing config before overwriting
-        if os.path.exists(config_path):
+        # The file that is really written: replacing a symlinked config by name would swap the link itself
+        #   for a regular file and leave the file it points to unchanged
+        real_config_path = os.path.realpath(config_path)
+
+        # Refuse a config that is not writable. The atomic replace below would otherwise succeed in a
+        #   writable folder and silently replace a config the user made read-only
+        if os.path.exists(real_config_path) and (not os.access(real_config_path, os.W_OK)):
+            raise PermissionError("The config file is not writable: {:s}".format(real_config_path))
+
+        # Backup existing config before overwriting. A failed backup aborts the write
+        backup_path = None
+        if backup and os.path.exists(config_path):
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             base, ext = os.path.splitext(config_path)
             backup_path = "{}.bak.{}{}".format(base, timestamp, ext)
@@ -6383,90 +6583,48 @@ class PlateTool(QtWidgets.QMainWindow):
         if catalog_mag_limit is not None:
             updates["Calibration"] = {"catalog_mag_limit": "{:.1f}".format(catalog_mag_limit)}
 
+        # Read the existing file. newline='' keeps the line endings (CRLF stays CRLF), and the encoding
+        #   is the one RMS reads the config with
+        if os.path.exists(config_path):
+            with open(config_path, 'r', newline='', encoding='utf-8') as f:
+                lines = f.readlines()
+        else:
+            lines = []
+
+        # Set the new values in the lines
+        new_lines = updateConfigLines(lines, updates)
+
+        # Write back through a temporary file next to the real file, so a failed write never leaves a
+        #   truncated config behind
+        tmp_path = real_config_path + ".tmp"
         try:
-            # Read existing file
-            if os.path.exists(config_path):
-                with open(config_path, 'r') as f:
-                    lines = f.readlines()
-            else:
-                lines = []
-
-            # Track which updates were applied
-            applied = {section: {k: False for k in keys} for section, keys in updates.items()}
-            current_section = None
-
-            # Update existing lines
-            new_lines = []
-            for line in lines:
-                stripped = line.strip()
-
-                # Track current section
-                section_match = re.match(r'\s*\[([^\]]+)\]', stripped)
-                if section_match:
-                    current_section = section_match.group(1)
-                    new_lines.append(line)
-                    continue
-
-                # Check if this line is a key we want to update
-                updated = False
-                if current_section and ': ' in stripped and not stripped.startswith((';', '#')):
-                    key = stripped.split(': ')[0].strip()
-                    if current_section in updates and key in updates[current_section]:
-                        value = updates[current_section][key]
-                        new_lines.append(f"{key}: {value}\n")
-                        applied[current_section][key] = True
-                        updated = True
-
-                if not updated:
-                    new_lines.append(line)
-
-            # Add any missing sections/keys at the end
-            for section, keys in updates.items():
-                missing_keys = [k for k, was_applied in applied[section].items() if not was_applied]
-                if not missing_keys:
-                    continue
-
-                # Check if section exists
-                section_exists = any(f'[{section}]' in line for line in new_lines)
-                if not section_exists:
-                    new_lines.append(f"\n[{section}]\n")
-                    for key in missing_keys:
-                        new_lines.append(f"{key}: {updates[section][key]}\n")
-                else:
-                    # Find section end and insert keys
-                    insert_idx = None
-                    in_section = False
-                    for i, line in enumerate(new_lines):
-                        if f'[{section}]' in line:
-                            in_section = True
-                            insert_idx = i + 1
-                        elif in_section:
-                            if line.strip().startswith('['):
-                                break
-                            if line.strip() and not line.strip().startswith(';'):
-                                insert_idx = i + 1
-
-                    if insert_idx is not None:
-                        for key in reversed(missing_keys):
-                            new_lines.insert(insert_idx, f"{key}: {updates[section][key]}\n")
-
-            # Write back
-            with open(config_path, 'w') as f:
+            with open(tmp_path, 'w', newline='', encoding='utf-8') as f:
                 f.writelines(new_lines)
 
-            print(f"Saved star detection settings to: {config_path}")
-            print(f"  intensity_threshold: {self.override_intensity_threshold}")
-            print(f"  segment_radius: {self.override_segment_radius}")
-            print(f"  max_stars: {self.configMaxStars()}")
-            if catalog_mag_limit is not None:
-                print(f"  catalog_mag_limit: {catalog_mag_limit:.1f}")
+            # Keep the permissions of the config
+            if os.path.exists(real_config_path):
+                shutil.copymode(real_config_path, tmp_path)
 
-            qmessagebox(message=f"Star detection settings saved to:\n{config_path}",
-                       title="Settings Saved", message_type="info")
+            # Replace the config only once the new content is complete
+            os.replace(tmp_path, real_config_path)
 
-        except Exception as e:
-            qmessagebox(message=f"Error saving config:\n{str(e)}",
-                       title="Save Error", message_type="warning")
+        # Never leave the temporary file behind
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+        # Report the saved values
+        print(f"Saved star detection settings to: {config_path}")
+        print(f"  intensity_threshold: {self.override_intensity_threshold}")
+        print(f"  segment_radius: {self.override_segment_radius}")
+        print(f"  max_stars: {self.configMaxStars()}")
+        if catalog_mag_limit is not None:
+            print(f"  catalog_mag_limit: {catalog_mag_limit:.1f}")
+
+        qmessagebox(message=f"Star detection settings saved to:\n{config_path}",
+                   title="Settings Saved", message_type="info")
+
+        return backup_path
 
 
     ###################################################################################################
@@ -6477,8 +6635,13 @@ class PlateTool(QtWidgets.QMainWindow):
         """Auto-load mask.bmp if present, else clear any mask carried over from a previous station.
 
         Must be called after the new station's image handle is in place, since the mask is rendered
-        against the current image dimensions.
+        against the current image dimensions. On the first call, a mask given at startup is edited
+        instead of being cleared when the data directory has no mask.bmp.
         """
+
+        # The startup mask is only a fallback for the first initialization, later calls are station changes
+        startup_mask = getattr(self, 'startup_mask', None)
+        self.startup_mask = None
 
         # Reset ALL mask state - critical when switching stations/directories. Clearing only the
         #   paint layer (not the polygons or the rendered overlay) left the previous station's mask
@@ -6494,6 +6657,11 @@ class PlateTool(QtWidgets.QMainWindow):
         mask_path = os.path.join(self.dir_path, "mask.bmp")
         if os.path.exists(mask_path):
             self.loadMaskFromFile(mask_path)
+
+        # No mask.bmp in the data directory, but a mask of the image size was given at startup - edit that one
+        elif self.maskFitsImage(startup_mask):
+            self.loadMaskImage(np.array(startup_mask.img, dtype=np.uint8))
+
         else:
             # No mask for this station - clear any leftover overlay/outlines from the previous one
             self.updateMaskDisplay()
@@ -7256,6 +7424,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Update self.mask so star detection uses the new mask
             self.mask = MaskStructure(mask_img)
+            self.updateStars(only_update_catalog=True)
             print("Mask updated for star detection")
 
             # Mark as saved
@@ -7274,14 +7443,13 @@ class PlateTool(QtWidgets.QMainWindow):
             # Remember the directory for next time
             self.last_mask_dir = os.path.dirname(file_path)
             self.loadMaskFromFile(file_path)
+            self.updateStars(only_update_catalog=True)
 
     def loadMaskFromFile(self, mask_path):
-        """Load mask.bmp and convert masked regions to editable polygons.
+        """ Read a mask file and make it the edited mask (see loadMaskImage).
 
-        Pixels that cannot be represented as clean polygon contours (e.g. prior
-        brush strokes, or boundary pixels lost to approxPolyDP simplification)
-        are captured in the paint layer so the full mask survives a round-trip
-        through save → load without any pixel loss.
+        Arguments:
+            mask_path: [str] Path to the mask image (0 = masked, 255 = unmasked).
         """
         if not os.path.exists(mask_path):
             print(f"Mask file not found: {mask_path}")
@@ -7293,6 +7461,39 @@ class PlateTool(QtWidgets.QMainWindow):
         if mask_img is None:
             print(f"Failed to load mask: {mask_path}")
             return
+
+        self.loadMaskImage(mask_img)
+
+
+    def maskFitsImage(self, mask):
+        """ Check that the given mask has an image and the size of the current image.
+
+        Arguments:
+            mask: [MaskStructure] Mask to check, may be None.
+
+        Return:
+            [bool] True if the mask can be used on the current image.
+        """
+
+        if (mask is None) or (getattr(mask, 'img', None) is None) or (self.img.data is None):
+            return False
+
+        # The image data is indexed as (x, y), the mask image as (y, x)
+        img_width, img_height = self.img.data.shape[:2]
+
+        return mask.img.shape[:2] == (img_height, img_width)
+
+
+    def loadMaskImage(self, mask_img):
+        """ Make the given mask image the edited mask, with the masked regions converted to editable polygons.
+
+        Pixels that cannot be represented as clean polygon contours (e.g. prior brush strokes, or boundary
+        pixels lost to approxPolyDP simplification) are captured in the paint layer, so the full mask survives
+        a round trip through save and load without any pixel loss.
+
+        Arguments:
+            mask_img: [ndarray] Grayscale mask image (0 = masked, 255 = unmasked).
+        """
 
         self.mask_polygons = []
         self.mask_current_polygon = []
@@ -9027,15 +9228,9 @@ class PlateTool(QtWidgets.QMainWindow):
         Returns:
             bool: True if balancing was performed, False otherwise.
         """
-        # Get current FF file name
-        ff_name_c = convertFRNameToFF(self.img_handle.name())
-
         # Get detected stars count
-        n_detected = 0
-        if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
-            n_detected = len(self.star_detection_override_data[ff_name_c])
-        elif ff_name_c in self.calstars:
-            n_detected = len(self.calstars[ff_name_c])
+        star_data = self.getDetectedStars()
+        n_detected = 0 if star_data is None else len(star_data)
 
         if n_detected < 10:
             return False
@@ -9987,10 +10182,6 @@ class PlateTool(QtWidgets.QMainWindow):
             self.tle_file = None
         if not hasattr(self, "satellite_tracks"):
             self.satellite_tracks = []
-        if not hasattr(self, "fov_poly_cache"):
-            self.fov_poly_cache = None
-        if not hasattr(self, "fov_poly_jd"):
-            self.fov_poly_jd = None
         if not hasattr(self, "sat_track_curves"):
             self.sat_track_curves = []
         if not hasattr(self, "sat_track_labels"):
@@ -10287,15 +10478,7 @@ class PlateTool(QtWidgets.QMainWindow):
                         calstars_centroid = False
                         if self.img_handle is not None:
 
-                            # Handle using FR files too
-                            ff_name_c = convertFRNameToFF(self.img_handle.name())
-
-                            # Use override data if enabled, otherwise CALSTARS
-                            star_data = None
-                            if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
-                                star_data = np.array(self.star_detection_override_data[ff_name_c])
-                            elif ff_name_c in self.calstars:
-                                star_data = np.array(self.calstars[ff_name_c])
+                            star_data = self.getDetectedStars()
 
                             if star_data is not None:
 
@@ -11915,6 +12098,10 @@ class PlateTool(QtWidgets.QMainWindow):
         # Temp bool to extract header line
         first_bool = False
 
+        # The line above the first row of data holds the column names (the commented header of the ev files).
+        #   A file without a line above its data has no column names, which the column check reports
+        temp_line = ''
+
         # Wrap in try except for uncaught errors
         try:
             # Opens and parses pick file
@@ -11925,7 +12112,7 @@ class PlateTool(QtWidgets.QMainWindow):
                         # Clean the line
                         line = [part.strip() for part in line.split() if part]
 
-                        # Unpack the header
+                        # Unpack the header at the first row of data, from the line above it
                         if first_bool == False:
                             first_bool = True
 
@@ -11943,23 +12130,22 @@ class PlateTool(QtWidgets.QMainWindow):
                                             message="TXT file must contain 'fr', 'cx', and 'cy' columns.",
                                             message_type="error")
                                 return None
-                        
-                        else:
-                            # Unpack the pick
-                            frame_number = int(line[frame_number_idx])
-                            cx, cy = float(line[x_centroid_idx]), float(line[y_centroid_idx])
 
-                            picks.append({
-                                'x_centroid': cx,
-                                'y_centroid': cy,
-                                'mode' : 1,
-                                'intensity_sum' : 1,
-                                'photometry_pixels' : None,
-                                'background_intensity' : 0,
-                                'snr' : 1,
-                                'saturated' : False,
-                            })
-                            pick_frame_indices.append(frame_number)
+                        # Unpack the pick (the first row of data is a pick too)
+                        frame_number = int(line[frame_number_idx])
+                        cx, cy = float(line[x_centroid_idx]), float(line[y_centroid_idx])
+
+                        picks.append({
+                            'x_centroid': cx,
+                            'y_centroid': cy,
+                            'mode' : 1,
+                            'intensity_sum' : 1,
+                            'photometry_pixels' : None,
+                            'background_intensity' : 0,
+                            'snr' : 1,
+                            'saturated' : False,
+                        })
+                        pick_frame_indices.append(frame_number)
 
                     # Store a temp line to hit previous for col names
                     temp_line = line
@@ -12047,7 +12233,7 @@ class PlateTool(QtWidgets.QMainWindow):
                         # Populate arrays
                         cx, cy = float(line[x_ind]), float(line[y_ind])
                         background = float(line[background_ind]) if background_ind is not None else 0
-                        saturated = bool(line[sat_ind]) if sat_ind is not None else False
+                        saturated = (line[sat_ind].lower() == 'true') if sat_ind is not None else False
                         snr = float(line[snr_ind]) if snr_ind is not None else 1
                         pick_frame_times.append(datetime.datetime.strptime(line[pick_frame_times_idx], 
                                                                            '%Y-%m-%dT%H:%M:%S.%f'))
@@ -12379,6 +12565,49 @@ class PlateTool(QtWidgets.QMainWindow):
         self.img_zoom.setLevels(self.tab.hist.getLevels())
         self.updateLeftLabels()
 
+    def computeFOVPolygon(self, jd):
+        """ Compute the FOV polygon on the sky by sampling the image edges with the current platepar.
+
+        The polygon is not cached because it changes with the platepar as well as with the time, and it
+        only takes a few milliseconds to compute.
+
+        Arguments:
+            jd: [float] Julian date.
+
+        Return:
+            fov_poly: [list] List of (RA, Dec) tuples of the polygon vertices, in degrees.
+        """
+
+        w = self.platepar.X_res
+        h = self.platepar.Y_res
+
+        # Define edges: (x1, y1) -> (x2, y2)
+        edges = [
+            ((0, 0), (w, 0)),   # Top
+            ((w, 0), (w, h)),   # Right
+            ((w, h), (0, h)),   # Bottom
+            ((0, h), (0, 0))    # Left
+        ]
+
+        samples_per_side = 10
+
+        fov_poly = []
+        for (x_start, y_start), (x_end, y_end) in edges:
+            xs = np.linspace(x_start, x_end, samples_per_side, endpoint=False)
+            ys = np.linspace(y_start, y_end, samples_per_side, endpoint=False)
+
+            # Prepare inputs
+            n = len(xs)
+            jd_arr = [jd]*n
+            level_arr = [1]*n
+
+            _, r_arr, d_arr, _ = xyToRaDecPP(jd_arr, xs, ys, level_arr, self.platepar, jd_time=True, extinction_correction=False)
+
+            for r, d in zip(r_arr, d_arr):
+                fov_poly.append((r, d))
+
+        return fov_poly
+
     def updateConstellations(self):
         """ Projects and draws constellation lines. """
 
@@ -12395,43 +12624,12 @@ class PlateTool(QtWidgets.QMainWindow):
         # 0. Generate FOV polygon
         w = self.platepar.X_res
         h = self.platepar.Y_res
-        fov_poly = []
 
-        if self.fov_poly_cache is not None and self.fov_poly_jd == jd:
-            fov_poly = self.fov_poly_cache
-        else:
-            # Define edges: (x1, y1) -> (x2, y2)
-            edges = [
-                ((0, 0), (w, 0)),   # Top
-                ((w, 0), (w, h)),   # Right
-                ((w, h), (0, h)),   # Bottom
-                ((0, h), (0, 0))    # Left
-            ]
-            
-            samples_per_side = 10
-            
-            try:
-                for (x_start, y_start), (x_end, y_end) in edges:
-                    xs = np.linspace(x_start, x_end, samples_per_side, endpoint=False)
-                    ys = np.linspace(y_start, y_end, samples_per_side, endpoint=False)
-                    
-                    # Prepare inputs
-                    n = len(xs)
-                    jd_arr = [jd]*n
-                    level_arr = [1]*n
-                    
-                    _, r_arr, d_arr, _ = xyToRaDecPP(jd_arr, xs, ys, level_arr, self.platepar, jd_time=True, extinction_correction=False)
-                    
-                    for r, d in zip(r_arr, d_arr):
-                        fov_poly.append((r, d))
-                        
-                # Update cache
-                self.fov_poly_cache = fov_poly
-                self.fov_poly_jd = jd
-                
-            except Exception as e:
-                print(f"Error computing FOV polygon for constellations: {e}")
-                return
+        try:
+            fov_poly = self.computeFOVPolygon(jd)
+        except Exception as e:
+            print(f"Error computing FOV polygon for constellations: {e}")
+            return
 
         # 1. Filter using sphericalPolygonCheck
         # Check start and end points
@@ -12871,19 +13069,11 @@ class PlateTool(QtWidgets.QMainWindow):
         self.status_bar.showMessage("Trying quick alignment...")
         QtWidgets.QApplication.processEvents()
 
-        # Get current FF file name
-        ff_name_c = convertFRNameToFF(self.img_handle.name())
-
-        # Use override data if enabled and available, otherwise use original CALSTARS
-        if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
-            detected_stars = np.array(self.star_detection_override_data[ff_name_c])
-        elif ff_name_c in self.calstars:
-            detected_stars = np.array(self.calstars[ff_name_c])
-        else:
+        detected_stars = self.getDetectedStars()
+        if detected_stars is None:
             print("  No detected stars available - falling back to astrometry.net")
             return False
 
-        detected_stars = np.array(detected_stars)
         if len(detected_stars) < 10:
             print("  Less than 10 detected stars - falling back to astrometry.net")
             return False
@@ -13211,14 +13401,7 @@ class PlateTool(QtWidgets.QMainWindow):
         print("  BEFORE: RA={:.4f} Dec={:.4f} Rot={:.4f}".format(orig_ra, orig_dec, orig_rot), flush=True)
 
         # Get detected stars from current image (same as tryQuickAlignment)
-        ff_name_c = self.img_handle.current_ff_file if hasattr(self.img_handle, 'current_ff_file') else None
-
-        # Use override data if enabled and available, otherwise use original CALSTARS
-        detected_stars = None
-        if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
-            detected_stars = np.array(self.star_detection_override_data[ff_name_c])
-        elif ff_name_c is not None and ff_name_c in self.calstars:
-            detected_stars = np.array(self.calstars[ff_name_c])
+        detected_stars = self.getDetectedStars()
 
         if detected_stars is None or len(detected_stars) < 5:
             print("  Not enough detected stars ({})".format(
@@ -13413,7 +13596,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 f"Best with image:  {best_available_ff}  ({n_stars_available} stars)"
             )
 
-            auto_fit_label = "Auto Fit (placeholder)" if not best_ff_available else "Auto Fit"
+            # Without the image of the best frame, the fit runs on a generated placeholder image
+            auto_fit_label = "Auto Fit" if best_ff_available else "Auto Fit on placeholder image"
             auto_fit_btn = msg_box.addButton(auto_fit_label, QtWidgets.QMessageBox.ButtonRole.ActionRole)
             navigate_btn = msg_box.addButton("Go to Best Image", QtWidgets.QMessageBox.ButtonRole.ActionRole)
             msg_box.addButton(QtWidgets.QMessageBox.StandardButton.Cancel)
@@ -13455,35 +13639,30 @@ class PlateTool(QtWidgets.QMainWindow):
                             valid = (x_coords >= 0) & (x_coords < width)
                             placeholder[y_coords[valid], x_coords[valid]] = 40
 
+                    # The placeholder is named after the best FF file, so the image handle takes the frame
+                    #   time from its name. It only exists in memory: a file in the data folder would be left
+                    #   behind and taken for an image by other tools
                     base_name = os.path.splitext(best_ff)[0]
                     placeholder_name = f"{base_name}_placeholder.png"
-                    placeholder_path = os.path.join(self.dir_path, placeholder_name)
 
-                    img_pil = Image.fromarray(placeholder)
-                    img_pil.save(placeholder_path)
-                    print(f"Created placeholder image: {placeholder_path}")
+                    # Carry the detected stars (and the re-detected ones) over to the placeholder image, so
+                    #   getDetectedStars chooses between them as it does for the best frame
+                    star_sources = [self.calstars]
+                    if has_overrides:
+                        star_sources.append(self.star_detection_override_data)
 
-                    if best_ff in self.calstars:
-                        self.calstars[placeholder_name] = self.calstars[best_ff]
+                    for stars in star_sources:
+                        if best_ff in stars:
+                            stars[placeholder_name] = stars[best_ff]
 
-                    # Refresh file list and navigate to placeholder
-                    self.img_handle = detectInputTypeFolder(
-                        self.dir_path, self.config,
-                        beginning_time=None, fps=self.fps
-                    )
-                    self.img.changeHandle(self.img_handle)
+                    # Add the placeholder to the image list and navigate to it
+                    target_index = self.img_handle.addMemoryFF(placeholder_name,
+                                                               ffStructFromImage(placeholder))
+                    print(f"Created placeholder image: {placeholder_name}")
 
-                    target_index = None
-                    for i, ff_path in enumerate(self.img_handle.ff_list):
-                        if os.path.basename(ff_path) == placeholder_name:
-                            target_index = i
-                            break
-
-                    if target_index is not None:
-                        current_index = self.img_handle.current_ff_index
-                        delta = target_index - current_index
-                        if delta != 0:
-                            self.nextImg(n=delta)
+                    delta = target_index - self.img_handle.current_ff_index
+                    if delta != 0:
+                        self.nextImg(n=delta)
 
                     # Use the same auto-fit path as the fit parameters panel
                     self.autoFitAstrometryNet()
@@ -13573,26 +13752,15 @@ class PlateTool(QtWidgets.QMainWindow):
             # Tight search range based on config (0.75x to 1.5x)
             fov_w_range = [0.75*self.config.fov_w, 1.5*self.config.fov_w]
 
-        # Handle using FR files too
-        ff_name_c = convertFRNameToFF(self.img_handle.name())
-
         # Find and load a mask file if there is one
         mask = getMaskFile(self.dir_path, self.config)
 
         # Compute JD for astrometry.net matching
         jd = date2JD(*self.img_handle.currentTime())
 
-        # Use override data if enabled and available, otherwise use original CALSTARS
-        has_star_data = False
-        star_data = None
-        if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
-            star_data = np.array(self.star_detection_override_data[ff_name_c])
-            has_star_data = True
-        elif ff_name_c in self.calstars:
-            star_data = np.array(self.calstars[ff_name_c])
-            has_star_data = True
+        star_data = self.getDetectedStars()
 
-        if has_star_data and (not upload_image):
+        if (star_data is not None) and (not upload_image):
 
             # Make sure that there are at least 10 stars
             if len(star_data) < 10:
@@ -13861,9 +14029,8 @@ class PlateTool(QtWidgets.QMainWindow):
         self.status_bar.showMessage("Astrometry.net solution found, processing...")
         QtWidgets.QApplication.processEvents()
 
-        # Compute JD and FF name (needed for post-solve steps)
+        # Compute JD (needed for post-solve steps)
         jd = date2JD(*self.img_handle.currentTime())
-        ff_name_c = convertFRNameToFF(self.img_handle.name())
 
         # Save user's settings for the final fit
         user_distortion_type = self.platepar.distortion_type
@@ -14012,13 +14179,9 @@ class PlateTool(QtWidgets.QMainWindow):
             catalog_x_fov, catalog_y_fov, catalog_stars)
         print("  Catalog stars after mask filter: {:d}".format(len(catalog_stars)))
 
-        # Get detected stars - use override data if enabled, otherwise CALSTARS
+        # Get detected stars
         # CALSTARS format: Y(0) X(1) IntensSum(2) Ampltd(3) FWHM(4) BgLvl(5) SNR(6) NSatPx(7)
-        detected_stars = None
-        if self.star_detection_override_enabled and ff_name_c in self.star_detection_override_data:
-            detected_stars = np.array(self.star_detection_override_data[ff_name_c])
-        elif ff_name_c in self.calstars:
-            detected_stars = np.array(self.calstars[ff_name_c])
+        detected_stars = self.getDetectedStars()
 
         if detected_stars is not None and len(detected_stars) > 0:
             det_y = detected_stars[:, 0]
@@ -17161,48 +17324,11 @@ class PlateTool(QtWidgets.QMainWindow):
         jd = datetime2JD(t_start)
         
         # Generate FOV polygon by sampling edges
-        w = self.platepar.X_res
-        h = self.platepar.Y_res
-        
-        # Check if we can use cached FOV polygon
-        fov_poly = []
-        if self.fov_poly_cache is not None and self.fov_poly_jd == jd:
-            fov_poly = self.fov_poly_cache
-            # print("Using cached FOV polygon.")
-        else:
-            # print("Computing FOV polygon...")
-            # Define edges: (x1, y1) -> (x2, y2)
-            edges = [
-                ((0, 0), (w, 0)),   # Top
-                ((w, 0), (w, h)),   # Right
-                ((w, h), (0, h)),   # Bottom
-                ((0, h), (0, 0))    # Left
-            ]
-            
-            samples_per_side = 10
-            
-            try:
-                for (x_start, y_start), (x_end, y_end) in edges:
-                    xs = np.linspace(x_start, x_end, samples_per_side, endpoint=False)
-                    ys = np.linspace(y_start, y_end, samples_per_side, endpoint=False)
-                    
-                    # Prepare inputs
-                    n = len(xs)
-                    jd_arr = [jd]*n
-                    level_arr = [1]*n
-                    
-                    _, r_arr, d_arr, _ = xyToRaDecPP(jd_arr, xs, ys, level_arr, self.platepar, jd_time=True, extinction_correction=False)
-                    
-                    for r, d in zip(r_arr, d_arr):
-                        fov_poly.append((r, d))
-                        
-                # Update cache
-                self.fov_poly_cache = fov_poly
-                self.fov_poly_jd = jd
-                
-            except Exception as e:
-                print(f"Error computing FOV polygon: {e}")
-                return
+        try:
+            fov_poly = self.computeFOVPolygon(jd)
+        except Exception as e:
+            print(f"Error computing FOV polygon: {e}")
+            return
 
         try:
             self.satellite_tracks = predictor.getSatelliteTracks(self.platepar, fov_poly, sats)

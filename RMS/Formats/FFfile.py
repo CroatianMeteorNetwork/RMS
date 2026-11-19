@@ -50,6 +50,21 @@ def readFFpng(directory, filename, full_filename=False):
     if len(img.shape) == 3:
         img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
+    return ffStructFromImage(img)
+
+
+def ffStructFromImage(img):
+    """ Make a pseudo-FF structure from a single grayscale image.
+
+    The avepixel and the maxpixel are set to the image, the stdpixel and the maxframe to zeros.
+
+    Arguments:
+        img: [ndarray] 2D uint8 or uint16 image.
+
+    Return:
+        ff: [FFStruct] FF structure with the image data.
+    """
+
     # Create an FF structure
     ff = FFStruct()
     ff.nrows = img.shape[0]
@@ -420,15 +435,18 @@ def validFFName(ff_file, fmt=None):
         ff_file: [str] Name of the FF file
 
     Keyword arguments:
-        fmt: [str] Format of the FF file. If not given, it will tried to be determined from the file name.
+        fmt: [str] Format of the FF file. If not given, it will tried to be determined from the file name
+            (bin or fits). PNG pseudo-FF files are only accepted with an explicit fmt='png', so the directory
+            scans never take a PNG image (e.g. made by BatchFFtoImage) for an FF file.
+
+    Return:
+        [bool] True if the name is the name of an FF file in the given format.
     """
 
+    # Determine the format from the file name, only the FF formats recorded by RMS are inferred
     if fmt is None:
         if ff_file.endswith('.bin'):
             fmt = 'bin'
-
-        elif ff_file.endswith('.png'):
-            fmt = 'png'
 
         else:
             fmt = 'fits'

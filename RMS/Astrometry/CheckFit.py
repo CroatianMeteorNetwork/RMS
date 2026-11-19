@@ -415,12 +415,21 @@ def _calcImageResidualsAstro(params, config, platepar, catalog_stars, star_dict,
     """
 
 
-    # Set the fitting parameters directly on the platepar (no deep copy needed —
-    # matchStarsResiduals only reads from the platepar, never modifies it)
+    # Set the fitting parameters on the platepar for this evaluation, remembering its own (no deep copy is
+    #   needed, matchStarsResiduals only reads from the platepar)
+    params_prev = (platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref, platepar.F_scale)
     platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref, platepar.F_scale = params
 
-    # Match stars and calculate image residuals
-    return matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius, verbose=False)
+    try:
+
+        # Match stars and calculate image residuals
+        return matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius, verbose=False)
+
+    finally:
+
+        # Put the parameters of the platepar back, so a fit leaves the platepar as it was given whether it
+        #   succeeds or not (the caller applies the result of a successful fit)
+        platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref, platepar.F_scale = params_prev
 
 
 
@@ -483,7 +492,9 @@ def autoCheckFit(config, platepar, calstars_data, _nn_refinement=False):
 
     Return:
         (platepar, fit_status):
-            platepar: [Platepar structure] Estimated/refined platepar.
+            platepar: [Platepar structure] Estimated/refined platepar. If the fit was not successful, the
+                platepar of the last successful step (the NN alignment or a fit of the pointing), or the
+                given one if no step succeeded.
             fit_status: [bool] True if fit was successful, False if not.
     """
 
