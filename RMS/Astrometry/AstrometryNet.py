@@ -468,7 +468,7 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
                        fov_w_hint=None, max_stars=100, verbose=False, x_center=None, y_center=None,
                        lat=None, lon=None, jd=None, input_intensities=None, position_hint=None, stop_logodds=60.0):
     """ Find an astrometric solution of X, Y image coordinates of stars detected on an image using the
-        local installation of astrometry.net.
+        local installation of astrometry.net or a compatible remote service.
 
     Keyword arguments:
         ff_file_path: [str] Path to the FF file to load.
@@ -486,12 +486,14 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
         lon: [float] Station longitude in degrees. Required for iterative matching.
         jd: [float] Julian date. Required for iterative matching.
         input_intensities: [ndarray] Star intensities for brightness-based matching. Optional.
-        position_hint: [tuple] (ra, dec, radius) in degrees for the local solver, see astrometryNetSolveLocal.
+        position_hint: [tuple] (ra, dec, radius) in degrees: only search within the radius of the given
+            pointing, None by default (the whole sky).
         stop_logodds: [float] Log odds ratio at which the local solver stops, see astrometryNetSolveLocal.
     """
 
     # Helper to try coordinate-only first, then fall back to image if available
-    def _tryRemoteSolve(api_url, ff_path, image, x_coords, y_coords, fov_range, x_cen, y_cen):
+    def _tryRemoteSolve(api_url, ff_path, image, x_coords, y_coords, fov_range, x_cen, y_cen,
+                        position_hint):
         """Try coordinate-only solve first, fall back to image if that fails."""
 
         # If we have coordinates, try coordinate-only first (faster, less bandwidth)
@@ -501,7 +503,7 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
                 result = novaAstrometryNetSolve(
                     ff_file_path=None, img=None, x_data=x_coords, y_data=y_coords,
                     fov_w_range=fov_range, x_center=x_cen, y_center=y_cen,
-                    api_url=api_url
+                    api_url=api_url, position_hint=position_hint
                 )
                 if result is not None:
                     return result
@@ -515,7 +517,7 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
                 return novaAstrometryNetSolve(
                     ff_file_path=ff_path, img=image, x_data=None, y_data=None,
                     fov_w_range=fov_range, x_center=x_cen, y_center=y_cen,
-                    api_url=api_url
+                    api_url=api_url, position_hint=position_hint
                 )
             return None
 
@@ -523,7 +525,7 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
         return novaAstrometryNetSolve(
             ff_file_path=ff_path, img=image, x_data=x_coords, y_data=y_coords,
             fov_w_range=fov_range, x_center=x_cen, y_center=y_cen,
-            api_url=api_url
+            api_url=api_url, position_hint=position_hint
         )
 
     # If the local installation of astrometry.net is not available, use remote API
@@ -535,7 +537,7 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
         try:
             result = _tryRemoteSolve(
                 PRIMARY_API_URL, ff_file_path, img, x_data, y_data,
-                fov_w_range, x_center, y_center
+                fov_w_range, x_center, y_center, position_hint
             )
             if result is not None:
                 return result
@@ -546,7 +548,7 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
         print(f"Trying fallback server: {FALLBACK_API_URL}")
         return _tryRemoteSolve(
             FALLBACK_API_URL, ff_file_path, img, x_data, y_data,
-            fov_w_range, x_center, y_center
+            fov_w_range, x_center, y_center, position_hint
         )
 
     else:
@@ -572,7 +574,7 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
             try:
                 result = _tryRemoteSolve(
                     PRIMARY_API_URL, ff_file_path, img, x_data, y_data,
-                    fov_w_range, x_center, y_center
+                    fov_w_range, x_center, y_center, position_hint
                 )
                 if result is not None:
                     return result
@@ -583,7 +585,7 @@ def astrometryNetSolve(ff_file_path=None, img=None, mask=None, x_data=None, y_da
             print(f"Trying fallback server: {FALLBACK_API_URL}")
             return _tryRemoteSolve(
                 FALLBACK_API_URL, ff_file_path, img, x_data, y_data,
-                fov_w_range, x_center, y_center
+                fov_w_range, x_center, y_center, position_hint
             )
 
 
