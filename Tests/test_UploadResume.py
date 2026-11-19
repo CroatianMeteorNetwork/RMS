@@ -10,6 +10,7 @@ as a failed try of the upload manager.
 
 from __future__ import print_function, division, absolute_import
 
+import errno
 import hashlib
 import os
 import queue
@@ -207,13 +208,28 @@ def station(tmp_path, monkeypatch):
     server = LocalSFTPServer(str(remote_root))
 
     st = SimpleNamespace(local_dir=str(local_dir), remote_dir=str(remote_root/DIR_REMOTE), server=server,
-                         drop_after=None)
+                         drop_after=None, fsync_error=None)
 
     # Connect uploadSFTP to the local server
     def getSSHAndSFTP(hostname, **kwargs):
         """ Connect a new SFTP client to the local server, with the link drop set for this upload. """
         sftp = st.server.connect(drop_after=st.drop_after)
         st.drop_after = None
+
+        # Make the server reply to a sync with the given error
+        if st.fsync_error is not None:
+            fsync_error = st.fsync_error
+            request = sftp._request
+
+            def failingRequest(request_type, *args):
+                """ Raise the sync error instead of sending the sync request. """
+                if args and (args[0] == 'fsync@openssh.com'):
+                    raise fsync_error
+                return request(request_type, *args)
+
+            sftp._request = failingRequest
+            st.fsync_error = None
+
         return FakeSSH(), sftp
 
     monkeypatch.setattr(um, "getSSHAndSFTP", getSSHAndSFTP)
@@ -463,6 +479,57 @@ def test_server_without_extensions(station):
     assert resume_offset > 0
     assert remoteFiles(station) == [ARCHIVE_NAME]
     assert readFile(os.path.join(station.remote_dir, ARCHIVE_NAME)) == readFile(local_file)
+
+
+def test_failed_sync_keeps_partial_upload(station):
+    """ A sync which fails on the server (e.g. a disk error) keeps the partial upload for the next try instead
+        of renaming it. """
+
+    local_file = makeFile(os.path.join(station.local_dir, ARCHIVE_NAME), 6*MIB, seed=19)
+
+    station.fsync_error = IOError("Failure")
+    status, _ = upload(station)
+
+    assert not status
+    assert remoteFiles(station) == [os.path.basename(partPath(station, local_file))]
+
+    status, resume_offset = upload(station)
+
+    assert status
+    assert resume_offset == 6*MIB - um.UPLOAD_RESUME_BACK_OFF
+    assert remoteFiles(station) == [ARCHIVE_NAME]
+    assert readFile(os.path.join(station.remote_dir, ARCHIVE_NAME)) == readFile(local_file)
+
+
+@pytest.mark.parametrize("error, synced", [
+    (None, True),
+    (IOError("Operation unsupported"), False),
+    (IOError(errno.EACCES, "Permission denied"), False),
+])
+def test_sync_skipped_when_not_offered(error, synced):
+    """ A server without the sync extension, or one which refuses it, is skipped. """
+
+    def request(request_type, *args):
+        """ Reply to the sync request with the given error. """
+        if error is not None:
+            raise error
+
+    sftp = SimpleNamespace(_request=request)
+
+    assert um.syncRemoteFile(sftp, SimpleNamespace(handle=b'h')) == synced
+
+
+def test_failed_sync_raises():
+    """ Any other error of the sync is raised. """
+
+    def request(request_type, *args):
+        """ Reply to the sync request with a failure. """
+        raise IOError("Failure")
+
+    sftp = SimpleNamespace(_request=request)
+
+    with pytest.raises(IOError):
+        um.syncRemoteFile(sftp, SimpleNamespace(handle=b'h'))
 
 
 def test_empty_file(station):

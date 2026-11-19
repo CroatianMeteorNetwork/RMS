@@ -1,5 +1,6 @@
 """ Functions for uploading files to server via SFTP. """
 
+import errno
 import hashlib
 import logging
 import os
@@ -492,14 +493,16 @@ def confirmRemoteWrites(sftp, remote_handle):
 
 def syncRemoteFile(sftp, remote_handle):
     """ Ask the server to write a file to its disk (the fsync@openssh.com extension), so an upload which is
-        renamed afterwards survives a crash of the server. Servers without the extension are skipped.
+        renamed afterwards survives a crash of the server. Servers which do not offer the extension, or refuse
+        it, are skipped. A sync which fails on the server raises an IOError, so the upload is kept for the
+        next try instead of being renamed.
 
     Arguments:
         sftp: [paramiko.SFTPClient object] Connection handle.
         remote_handle: [paramiko.SFTPFile object] Open remote file.
 
     Return:
-        [bool] True if the server confirmed the sync, False otherwise.
+        [bool] True if the server confirmed the sync, False if it does not offer it.
     """
 
     # paramiko has no public call for this extension
@@ -507,8 +510,14 @@ def syncRemoteFile(sftp, remote_handle):
         sftp._request(CMD_EXTENDED, 'fsync@openssh.com', remote_handle.handle)
         return True
 
-    except Exception:
-        return False
+    except IOError as e:
+
+        # paramiko reports a refused request as EACCES, and an unknown one only by the text of the reply of
+        #   the server ("Operation unsupported"). Any other error is a failed sync (e.g. a disk error)
+        if (e.errno == errno.EACCES) or ('unsupported' in str(e).lower()):
+            return False
+
+        raise
 
 
 def writePartialUpload(sftp, local_file, remote_part_file, resume_offset, callback=None):
