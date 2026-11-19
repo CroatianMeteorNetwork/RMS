@@ -107,6 +107,18 @@ regex_for() {
 }
 
 # ------------------------------------------------------------
+#  kernel_flavour() - kernel release without its version and ABI parts,
+#  so kernel updates within one flavour compare equal:
+#    6.6.31+rpt-rpi-v8, 6.1.0-rpi7-rpi-v8 -> rpi-v8
+#    6.12.25+rpt-rpi-2712                 -> rpi-2712
+#    5.10.103-v7l+ -> v7l+,  5.10.103+ -> +
+#    6.1.0-18-amd64 -> amd64,  5.15.0-91-generic -> generic
+# ------------------------------------------------------------
+kernel_flavour() {
+    sed -E -e 's/^[0-9]+(\.[0-9]+)*//' -e 's/^(-[0-9]+|-rpi[0-9]+|\+rpt)//' -e 's/^-//' <<< "$1"
+}
+
+# ------------------------------------------------------------
 #  should_reboot() – check if system reboot is requested
 # ------------------------------------------------------------
 should_reboot() {
@@ -134,12 +146,13 @@ should_reboot() {
         # last, and without the flavour filter a Pi 5 running rpi-2712 would compare
         # itself against the rpi-v8 tree - both report a mismatch on every run.
         # modules.dep is written by depmod for every properly installed kernel.
-        flavour=""
-        [[ "$running" =~ ^[0-9][^-]*(-[0-9]+)?-(.+)$ ]] && flavour="${BASH_REMATCH[2]}"
+        # The flavour leaves out the Debian ABI part, so an update from 6.1.0-rpi7-rpi-v8
+        # to 6.1.0-rpi8-rpi-v8 or 6.6.20+rpt-rpi-v8 stays within the rpi-v8 flavour.
+        flavour="$(kernel_flavour "$running")"
         latest="$(for f in /lib/modules/[0-9]*/modules.dep; do
                       [[ -f "$f" ]] || continue
                       d="${f%/modules.dep}"; d="${d##*/}"
-                      [[ -z "$flavour" || "$d" == *"-$flavour" ]] || continue
+                      [[ "$(kernel_flavour "$d")" == "$flavour" ]] || continue
                       echo "$d"
                   done | sort -V | tail -1)"
         # Require the candidate to be strictly newer, so a purged running-kernel tree
