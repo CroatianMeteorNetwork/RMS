@@ -136,6 +136,57 @@ def warnOlderAstrometryModel(platepar, name):
     return True
 
 
+def coverageMatchFraction(n_matched, n_detected, catalog_stars, jd, platepar, n_detected_all=None):
+    """ Compute the fraction of the stars which could have been matched that actually were matched.
+
+        Stars can only be matched to catalog stars down to the limiting magnitude, so the number of possible
+        matches is the smaller of the number of detected stars and the number of catalog stars which project
+        inside the image. Dividing by the number of detections alone would reject every fit of a camera which
+        detects stars fainter than the catalog limit. When only a random sample of the detected stars is used
+        for the fit, on average only the same share of the catalog stars has its detection in the sample. The
+        number of possible matches is then an expected number, so the fraction can be slightly above 1.
+
+    Arguments:
+        n_matched: [int] Number of matched stars.
+        n_detected: [int] Number of detected stars used for matching.
+        catalog_stars: [ndarray] Catalog stars (ra, dec, mag, ...), already limited to the limiting magnitude
+            used for matching.
+        jd: [float] Julian date of the image.
+        platepar: [Platepar instance] Platepar used to project the catalog stars.
+
+    Keyword arguments:
+        n_detected_all: [int] Number of detected stars on the image, if only a sample of n_detected of them
+            was used for matching. None by default, which means that all detected stars were used.
+
+    Return:
+        (match_fraction, n_possible): [tuple]
+            - match_fraction: [float] Fraction of the possible matches which were matched.
+            - n_possible: [float] Number of possible matches (the denominator of the fraction).
+    """
+
+    # Count the catalog stars which project inside the image at the time of the image
+    n_catalog_in_image = 0
+    if len(catalog_stars):
+        cat_x, cat_y = raDecToXYPP(catalog_stars[:, 0], catalog_stars[:, 1], jd, platepar)
+        n_catalog_in_image = int(np.count_nonzero((cat_x >= 0) & (cat_x < platepar.X_res)
+                                                  & (cat_y >= 0) & (cat_y < platepar.Y_res)))
+
+    # The share of the detected stars which were used for matching
+    sample_share = 1.0
+    if (n_detected_all is not None) and (n_detected_all > 0):
+        sample_share = min(1.0, n_detected/float(n_detected_all))
+
+    # The number of possible matches is limited both by the detections and by the catalog stars whose
+    #   detections were used
+    n_possible = min(float(n_detected), sample_share*n_catalog_in_image)
+
+    # Nothing could have been matched
+    if n_possible <= 0:
+        return 0.0, n_possible
+
+    return n_matched/n_possible, n_possible
+
+
 def refinePointingLSQ(config, platepar, jd, star_dict_ff, catalog_stars, fit_radius, check_radius, n_check,
                       lim_mag=None):
     """ Refine the pointing (reference RA, Dec, position angle and scale) of a recalibrated platepar by least
@@ -313,13 +364,14 @@ def recalibrateFF(
             hardcoded values.
         force_platepar_save: [bool] Skip the goodness of fit check and save the platepar. Note that
             the star coverage gate (min_match_fraction) still applies, so a fit that matched only a
-            small fraction of the detected stars is rejected even when this is True.
+            small fraction of the possible star matches is rejected even when this is True.
         ignore_distance_threshold: [bool] Don't consider the recalib as failed if the median distance
             is larger than the threshold.
         ignore_max_stars: [bool] Ignore the maximum number of image stars for recalibration.
-        min_match_fraction: [float] Minimum fraction of the detected stars that the fit must match
-            to be accepted. None by default, which uses config.recalibration_min_match_fraction.
-            Set to 0 to disable the coverage gate (e.g. for interactive use).
+        min_match_fraction: [float] Minimum fraction of the possible star matches (see
+            coverageMatchFraction) that the fit must match to be accepted. None by default, which uses
+            config.recalibration_min_match_fraction. Set to 0 to disable the coverage gate (e.g. for
+            interactive use).
 
     Return:
         result: [?] A Platepar instance if refinement is successful, None if it failed.
@@ -336,6 +388,9 @@ def recalibrateFF(
     # Resolve the coverage gate threshold from the config unless explicitly given
     if min_match_fraction is None:
         min_match_fraction = config.recalibration_min_match_fraction
+
+    # The number of detected stars on the image, before any sampling, for the coverage gate
+    n_detected_all = len(star_dict_ff[jd])
 
     # If there more stars than a set limit, sample them randomly using the same seed for reproducibility
     if not ignore_max_stars and len(star_dict_ff[jd]) > config.recalibration_max_stars:
@@ -612,14 +667,18 @@ def recalibrateFF(
         # fraction rejects those fits (the frame keeps the previous good platepar) while accepting
         # genuine fits - including after a real camera move, which re-matches the whole field at
         # the new pointing.
+        # The fraction is taken of the possible matches, not of all detected stars: only the stars down
+        #   to the catalog limit can be matched, so a camera which detects fainter stars would otherwise
+        #   have every fit rejected
         n_detected = len(star_dict_ff[jd])
-        match_fraction = len(image_stars)/n_detected if n_detected > 0 else 0.0
+        match_fraction, n_possible = coverageMatchFraction(len(image_stars), n_detected, catalog_stars, jd,
+                                                           working_platepar, n_detected_all=n_detected_all)
 
         if match_fraction < min_match_fraction:
-            log.info('Rejecting refined platepar, only {:d}/{:d} = {:.2f} of detected stars '
-                     'matched within {:.2f} px (< {:.2f})'.format(len(image_stars), n_detected,
-                                                                  match_fraction, min_match_radius,
-                                                                  min_match_fraction))
+            log.info('Rejecting refined platepar, only {:d}/{:.1f} = {:.2f} of the possible star matches '
+                     '({:d} detected stars used) matched within {:.2f} px (< {:.2f})'.format(
+                         len(image_stars), n_possible, match_fraction, n_detected, min_match_radius,
+                         min_match_fraction))
             return None, min_match_radius
 
         ### PHOTOMETRY FIT ###
