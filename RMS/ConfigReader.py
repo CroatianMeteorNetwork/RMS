@@ -804,10 +804,8 @@ def parse(path, strict=True):
 
     """
 
-    # Buffer any warnings raised while parsing (clamped FPS, bad binning, upload disabled on the
-    # default station code, ...) so initLogging can replay them into the night log. Config parsing
-    # runs before logging is initialized in every entry point, and every config load funnels
-    # through here. Idempotent and a no-op once logging is up (see installEarlyLogBuffer).
+    # Keep the warnings of the config parser until logging is initialized, so they also get into the night
+    #   log (see installEarlyLogBuffer)
     installEarlyLogBuffer()
 
     delimiter = ";"

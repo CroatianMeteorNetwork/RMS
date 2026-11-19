@@ -149,15 +149,18 @@ class InRmsFilter(logging.Filter):
 
 
 class EarlyRecordBuffer(logging.Handler):
-    """
-    Keep log records emitted before initLogging so they can be replayed into the night log.
-
-    Every entry point loads the config before it initializes logging, so warnings raised while
-    parsing (clamped FPS, bad binning factor, upload disabled on the default station code) would
-    otherwise only ever reach the console and never the uploaded night log.
+    """ Keep the log records emitted before logging is initialized, so initLogging can write them into the
+        night log. Every entry point parses the config before it initializes logging, so the warnings of the
+        config parser (e.g. a limited FPS, a bad binning factor, the upload disabled on the default station
+        code) would otherwise only be printed on the console and never reach the uploaded night log.
     """
 
     def __init__(self, capacity=200):
+        """
+        Keyword arguments:
+            capacity: [int] Maximum number of records kept, later ones are only counted. 200 by default.
+        """
+
         logging.Handler.__init__(self)
 
         self.capacity = capacity
@@ -166,8 +169,13 @@ class EarlyRecordBuffer(logging.Handler):
 
 
     def emit(self, record):
+        """ Keep the record, or count it as dropped if the buffer is full.
 
-        # A full buffer just stops collecting - a handler must never raise
+        Arguments:
+            record: [logging.LogRecord] The record to keep.
+        """
+
+        # A full buffer stops keeping records, a handler must never raise
         if len(self.records) < self.capacity:
             self.records.append(record)
 
@@ -176,51 +184,51 @@ class EarlyRecordBuffer(logging.Handler):
 
 
 class _SuppressReplayedOnConsole(logging.Filter):
-    """
-    Drop records replayed from the early buffer so the console does not show a config warning
-    twice. Such a record was already printed to stderr by _default_handler before logging was
-    initialized; the replay exists only to get it into the night-log FILE. Applied to the console
-    handler only - the file handler still receives the replayed record.
+    """ Skip the records replayed from the early buffer on the console. They were already printed there before
+        logging was initialized, and are replayed only to get them into the night log file.
     """
 
     def filter(self, record):
+        """ Return False for a record replayed from the early buffer.
+
+        Arguments:
+            record: [logging.LogRecord] The record to check.
+
+        Return:
+            [bool] True if the record is shown on the console.
+        """
+
         return not getattr(record, "replayed_from_early_buffer", False)
 
 
 def installEarlyLogBuffer(level=logging.WARNING):
-    """
-    Attach a record buffer to the root logger so records emitted before initLogging can be
-    replayed into the night log. Meant to be called at the start of config parsing (see
-    ConfigReader.parse) - the one path every entry point hits before it initializes logging.
+    """ Attach a buffer to the root logger which keeps the records emitted before logging is initialized (see
+        EarlyRecordBuffer). It is called at the start of config parsing (ConfigReader.parse), which every entry
+        point runs before it initializes logging. A second call returns the same buffer. Once logging is
+        initialized (a queue handler is on the root logger), nothing is installed, as the records already reach
+        the night log and the buffer would never be emptied.
 
-    Idempotent and self-managing:
-      - a second call while still pre-init returns the existing buffer,
-      - once real logging is up (a QueueHandler on the root logger, installed by initLogging or
-        initChildProcess) it is a no-op, since records already reach the night log directly and a
-        buffer installed now would never be drained.
-
-    The console side is already covered by _default_handler, installed on the root logger when
-    this module is imported. Only warnings and above are kept by default, so the buffer cannot
-    fill up with third-party chatter before the interesting records arrive.
+    Keyword arguments:
+        level: [int] Lowest level of the records kept. logging.WARNING by default, so the buffer is not filled
+            with the messages of other libraries.
 
     Return:
-        [EarlyRecordBuffer or None] The buffer on the root logger, or None if real logging is
-            already initialized.
+        [EarlyRecordBuffer or None] The buffer on the root logger, None if logging is already initialized.
     """
 
     root = logging.getLogger()
 
-    # Real logging already up: records reach the night log directly, so a buffer installed now
-    # would only accumulate undrained. No-op.
+    # Logging is already initialized, the records reach the night log directly
     for handler in root.handlers:
         if isinstance(handler, logging.handlers.QueueHandler):
             return None
 
-    # Pre-init: reuse a buffer if one is already attached
+    # Reuse the buffer installed by an earlier call
     for handler in root.handlers:
         if isinstance(handler, EarlyRecordBuffer):
             return handler
 
+    # Attach a new buffer
     buffer_handler = EarlyRecordBuffer()
     buffer_handler.setLevel(level)
     root.addHandler(buffer_handler)
@@ -229,11 +237,12 @@ def installEarlyLogBuffer(level=logging.WARNING):
 
 
 def _drainEarlyLogBuffer():
-    """
-    Take the records off any early buffer on the root logger.
+    """ Take the records off the early buffers on the root logger and empty them.
 
     Return:
-        [tuple] (records, dropped) - the buffered records and the number that did not fit.
+        (records, dropped): [tuple]
+            - records: [list] The kept records, oldest first.
+            - dropped: [int] The number of records which did not fit into the buffer.
     """
 
     root = logging.getLogger()
@@ -241,6 +250,7 @@ def _drainEarlyLogBuffer():
     records = []
     dropped = 0
 
+    # Collect and empty every early buffer
     for handler in root.handlers:
         if isinstance(handler, EarlyRecordBuffer):
             records.extend(handler.records)
@@ -591,9 +601,8 @@ class LoggingManager:
             if self.is_initialized:
                 return
 
-            # Take anything logged before this point off the early buffer, so it can be replayed
-            # into the night log once the queue handler is up. Config parsing happens before
-            # initLogging in every entry point, so this is where its warnings come from.
+            # Take the records logged before logging was initialized (e.g. the config warnings) off the early
+            #   buffer, they are written into the night log below
             early_records, early_dropped = _drainEarlyLogBuffer()
 
             # Remove any default handlers from the root logger
@@ -615,16 +624,14 @@ class LoggingManager:
             main_logger.setLevel(min(console_level, file_level)) # Keep root logger permissive
             main_logger.propagate = False
 
-            # Replay the pre-init records into the night log. handle() skips the logger level
-            # check but still runs the handler filters, so InRmsFilter drops non-RMS records as
-            # usual, and each record keeps its original timestamp. Mark them so the listener's
-            # console handler can skip them: _default_handler already printed them to stderr
-            # before logging came up, so replaying to the console too would double them - the
-            # replay exists only to get them into the night-log file.
+            # Write the early records into the night log. handle() keeps the original time of each record and
+            #   still applies the handler filters. The records are marked so the console skips them, as they
+            #   were already printed there
             for record in early_records:
                 record.replayed_from_early_buffer = True
                 main_logger.handle(record)
 
+            # Report the early records which did not fit into the buffer
             if early_dropped:
                 main_logger.warning(
                     "{:d} log record(s) emitted before logging was initialized were dropped".format(
@@ -960,8 +967,8 @@ def _listener_configurer(config, log_file_prefix, safedir, console_level=logging
     handler.addFilter(InRmsFilter(config))
     console.addFilter(InRmsFilter(config))
 
-    # Config warnings replayed from the early buffer were already shown on the console before
-    # logging was initialized; keep them in the file but skip them on the console (no double print)
+    # The records replayed from the early buffer were already printed on the console, write them only into
+    #   the file
     console.addFilter(_SuppressReplayedOnConsole())
 
     # Set common formatter for both handlers
