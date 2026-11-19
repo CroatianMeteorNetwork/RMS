@@ -329,6 +329,7 @@ def fileFingerprint(file_path):
         [str] The first 16 hex digits of the SHA-256 hash of the file.
     """
 
+    # Identify the version of the file by its path, size and modification time
     file_stat = os.stat(file_path)
     cache_key = (os.path.abspath(file_path), file_stat.st_size, file_stat.st_mtime_ns)
 
@@ -417,6 +418,7 @@ def findPartialUpload(sftp, local_file, dir_remote):
             - resume_offset: [int] Byte from which the upload resumes, 0 if it starts from the beginning.
     """
 
+    # Name of the partial upload of this version of the file
     file_name = os.path.basename(local_file)
     local_file_size = os.path.getsize(local_file)
     part_name = partialUploadName(file_name, local_file)

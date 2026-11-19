@@ -73,6 +73,7 @@ class SocketChannel(object):
         self.bytes_sent = 0
 
     def send(self, data):
+        """ Send bytes to the server, or drop the link once drop_after bytes have been sent. """
 
         # Simulate a dropped link, the server keeps what it received before
         if (self.drop_after is not None) and (self.bytes_sent + len(data) > self.drop_after):
@@ -85,16 +86,20 @@ class SocketChannel(object):
         return n
 
     def recv(self, n):
+        """ Receive up to n bytes from the server. """
         return self.sock.recv(n)
 
     def get_name(self):
+        """ Name of the channel in paramiko's log. """
         return "local sftp-server"
 
     def recv_ready(self):
+        """ Check if the server has sent a reply which was not read yet. """
         ready, _, _ = select.select([self.sock], [], [], 0)
         return bool(ready)
 
     def close(self):
+        """ Close the client end of the connection. """
         self.sock.close()
 
 
@@ -151,6 +156,7 @@ class FakeSSH(object):
     """ The SSH client returned next to the SFTP client, only closed by uploadSFTP. """
 
     def close(self):
+        """ Nothing to close. """
         pass
 
 
@@ -179,6 +185,7 @@ def makeFile(path, size, seed):
 
 
 def readFile(path):
+    """ Read the bytes of a file. """
     with open(path, 'rb') as f:
         return f.read()
 
@@ -204,6 +211,7 @@ def station(tmp_path, monkeypatch):
 
     # Connect uploadSFTP to the local server
     def getSSHAndSFTP(hostname, **kwargs):
+        """ Connect a new SFTP client to the local server, with the link drop set for this upload. """
         sftp = st.server.connect(drop_after=st.drop_after)
         st.drop_after = None
         return FakeSSH(), sftp
@@ -233,10 +241,12 @@ def upload(st, file_name=ARCHIVE_NAME):
 
 
 def remoteFiles(st):
+    """ Sorted names of the files in the remote directory of the station. """
     return sorted(os.listdir(st.remote_dir))
 
 
 def partPath(st, local_file):
+    """ Path in the remote directory of the partial upload of a local file. """
     return os.path.join(st.remote_dir, um.partialUploadName(os.path.basename(local_file), local_file))
 
 
@@ -510,6 +520,7 @@ def runUploadData(tmp_path, monkeypatch, attempts, retries):
     delays = []
 
     def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, resume_offsets=None, **kwargs):
+        """ Return the scripted result of the next upload attempt. """
         status, resume_offset = attempts[len(calls)]
         calls.append(file_list[0])
         resume_offsets[file_list[0]] = resume_offset
