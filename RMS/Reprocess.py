@@ -243,9 +243,8 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                 from RMS.Astrometry.NightCalibration import endOfNightCalibration
                 platepar, platepar_path, platepar_fmt = endOfNightCalibration(config, night_data_dir, calstars_name,
                                                                               platepar, platepar_path, platepar_fmt)
-            except Exception as e:
-                log.warning("The automatic calibration at the end of the night failed: {:s}".format(repr(e)))
-                log.warning(repr(traceback.format_exception(*sys.exc_info())))
+            except Exception:
+                log.warning("The automatic calibration at the end of the night failed", exc_info=True)
 
 
         # Run calibration check and auto astrometry refinement
