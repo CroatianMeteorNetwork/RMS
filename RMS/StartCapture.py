@@ -458,7 +458,25 @@ def wait(duration, compressor, buffered_capture, video_file, daytime_mode=None, 
                 exit_was_set = False
 
             if not exit_was_set:
-                log.warning('WATCHDOG: BufferedCapture process died unexpectedly! Signaling for restart...')
+
+                # Report how it died. A negative exit code is minus the signal that killed it: -11
+                # SIGSEGV and -6 SIGABRT are crashes in native code, -9 SIGKILL is an outside kill
+                # (most likely the OOM killer). A positive code means run() returned without the exit
+                # flag set.
+                try:
+                    code = buffered_capture.exitcode
+                except Exception:
+                    code = None
+
+                if code is not None and code < 0:
+                    cause = 'killed by signal {:d}{:s}'.format(
+                        -code, {11: ' (SIGSEGV)', 6: ' (SIGABRT)', 9: ' (SIGKILL)',
+                                15: ' (SIGTERM)'}.get(-code, ''))
+                else:
+                    cause = 'exit code {}'.format(code)
+
+                log.warning('WATCHDOG: BufferedCapture process died unexpectedly (%s)! '
+                            'Signaling for restart...', cause)
                 return "capture_died"
             else:
                 log.debug('WATCHDOG: BufferedCapture process exited intentionally (exit flag was set)')
