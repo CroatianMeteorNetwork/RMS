@@ -128,8 +128,10 @@ def test_queuedpool_worker_reattaches_logging():
     multiprocessing.set_start_method('spawn', force=True)
 
     pool = QueuedPool(_logcheck_worker, cores=1, backup_dir=None, print_state=False)
-    # Simulate an initialized logging queue (getLoggingQueue() is None without initLogging)
-    pool.logging_queue = multiprocessing.Queue()
+    # Simulate an initialized logging queue (getLoggingQueue() is None without initLogging), of the type
+    #   initLogging makes, which is pickled with its abandoned flag
+    from RMS.Logger import _LoggingQueue
+    pool.logging_queue = _LoggingQueue(0, ctx=multiprocessing.get_context())
     try:
         pool.addJob([1])
         pool.startPool()
