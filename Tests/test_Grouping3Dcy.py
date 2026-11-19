@@ -31,10 +31,137 @@ def _thresholdCount(max_value, average, stddev, k1, j1):
         (255, 250, 10, 1.0, 0.0, 1),
         # Reject a pixel below the threshold: avg_std = 10, max_value = 5.
         (5, 10, 1, 0.6, 0.0, 0),
+        # A negative j1 gives a negative threshold, which must clamp to 0 (accept) instead of wrapping to a
+        # huge unsigned value that then clamps to 255 (reject).
+        (5, 10, 1, 0.6, -20.0, 1),
     ],
 )
 def testThresholdAndSubsampleThresholdConversion(max_value, average, stddev, k1, j1, expected):
     assert _thresholdCount(max_value, average, stddev, k1, j1) == expected
+
+
+def testThresholdAndSubsampleSkipsPartialEdgeBlocks():
+    """ Pixels in the partial edge block (image size not a multiple of f) must not be counted.
+
+    With 1080 rows and f = 16 there are 67 full block rows, so rows 1072-1079 would map to block row 67,
+    which is outside the count array and used to alias into the next frame (or past the buffer).
+    """
+
+    n_frames, height, width, f = 8, 1080, 1920, 16
+
+    # Empty frames, with a standard deviation of 1 everywhere
+    frames = np.zeros((n_frames, height, width), dtype=np.uint8)
+    compressed = np.zeros((4, height, width), dtype=np.uint8)
+    compressed[3] = 1
+
+    # Bright pixels only in the last 8 rows (the partial block row), on frame 5
+    compressed[0, 1072:1080, 0:64] = 200
+    compressed[1, 1072:1080, 0:64] = 5
+
+    # Nothing is found in the partial block row
+    num, pointsx, pointsy, pointsz = thresholdAndSubsample(
+        frames, compressed, min_level=40, min_points=8, k1=1.5, j1=9.0, f=f
+    )
+
+    assert num == 0
+    assert len(pointsy) == 0
+
+    # The same bright block moved into the last full block row must still be detected
+    compressed[0] = 0
+    compressed[1] = 0
+    compressed[0, 1056:1072, 0:64] = 200
+    compressed[1, 1056:1072, 0:64] = 5
+
+    # One point per block in the last full block row, on frame 5
+    num, pointsx, pointsy, pointsz = thresholdAndSubsample(
+        frames, compressed, min_level=40, min_points=8, k1=1.5, j1=9.0, f=f
+    )
+
+    assert num == 4
+    assert np.all(pointsy == height//f - 1)
+    assert np.all(pointsz == 5)
+
+
+def testThresholdAndSubsampleSkipsPartialEdgeColumns():
+    """ Pixels in a partial edge block column must not be counted either. """
+
+    n_frames, height, width, f = 4, 64, 72, 16
+
+    # Empty frames, with a standard deviation of 1 everywhere
+    frames = np.zeros((n_frames, height, width), dtype=np.uint8)
+    compressed = np.zeros((4, height, width), dtype=np.uint8)
+    compressed[3] = 1
+
+    # Bright pixels only in the last 8 columns (the partial block column), on frame 1
+    compressed[0, 0:16, 64:72] = 200
+    compressed[1, 0:16, 64:72] = 1
+
+    # Nothing is found in the partial block column
+    num, pointsx, pointsy, pointsz = thresholdAndSubsample(
+        frames, compressed, min_level=40, min_points=8, k1=1.5, j1=9.0, f=f
+    )
+
+    assert num == 0
+
+
+@pytest.mark.parametrize("contiguous", [True, False])
+def testThresholdAndSubsamplePaddedFrameBuffer(contiguous):
+    """ A frame buffer padded by a row and a column must give the same points as an unpadded one.
+
+    At 1280x720 the capture buffer is padded to 721x1281 (RMS.Misc.frameBufferShape), while the compressed
+    frames are cropped to 720x1280. Under the forkserver/spawn start methods the extractor gets the compressed
+    frames as a contiguous copy, and sizing the loops from the padded buffer made them read the wrong pixels
+    (column 1280 of a row is the first pixel of the next row) and past the end of the array. Under fork the
+    compressed frames are a view into the padded array; its padding is filled with bright pixels here, so
+    reading it would also show up as extra points.
+    """
+
+    from types import SimpleNamespace
+
+    from RMS.Misc import frameBufferShape
+
+    n_frames, height, width, f = 8, 720, 1280, 16
+
+    # The padded size of the 720p capture buffer
+    _, buffer_height, buffer_width = frameBufferShape(SimpleNamespace(width=width, height=height))
+    assert (buffer_height, buffer_width) == (height + 1, width + 1)
+
+    # A short bright streak in the first column, on frame 3. It fills the first block, and reading column
+    #   1280 of a contiguous copy would see it again as the first pixel of the next row
+    compressed_padded = np.zeros((4, buffer_height, buffer_width), dtype=np.uint8)
+    compressed_padded[3] = 1
+    compressed_padded[0, 1:17, 0] = 200
+    compressed_padded[1, 1:17, 0] = 3
+
+    # Fill the padding row and column with bright pixels on the same frame, which must never be read
+    compressed_padded[0, height, :] = 255
+    compressed_padded[0, :, width] = 255
+    compressed_padded[1, height, :] = 3
+    compressed_padded[1, :, width] = 3
+
+    # The compressed frames cropped to the image size, as a view (fork) or as a contiguous copy
+    #   (forkserver/spawn)
+    compressed = compressed_padded[:, :height, :width]
+    if contiguous:
+        compressed = np.ascontiguousarray(compressed)
+
+    # Reference points from an unpadded frame buffer
+    reference = thresholdAndSubsample(
+        np.zeros((n_frames, height, width), dtype=np.uint8), np.ascontiguousarray(compressed),
+        min_level=40, min_points=8, k1=1.5, j1=9.0, f=f
+    )
+
+    # Points from the padded frame buffer
+    padded = thresholdAndSubsample(
+        np.zeros((n_frames, buffer_height, buffer_width), dtype=np.uint8), compressed,
+        min_level=40, min_points=8, k1=1.5, j1=9.0, f=f
+    )
+
+    # Only the streak's block is found, with or without the padding
+    assert reference[0] == 1
+    assert padded[0] == reference[0]
+    for padded_coords, reference_coords in zip(padded[1:], reference[1:]):
+        assert np.array_equal(padded_coords, reference_coords)
 
 
 
