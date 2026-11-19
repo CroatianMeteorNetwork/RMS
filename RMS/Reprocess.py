@@ -48,7 +48,8 @@ from RMS.Formats.ObservationSummary import serialize, finalizeObservationSummary
 from RMS.Formats.ObservationSummary import OBSERVATION_SUMMARY_NAME_JSON, \
     OBSERVATION_SUMMARY_WORKING_NAME_JSON
 from Utils.AuditConfig import compareConfigs
-from RMS.Misc import RmsDateTime, tarWithProgress, getRMSStyleFileName, setMultiprocessingStartMethod
+from RMS.Misc import RmsDateTime, tarWithProgress, getRMSStyleFileName, setMultiprocessingStartMethod, \
+    disableGitPrompts
 from RMS.RunExternalScript import runExternalScript
 
 # Get the logger from the main module
@@ -235,6 +236,18 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
 
         # Get the platepar file
         platepar, platepar_path, platepar_fmt = getPlatepar(config, night_data_dir)
+
+        # Automatic calibration: the joint fit of the lens distortion on the whole night (see
+        #   RMS.Astrometry.NightCalibration), so the night is reduced with the best platepar. It never stops the
+        #   processing of the night
+        if config.auto_calibration and (calstars_name is not None):
+            try:
+                from RMS.Astrometry.NightCalibration import endOfNightCalibration
+                platepar, platepar_path, platepar_fmt = endOfNightCalibration(config, night_data_dir, calstars_name,
+                                                                              platepar, platepar_path, platepar_fmt)
+            except Exception as e:
+                log.warning("The automatic calibration at the end of the night failed: {:s}".format(repr(e)))
+                log.warning(repr(traceback.format_exception(*sys.exc_info())))
 
 
         # Run calibration check and auto astrometry refinement
@@ -691,6 +704,15 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
     updateProcessingStatus(config, night_data_dir, archiving='completed',
         completed_utc=RmsDateTime.utcnow().strftime("%Y-%m-%d %H:%M:%S"))
 
+    # Automatic calibration: the periodic refit of the lens distortion on the recent archived nights (see
+    #   RMS.Astrometry.NightCalibration.periodicRefit). It never stops the processing of the night
+    if config.auto_calibration:
+        try:
+            from RMS.Astrometry.NightCalibration import periodicRefit
+            periodicRefit(config)
+        except Exception as e:
+            log.warning("The periodic refit of the automatic calibration failed: {:s}".format(repr(e)))
+
 
     return night_archive_dir, archive_name, imgdata_archive_name, metadata_archive_name, detector
 
@@ -998,6 +1020,10 @@ if __name__ == "__main__":
     # (3.6-3.14). Must be done before any Process/Pool is created. Keeps the platform
     # default where it is safe: fork on Linux through 3.13.
     setMultiprocessingStartMethod()
+
+    # Make sure that no git invocation from this process, or from any of its children, can ever
+    # stop and ask for credentials on the terminal and block the whole processing chain
+    disableGitPrompts()
 
     ### COMMAND LINE ARGUMENTS
 

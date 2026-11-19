@@ -2235,18 +2235,17 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
     sigRefractionToggled = QtCore.pyqtSignal()
     sigEqAspectToggled = QtCore.pyqtSignal()
     sigAsymmetryCorrToggled = QtCore.pyqtSignal()
+    sigDecenteringCorrToggled = QtCore.pyqtSignal()
     sigForceDistortionToggled = QtCore.pyqtSignal()
+    sigExactReverseToggled = QtCore.pyqtSignal()
     sigOnVignettingFixedToggled = QtCore.pyqtSignal()
     sigFitOnlyPointingToggled = QtCore.pyqtSignal()
     sigRestoreDefaultsPressed = QtCore.pyqtSignal()
 
-    # Default settings for SkyFit2 Fit Parameters tab
+    # Default settings for SkyFit2 Fit Parameters tab (the default model of the distortion comes from the config
+    #   file, see defaultModel)
     DEFAULT_FIXED_SCALE = False
     DEFAULT_REFRACTION = True
-    DEFAULT_EQUAL_ASPECT = True
-    DEFAULT_ASYMMETRY_CORR = True
-    DEFAULT_FORCE_DISTORTION_CENTRE = False
-    DEFAULT_DISTORTION_TYPE = "radial7-odd"
     DEFAULT_EXTINCTION_SCALE = 0.6
     DEFAULT_VIGNETTING_FIXED = True
 
@@ -2386,6 +2385,13 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         if not self.gui.platepar.distortion_type.startswith('radial'):
             self.asymmetryCorr.hide()
 
+        # Decentering of the radial distortion (a lens element off the optical axis, Brown-Conrady)
+        self.decenteringCorr = QtWidgets.QCheckBox('Decentering Correction')
+        self.decenteringCorr.released.connect(self.onDecenteringCorrToggled)
+        full_layout.addWidget(self.decenteringCorr)
+        if not self.gui.platepar.distortion_type.startswith('radial'):
+            self.decenteringCorr.hide()
+
         self.fdistortion = QtWidgets.QCheckBox('Force Distortion Centre')
         self.fdistortion.released.connect(self.onForceDistortionToggled)
         full_layout.addWidget(self.fdistortion)
@@ -2487,6 +2493,17 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.distortion_type.addItems(self.gui.platepar.distortion_type_list)
         self.distortion_type.currentIndexChanged.connect(self.onIndexChanged)
         form.addRow(QtWidgets.QLabel('Distortion'), self.distortion_type)
+
+        # Sky to image as the exact inverse of the forward distortion, for every distortion type. The reverse
+        #   coefficients are then not used, and not shown
+        self.exactReverse = QtWidgets.QCheckBox('Exact Inverse')
+        self.exactReverse.setToolTip(
+            "Take the sky to the image as the exact inverse of the forward distortion (x_fwd, y_fwd)\n"
+            "instead of through the separately fitted reverse distortion (x_rev, y_rev),\n"
+            "which is then not used. Saved with the platepar.")
+        self.exactReverse.setChecked(getattr(self.gui.platepar, 'exact_reverse', False))
+        self.exactReverse.released.connect(self.onExactReverseToggled)
+        form.addRow(self.exactReverse)
 
 
         # Distortion buttons row - use widget container to prevent clipping
@@ -2729,6 +2746,21 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         # Emit signal to trigger display updates (connected to onFitParametersChanged)
         self.sigEqAspectToggled.emit()
 
+    def onDecenteringCorrToggled(self):
+        new_value = self.decenteringCorr.isChecked()
+        # Remap coefficients with stash to preserve/restore values when toggling
+        self._remapCoeffsWithStash('decentering_corr', new_value)
+
+        # Update GUI to reflect new poly_length and coefficient values
+        self.fit_parameters.changeNumberShown(self.gui.platepar.poly_length)
+        self.fit_parameters.updateValues()
+
+        # Update restore defaults button state
+        self.updateRestoreDefaultsButton()
+
+        # Emit signal to trigger display updates (connected to onFitParametersChanged)
+        self.sigDecenteringCorrToggled.emit()
+
     def onAsymmetryCorrToggled(self):
         new_value = self.asymmetryCorr.isChecked()
         # Remap coefficients with stash to preserve/restore values when toggling
@@ -2758,6 +2790,17 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
 
         # Emit signal to trigger display updates (connected to onFitParametersChanged)
         self.sigForceDistortionToggled.emit()
+
+    def onExactReverseToggled(self):
+        """ Take the sky to the image as the exact inverse of the forward distortion, or through the reverse
+            one, and show the reverse coefficients only when they are used.
+        """
+
+        self.gui.platepar.exact_reverse = self.exactReverse.isChecked()
+        self.fit_parameters.showReverse(not self.gui.platepar.exact_reverse)
+
+        # Emit signal to trigger display updates (connected to onFitParametersChanged)
+        self.sigExactReverseToggled.emit()
 
     # def onLatChanged(self):
     #     self.gui.platepar.lat = self.lat.value()
@@ -2914,10 +2957,12 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         if self.gui.platepar.distortion_type.startswith('radial'):
             self.eqAspect.show()
             self.asymmetryCorr.show()
+            self.decenteringCorr.show()
             self.fdistortion.show()
         else:
             self.eqAspect.hide()
             self.asymmetryCorr.hide()
+            self.decenteringCorr.hide()
             self.fdistortion.hide()
 
         # Update restore defaults button state
@@ -2950,31 +2995,49 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.fit_only_pointing.setChecked(self.gui.fit_only_pointing)
         self.eqAspect.setChecked(self.gui.platepar.equal_aspect)
         self.asymmetryCorr.setChecked(self.gui.platepar.asymmetry_corr)
+        self.decenteringCorr.setChecked(getattr(self.gui.platepar, 'decentering_corr', False))
         self.fdistortion.setChecked(self.gui.platepar.force_distortion_centre)
+        self.exactReverse.setChecked(getattr(self.gui.platepar, 'exact_reverse', False))
 
         if self.gui.platepar.distortion_type.startswith('radial'):
             self.eqAspect.show()
             self.asymmetryCorr.show()
+            self.decenteringCorr.show()
             self.fdistortion.show()
         else:
             self.eqAspect.hide()
             self.asymmetryCorr.hide()
+            self.decenteringCorr.hide()
             self.fdistortion.hide()
 
         # Update restore defaults button state
         self.updateRestoreDefaultsButton()
 
+    def defaultModel(self):
+        """ The default model of the distortion: the one of the config file (platepar_distortion_type and the flags
+            after it), see AutoPlatepar.plateparModel.
+
+        Return:
+            [dict] The settings by the name of their platepar attribute.
+        """
+
+        from RMS.Astrometry.AutoPlatepar import plateparModel
+
+        return plateparModel(getattr(self.gui, 'config', None))
+
     def isAtDefaults(self):
         """Check if current settings match the defaults."""
         pp = self.gui.platepar
         gui = self.gui
+        model = self.defaultModel()
         return (gui.fixed_scale == self.DEFAULT_FIXED_SCALE and
                 gui.fit_only_pointing == False and
                 pp.refraction == self.DEFAULT_REFRACTION and
-                pp.equal_aspect == self.DEFAULT_EQUAL_ASPECT and
-                pp.asymmetry_corr == self.DEFAULT_ASYMMETRY_CORR and
-                pp.force_distortion_centre == self.DEFAULT_FORCE_DISTORTION_CENTRE and
-                pp.distortion_type == self.DEFAULT_DISTORTION_TYPE and
+                pp.equal_aspect == model['equal_aspect'] and
+                pp.asymmetry_corr == model['asymmetry_corr'] and
+                getattr(pp, 'decentering_corr', False) == model['decentering_corr'] and
+                pp.force_distortion_centre == model['force_distortion_centre'] and
+                pp.distortion_type == model['distortion_type'] and
                 pp.extinction_scale == self.DEFAULT_EXTINCTION_SCALE and
                 pp.vignetting_fixed == self.DEFAULT_VIGNETTING_FIXED)
 
@@ -3007,6 +3070,7 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         """Restore all default settings for the Fit Parameters tab."""
         pp = self.gui.platepar
         gui = self.gui
+        model = self.defaultModel()
 
         # Restore fixed scale
         if gui.fixed_scale != self.DEFAULT_FIXED_SCALE:
@@ -3025,25 +3089,30 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
             self.refraction.setChecked(self.DEFAULT_REFRACTION)
 
         # Restore equal aspect
-        if pp.equal_aspect != self.DEFAULT_EQUAL_ASPECT:
-            self._remapCoeffsWithStash('equal_aspect', self.DEFAULT_EQUAL_ASPECT)
-            self.eqAspect.setChecked(self.DEFAULT_EQUAL_ASPECT)
+        if pp.equal_aspect != model['equal_aspect']:
+            self._remapCoeffsWithStash('equal_aspect', model['equal_aspect'])
+            self.eqAspect.setChecked(model['equal_aspect'])
 
         # Restore asymmetry correction
-        if pp.asymmetry_corr != self.DEFAULT_ASYMMETRY_CORR:
-            self._remapCoeffsWithStash('asymmetry_corr', self.DEFAULT_ASYMMETRY_CORR)
-            self.asymmetryCorr.setChecked(self.DEFAULT_ASYMMETRY_CORR)
+        if pp.asymmetry_corr != model['asymmetry_corr']:
+            self._remapCoeffsWithStash('asymmetry_corr', model['asymmetry_corr'])
+            self.asymmetryCorr.setChecked(model['asymmetry_corr'])
+
+        # Restore decentering correction
+        if getattr(pp, 'decentering_corr', False) != model['decentering_corr']:
+            self._remapCoeffsWithStash('decentering_corr', model['decentering_corr'])
+            self.decenteringCorr.setChecked(model['decentering_corr'])
 
         # Restore force distortion centre
-        if pp.force_distortion_centre != self.DEFAULT_FORCE_DISTORTION_CENTRE:
-            self._remapCoeffsWithStash('force_distortion_centre', self.DEFAULT_FORCE_DISTORTION_CENTRE)
-            self.fdistortion.setChecked(self.DEFAULT_FORCE_DISTORTION_CENTRE)
+        if pp.force_distortion_centre != model['force_distortion_centre']:
+            self._remapCoeffsWithStash('force_distortion_centre', model['force_distortion_centre'])
+            self.fdistortion.setChecked(model['force_distortion_centre'])
 
         # Restore distortion type
-        if pp.distortion_type != self.DEFAULT_DISTORTION_TYPE:
-            self._changeDistortionTypeWithStash(self.DEFAULT_DISTORTION_TYPE)
+        if pp.distortion_type != model['distortion_type']:
+            self._changeDistortionTypeWithStash(model['distortion_type'])
             self.distortion_type.setCurrentIndex(
-                pp.distortion_type_list.index(self.DEFAULT_DISTORTION_TYPE))
+                pp.distortion_type_list.index(model['distortion_type']))
             self.fit_parameters.changeNumberShown(pp.poly_length)
             self.fit_parameters.updateValues()
 
@@ -3062,10 +3131,12 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         if pp.distortion_type.startswith('radial'):
             self.eqAspect.show()
             self.asymmetryCorr.show()
+            self.decenteringCorr.show()
             self.fdistortion.show()
         else:
             self.eqAspect.hide()
             self.asymmetryCorr.hide()
+            self.decenteringCorr.hide()
             self.fdistortion.hide()
 
         # Update button state
@@ -3181,6 +3252,27 @@ class ArrayTabWidget(QtWidgets.QTabWidget, ScaledSizeHelper):
         for i in range(len(self.vars)):
             self.addTab(self.tabs[i], self.tab_names[i])
             self.setupTab(i)
+
+        # The reverse coefficients are not used with the exact inverse of the forward distortion
+        self.showReverse(not getattr(self.platepar, 'exact_reverse', False))
+
+    def showReverse(self, show):
+        """ Show or hide the tabs of the reverse distortion (x_poly_rev, y_poly_rev), which the exact
+            inverse of the forward distortion (platepar.exact_reverse) does not use. Hidden, they are taken
+            out of the tab bar, so the forward tabs come first.
+
+        Arguments:
+            show: [bool] Show the reverse tabs.
+        """
+
+        for i in (0, 1):
+            index = self.indexOf(self.tabs[i])
+
+            # Put the tab back in its place, or take it out
+            if show and (index < 0):
+                self.insertTab(i, self.tabs[i], self.tab_names[i])
+            elif (not show) and (index >= 0):
+                self.removeTab(index)
 
     def changeNumberShown(self, n):
         """
@@ -3340,6 +3432,7 @@ class DistortionDialog(QtWidgets.QDialog, ScaledSizeHelper):
         self.fit_parameters.platepar = platepar
         self.fit_parameters.changeNumberShown(platepar.poly_length)
         self.fit_parameters.updateValues()
+        self.fit_parameters.showReverse(not getattr(platepar, 'exact_reverse', False))
 
     def changeNumberShown(self, n):
         """Change the number of coefficients shown."""

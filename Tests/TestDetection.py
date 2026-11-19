@@ -131,3 +131,41 @@ def test_save_detections_accepts_results_without_diagnostics(tmp_path, monkeypat
     assert ff_detected == []
     assert (tmp_path/calstars_name).exists()
     assert (tmp_path/ftpdetectinfo_name).exists()
+
+
+def _segment(first_point, second_point, frame_min, frame_max):
+    """ A line of the 3D detector: two points (x, y, frame) on it, the point count, the quality and the frame
+    range.
+    """
+
+    return [first_point, second_point, 10, 10.0, frame_min, frame_max]
+
+
+def test_merge3DLines_merges_segments_given_later_first():
+    """ Two segments of one meteor must merge whatever their order in the list.
+
+    The merge compares each segment with the vector from the start of the first segment to the end of the
+    second one. With the later segment first that vector pointed back in time (about 180 deg from both
+    segments), so the segments of one meteor stayed apart.
+    """
+
+    # A meteor moving 4 px right and 3 px down per frame, found as two segments overlapping in frames 15-20
+    early = _segment((0, 0, 0), (40, 30, 10), 0, 20)
+    late = _segment((80, 60, 20), (160, 120, 40), 15, 40)
+
+    # Merged into one line covering both frame ranges, in either order
+    for line_list in ([early, late], [late, early]):
+        merged = Detection.merge3DLines(line_list, 20)
+        assert len(merged) == 1
+        assert merged[0][4:6] == [0, 40]
+
+
+def test_merge3DLines_keeps_crossing_meteors_apart():
+    """ Two meteors at the same time in different directions must not merge, whatever their order. """
+
+    # One moving right, one moving down, on overlapping frames
+    right = _segment((0, 100, 0), (100, 100, 20), 0, 20)
+    down = _segment((300, 0, 5), (300, 100, 25), 5, 25)
+
+    for line_list in ([right, down], [down, right]):
+        assert len(Detection.merge3DLines(line_list, 20)) == 2
