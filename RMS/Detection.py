@@ -31,7 +31,7 @@ import matplotlib.gridspec as gridspec
 from mpl_toolkits.mplot3d import Axes3D
 
 # RMS imports
-from RMS.Astrometry.Conversions import jd2Date, raDec2AltAz
+from RMS.Astrometry.Conversions import jd2Date, trueRaDec2ApparentAltAz
 import RMS.ConfigReader as cr
 from RMS.DetectionTools import getThresholdedStripe3DPoints, loadImageCalibration, binImageCalibration, \
     dilateCoordinates
@@ -276,6 +276,11 @@ def merge3DLines(line_list, vect_angle_thresh, last_count=0):
     if len(line_list) < 2:
         return line_list
 
+    # Sort the lines by the frames of their points, so the vector from the first point of a line to the last
+    #   point of a line after it in the list points forward in time (with a later segment first it pointed
+    #   back, about 180 deg from both lines, and the segments of one meteor were never merged)
+    line_list = sorted(line_list, key=lambda l: (l[0][2], l[1][2]))
+
     final_list = []
     paired_indices = []
 
@@ -364,30 +369,63 @@ def merge3DLines(line_list, vect_angle_thresh, last_count=0):
 
 
 
-def checkWhiteRatio(img_thres, ff, max_white_ratio):
-    """ Checks if there are too many threshold passers on an image. """
+def checkWhiteRatio(img_thres, ff, max_white_ratio, diagnostics=None):
+    """ Checks if there are too many threshold passers on an image.
 
-    # Check if the image is too "white" and any further processing makes no sense
-    # Compute the radio between the number of threshold passers and all pixels
-    white_ratio = np.count_nonzero(img_thres)/float(ff.nrows*ff.ncols)
+    Arguments:
+        img_thres: [ndarray] Thresholded image.
+        ff: [FF object] FF whose planes were thresholded.
+        max_white_ratio: [float] Maximum allowed ratio between threshold passers and all pixels.
+
+    Keyword arguments:
+        diagnostics: [dict] If given, the outcome of the check is recorded in it (see getLines) so the
+            caller can report a night whose images were mostly skipped. None by default.
+
+    Return:
+        [bool] True if the image passed the check, False if it should be skipped.
+    """
+
+    # Compute the ratio between the number of threshold passers and all pixels
+    white_ratio = float(np.count_nonzero(img_thres))/(ff.nrows*ff.ncols)
 
     logDebug('white ratio: {:.6f}'.format(white_ratio))
 
-    if white_ratio > max_white_ratio:
+    passed = white_ratio <= max_white_ratio
 
-        log.debug(("Too many threshold passers! White ratio is {:.2f}, which is higher than the "\
-            "max_white_ratio threshold: {:.2f}").format(white_ratio, max_white_ratio))
+    if diagnostics is not None:
+        diagnostics['white_ratio_checks'] = diagnostics.get('white_ratio_checks', 0) + 1
+        diagnostics['white_ratio_max'] = max(white_ratio, diagnostics.get('white_ratio_max', 0.0))
 
-        return False
+    if not passed:
 
+        # A single skipped image is normal (bright, cloudy or twilight sky where the maxpixel runs far
+        # above the average over a large area), so it is only logged at debug level. A station whose
+        # images are mostly skipped is reported once for the whole night by the caller of detection,
+        # from the diagnostics recorded here
+        log.debug(("Too many threshold passers! White ratio is {:.4f}, which is higher than the "
+            "max_white_ratio threshold: {:.4f}, skipping the image.").format(white_ratio, max_white_ratio))
 
-    return True
+        if diagnostics is not None:
+
+            diagnostics['white_ratio_rejections'] = diagnostics.get('white_ratio_rejections', 0) + 1
+
+            # Measure how far the maxpixel noise floor sits above the temporal noise the threshold is
+            # built from. On a healthy camera the median maxpixel excess over avepixel is a few
+            # stdpixel. Video paths that smooth per-pixel temporal noise (software re-encoded or some
+            # IP camera streams) shrink stdpixel far below the excess, which puts the k1*stdpixel + j1
+            # threshold under the noise floor on every clear image
+            if 'maxpixel_excess_median' not in diagnostics:
+                excess = ff.maxpixel.astype(np.float64) - ff.avepixel.astype(np.float64)
+                diagnostics['maxpixel_excess_median'] = float(np.median(excess))
+                diagnostics['stdpixel_median'] = float(np.median(ff.stdpixel))
+
+    return passed
 
 
 
 
 def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_white_ratio, \
-    mask=None, flat_struct=None, dark=None, debug=False):
+    mask=None, flat_struct=None, dark=None, debug=False, diagnostics=None):
     """ Get (rho, phi) pairs for each meteor present on the image using KHT.
 
     Arguments:
@@ -401,6 +439,12 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
         mask: [MaskStruct] Mask structure.
         flat_struct: [FlatStruct]  Flat frame structure.
         dark: [ndarray] Dark frame.
+        debug: [bool] Show the thresholded image of every time window. False by default.
+        diagnostics: [dict] If given, the white ratio checks are recorded in it: 'white_ratio_checks'
+            and 'white_ratio_rejections' count the checks and the skipped images (one check per FF, or
+            one per time window for other inputs), 'white_ratio_max' is the largest ratio seen, and
+            'maxpixel_excess_median' and 'stdpixel_median' describe the noise floor of the first
+            skipped image. None by default.
 
 
     Return:
@@ -420,7 +464,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
         # show("thresholded ALL", img_thres)
 
         # Check if there are too many threshold passers, if so report that no lines were found
-        if not checkWhiteRatio(img_thres, img_handle.ff, max_white_ratio):
+        if not checkWhiteRatio(img_thres, img_handle.ff, max_white_ratio, diagnostics=diagnostics):
             return line_results
 
 
@@ -463,7 +507,7 @@ def getLines(img_handle, k1, j1, time_slide, time_window_size, max_lines, max_wh
             img = thresholdFF(img_handle.ff, k1, j1, mask=mask)
 
             # Check if there are too many threshold passers, if so report that no lines were found
-            if not checkWhiteRatio(img, img_handle.ff, max_white_ratio):
+            if not checkWhiteRatio(img, img_handle.ff, max_white_ratio, diagnostics=diagnostics):
                 continue
 
 
@@ -1038,8 +1082,35 @@ def thresholdAndCorrectGammaFF(img_handle, config, mask):
 
 
 
+def extendFrameRange(frame_min, frame_max, frame_extension, total_frames):
+    """ Extend the frame range of a detected line on both sides and cap it to the frames that exist.
 
-def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, asgard=False, debug=False):
+    Arguments:
+        frame_min: [int] First frame of the line.
+        frame_max: [int] Last frame of the line.
+        frame_extension: [int] Number of frames to add on each side.
+        total_frames: [int] Total number of frames in the input.
+
+    Return:
+        (frame_min, frame_max): [tuple of ints] Extended frame range.
+    """
+
+    # Work with plain ints, as under NumPy 2 an unsigned NumPy scalar keeps its type and wraps around below
+    #   zero instead of going negative (e.g. uint16 1 - 3 -> 65534, which the cap below wouldn't catch)
+    frame_min = int(frame_min) - int(frame_extension)
+    frame_max = int(frame_max) + int(frame_extension)
+
+    # Cap the range to the first and the last frame
+    frame_min = max(frame_min, 0)
+    frame_max = min(frame_max, int(total_frames) - 1)
+
+    return frame_min, frame_max
+
+
+
+
+def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, asgard=False, debug=False, \
+    diagnostics=None):
     """ Detect meteors on the given image. Here are the steps in the detection:
             - input image (FF bin format file) is thresholded (converted to black and white)
             - several morphological operations are applied to clean the image
@@ -1062,6 +1133,8 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
         asgard: [bool] If True, the vid file sequence number will be added in with the frame. False by 
             default, in which case only the frame number will be in the centroids.
         debug: [bool] If True, graphs for testing the detection settings will be shown. False by default.
+        diagnostics: [dict] If given, the white ratio checks are recorded in it (see getLines). None by
+            default.
     
     Return:
         meteor_detections: [list] a list of detected meteors, with these elements:
@@ -1104,7 +1177,7 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
     # Get lines on the image
     line_list = getLines(img_handle, config.k1_det, config.j1_det, config.time_slide, config.time_window_size,
         config.max_lines_det, config.max_white_ratio, mask=mask, \
-        flat_struct=flat_struct, dark=dark, debug=debug)
+        flat_struct=flat_struct, dark=dark, debug=debug, diagnostics=diagnostics)
 
     # logDebug('List of lines:', line_list)
 
@@ -1264,12 +1337,8 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 continue
 
             # Extend the frame range for several frames, just to be sure to catch all parts of the meteor
-            frame_min -= config.frame_extension
-            frame_max += config.frame_extension
-
-            # Cap values
-            frame_min = max(frame_min, 0)
-            frame_max = min(frame_max, img_handle.total_frames - 1)
+            frame_min, frame_max = extendFrameRange(frame_min, frame_max, config.frame_extension,
+                img_handle.total_frames)
 
             logDebug(detected_line)
 
@@ -1304,7 +1373,8 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                 img_thres, max_avg_corrected, flattened_weights, \
                     min_patch_intensity = thresholdAndCorrectGammaFF(img_handle, config, mask)
 
-                logDebug('Centroiding frames {:d} - {:d} and time:'.format(frame_min, frame_max, img_handle.name()))
+                logDebug('Centroiding frames {:d} - {:d} and time: {:s}'.format(frame_min, frame_max,
+                    img_handle.name()))
                 
 
 
@@ -1430,12 +1500,17 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                     y_centroid = np.sum(y_weighted.astype(np.float64))/float(max_weights_sum)
 
 
-                    # Correct the rolling shutter effect
+                    # Correct the rolling shutter effect: the row of the centroid is read later than the top row,
+                    #   by its share of the readout time of the sensor (see RMS.Routines.RollingShutterCorrection)
                     if config.deinterlace_order == -1:
 
-                        # Compute the corrected frame time
-                        frame_no = RollingShutterCorrection.correctRollingShutterTemporal(frame_no, \
-                            y_centroid, img_handle.ff.maxpixel.shape[0])
+                        # Compute the corrected frame time, with the row and the height of the image before the
+                        #   binning (the crop of the capture is in the rows of the unbinned image, and only the
+                        #   inputs from the RMS capture are cropped)
+                        bin_factor = config.detection_binning_factor if (img_handle.input_type != 'ff') else 1
+                        frame_no = RollingShutterCorrection.correctFrameTime(frame_no, y_centroid*bin_factor,
+                            img_handle.ff.maxpixel.shape[0]*bin_factor, config, fps=getattr(img_handle, 'fps', None),
+                            cropped=RollingShutterCorrection.croppedInput(img_handle.input_type))
 
 
                     # Get current frame if video or images are used as input
@@ -1934,7 +2009,10 @@ if __name__ == "__main__":
                 alt_array = []
                 for jd, ra, dec in zip(jd_array, ra_array, dec_array):
 
-                    azim, alt = raDec2AltAz(ra, dec, jd, np.degrees(ast.lat), np.degrees(ast.lon))
+                    # The RA/Dec are J2000, so they go back through the frame of date (no refraction, as
+                    #   in xyToRaDecAST)
+                    azim, alt = trueRaDec2ApparentAltAz(ra, dec, jd, np.degrees(ast.lat), np.degrees(ast.lon),
+                        refraction=False)
 
                     azim_array.append(azim)
                     alt_array.append(alt)
