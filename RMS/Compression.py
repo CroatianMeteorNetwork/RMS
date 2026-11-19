@@ -31,7 +31,7 @@ import cv2
 from RMS.VideoExtraction import Extractor
 from RMS.Formats import FFfile, FFStruct
 from RMS.Formats import FieldIntensities
-from RMS.Logger import getLogger, getLoggingQueue, initChildProcess
+from RMS.Logger import getLogger, getLoggingQueue, initChildProcess, flushChildLogging
 from RMS.Misc import UTCFromTimestamp, frameBufferShape, AtomicFlag, stableDoubleRead
 from RMS.Routines.Image import saveImage
 
@@ -407,6 +407,10 @@ class Compressor(multiprocessing.Process):
 
                     log.debug('Compression run exit')
 
+                    # os._exit() skips the logging queue's feeder thread, so push the buffered records out
+                    #   first or the last ones never reach the log. Before run_exited, so stop() waits for it
+                    flushChildLogging()
+
                     self.run_exited.set()
                     os._exit(0)
 
@@ -539,6 +543,11 @@ class Compressor(multiprocessing.Process):
         log.debug('Compression run exit')
 
         time.sleep(1.0)
+
+        # os._exit() below skips the logging queue's feeder thread, so push the buffered records out first
+        #   or the last ones of the night never reach the log. Before run_exited, so stop() waits for it
+        flushChildLogging()
+
         self.run_exited.set()
 
         # Force-exit the process. The forked QueuedPool Manager proxy threads

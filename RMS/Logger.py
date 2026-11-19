@@ -8,6 +8,7 @@ import errno
 import logging
 import logging.handlers
 import multiprocessing
+import multiprocessing.util
 import datetime
 import threading
 import atexit
@@ -379,6 +380,9 @@ LOG_RESTART_BACKOFF_MAX = 3600
 
 # Interval of the manager's own always-on health thread
 LOG_HEALTH_INTERVAL = 60
+
+# Maximum time a child process waits at exit for its buffered log records to reach the listener
+LOG_CHILD_EXIT_FLUSH_TIMEOUT = 2.0
 
 # The most recently initialized LoggingManager, used by the module-level health check
 _active_manager = None
@@ -1052,6 +1056,10 @@ def initChildLogging(logging_queue, config):
     top of a child process's run() so its records are forwarded to the listener process.
     A no-op if logging was never initialized (queue is None).
 
+    Like in the parent, records are dropped and counted while the queue is full, and at the
+    child's exit its buffered records are flushed with a time limit (flushChildLogging), so
+    a listener which does not read cannot stop the child or hold up its exit.
+
     Arguments:
         logging_queue: [multiprocessing.Queue] The shared logging queue, or None.
         config: [Config] Config used for the InRmsFilter. If None, no filter is applied.
@@ -1065,7 +1073,11 @@ def initChildLogging(logging_queue, config):
     for handler in root.handlers[:]:
         root.removeHandler(handler)
 
-    qh = logging.handlers.QueueHandler(logging_queue)
+    # Forward everything to the listener, filtering to RMS records if a config is given. The handler
+    #   must drop records on a full queue like the parent's: a plain QueueHandler raises queue.Full,
+    #   handleError() writes the traceback to sys.stderr, which in a forked child is a LoggerWriter
+    #   feeding the same full queue, and every log call turns into an unbounded recursion
+    qh = _DroppingQueueHandler(logging_queue)
     qh.setFormatter(logging.Formatter('%(message)s'))
     if config is not None:
         qh.addFilter(InRmsFilter(config))
@@ -1079,6 +1091,71 @@ def initChildLogging(logging_queue, config):
     # from Compressor) can grab it in their own __init__ under 'forkserver'/'spawn', where
     # the module-level manager state is not inherited.
     _global_logging_manager.logging_queue = logging_queue
+
+    # Bound the child's exit. multiprocessing joins the queue's feeder thread when the child
+    #   exits, and that join never returns if the feeder is blocked on the pipe of a listener that
+    #   does not read (stopped, or gone with the queue the watchdog abandoned) - the child then
+    #   hangs in its exit and its parent's join() with it. This finalizer runs before the feeder
+    #   join (priority 0 runs before -5) and flushes with a bound instead, which also takes the
+    #   place of the unbounded join
+    multiprocessing.util.Finalize(None, flushChildLogging,
+        kwargs={'timeout': LOG_CHILD_EXIT_FLUSH_TIMEOUT}, exitpriority=0)
+
+
+def flushChildLogging(timeout=LOG_CHILD_EXIT_FLUSH_TIMEOUT):
+    """ Push a child process's buffered log records to the listener before it exits.
+
+    Records logged through a QueueHandler sit in the buffer of the multiprocessing.Queue feeder
+    thread until that thread writes them into the pipe. os._exit() kills the process without
+    giving the feeder a chance to run, so the last records a child logs (typically its own exit
+    messages) are lost. Closing the queue asks the feeder to write out its buffer and stop, and
+    join_thread() waits for that. The wait is bounded because a listener that stopped reading
+    would otherwise block the exit forever; if the flush does not finish in time, the records
+    still buffered are given up and the interpreter's own exit no longer waits for them.
+
+    Called automatically at a normal child exit (see initChildLogging). Call it directly only
+    right before os._exit(): the queue cannot be used in this process afterwards.
+
+    Keyword arguments:
+        timeout: [float] Maximum number of seconds to wait for the flush.
+            LOG_CHILD_EXIT_FLUSH_TIMEOUT by default.
+    """
+
+    # Collect the distinct queues behind the root logger's queue handlers
+    queues = []
+    for handler in logging.getLogger().handlers:
+        if isinstance(handler, logging.handlers.QueueHandler):
+            q = getattr(handler, 'queue', None)
+            if (q is not None) and all(q is not other for other in queues):
+                queues.append(q)
+
+    # Nothing to flush without a queue handler
+    if not queues:
+        return
+
+    # Close every queue and wait until its feeder thread wrote out the buffered records
+    def _drain():
+        for q in queues:
+            try:
+                q.close()
+                q.join_thread()
+            except Exception:
+                continue
+
+    # Bound the wait with a daemon thread; the process exit abandons it if the flush is stuck
+    flusher = threading.Thread(target=_drain, name='rms-log-flush')
+    flusher.daemon = True
+    flusher.start()
+    flusher.join(timeout)
+
+    # A stuck flush gives up the records still buffered: the interpreter's exit must not wait for
+    #   them again without a bound
+    if flusher.is_alive():
+        for q in queues:
+            try:
+                q.cancel_join_thread()
+            except Exception:
+                continue
 
 
 def initChildProcess(logging_queue=None, config=None, ignore_sigint=True):
