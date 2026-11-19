@@ -1,3 +1,4 @@
+import argparse
 import struct
 import json
 import hashlib
@@ -279,7 +280,15 @@ def setCameraParam(cam, opts):
 
 if __name__ == '__main__':
 
-    ipaddr = sys.argv[1]
+    arg_parser = argparse.ArgumentParser(description="""Apply the standard set of RMS camera parameters \
+(video encoding, color, exposure, gain) to an IMX291-style IP camera over the DVRIP protocol.""")
+
+    arg_parser.add_argument('ip_address', metavar='CAMERA_IP', type=str,
+        help='IP address of the camera, e.g. 192.168.42.10.')
+
+    cml_args = arg_parser.parse_args()
+
+    ipaddr = cml_args.ip_address
 
     if not checkValidIPAddr(ipaddr):
         print('ipaddress invalid')
