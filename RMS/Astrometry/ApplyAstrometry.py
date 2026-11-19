@@ -923,7 +923,7 @@ def calculateMagnitudes(px_sum_arr, radius_arr, photom_offset, vignetting_coeff)
 
 
 def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_correction=True, \
-    measurement=False, jd_time=False, precompute_pointing_corr=False, aberration=None):
+    measurement=False, jd_time=False, precompute_pointing_corr=False, aberration=None, horizontal=False):
     """ Converts image XY to RA,Dec, but it takes a platepar instead of individual parameters. 
 
     Arguments:
@@ -933,7 +933,8 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
             if jd_time is True - Julian dates.
         X_data: [ndarray] 1D numpy array containing the image X component.
         Y_data: [ndarray] 1D numpy array containing the image Y component.
-        level_data: [ndarray] Levels of the meteor centroid.
+        level_data: [ndarray] Levels of the meteor centroid. None skips the photometry, for points whose
+            directions only are needed (the magnitudes are then returned as None).
         platepar: [Platepar structure] Astrometry parameters.
 
     Keyword arguments:
@@ -956,13 +957,18 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
             unrefracted plate measurement=True also triggers the post-hoc refraction correction.
             Never done for a plate fitted without the aberration modelled (platepar.aberration False),
             which has absorbed it.
+        horizontal: [bool] Return the azimuth (+east of due north) and the altitude at the dates (deg) in
+            place of RA and Dec: the direction the light arrives from in the frame of the Earth, without the
+            refraction of a star, the post-hoc measurement correction or the annual aberration taken out.
+            False by default.
 
     Return:
         (JD_data, RA_data, dec_data, magnitude_data): [tuple of ndarrays]
             JD_data: [ndarray] Julian date of each data point.
             RA_data: [ndarray] Right ascension of each point (deg).
             dec_data: [ndarray] Declination of each point (deg).
-            magnitude_data: [ndarray] Array of meteor's lightcurve apparent magnitudes.
+            magnitude_data: [ndarray] Array of meteor's lightcurve apparent magnitudes, None without
+                level_data.
     """
 
 
@@ -982,11 +988,12 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
         asymmetry_corr=platepar.asymmetry_corr, precompute_pointing_corr=precompute_pointing_corr,
         decentering_corr=getattr(platepar, "decentering_corr", False),
         refraction_scale=refractionScale(platepar.elev), \
-        aberration=plateAberration(platepar, measurement, aberration))
+        aberration=plateAberration(platepar, measurement, aberration), horizontal=horizontal)
 
     # Correct the coordinates for refraction if it wasn't taken into account during the astrometry calibration
     #   procedure
-    if (not platepar.refraction) and measurement and platepar.measurement_apparent_to_true_refraction:
+    if (not horizontal) and (not platepar.refraction) and measurement \
+        and platepar.measurement_apparent_to_true_refraction:
 
         refr_scale = refractionScale(platepar.elev)
 
@@ -998,6 +1005,10 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
             RA_data[i] = np.degrees(ra)
             dec_data[i] = np.degrees(dec)
             
+
+    # Without levels only the directions are wanted
+    if level_data is None:
+        return JD_data, RA_data, dec_data, None
 
     # Compute radii from image centre
     radius_arr = np.hypot(np.array(X_data) - platepar.X_res/2, np.array(Y_data) - platepar.Y_res/2)
@@ -1017,7 +1028,7 @@ def xyToRaDecPP(time_data, X_data, Y_data, level_data, platepar, extinction_corr
 
 
 
-def raDecToXYPP(RA_data, dec_data, jd, platepar, measurement=False, aberration=None):
+def raDecToXYPP(RA_data, dec_data, jd, platepar, measurement=False, aberration=None, horizontal=False):
     """ Converts RA, Dec to image coordinates, but the platepar is given instead of individual parameters.
     Arguments:
         RA: [ndarray] Array of right ascensions (degrees).
@@ -1035,6 +1046,9 @@ def raDecToXYPP(RA_data, dec_data, jd, platepar, measurement=False, aberration=N
             landmark), see xyToRaDecPP.
             Never done for a plate fitted without the aberration modelled (platepar.aberration False),
             which has absorbed it.
+        horizontal: [bool] RA_data and dec_data are the azimuth (+east of due north) and the altitude at jd
+            (deg): the direction the light arrives from in the frame of the Earth, which is neither refracted nor
+            aberrated. False by default.
 
     Return:
         (x, y): [tuple of ndarrays] Image X and Y coordinates. With platepar.exact_reverse set, the exact inverse
@@ -1062,7 +1076,7 @@ def raDecToXYPP(RA_data, dec_data, jd, platepar, measurement=False, aberration=N
         force_distortion_centre=platepar.force_distortion_centre, asymmetry_corr=platepar.asymmetry_corr,
         decentering_corr=getattr(platepar, "decentering_corr", False), invert_forward=exact_reverse,
         jd_data=jd_data, refraction_scale=refractionScale(platepar.elev), \
-        aberration=plateAberration(platepar, measurement, aberration))
+        aberration=plateAberration(platepar, measurement, aberration), horizontal=horizontal)
 
     return X_data, Y_data
 
