@@ -12098,6 +12098,10 @@ class PlateTool(QtWidgets.QMainWindow):
         # Temp bool to extract header line
         first_bool = False
 
+        # The line above the first row of data holds the column names (the commented header of the ev files).
+        #   A file without a line above its data has no column names, which the column check reports
+        temp_line = ''
+
         # Wrap in try except for uncaught errors
         try:
             # Opens and parses pick file
@@ -12108,7 +12112,7 @@ class PlateTool(QtWidgets.QMainWindow):
                         # Clean the line
                         line = [part.strip() for part in line.split() if part]
 
-                        # Unpack the header
+                        # Unpack the header at the first row of data, from the line above it
                         if first_bool == False:
                             first_bool = True
 
@@ -12126,23 +12130,22 @@ class PlateTool(QtWidgets.QMainWindow):
                                             message="TXT file must contain 'fr', 'cx', and 'cy' columns.",
                                             message_type="error")
                                 return None
-                        
-                        else:
-                            # Unpack the pick
-                            frame_number = int(line[frame_number_idx])
-                            cx, cy = float(line[x_centroid_idx]), float(line[y_centroid_idx])
 
-                            picks.append({
-                                'x_centroid': cx,
-                                'y_centroid': cy,
-                                'mode' : 1,
-                                'intensity_sum' : 1,
-                                'photometry_pixels' : None,
-                                'background_intensity' : 0,
-                                'snr' : 1,
-                                'saturated' : False,
-                            })
-                            pick_frame_indices.append(frame_number)
+                        # Unpack the pick (the first row of data is a pick too)
+                        frame_number = int(line[frame_number_idx])
+                        cx, cy = float(line[x_centroid_idx]), float(line[y_centroid_idx])
+
+                        picks.append({
+                            'x_centroid': cx,
+                            'y_centroid': cy,
+                            'mode' : 1,
+                            'intensity_sum' : 1,
+                            'photometry_pixels' : None,
+                            'background_intensity' : 0,
+                            'snr' : 1,
+                            'saturated' : False,
+                        })
+                        pick_frame_indices.append(frame_number)
 
                     # Store a temp line to hit previous for col names
                     temp_line = line
