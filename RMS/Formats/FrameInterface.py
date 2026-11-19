@@ -830,6 +830,39 @@ class InputTypeFRFF(InputType):
             return (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000)
 
 
+# Formats of a beginning time in the name of a video and when it's given by the user
+BEGINNING_TIME_FORMATS = ["%Y%m%d_%H%M%S.%f", "%Y%m%d_%H%M%S", "%Y%m%d-%H%M%S.%f", "%Y%m%d-%H%M%S"]
+
+
+def beginningTimeFromVideoName(file_name):
+    """ Read the time of the beginning of a video from the name of its file.
+
+    Arguments:
+        file_name: [str] Name of the video file, with the extension.
+
+    Return:
+        [datetime] The time, or None if it can't be read from the name.
+    """
+
+    # Remove the file extension
+    file_name_noext = ".".join(file_name.split('.')[:-1])
+
+    for fmt in BEGINNING_TIME_FORMATS:
+        try:
+            return datetime.datetime.strptime(file_name_noext, fmt)
+        except ValueError:
+            pass
+
+    # If no formats matched, try the RMS video file format, e.g. CAWE01_20240611_020430_954145_video.mkv
+    try:
+        fn_data = file_name_noext.split('_')
+        fn_timestamp = fn_data[1] + '_' + fn_data[2] + '_' + fn_data[3]
+        return datetime.datetime.strptime(fn_timestamp, "%Y%m%d_%H%M%S_%f")
+
+    except (ValueError, IndexError):
+        return None
+
+
 class InputTypeVideo(InputType):
     def __init__(self, dir_path, config, beginning_time=None, detection=False, preload_video=False, 
                  flipud=False, chunk_frames=None):
@@ -875,35 +908,16 @@ class InputTypeVideo(InputType):
         # Don't byteswap the images
         self.byteswap = False
 
-        # Remove the file extension
-        file_name_noext = ".".join(self.file_name.split('.')[:-1])
-
         if beginning_time is None:
 
-            time_formats_to_try = ["%Y%m%d_%H%M%S.%f", "%Y%m%d_%H%M%S", "%Y%m%d-%H%M%S.%f", "%Y%m%d-%H%M%S"]
-            self.beginning_datetime = None
+            self.beginning_datetime = beginningTimeFromVideoName(self.file_name)
 
-            for fmt in time_formats_to_try:
-                try:
-                    self.beginning_datetime = datetime.datetime.strptime(file_name_noext, fmt)
-                    break
-                except ValueError:
-                    pass
-
-            # If no formats matched, try the RMS video file format, e.g. CAWE01_20240611_020430_954145_video.mkv
             if self.beginning_datetime is None:
-                
-                try:
-                    fn_data = file_name_noext.split('_')
-                    fn_timestamp = fn_data[1] + '_' + fn_data[2] + '_' + fn_data[3]
-                    self.beginning_datetime = datetime.datetime.strptime(fn_timestamp, "%Y%m%d_%H%M%S_%f")
 
-                except ValueError:
+                messagebox(title="Input error", \
+                message="The time of the beginning cannot be read from the file name! Either change the name of the file to be in the YYYYMMDD_hhmmss format, or specify the beginning time using command line options.")
 
-                    messagebox(title="Input error", \
-                    message="The time of the beginning cannot be read from the file name! Either change the name of the file to be in the YYYYMMDD_hhmmss format, or specify the beginning time using command line options.")
-
-                    sys.exit()
+                sys.exit()
 
         else:
             self.beginning_datetime = beginning_time
