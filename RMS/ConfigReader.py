@@ -682,9 +682,9 @@ class Config:
         # Maximum number of stars to use for recalibration on a single FF
         self.recalibration_max_stars = 200
 
-        # Minimum fraction of detected stars that a per-FF recalibration fit
-        #   must match to be accepted (guards against sparse spurious fits
-        #   chaining forward on cloudy nights)
+        # Minimum fraction of the possible star matches (the detected stars, or the catalog stars in the
+        #   image if there are fewer) that a per-FF recalibration fit must match to be accepted (guards
+        #   against sparse spurious fits chaining forward on cloudy nights)
         self.recalibration_min_match_fraction = 0.6
 
         # Refine the pointing of every per-FF recalibration by least squares on the matched stars (the search
