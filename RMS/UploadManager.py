@@ -1,5 +1,6 @@
 """ Functions for uploading files to server via SFTP. """
 
+import hashlib
 import logging
 import os
 import ctypes
@@ -9,6 +10,7 @@ from queue import Empty
 from multiprocessing import Manager
 
 import paramiko
+from paramiko.sftp import CMD_EXTENDED, CMD_STATUS
 
 from RMS.Logger import LoggingManager, getLogger, getLoggingQueue, initChildProcess
 from RMS.Misc import mkdirP, UTCFromTimestamp, runWithTimeout, AtomicFlag, BoundedLock
@@ -21,6 +23,27 @@ QueueEmpty = Empty
 
 # Get the logger from the main module
 log = logging.getLogger("rmslogger")
+
+
+# Files are uploaded under a temporary name ending in this suffix and renamed once complete
+PARTIAL_UPLOAD_SUFFIX = '.part'
+
+# Size of one SFTP write in bytes, the same as paramiko's put() uses
+UPLOAD_CHUNK_SIZE = 32768
+
+# A resumed upload starts this many bytes before the end of the partial upload on the server. The last
+#   writes before an interruption may not have reached the disk of the server intact (e.g. if the server
+#   crashed), and this is more than paramiko keeps in flight (its SSH channel window of 2 MiB)
+UPLOAD_RESUME_BACK_OFF = 4*1024*1024
+
+# Number of bytes before the resume point which are compared with the local file before resuming
+UPLOAD_RESUME_CHECK_SIZE = 64*1024
+
+# Partial uploads not written to in this many days are removed from the remote directory
+PARTIAL_UPLOAD_MAX_AGE_DAYS = 7
+
+# Fingerprints of local files, keyed by the path, size and modification time of the file
+_FINGERPRINT_CACHE = {}
 
 
 def existsRemoteDirectory(sftp,path):
@@ -294,6 +317,247 @@ def getSSHAndSFTP(hostname, sftp_timeout=300, **kwargs):
     return ssh, sftp
 
 
+def fileFingerprint(file_path):
+    """ Compute an identifier of the content of a file: the first 16 hex digits of its SHA-256 hash. It is
+        cached by the path, size and modification time of the file, so it is computed only once per version
+        of the file, however many times its upload is tried.
+
+    Arguments:
+        file_path: [str] Path to the file.
+
+    Return:
+        [str] The first 16 hex digits of the SHA-256 hash of the file.
+    """
+
+    file_stat = os.stat(file_path)
+    cache_key = (os.path.abspath(file_path), file_stat.st_size, file_stat.st_mtime_ns)
+
+    if cache_key not in _FINGERPRINT_CACHE:
+
+        # Keep the cache small, the upload manager runs for weeks
+        if len(_FINGERPRINT_CACHE) > 100:
+            _FINGERPRINT_CACHE.clear()
+
+        # Hash the file in blocks of 1 MiB
+        sha = hashlib.sha256()
+        with open(file_path, 'rb') as f:
+            for block in iter(lambda: f.read(1024*1024), b''):
+                sha.update(block)
+
+        _FINGERPRINT_CACHE[cache_key] = sha.hexdigest()[:16]
+
+    return _FINGERPRINT_CACHE[cache_key]
+
+
+def partialUploadName(file_name, file_path):
+    """ Name under which a file is uploaded until it is complete: the file name, the fingerprint of its
+        content and the partial upload suffix. An archive rebuilt under the same name gets another partial
+        name, so an upload is never resumed onto the bytes of a different file.
+
+    Arguments:
+        file_name: [str] Name of the file on the server.
+        file_path: [str] Path to the local file.
+
+    Return:
+        [str] Name of the partial upload.
+    """
+
+    return "{:s}.{:s}{:s}".format(file_name, fileFingerprint(file_path), PARTIAL_UPLOAD_SUFFIX)
+
+
+def remoteMatchesLocal(sftp, remote_file, local_file, end_offset):
+    """ Check that the UPLOAD_RESUME_CHECK_SIZE bytes before the given offset are the same in a remote file
+        and in the local file.
+
+    Arguments:
+        sftp: [paramiko.SFTPClient object] Connection handle.
+        remote_file: [str] Path to the remote file.
+        local_file: [str] Path to the local file.
+        end_offset: [int] Offset at which the compared bytes end.
+
+    Return:
+        [bool] True if the bytes are the same, False otherwise.
+    """
+
+    check_size = min(UPLOAD_RESUME_CHECK_SIZE, end_offset)
+
+    # Read the bytes from the server
+    with sftp.open(remote_file, 'rb') as remote_handle:
+        remote_handle.seek(end_offset - check_size)
+        remote_bytes = remote_handle.read(check_size)
+
+    # Read the same bytes from the local file
+    with open(local_file, 'rb') as f:
+        f.seek(end_offset - check_size)
+        local_bytes = f.read(check_size)
+
+    return remote_bytes == local_bytes
+
+
+def findPartialUpload(sftp, local_file, dir_remote):
+    """ Find the partial upload of a file on the server and the point from which its upload can resume.
+
+        The partial upload carries a fingerprint of the file content in its name (see partialUploadName). Its
+        last UPLOAD_RESUME_BACK_OFF bytes are not trusted, because the last writes before an interruption may
+        not have reached the disk of the server intact, so the upload resumes that many bytes before its end.
+        The UPLOAD_RESUME_CHECK_SIZE bytes before the resume point are compared with the local file, and if
+        they differ, or if the partial upload is larger than the file, the upload starts from the beginning.
+
+        Partial uploads of other versions of the file, and partial uploads in the remote directory which have
+        not been written to in PARTIAL_UPLOAD_MAX_AGE_DAYS days, are removed.
+
+    Arguments:
+        sftp: [paramiko.SFTPClient object] Connection handle.
+        local_file: [str] Path to the local file.
+        dir_remote: [str] Remote directory where the file is uploaded.
+
+    Return:
+        (remote_part_file, resume_offset): [tuple]
+            - remote_part_file: [str] Path of the partial upload on the server.
+            - resume_offset: [int] Byte from which the upload resumes, 0 if it starts from the beginning.
+    """
+
+    file_name = os.path.basename(local_file)
+    local_file_size = os.path.getsize(local_file)
+    part_name = partialUploadName(file_name, local_file)
+    remote_part_file = dir_remote + '/' + part_name
+
+    # Find the partial upload of this file, and remove the partial uploads of other versions of it and old
+    #   ones (e.g. of files which were deleted on the station before their upload completed)
+    part_size = None
+    for attr in sftp.listdir_attr(dir_remote):
+
+        if not attr.filename.endswith(PARTIAL_UPLOAD_SUFFIX):
+            continue
+
+        if attr.filename == part_name:
+            part_size = attr.st_size
+            continue
+
+        is_other_version = attr.filename.startswith(file_name + '.')
+        is_old = (attr.st_mtime is not None) \
+            and ((time.time() - attr.st_mtime) > PARTIAL_UPLOAD_MAX_AGE_DAYS*24*3600)
+
+        if is_other_version or is_old:
+
+            log.info("Removing the partial upload {:s}".format(attr.filename))
+
+            try:
+                sftp.remove(dir_remote + '/' + attr.filename)
+
+            except IOError as e:
+                log.warning("Could not remove the partial upload {:s}: {}".format(attr.filename, e))
+
+
+    # Without a partial upload of this file, or with one larger than the file, start from the beginning
+    if (part_size is None) or (part_size > local_file_size):
+        return remote_part_file, 0
+
+    # Cut back the end of the partial upload, which may not have been written intact
+    resume_offset = max(part_size - UPLOAD_RESUME_BACK_OFF, 0)
+
+    # Check that the partial upload holds this file before the resume point
+    if (resume_offset > 0) and not remoteMatchesLocal(sftp, remote_part_file, local_file, resume_offset):
+        log.info("The partial upload {:s} differs from the local file, starting from the beginning".format(
+            part_name))
+        return remote_part_file, 0
+
+    return remote_part_file, resume_offset
+
+
+def confirmRemoteWrites(sftp, remote_handle):
+    """ Wait for the server to confirm all pipelined writes to a file, and raise the first failed write.
+        paramiko checks these replies in batches while writing and drops the replies still pending when the
+        file is closed, so a failed write near the end of the file would otherwise go unnoticed.
+
+    Arguments:
+        sftp: [paramiko.SFTPClient object] Connection handle.
+        remote_handle: [paramiko.SFTPFile object] Remote file open for pipelined writing.
+    """
+
+    # The pending writes are not in paramiko's public interface, skip the check if this changes
+    pending = getattr(remote_handle, '_reqs', None)
+    if pending is None:
+        return
+
+    # Read the reply to every pending write, a failed write raises an IOError
+    while pending:
+        reply_type, _ = sftp._read_response(pending.popleft())
+
+        if reply_type != CMD_STATUS:
+            raise IOError("Unexpected reply of the server to a write")
+
+
+def syncRemoteFile(sftp, remote_handle):
+    """ Ask the server to write a file to its disk (the fsync@openssh.com extension), so an upload which is
+        renamed afterwards survives a crash of the server. Servers without the extension are skipped.
+
+    Arguments:
+        sftp: [paramiko.SFTPClient object] Connection handle.
+        remote_handle: [paramiko.SFTPFile object] Open remote file.
+
+    Return:
+        [bool] True if the server confirmed the sync, False otherwise.
+    """
+
+    # paramiko has no public call for this extension
+    try:
+        sftp._request(CMD_EXTENDED, 'fsync@openssh.com', remote_handle.handle)
+        return True
+
+    except Exception:
+        return False
+
+
+def writePartialUpload(sftp, local_file, remote_part_file, resume_offset, callback=None):
+    """ Write a file to its partial upload on the server, from the given offset to the end of the file.
+
+    Arguments:
+        sftp: [paramiko.SFTPClient object] Connection handle.
+        local_file: [str] Path to the local file.
+        remote_part_file: [str] Path of the partial upload on the server.
+        resume_offset: [int] Byte from which to write, 0 to start a new partial upload.
+
+    Keyword arguments:
+        callback: [function] Called after every write with the number of bytes of the file on the server, the
+            size of the file and the number of bytes written in this upload. None by default.
+    """
+
+    local_file_size = os.path.getsize(local_file)
+
+    # Open the partial upload: keep its first resume_offset bytes, or create it empty
+    remote_mode = 'r+b' if (resume_offset > 0) else 'wb'
+    with open(local_file, 'rb') as f, sftp.open(remote_part_file, remote_mode) as remote_handle:
+
+        # Cut off the end of the partial upload, which is written again
+        if resume_offset > 0:
+            remote_handle.truncate(resume_offset)
+
+        f.seek(resume_offset)
+        remote_handle.seek(resume_offset)
+
+        # Send the writes without waiting for the reply to each, as paramiko's put() does
+        remote_handle.set_pipelined(True)
+
+        # Write the rest of the file in chunks
+        bytes_sent = 0
+        while True:
+
+            data = f.read(UPLOAD_CHUNK_SIZE)
+            if not data:
+                break
+
+            remote_handle.write(data)
+            bytes_sent += len(data)
+
+            if callback is not None:
+                callback(resume_offset + bytes_sent, local_file_size, bytes_sent)
+
+        # Make sure that every write succeeded and is on the disk of the server before the file is renamed
+        confirmRemoteWrites(sftp, remote_handle)
+        syncRemoteFile(sftp, remote_handle)
+
+
 # Define a class to track progress and share values between the callback and the main thread
 class ProgressTracker(object):
     def __init__(self, total_bytes):
@@ -302,6 +566,9 @@ class ProgressTracker(object):
         self.last_percent = 0
         self.start_time = time.time()
 
+        # Bytes written in this upload, without the part of a resumed upload which was already on the server
+        self.sent_bytes = 0
+
 
 def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
                rsa_private_key=os.path.expanduser('~/.ssh/id_rsa'),
@@ -309,11 +576,16 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
                connect_timeout=300,
                banner_timeout=300,
                auth_timeout=300,
-               keepalive_interval=30):
+               keepalive_interval=30,
+               resume_offsets=None):
     """ Upload the given list of files using SFTP with progress reporting.
         The upload only supports uploading files from one local directory to one remote directory.
-        The files are uploaded only if they do not already exist on the server, or if they are of 
+        The files are uploaded only if they do not already exist on the server, or if they are of
         different size than the local files.
+
+        Each file is written under a temporary name and given its final name only once it is complete, so
+        the server never takes a file which is still being written. An interrupted upload is resumed by the
+        next upload of the same file (see findPartialUpload).
 
         The RSA private key is used for authentication. If the key is not found, the function will try to
         use the keys from the SSH agent (if available). Passphrase-protected keys are not supported.
@@ -332,6 +604,9 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
         port: [int] SSH port. 22 by default.
         rsa_private_key: [str] Path to the SSH private key. ~/.ssh/id_rsa by default.
         allow_dir_creation: [bool] Create a remote directory if it doesn't exist. False by default.
+        resume_offsets: [dict] If given, the byte from which the upload of each file started (0 for an
+            upload from the beginning) is stored in it, keyed by the entry in file_list. It is stored before
+            the file is written, so it is also there if the upload fails. None by default.
 
     Return:
         [bool] True if upload successful, false otherwise.
@@ -407,12 +682,13 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
                 update_interval = 0.5
 
             # Define a callback function for progress reporting
-            def progressCallback(bytes_transferred, _):
+            def progressCallback(bytes_transferred, _, bytes_sent):
                 """ Callback function to report upload progress. 
                     It updates the tracker and prints the progress to the console.
                 """
 
                 tracker.uploaded_bytes = bytes_transferred
+                tracker.sent_bytes = bytes_sent
                 
                 # Calculate percentage
                 if tracker.total_bytes > 0:
@@ -427,7 +703,9 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
                         
                         # Calculate transfer speed
                         if elapsed_time > 0:
-                            transfer_rate = tracker.uploaded_bytes/elapsed_time/1024  # KB/s
+                            # Only count the bytes written in this upload, not the part of a resumed
+                            #   upload which was already on the server
+                            transfer_rate = tracker.sent_bytes/elapsed_time/1024  # KB/s
                             
                             # Format as MB/s if over 1024 KB/s
                             if transfer_rate > 1024:
@@ -437,7 +715,7 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
                             
                             # Estimate time remaining
                             if percent_complete > 0 and percent_complete < 100.0:
-                                time_remaining = (elapsed_time/percent_complete)*(100 - percent_complete)
+                                time_remaining = (tracker.total_bytes - tracker.uploaded_bytes)/(1024*transfer_rate)
                                 # Format time remaining
                                 if time_remaining > 60:
                                     time_str = "{:.1f} min remaining".format(time_remaining/60)
@@ -485,19 +763,28 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
             
             # Upload the file under a temporary name and give it its final name only once complete. The
             #   server picks up uploads by name and can take a file that is still being written over a slow
-            #   link (it ignores the .part name)
-            temp_remote_file = remote_file + '.part'
+            #   link (it ignores the .part name). Find an earlier interrupted upload of the file to resume
+            temp_remote_file, resume_offset = findPartialUpload(sftp, local_file, dir_remote)
+
+            # Report where the upload starts before writing, so the caller knows it also if the upload fails
+            if resume_offsets is not None:
+                resume_offsets[fname] = resume_offset
 
             # Upload the file to the server if it isn't already there
-            log.info('Starting upload of ' \
-                     + local_file + ' ({}) to '.format(formatSize(local_file_size)) + remote_file)
-            sftp.put(local_file, temp_remote_file, callback=progressCallback)
+            if resume_offset > 0:
+                log.info('Resuming upload of ' + local_file + ' at {} of {} to '.format(
+                    formatSize(resume_offset), formatSize(local_file_size)) + remote_file)
+            else:
+                log.info('Starting upload of ' \
+                         + local_file + ' ({}) to '.format(formatSize(local_file_size)) + remote_file)
+
+            writePartialUpload(sftp, local_file, temp_remote_file, resume_offset, callback=progressCallback)
             log.debug("Upload completed, verifying...")
 
             # Check that the size of the remote file is correct, indicating a successful upload
             remote_info = sftp.lstat(temp_remote_file)
 
-            # If the remote and the local file are of the same size, skip it
+            # If the sizes differ, keep the partial upload, the next try resumes it
             if local_file_size != remote_info.st_size:
                 log.error('File verification failed: local size {} != remote size {}'.format(
                     formatSize(local_file_size), formatSize(remote_info.st_size)))
@@ -505,9 +792,19 @@ def uploadSFTP(hostname, username, dir_local, dir_remote, file_list, port=22,
 
             log.debug("File upload verified: {:s}".format(remote_file))
 
-            # posix_rename replaces a file of the same name, which a plain SFTP rename refuses
-            sftp.posix_rename(temp_remote_file, remote_file)
-            
+            # posix_rename replaces a file of the same name, which a plain SFTP rename refuses. On a server
+            #   without it, remove the old file first
+            try:
+                sftp.posix_rename(temp_remote_file, remote_file)
+
+            except IOError:
+                try:
+                    sftp.remove(remote_file)
+                except IOError:
+                    pass
+
+                sftp.rename(temp_remote_file, remote_file)
+
         return True
 
     except Exception as e:
@@ -835,6 +1132,11 @@ class UploadManager(multiprocessing.Process):
 
             tries = 0
 
+            # Furthest point from which the upload of each file was resumed. A failed upload which resumed
+            #   further than any try before it shows that the previous try moved the file forward, so it is
+            #   not counted as a failed try, and a link which keeps dropping still gets a large file through
+            furthest_resume_offsets = {}
+
             # Go through every file and upload it to server
             while True:
 
@@ -854,9 +1156,10 @@ class UploadManager(multiprocessing.Process):
                 data_path, f_name = os.path.split(file_name)
 
                 # Upload the file via SFTP (use the lowercase version of the station ID as the username)
+                resume_offsets = {}
                 upload_status = uploadSFTP(self.config.hostname, self.config.stationID.lower(), data_path, \
-                    self.config.remote_dir, [f_name], rsa_private_key=self.config.rsa_private_key, 
-                    port=self.config.host_port)
+                    self.config.remote_dir, [f_name], rsa_private_key=self.config.rsa_private_key,
+                    port=self.config.host_port, resume_offsets=resume_offsets)
 
                 # If the upload was successful, rewrite the holding file, which will remove the uploaded file
                 if upload_status:
@@ -867,14 +1170,29 @@ class UploadManager(multiprocessing.Process):
                 # If the upload failed, put the file back on the list and wait a bit
                 else:
 
-                    log.warning('Uploading failed! Retry {:d} of {:d}'.format(tries + 1, retries))
+                    # Check if this try resumed further than all earlier ones, i.e. the file is moving forward
+                    resume_offset = resume_offsets.get(f_name, 0)
+                    furthest_resume_offset = furthest_resume_offsets.get(file_name, 0)
+                    moved_forward = resume_offset > furthest_resume_offset
+                    furthest_resume_offsets[file_name] = max(resume_offset, furthest_resume_offset)
 
-                    tries += 1 
+                    # A file which is moving forward is retried after the shortest delay without counting a try
+                    if moved_forward:
+                        log.warning('Uploading failed, but the upload is moving forward (resumed at {})! '
+                                    'Retrying...'.format(formatSize(resume_offset)))
+                        delay = 15
+
+                    else:
+                        log.warning('Uploading failed! Retry {:d} of {:d}'.format(tries + 1, retries))
+
+                        tries += 1
+
+                        # Progressive retry delay: 15s * 2^(attempt-1), capped at 8 minutes
+                        delay = min(15*(2**(tries - 1)), 480)
+
                     with self.file_queue_lock:
                         self.file_queue.put(file_name)
 
-                    # Progressive retry delay: 15s * 2^(attempt-1), capped at 8 minutes
-                    delay = min(15*(2**(tries - 1)), 480)
                     if delay < 60:
                         log.info("Waiting %.0f s before next retry...", delay)
                     else:
