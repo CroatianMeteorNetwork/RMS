@@ -2621,6 +2621,11 @@ class PlateTool(QtWidgets.QMainWindow):
         # Store the mask
         self.mask = mask
 
+        # Mask given at startup (--mask, or found in the RMS root or the working directory). The mask editor
+        #   edits it when the data directory has no mask.bmp of its own, instead of replacing it with an empty
+        #   mask. It is only used by the first initialization of the editor, a station change clears the mask
+        self.startup_mask = mask
+
         # Last directory used for loading masks (for file dialog)
         self.last_mask_dir = None
 
@@ -6493,8 +6498,13 @@ class PlateTool(QtWidgets.QMainWindow):
         """Auto-load mask.bmp if present, else clear any mask carried over from a previous station.
 
         Must be called after the new station's image handle is in place, since the mask is rendered
-        against the current image dimensions.
+        against the current image dimensions. On the first call, a mask given at startup is edited
+        instead of being cleared when the data directory has no mask.bmp.
         """
+
+        # The startup mask is only a fallback for the first initialization, later calls are station changes
+        startup_mask = getattr(self, 'startup_mask', None)
+        self.startup_mask = None
 
         # Reset ALL mask state - critical when switching stations/directories. Clearing only the
         #   paint layer (not the polygons or the rendered overlay) left the previous station's mask
@@ -6510,6 +6520,11 @@ class PlateTool(QtWidgets.QMainWindow):
         mask_path = os.path.join(self.dir_path, "mask.bmp")
         if os.path.exists(mask_path):
             self.loadMaskFromFile(mask_path)
+
+        # No mask.bmp in the data directory, but a mask of the image size was given at startup - edit that one
+        elif self.maskFitsImage(startup_mask):
+            self.loadMaskImage(np.array(startup_mask.img, dtype=np.uint8))
+
         else:
             # No mask for this station - clear any leftover overlay/outlines from the previous one
             self.updateMaskDisplay()
@@ -7292,12 +7307,10 @@ class PlateTool(QtWidgets.QMainWindow):
             self.loadMaskFromFile(file_path)
 
     def loadMaskFromFile(self, mask_path):
-        """Load mask.bmp and convert masked regions to editable polygons.
+        """ Read a mask file and make it the edited mask (see loadMaskImage).
 
-        Pixels that cannot be represented as clean polygon contours (e.g. prior
-        brush strokes, or boundary pixels lost to approxPolyDP simplification)
-        are captured in the paint layer so the full mask survives a round-trip
-        through save → load without any pixel loss.
+        Arguments:
+            mask_path: [str] Path to the mask image (0 = masked, 255 = unmasked).
         """
         if not os.path.exists(mask_path):
             print(f"Mask file not found: {mask_path}")
@@ -7309,6 +7322,39 @@ class PlateTool(QtWidgets.QMainWindow):
         if mask_img is None:
             print(f"Failed to load mask: {mask_path}")
             return
+
+        self.loadMaskImage(mask_img)
+
+
+    def maskFitsImage(self, mask):
+        """ Check that the given mask has an image and the size of the current image.
+
+        Arguments:
+            mask: [MaskStructure] Mask to check, may be None.
+
+        Return:
+            [bool] True if the mask can be used on the current image.
+        """
+
+        if (mask is None) or (getattr(mask, 'img', None) is None) or (self.img.data is None):
+            return False
+
+        # The image data is indexed as (x, y), the mask image as (y, x)
+        img_width, img_height = self.img.data.shape[:2]
+
+        return mask.img.shape[:2] == (img_height, img_width)
+
+
+    def loadMaskImage(self, mask_img):
+        """ Make the given mask image the edited mask, with the masked regions converted to editable polygons.
+
+        Pixels that cannot be represented as clean polygon contours (e.g. prior brush strokes, or boundary
+        pixels lost to approxPolyDP simplification) are captured in the paint layer, so the full mask survives
+        a round trip through save and load without any pixel loss.
+
+        Arguments:
+            mask_img: [ndarray] Grayscale mask image (0 = masked, 255 = unmasked).
+        """
 
         self.mask_polygons = []
         self.mask_current_polygon = []
