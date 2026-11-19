@@ -6,12 +6,21 @@ This file was taken from WesternMeteorPyLib, commit 5234439 (Dec 2020)"""
 from __future__ import print_function, division, absolute_import
 
 import os
+import sys
 import argparse
 
 import numpy as np
 import scipy.interpolate
 
 import RMS.ConfigReader as cr
+from RMS.Misc import getRmsRootDir
+
+
+# Name of the EGM96 data file shipped with RMS
+EGM96_FILE_NAME = 'WW15MGH.DAC'
+
+# Interpolated geoid models, one per data file, built when first needed
+GEOID_MODELS = {}
 
 
 def loadEGM96Data(dir_path, file_name):
@@ -56,7 +65,56 @@ def interpolateEGM96Data(geoid_heights):
 
 
 
-def mslToWGS84Height(lat, lon, msl_height, config):
+def egm96FilePath(config=None):
+    """ Path to the EGM96 data file.
+
+    Keyword arguments:
+        config: [Config] Configuration with the path to the file (egm96_path, egm96_file_name). None
+            (default) takes the file shipped with RMS: in the RMS directory, or in the share directory of
+            the environment RMS was installed into.
+
+    Return:
+        [str] Path to the EGM96 data file.
+
+    """
+
+    # The file given by the configuration
+    if config is not None:
+        return os.path.join(config.egm96_path, config.egm96_file_name)
+
+    # The file in the RMS directory, else the one installed with the package
+    file_path = os.path.join(getRmsRootDir(), 'share', EGM96_FILE_NAME)
+    if not os.path.isfile(file_path):
+        file_path = os.path.join(sys.prefix, 'share', EGM96_FILE_NAME)
+
+    return file_path
+
+
+
+def geoidModel(config=None):
+    """ Interpolated EGM96 geoid model. Building it takes about 0.1 s, so it is built once per data file and
+        kept.
+
+    Keyword arguments:
+        config: [Config] Configuration with the path to the EGM96 data file. None (default) takes the file
+            shipped with RMS.
+
+    Return:
+        [RectSphereBivariateSpline] Geoid height (m) as a function of the colatitude and longitude (rad).
+
+    """
+
+    file_path = egm96FilePath(config)
+
+    # Build the model of this file the first time it is needed
+    if file_path not in GEOID_MODELS:
+        GEOID_MODELS[file_path] = interpolateEGM96Data(loadEGM96Data(*os.path.split(file_path)))
+
+    return GEOID_MODELS[file_path]
+
+
+
+def mslToWGS84Height(lat, lon, msl_height, config=None):
     """ Given the height above sea level (using the EGM96 model), compute the height above the WGS84
         ellipsoid.
 
@@ -64,18 +122,18 @@ def mslToWGS84Height(lat, lon, msl_height, config):
         lat: [float] Latitude +N (rad).
         lon: [float] Longitude +E (rad).
         msl_height: [float] Height above sea level (meters).
-        config: Config instance with the path to EGM96 coefficients
+
+    Keyword arguments:
+        config: [Config] Config instance with the path to EGM96 coefficients. None (default) takes the file
+            shipped with RMS.
 
     Return:
         wgs84_height: [float] Height above the WGS84 ellipsoid.
 
     """
 
-    # Load the geoid heights array
-    GEOID_HEIGHTS = loadEGM96Data(config.egm96_path, config.egm96_file_name)
-
-    # Init the interpolated geoid model
-    GEOID_MODEL = interpolateEGM96Data(GEOID_HEIGHTS)
+    # The interpolated geoid model
+    GEOID_MODEL = geoidModel(config)
 
     # Get the difference between WGS84 and MSL height
     lat_mod = np.pi/2 - lat
@@ -90,25 +148,25 @@ def mslToWGS84Height(lat, lon, msl_height, config):
 
 
 
-def wgs84toMSLHeight(lat, lon, wgs84_height, config):
+def wgs84toMSLHeight(lat, lon, wgs84_height, config=None):
     """ Given the height above the WGS84 ellipsoid compute the height above sea level (using the EGM96 model).
 
     Arguments:
         lat: [float] Latitude +N (rad).
         lon: [float] Longitude +E (rad).
         wgs84_height: [float] Height above the WGS84 ellipsoid (meters).
-        config: Config instance with the path to EGM96 coefficients
+
+    Keyword arguments:
+        config: [Config] Config instance with the path to EGM96 coefficients. None (default) takes the file
+            shipped with RMS.
 
     Return:
         msl_height: [float] Height above sea level (meters).
 
     """
 
-    # Load the geoid heights array
-    GEOID_HEIGHTS = loadEGM96Data(config.egm96_path, config.egm96_file_name)
-
-    # Init the interpolated geoid model
-    GEOID_MODEL = interpolateEGM96Data(GEOID_HEIGHTS)
+    # The interpolated geoid model
+    GEOID_MODEL = geoidModel(config)
 
     # Get the difference between WGS84 and MSL height
     lat_mod = np.pi/2 - lat
