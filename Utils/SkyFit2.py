@@ -23,7 +23,6 @@ import configparser
 import cv2
 import numpy as np
 import zlib
-from PIL import Image
 
 import matplotlib.pyplot as plt
 
@@ -474,7 +473,7 @@ import RMS.ConfigReader as cr
 from RMS.ExtractStars import extractStarsAndSave, extractStarsFF
 import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.Platepar import Platepar, getCatalogStarsImagePositions
-from RMS.Formats.FFfile import convertFRNameToFF, constructFFName
+from RMS.Formats.FFfile import convertFRNameToFF, constructFFName, ffStructFromImage
 from RMS.Formats.FrameInterface import detectInputTypeFolder, detectInputTypeFile
 from RMS.Formats.FTPdetectinfo import writeFTPdetectinfo
 from RMS.Formats import StarCatalog
@@ -13594,7 +13593,8 @@ class PlateTool(QtWidgets.QMainWindow):
                 f"Best with image:  {best_available_ff}  ({n_stars_available} stars)"
             )
 
-            auto_fit_label = "Auto Fit (placeholder)" if not best_ff_available else "Auto Fit"
+            # Without the image of the best frame, the fit runs on a generated placeholder image
+            auto_fit_label = "Auto Fit" if best_ff_available else "Auto Fit on placeholder image"
             auto_fit_btn = msg_box.addButton(auto_fit_label, QtWidgets.QMessageBox.ButtonRole.ActionRole)
             navigate_btn = msg_box.addButton("Go to Best Image", QtWidgets.QMessageBox.ButtonRole.ActionRole)
             msg_box.addButton(QtWidgets.QMessageBox.StandardButton.Cancel)
@@ -13636,35 +13636,30 @@ class PlateTool(QtWidgets.QMainWindow):
                             valid = (x_coords >= 0) & (x_coords < width)
                             placeholder[y_coords[valid], x_coords[valid]] = 40
 
+                    # The placeholder is named after the best FF file, so the image handle takes the frame
+                    #   time from its name. It only exists in memory: a file in the data folder would be left
+                    #   behind and taken for an image by other tools
                     base_name = os.path.splitext(best_ff)[0]
                     placeholder_name = f"{base_name}_placeholder.png"
-                    placeholder_path = os.path.join(self.dir_path, placeholder_name)
 
-                    img_pil = Image.fromarray(placeholder)
-                    img_pil.save(placeholder_path)
-                    print(f"Created placeholder image: {placeholder_path}")
+                    # Carry the detected stars (and the re-detected ones) over to the placeholder image, so
+                    #   getDetectedStars chooses between them as it does for the best frame
+                    star_sources = [self.calstars]
+                    if has_overrides:
+                        star_sources.append(self.star_detection_override_data)
 
-                    if best_ff in self.calstars:
-                        self.calstars[placeholder_name] = self.calstars[best_ff]
+                    for stars in star_sources:
+                        if best_ff in stars:
+                            stars[placeholder_name] = stars[best_ff]
 
-                    # Refresh file list and navigate to placeholder
-                    self.img_handle = detectInputTypeFolder(
-                        self.dir_path, self.config,
-                        beginning_time=None, fps=self.fps
-                    )
-                    self.img.changeHandle(self.img_handle)
+                    # Add the placeholder to the image list and navigate to it
+                    target_index = self.img_handle.addMemoryFF(placeholder_name,
+                                                               ffStructFromImage(placeholder))
+                    print(f"Created placeholder image: {placeholder_name}")
 
-                    target_index = None
-                    for i, ff_path in enumerate(self.img_handle.ff_list):
-                        if os.path.basename(ff_path) == placeholder_name:
-                            target_index = i
-                            break
-
-                    if target_index is not None:
-                        current_index = self.img_handle.current_ff_index
-                        delta = target_index - current_index
-                        if delta != 0:
-                            self.nextImg(n=delta)
+                    delta = target_index - self.img_handle.current_ff_index
+                    if delta != 0:
+                        self.nextImg(n=delta)
 
                     # Use the same auto-fit path as the fit parameters panel
                     self.autoFitAstrometryNet()

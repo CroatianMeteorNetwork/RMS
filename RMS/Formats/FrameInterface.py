@@ -138,6 +138,24 @@ def computeFramesToRead(read_nframes, total_frames, chunk_frames, first_frame):
     return int(frames_to_read)
 
 
+def validFFImageName(file_name):
+    """ Check if the given file is an FF file which the FF image handle can open.
+
+    Besides the FF formats which validFFName recognizes by the extension, this accepts the names of PNG
+    pseudo-FF files (FF*.png), e.g. the in-memory placeholders which SkyFit2 adds with addMemoryFF for frames
+    without an image. The PNG format is only accepted here, where it is asked for explicitly, so the directory
+    scans of RMS never take a PNG image for an FF file.
+
+    Arguments:
+        file_name: [str] Name of the file.
+
+    Return:
+        [bool] True if the file is an FF file (FITS, bin or PNG).
+    """
+
+    return validFFName(file_name) or validFFName(file_name, fmt='png')
+
+
 class InputType(object):
     def __init__(self):
         """ Template class for all input types. """
@@ -355,6 +373,9 @@ class InputTypeFRFF(InputType):
         # Cahcne for whole FF files
         self.cache = {}
 
+        # FF structures which only exist in memory, by file name (see addMemoryFF)
+        self.memory_ffs = {}
+
         # Cache for individual frames
         self.cache_frames = {}
 
@@ -398,6 +419,54 @@ class InputTypeFRFF(InputType):
     def beginning_datetime(self):
         return filenameToDatetime(self.name())
 
+    def addMemoryFF(self, file_name, ff):
+        """ Add an FF structure which only exists in memory (e.g. a placeholder for a frame without an image)
+            to the end of the file list, so nothing has to be written to the data directory.
+
+        Arguments:
+            file_name: [str] FF file name the frame is known by (the time is taken from it).
+            ff: [FFStruct] The FF structure.
+
+        Return:
+            index: [int] Index of the file in the file list.
+        """
+
+        # Handles unpickled from the state files of earlier versions do not have the attribute
+        if not hasattr(self, 'memory_ffs'):
+            self.memory_ffs = {}
+
+        # Store the structure, and drop a cached copy of an earlier structure with the same name
+        self.memory_ffs[file_name] = ff
+        self.cache.pop(file_name, None)
+
+        # Extend the per-file lists along with the file list
+        if file_name not in self.ff_list:
+            self.ff_list.append(file_name)
+            self.current_frame_list.append(None)
+            self.line_list.append(0)
+            self.line_number.append(1)
+            self.total_fr_chunks = len(self.ff_list)
+
+        return self.ff_list.index(file_name)
+
+    def _readFF(self, file_name):
+        """ Read an FF file of the file list, from memory if it was added with addMemoryFF.
+
+        Arguments:
+            file_name: [str] FF file name.
+
+        Return:
+            ff: [FFStruct] The FF structure, None if it could not be read.
+        """
+
+        # A shallow copy is returned, as some readers replace the image arrays of the returned structure
+        memory_ffs = getattr(self, 'memory_ffs', {})
+        if file_name in memory_ffs:
+            return copy.copy(memory_ffs[file_name])
+
+        # Read the file from disk
+        return readFF(self.dir_path, file_name)
+
     def nextChunk(self):
         """ Go to the next FF file. """
 
@@ -428,10 +497,10 @@ class InputTypeFRFF(InputType):
             if file_name in self.cache:
                 ff = self.cache[file_name]
 
-            elif validFFName(file_name):
+            elif validFFImageName(file_name):
                 
-                # Load the FF file from disk
-                ff = readFF(self.dir_path, file_name)
+                # Load the FF file from disk (or from memory, see addMemoryFF)
+                ff = self._readFF(file_name)
 
                 # Put the FF into separate cache
                 self.cache[file_name] = ff
@@ -448,19 +517,19 @@ class InputTypeFRFF(InputType):
             # when calling loadChunk on an image never called before, set the current frame to the start
             # if it's an FR file, otherwise set it to 0
             if self.current_frame is None:
-                if validFFName(file_name):
+                if validFFImageName(file_name):
                     self.current_frame = 0
                 else:
                     self.current_frame = ff.t[self.current_line][0]
 
 
         # If it contains at least one FF file
-        elif any([validFFName(ff_file) for ff_file in self.ff_list]):
+        elif any([validFFImageName(ff_file) for ff_file in self.ff_list]):
 
             if first_frame == -1:
                 first_frame = 0
 
-            total_ff_frames = len([x for x in self.ff_list if validFFName(x)])*256
+            total_ff_frames = len([x for x in self.ff_list if validFFImageName(x)])*256
             frames_to_read = computeFramesToRead(read_nframes, total_ff_frames, 256, first_frame)
             ffs_to_read = self.ff_list[first_frame//256:(first_frame + frames_to_read)//256 + 1]
 
@@ -473,7 +542,7 @@ class InputTypeFRFF(InputType):
                 max_frame = (first_frame + frames_to_read)%256
 
                 # Read the FF file
-                ff = readFF(self.dir_path, file_name)
+                ff = self._readFF(file_name)
 
                 # Select the frames
                 ff.maxpixel = selectFFFrames(ff.maxpixel, ff, min_frame, max_frame)
@@ -483,7 +552,7 @@ class InputTypeFRFF(InputType):
 
                 # Init an empty FF structure
                 # For multiple FFs, determine the dtype from the first reconstructed FF
-                ref_ff = readFF(self.dir_path, ffs_to_read[0])
+                ref_ff = self._readFF(ffs_to_read[0])
                 target_dtype = self.getTargetDtype(ref_ff.maxpixel)
                 
                 ff = FFMimickInterface(self.nrows, self.ncols, target_dtype)
@@ -506,7 +575,7 @@ class InputTypeFRFF(InputType):
                         max_frame = (first_frame + frames_to_read)%256
 
                     # Read the FF file
-                    ff_temp = readFF(self.dir_path, file_name)
+                    ff_temp = self._readFF(file_name)
 
                     # Reconstruct the maxpixel in the given frame range
                     maxpixel = selectFFFrames(ff_temp.maxpixel, ff_temp, min_frame, max_frame)
@@ -731,10 +800,10 @@ class InputTypeFRFF(InputType):
         if file_name in self.cache:
             ff_frame = self.cache[file_name]
 
-        elif validFFName(file_name):
+        elif validFFImageName(file_name):
 
-            # Load the FF file from disk
-            ff_frame = readFF(self.dir_path, file_name)
+            # Load the FF file from disk (or from memory, see addMemoryFF)
+            ff_frame = self._readFF(file_name)
 
             # Put the FF into separate cache
             self.cache[file_name] = ff_frame
@@ -751,14 +820,14 @@ class InputTypeFRFF(InputType):
 
 
         if self.current_frame is None:
-            if validFFName(file_name):
+            if validFFImageName(file_name):
                 self.current_frame = 0
             else:
                 self.current_frame = ff_frame.t[self.current_line][0]
 
 
         # Get frame from file
-        if validFFName(file_name):
+        if validFFImageName(file_name):
             
             # Reconstruct the frame from an FF file
             frame = reconstructFrameFF(ff_frame, self.current_frame%self.total_frames, \
