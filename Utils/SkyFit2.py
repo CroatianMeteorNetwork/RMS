@@ -253,6 +253,159 @@ def migrateStatePlanetPairs(paired_stars, cache_time, platepar):
     return len(old_bodies)
 
 
+def _configSectionName(line):
+    r""" Return the section name of a config file section header line, the way configparser reads it.
+
+        configparser matches the line, stripped of comments and spaces, against \[(?P<header>.+)\] and does
+        not strip the name itself, so '[ StarExtraction ]' is a section called ' StarExtraction '.
+
+    Arguments:
+        line: [str] Config file line.
+
+    Return:
+        [str] Section name, or None if the line is not a section header.
+    """
+
+    # Comment lines are never headers, and an inline comment after a header is not part of it
+    stripped = line.strip()
+    if stripped.startswith((';', '#')):
+        return None
+    stripped = re.sub(r'\s+;.*$', '', stripped)
+
+    # The header pattern of configparser
+    section_match = re.match(r'\[(.+)\]', stripped)
+    if section_match is None:
+        return None
+
+    return section_match.group(1)
+
+
+def updateConfigLines(lines, updates):
+    """ Set the given keys in the lines of an RMS .config file, keeping everything else as it is.
+
+        A key line is recognised whatever the spelling configparser accepts ('key: value', 'key:value',
+        'key=value', 'key = value'), and the key name is compared case-insensitively like configparser
+        does. The original key spelling, delimiter, spacing, line ending (LF or CRLF) and any ';' inline
+        comment are kept. Keys that are not in the file are added at the end of their section, and
+        missing sections are appended, with the line ending the file uses.
+
+    Arguments:
+        lines: [list] Lines of the config file, with their line endings.
+        updates: [dict] {section: {key: value_str}} of the values to write.
+
+    Return:
+        new_lines: [list] Updated lines.
+    """
+
+    # A key line with its delimiter, an optional ';' inline comment and the line ending. Only spaces and
+    #   tabs are matched around the delimiter, so an empty value never swallows the line ending
+    key_re = re.compile(r'^([ \t]*)([^:=\s;#\[][^:=\r\n]*?)([ \t]*[:=][ \t]*)(.*?)([ \t]+;.*?)?(\r?\n)?$')
+
+    # The line ending of the file, for the lines that are added
+    eol_default = "\r\n" if any(line.endswith("\r\n") for line in lines) else "\n"
+
+    # The keys written so far, and the keys to write by their lower-case name, as configparser compares them
+    applied = {section: {k: False for k in keys} for section, keys in updates.items()}
+    wanted = {section: {k.lower(): k for k in keys} for section, keys in updates.items()}
+    current_section = None
+
+    # Indentation of the last key line. A line indented deeper than it is a continuation of that key's
+    #   value for configparser, not a key of its own. The continuation of a replaced value is dropped
+    last_key_indent = None
+    last_key_replaced = False
+
+    # Replace the values of the keys that already exist
+    new_lines = []
+    for line in lines:
+
+        # A section header starts a new section, and a value never continues past it
+        section_name = _configSectionName(line)
+        if section_name is not None:
+            current_section = section_name
+            last_key_indent = None
+            new_lines.append(line)
+            continue
+
+        # Blank and comment lines neither start nor end a value
+        if (not line.strip()) or line.strip().startswith((';', '#')):
+            new_lines.append(line)
+            continue
+
+        # Keep or drop a continuation line together with the value it continues
+        indent_level = len(line) - len(line.lstrip())
+        if (last_key_indent is not None) and (indent_level > last_key_indent):
+            if not last_key_replaced:
+                new_lines.append(line)
+            continue
+
+        # Any key line sets the indentation that later continuation lines are compared to
+        key_match = key_re.match(line)
+        if key_match is not None:
+            last_key_indent = indent_level
+            last_key_replaced = False
+
+        # Only the keys of the sections to update are changed
+        if current_section not in updates:
+            key_match = None
+
+        # Replace the value of a wanted key, keeping the rest of the line
+        if key_match is not None:
+
+            indent, key, delim, _, comment, eol = key_match.groups()
+            key_name = wanted[current_section].get(key.strip().lower())
+
+            # Keep the indentation, key spelling, delimiter, inline comment and line ending
+            if key_name is not None:
+                new_lines.append(indent + key + delim + updates[current_section][key_name]
+                                 + (comment or "") + (eol or eol_default))
+                applied[current_section][key_name] = True
+                last_key_replaced = True
+                continue
+
+        # Any other line is kept as it is
+        new_lines.append(line)
+
+    # Add any missing keys, at the end of their section or in a new section
+    for section, keys in updates.items():
+
+        missing_keys = [k for k, was_applied in applied[section].items() if not was_applied]
+        if not missing_keys:
+            continue
+
+        # Find the last non-comment line of the section
+        insert_idx = None
+        in_section = False
+        for i, line in enumerate(new_lines):
+
+            section_name = _configSectionName(line)
+            if section_name is not None:
+                if in_section:
+                    break
+                in_section = (section_name == section)
+                if in_section:
+                    insert_idx = i + 1
+
+            elif in_section and line.strip() and not line.strip().startswith((';', '#')):
+                insert_idx = i + 1
+
+        # Append a whole new section if it does not exist
+        if insert_idx is None:
+            if new_lines and not new_lines[-1].endswith("\n"):
+                new_lines[-1] += eol_default
+            new_lines.append("{:s}[{:s}]{:s}".format(eol_default, section, eol_default))
+            for key in missing_keys:
+                new_lines.append("{:s}: {:s}{:s}".format(key, updates[section][key], eol_default))
+
+        # Insert the keys after the last line of the existing section
+        else:
+            if not new_lines[insert_idx - 1].endswith("\n"):
+                new_lines[insert_idx - 1] += eol_default
+            for key in reversed(missing_keys):
+                new_lines.insert(insert_idx, "{:s}: {:s}{:s}".format(key, updates[section][key], eol_default))
+
+    return new_lines
+
+
 import matplotlib.gridspec as gridspec
 import matplotlib.ticker as ticker
 import scipy.optimize
@@ -2126,24 +2279,34 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                     # Only write the catalog LM if it was tuned and the user kept it checked
                     catalog_lm = pt.tuned_cat_lim_mag if save_lm else None
 
-                    if os.path.realpath(src) != os.path.realpath(dest):
-                        # Copy the config to the target, then write overrides into the copy
-                        shutil.copy2(src, dest)
+                    # Is the target the loaded config file itself
+                    is_loaded_config = (os.path.realpath(src) == os.path.realpath(dest))
+
+                    # A config that already exists at the target belongs to that station (its ID,
+                    #   coordinates, camera and upload settings). Only patch the star detection keys in it,
+                    #   after backing it up. A new target starts as a copy of the loaded config, which needs
+                    #   no backup. A failed write raises and is reported below, not as saved
+                    if os.path.exists(dest):
                         pt._writeStarDetectionConfig(dest, catalog_mag_limit=catalog_lm)
                     else:
-                        # Same file — write overrides in-place (backup handled by _writeStarDetectionConfig)
-                        pt._writeStarDetectionConfig(dest, catalog_mag_limit=catalog_lm)
-                    # Sync in-memory config attrs so modified state is cleared
-                    pt.config.intensity_threshold = pt.override_intensity_threshold
-                    pt.config.neighborhood_size = pt.override_neighborhood_size
-                    pt.config.max_stars = pt.configMaxStars()
-                    pt.config.segment_radius = pt.override_segment_radius
-                    pt.config.max_feature_ratio = pt.override_max_feature_ratio
-                    pt.config.roundness_threshold = pt.override_roundness_threshold
-                    if catalog_lm is not None:
-                        # Match the one decimal the file holds
-                        pt.config.catalog_mag_limit = round(catalog_lm, 1)
-                    pt._updateConfigSaveButtonState()
+                        shutil.copy2(src, dest)
+                        pt._writeStarDetectionConfig(dest, catalog_mag_limit=catalog_lm, backup=False)
+
+                    # Sync the in-memory config only when the loaded config file itself was written, so
+                    #   the modified state still shows while the loaded file holds the old values
+                    if is_loaded_config:
+                        pt.config.intensity_threshold = pt.override_intensity_threshold
+                        pt.config.neighborhood_size = pt.override_neighborhood_size
+                        pt.config.max_stars = pt.configMaxStars()
+                        pt.config.segment_radius = pt.override_segment_radius
+                        pt.config.max_feature_ratio = pt.override_max_feature_ratio
+                        pt.config.roundness_threshold = pt.override_roundness_threshold
+                        if catalog_lm is not None:
+                            # Match the one decimal the file holds
+                            pt.config.catalog_mag_limit = round(catalog_lm, 1)
+                        pt._updateConfigSaveButtonState()
+
+                    # Only reached when the write succeeded
                     results.append("Config saved to: " + dest)
                 except Exception as e:
                     results.append("Config save to {} failed: {}".format(target_dir, repr(e)))
@@ -6364,11 +6527,12 @@ class PlateTool(QtWidgets.QMainWindow):
         return final_lm
 
 
-    def _writeStarDetectionConfig(self, config_path, catalog_mag_limit=None):
-        """Write star detection parameters to the specified config file.
+    def _writeStarDetectionConfig(self, config_path, catalog_mag_limit=None, backup=True):
+        """ Write the star detection override parameters to the given config file, backing it up first.
 
-        Preserves comments and formatting by doing surgical line updates.
-        Uses ': ' separator like the RMS config format.
+            Preserves comments and formatting by doing surgical line updates (see updateConfigLines).
+            Missing keys and sections are appended. Errors are not caught: the caller must report them
+            and must not treat the settings as saved.
 
         Arguments:
             config_path: [str] Path to the config file to update.
@@ -6376,12 +6540,27 @@ class PlateTool(QtWidgets.QMainWindow):
         Keyword arguments:
             catalog_mag_limit: [float] Catalog limiting magnitude to write. None (default) leaves
                 the one in the config alone.
+            backup: [bool] Copy an existing file to a timestamped backup before changing it. True by
+                default.
+
+        Return:
+            backup_path: [str] Path of the backup, None if no backup was made.
         """
-        import re
+
         from datetime import datetime
 
-        # Backup existing config before overwriting
-        if os.path.exists(config_path):
+        # The file that is really written: replacing a symlinked config by name would swap the link itself
+        #   for a regular file and leave the file it points to unchanged
+        real_config_path = os.path.realpath(config_path)
+
+        # Refuse a config that is not writable. The atomic replace below would otherwise succeed in a
+        #   writable folder and silently replace a config the user made read-only
+        if os.path.exists(real_config_path) and (not os.access(real_config_path, os.W_OK)):
+            raise PermissionError("The config file is not writable: {:s}".format(real_config_path))
+
+        # Backup existing config before overwriting. A failed backup aborts the write
+        backup_path = None
+        if backup and os.path.exists(config_path):
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             base, ext = os.path.splitext(config_path)
             backup_path = "{}.bak.{}{}".format(base, timestamp, ext)
@@ -6405,90 +6584,48 @@ class PlateTool(QtWidgets.QMainWindow):
         if catalog_mag_limit is not None:
             updates["Calibration"] = {"catalog_mag_limit": "{:.1f}".format(catalog_mag_limit)}
 
+        # Read the existing file. newline='' keeps the line endings (CRLF stays CRLF), and the encoding
+        #   is the one RMS reads the config with
+        if os.path.exists(config_path):
+            with open(config_path, 'r', newline='', encoding='utf-8') as f:
+                lines = f.readlines()
+        else:
+            lines = []
+
+        # Set the new values in the lines
+        new_lines = updateConfigLines(lines, updates)
+
+        # Write back through a temporary file next to the real file, so a failed write never leaves a
+        #   truncated config behind
+        tmp_path = real_config_path + ".tmp"
         try:
-            # Read existing file
-            if os.path.exists(config_path):
-                with open(config_path, 'r') as f:
-                    lines = f.readlines()
-            else:
-                lines = []
-
-            # Track which updates were applied
-            applied = {section: {k: False for k in keys} for section, keys in updates.items()}
-            current_section = None
-
-            # Update existing lines
-            new_lines = []
-            for line in lines:
-                stripped = line.strip()
-
-                # Track current section
-                section_match = re.match(r'\s*\[([^\]]+)\]', stripped)
-                if section_match:
-                    current_section = section_match.group(1)
-                    new_lines.append(line)
-                    continue
-
-                # Check if this line is a key we want to update
-                updated = False
-                if current_section and ': ' in stripped and not stripped.startswith((';', '#')):
-                    key = stripped.split(': ')[0].strip()
-                    if current_section in updates and key in updates[current_section]:
-                        value = updates[current_section][key]
-                        new_lines.append(f"{key}: {value}\n")
-                        applied[current_section][key] = True
-                        updated = True
-
-                if not updated:
-                    new_lines.append(line)
-
-            # Add any missing sections/keys at the end
-            for section, keys in updates.items():
-                missing_keys = [k for k, was_applied in applied[section].items() if not was_applied]
-                if not missing_keys:
-                    continue
-
-                # Check if section exists
-                section_exists = any(f'[{section}]' in line for line in new_lines)
-                if not section_exists:
-                    new_lines.append(f"\n[{section}]\n")
-                    for key in missing_keys:
-                        new_lines.append(f"{key}: {updates[section][key]}\n")
-                else:
-                    # Find section end and insert keys
-                    insert_idx = None
-                    in_section = False
-                    for i, line in enumerate(new_lines):
-                        if f'[{section}]' in line:
-                            in_section = True
-                            insert_idx = i + 1
-                        elif in_section:
-                            if line.strip().startswith('['):
-                                break
-                            if line.strip() and not line.strip().startswith(';'):
-                                insert_idx = i + 1
-
-                    if insert_idx is not None:
-                        for key in reversed(missing_keys):
-                            new_lines.insert(insert_idx, f"{key}: {updates[section][key]}\n")
-
-            # Write back
-            with open(config_path, 'w') as f:
+            with open(tmp_path, 'w', newline='', encoding='utf-8') as f:
                 f.writelines(new_lines)
 
-            print(f"Saved star detection settings to: {config_path}")
-            print(f"  intensity_threshold: {self.override_intensity_threshold}")
-            print(f"  segment_radius: {self.override_segment_radius}")
-            print(f"  max_stars: {self.configMaxStars()}")
-            if catalog_mag_limit is not None:
-                print(f"  catalog_mag_limit: {catalog_mag_limit:.1f}")
+            # Keep the permissions of the config
+            if os.path.exists(real_config_path):
+                shutil.copymode(real_config_path, tmp_path)
 
-            qmessagebox(message=f"Star detection settings saved to:\n{config_path}",
-                       title="Settings Saved", message_type="info")
+            # Replace the config only once the new content is complete
+            os.replace(tmp_path, real_config_path)
 
-        except Exception as e:
-            qmessagebox(message=f"Error saving config:\n{str(e)}",
-                       title="Save Error", message_type="warning")
+        # Never leave the temporary file behind
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+        # Report the saved values
+        print(f"Saved star detection settings to: {config_path}")
+        print(f"  intensity_threshold: {self.override_intensity_threshold}")
+        print(f"  segment_radius: {self.override_segment_radius}")
+        print(f"  max_stars: {self.configMaxStars()}")
+        if catalog_mag_limit is not None:
+            print(f"  catalog_mag_limit: {catalog_mag_limit:.1f}")
+
+        qmessagebox(message=f"Star detection settings saved to:\n{config_path}",
+                   title="Settings Saved", message_type="info")
+
+        return backup_path
 
 
     ###################################################################################################
