@@ -460,7 +460,9 @@ def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=3] frames, \
         passers on the given frame. 
 
     Arguments:
-        frames: [3D ndarray] Numpy array containing video frames. Structure: (nframe, y, x).
+        frames: [3D ndarray] Numpy array containing video frames. Structure: (nframe, y, x). Only the number
+            of frames is used. The frame buffer may be padded by a row and a column (see
+            RMS.Misc.frameBufferShape), so the image size is taken from the compressed frames.
         compressed: [3D ndarray] Numpy array containing compressed video frames. Structure: (frame, y, x), 
             where frames are: maxpixel, maxframe, avepixel, stdpixel
         min_level: [int] The point will be subsampled if it has this minimum pixel level (i.e. brightness).
@@ -468,7 +470,8 @@ def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=3] frames, \
             threshold.
         k1: [float] Threhsold max > avg + k1*stddev
         j1: [float] Constant level offset in the threshold
-        f: [int] Decimation scale
+        f: [int] Decimation scale. When the image size is not a multiple of f, the pixels of the partial
+            blocks at the bottom and right edges are not used.
 
     Return:
         num: [int] Number threshold passers.
@@ -479,12 +482,13 @@ def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=3] frames, \
 
     cdef unsigned int x, y, x2, y2, n, max_val, nframes, x_size, y_size
     cdef unsigned int num = 0
-    cdef unsigned int avg_std
+    cdef int avg_std
 
-    # Calculate the shapes of the subsamples image
-    cdef shape_z = frames.shape[0]
-    cdef shape_y = int(floor(frames.shape[1]//f))
-    cdef shape_x = int(floor(frames.shape[2]//f))
+    # Calculate the shape of the subsampled image (only the full f*f blocks) from the size of the compressed
+    #   frames, which are never padded
+    cdef unsigned int shape_z = frames.shape[0]
+    cdef unsigned int shape_y = int(floor(compressed.shape[1]//f))
+    cdef unsigned int shape_x = int(floor(compressed.shape[2]//f))
     
     # Init subsampled image arrays
     cdef np.ndarray[np.int32_t, ndim=3] count = np.zeros((shape_z, shape_y, shape_x), np.int32)
@@ -492,24 +496,29 @@ def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=3] frames, \
     cdef np.ndarray[UINT16_TYPE_t, ndim=1] pointsx = np.zeros((shape_z*shape_y*shape_x), UINT16_TYPE)
     cdef np.ndarray[UINT16_TYPE_t, ndim=1] pointsz = np.zeros((shape_z*shape_y*shape_x), UINT16_TYPE)
 
-    # Extract frames dimensions 
+    # Extract the image dimensions from the compressed frames. The frame buffer can be one row and one
+    #   column larger, and reading the compressed frames at that size goes to the wrong pixels (or past the
+    #   end of the array) when they are a contiguous copy, as under the forkserver/spawn start methods
     nframes = frames.shape[0]
-    y_size = frames.shape[1]
-    x_size = frames.shape[2]
+    y_size = compressed.shape[1]
+    x_size = compressed.shape[2]
     
     for y in range(y_size):
         for x in range(x_size):
 
             max_val = compressed[0, y, x]
 
-            # Keep the original truncation order while making both narrowing conversions explicit.
-            avg_std = <unsigned int> (
+            # Compute the threshold as a signed value (a negative j1 can make it negative, which would wrap
+            #   to a huge number if narrowed to an unsigned type), keeping the original truncation order
+            avg_std = <int> (
                 <int> (<double> compressed[2, y, x] + k1*<double> compressed[3, y, x])
                 + <double> j1
             )
 
-            # Make sure the threshold limit is not above the maximum possible value
-            if avg_std > 255:
+            # Clamp the threshold to the valid pixel value range
+            if avg_std < 0:
+                avg_std = 0
+            elif avg_std > 255:
                 avg_std = 255
             
             if ((max_val > min_level) and (max_val >= avg_std)):
@@ -520,6 +529,12 @@ def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=3] frames, \
                 # Subsample frame in f*f squares
                 y2 = int(floor(y//f))
                 x2 = int(floor(x//f))
+
+                # Skip the partial edge block when the image size is not a multiple of f, as the count
+                #   array only covers the full blocks (an index past its edge would land in the counts of the
+                #   next block row or frame, or past the end of the array)
+                if (y2 >= shape_y) or (x2 >= shape_x):
+                    continue
                 
                 # Check if there are enough of threshold passers inside of this square
                 if count[n, y2, x2] >= min_points:
