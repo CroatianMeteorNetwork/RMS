@@ -21,6 +21,7 @@ import math
 import os
 import sys
 from RMS.CompileArgs import getCompileArgs
+from RMS.Logger import installEarlyLogBuffer
 from RMS.Misc import getRmsRootDir
 from Utils.GenerateTimelapse import isFfmpegWorking
 import matplotlib.colors as mcolors
@@ -802,6 +803,10 @@ def parse(path, strict=True):
         config: [Config]
 
     """
+
+    # Keep the warnings of the config parser until logging is initialized, so they also get into the night
+    #   log (see installEarlyLogBuffer)
+    installEarlyLogBuffer()
 
     delimiter = ";"
 
