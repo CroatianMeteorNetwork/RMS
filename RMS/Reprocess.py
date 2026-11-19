@@ -268,7 +268,9 @@ def processNight(night_data_dir, config, detection_results=None, nodetect=False)
                 platepar.write(platepar_path, fmt=platepar_fmt)
 
             else:
-                log.info('Astrometric calibration FAILED!, Using old platepar for calibration...')
+                log.info('Astrometric calibration FAILED! The platepar is not saved, the recalibration starts from '
+                         'the last successful step of the check (the NN alignment or a fit of the pointing), or '
+                         'from the old platepar if no step succeeded...')
                 addObsParam(obs_dict, "photometry_good", "False")
 
             saveObservationSummaryDict(obs_dict)
