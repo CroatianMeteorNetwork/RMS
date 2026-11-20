@@ -1078,6 +1078,19 @@ if __name__ == '__main__':
         help="Camera password (overrides the password in the config device URL)."
     )
 
+    # NOTE: no '-i' short form on purpose. Firmware-side ISP control forwards
+    # daemon args verbatim (isp_ctl `manual`/`auto` use -a/-d/-i/-e, where
+    # -i = ISP-digital gain). A '-i' short form here would let argparse swallow
+    # the daemon's `-i <val>` as the camera IP, silently dropping it.
+    parser.add_argument(
+        '--ip',
+        type=str,
+        default=None,
+        help="Control a camera directly by its IP address, with no RMS config "
+             "(e.g. --ip 192.168.42.10). Mutually exclusive with --config; "
+             "--user/--password override the default admin / empty credentials."
+    )
+
     cml_args = parser.parse_args()
     cmd = cml_args.command[0]
     if cml_args.options is not None:
@@ -1085,14 +1098,24 @@ if __name__ == '__main__':
     else:
         opts = ''
 
-    # Load the config file
-    config = cr.loadConfigFromDirectory(cml_args.config, 'notused')
-
     if cmd not in cmd_list:
         log.info('Error: command "%s" not supported', cmd)
         exit(1)
 
-    cameraControlV2(config, cmd, opts, camera_user=cml_args.user, camera_pwd=cml_args.password)
+    if cml_args.ip is not None:
+        # Standalone mode: drive the camera directly by IP, with no RMS config.
+        # --user/--password override the defaults (admin / empty).
+        if cml_args.config is not None:
+            log.info('Error: --ip and --config are mutually exclusive.')
+            exit(1)
+        camera_user = cml_args.user if cml_args.user is not None else 'admin'
+        camera_pwd = cml_args.password if cml_args.password is not None else ''
+        cameraControl(cml_args.ip, camera_user, camera_pwd, cmd, opts)
+
+    else:
+        # Load the config file and drive the camera its device URL points at.
+        config = cr.loadConfigFromDirectory(cml_args.config, 'notused')
+        cameraControlV2(config, cmd, opts, camera_user=cml_args.user, camera_pwd=cml_args.password)
 
 
 """Known Field mappings
