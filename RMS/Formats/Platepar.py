@@ -40,6 +40,7 @@ import scipy.optimize
 from scipy.spatial import cKDTree
 from RMS.Astrometry.Conversions import date2JD, jd2Date, JD2HourAngle, trueOfDateRaDec2ApparentAltAz, \
     apparentAltAz2TrueOfDateRaDec
+from RMS.GeoidHeightEGM96 import mslToWGS84Height
 from RMS.Math import angularSeparation, sphericalPointFromHeadingAndDistance
 from RMS.Misc import RmsDateTime, rmsCommit
 
@@ -2440,6 +2441,10 @@ class Platepar(object):
         # Parse JSON into an object with attributes corresponding to dict keys
         self.__dict__ = platepar_dict
 
+        # The height above the ellipsoid follows from the station coordinates (see height_wgs84), a value in
+        #   the file is not taken
+        self.__dict__.pop('height_wgs84', None)
+
         # The reference hour angle is a function of the reference time only, so it is recomputed rather
         #   than taken from the file: this way a platepar written with an older definition of the sidereal
         #   time (e.g. without the equation of the equinoxes) keeps pointing where it was fitted
@@ -2684,6 +2689,10 @@ class Platepar(object):
         self2.y_poly_rev = self.y_poly_rev.tolist()
         del self2.time
 
+        # The height above the ellipsoid is derived from the station coordinates, an assigned value is not
+        #   written
+        self2.__dict__.pop('height_wgs84', None)
+
         # For compatibility with old procedures, write the forward distortion parameters as x, y
         self2.x_poly = self.x_poly_fwd.tolist()
         self2.y_poly = self.y_poly_fwd.tolist()
@@ -2861,6 +2870,26 @@ class Platepar(object):
 
         # Compute the rotation of the camera wrt horizon
         return RMS.Astrometry.ApplyAstrometry.rotationWrtHorizon(self)
+
+    @property
+    def height_wgs84(self):
+        """ Height of the station above the WGS84 ellipsoid (m). Derived from the height above sea level (elev)
+            through the EGM96 geoid, so that it follows any change of the station coordinates. A value
+            assigned to it takes precedence; it is not written into the platepar file.
+        """
+
+        # An assigned value is kept in the instance dictionary under the name of the property
+        if self.__dict__.get('height_wgs84') is not None:
+            return self.__dict__['height_wgs84']
+
+        # Otherwise the height above sea level is taken to the ellipsoid
+        return mslToWGS84Height(np.radians(self.lat), np.radians(self.lon), self.elev)
+
+    @height_wgs84.setter
+    def height_wgs84(self, value):
+        """ Assign the height of the station above the WGS84 ellipsoid (m), None to derive it again. """
+
+        self.__dict__['height_wgs84'] = value
 
     def __repr__(self):
 
