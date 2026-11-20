@@ -511,6 +511,13 @@ class Config:
         self.line_distance_const = 4   # constant that determines the influence of average point distance on the line quality
         self.point_ratio_threshold = 0.7 # another line is sought while the points on the best line over the number of candidate lines are below this (see Grouping3Dcy.find3DLines)
         self.max_lines = 5             # maximum number of lines
+        # Maximum angular velocity for fireball candidates in deg/s. Converted to a per-sensor
+        # px/frame cap at runtime using fps and the deg/pixel scale derived from the nominal FOV
+        # (fov_w/fov_h in the [Capture] section), so the same value transfers between cameras with
+        # different FOV/resolution. Default is wider than the meteor detector's ang_vel_max
+        # (35 deg/s) because the fireball detector is recall-first and the cap exists mostly to
+        # reject birds/planes, not to constrain real fireballs.
+        self.fireball_max_ang_vel = 60.0
 
         ##### MeteorDetection
         
@@ -1567,7 +1574,9 @@ def parseFireballDetection(config, parser):
     
     if parser.has_option(section, "max_lines"):
         config.max_lines = parser.getint(section, "max_lines")
-    
+
+    if parser.has_option(section, "fireball_max_ang_vel"):
+        config.fireball_max_ang_vel = parser.getfloat(section, "fireball_max_ang_vel")
 
 
 
