@@ -50,6 +50,12 @@ from RMS.Logger import LoggingManager, getLogger, gstDebugLogger, getLoggingQueu
 from RMS.CaptureModeSwitcher import switchCameraMode
 import Utils.CameraControl as cc
 
+# How many consecutive failed reads mean the device is gone rather than merely slow. Each attempt is a
+# try-pull-sample with a 500 ms timeout, so this is the number of half seconds of silence tolerated
+# before the pipeline is rebuilt.
+MAX_FAILED_READS = 4
+
+
 # Get the logger from the main module
 log = getLogger("rmslogger")
 
@@ -226,6 +232,9 @@ class BufferedCapture(Process):
         # Timestamp correction between smoothed PTS and pipeline running time
         self.last_pts_correction_ns = 0
         self.last_running_time_ns = None
+        self.held_sample = None
+        self.held_buffer = None
+        self.held_map = None
 
         # handle for the Gst bus-poller thread
         self._bus_should_exit = False
@@ -494,6 +503,20 @@ class BufferedCapture(Process):
         return m, self.b - self.m_jump_error
 
 
+    def releaseHeldFrame(self):
+        """ Unmap the buffer whose pixels were handed out by the previous read(). """
+
+        if getattr(self, 'held_map', None) is not None:
+            try:
+                self.held_buffer.unmap(self.held_map)
+            except Exception as e:
+                log.debug("Failed to unmap held buffer: %s", e)
+
+        self.held_map = None
+        self.held_buffer = None
+        self.held_sample = None
+
+
     def smoothPTS(self, new_pts):
         """ Smooth pts using linear regression.
 
@@ -574,6 +597,11 @@ class BufferedCapture(Process):
             if GST_IMPORTED and (self.config.media_backend == 'gst') and (not self.media_backend_override):
 
                 # Pull a frame from the GStreamer pipeline with a .5 sec timeout
+                # Release the previous frame's mapping. Holding it until now is what lets the frame be
+                # handed out as a view instead of a copy: the caller is finished with it by the time it
+                # asks for the next one.
+                self.releaseHeldFrame()
+
                 sample = self.device.emit("try-pull-sample", 500 * Gst.MSECOND)
                 if not sample:
                     log.info("GStreamer pipeline did not emit a sample.")
@@ -599,8 +627,16 @@ class BufferedCapture(Process):
                     return False, None, None
 
                 try:
-                    # Convert to np.ndarray
+                    # The frame is a view into the mapped buffer, not a copy. The mapping, the buffer
+                    # and the sample are kept alive until the next call, which is what makes that safe:
+                    # unmapping here would pull the pixels out from under the caller on sources backed
+                    # by dma-buf, and copying 5 MB per frame to avoid that costs more than the rest of
+                    # this function put together
                     frame = np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
+
+                    self.held_sample = sample
+                    self.held_buffer = buffer
+                    self.held_map = map_info
 
                     # Smooth raw pts and calculate actual timestamp
                     smoothed_pts = self.smoothPTS(gst_timestamp_ns)
@@ -621,6 +657,9 @@ class BufferedCapture(Process):
                     if running_time_ns is not None:
                         self.last_running_time_ns = running_time_ns
                         self.last_pts_correction_ns = smoothed_pts - running_time_ns
+
+                        # Note: this reduces to smoothed_pts. The two values above are kept because
+                        # moveSegment() applies the correction to a fresh running time.
                         corrected_running_time_ns = running_time_ns + self.last_pts_correction_ns
                         timestamp = self.start_timestamp + (corrected_running_time_ns/1e9)
                     else:
@@ -628,9 +667,9 @@ class BufferedCapture(Process):
                         self.last_pts_correction_ns = 0
                         timestamp = self.start_timestamp + (smoothed_pts/1e9)
 
-                finally:
-                    # Always unmap buffer to prevent memory leaks
-                    buffer.unmap(map_info)
+                except Exception:
+                    self.releaseHeldFrame()
+                    raise
 
             # OpenCV
             else:
@@ -805,7 +844,7 @@ class BufferedCapture(Process):
         """
         Quickly check if a frame is grayscale by sampling pixels along the diagonal.
         If all three channels match on those diagonal samples, return True.
-        If an IndexError is raised (i.e., frame is single-channel), also return True.
+        A single-channel frame is always reported as grayscale.
         This trades completeness for speed, as only the diagonal is checked.
 
         Args:
@@ -820,9 +859,11 @@ class BufferedCapture(Process):
         if frame is None:
             raise ValueError("isGrayscale() called with frame=None")
 
-        # We don't explicitly check frame.shape first; instead we rely on an IndexError
-        # if 'frame' is single-channel (which is inherently grayscale).
-        # This is faster than an extra dimension check for most BGR GMN stations
+        # A single channel frame has no channel axis to compare, so it is grayscale by definition.
+        # This has to be checked explicitly: ellipsis indexing does not raise on a 2D array, it slices
+        # columns instead, and comparing columns of an image reports a mono frame as colour
+        if frame.ndim < 3:
+            return True
 
         try:
             # If diagonal samples are not identical, frame is color
@@ -1251,6 +1292,37 @@ class BufferedCapture(Process):
                 if not success:
                     raise ValueError("Failed to transition pipeline to PLAYING state")
 
+                # Re-anchor the start time to the pipeline's base time, which is the origin the buffer
+                # running times are measured from. start_timestamp was taken when the PAUSED transition
+                # was initiated, and a source's start() runs inside that transition (opening the
+                # device, configuring the sensor...). Whatever time it takes would otherwise be
+                # subtracted from every frame timestamp for the whole session.
+                # Only the difference of two GStreamer clock readings is used, so it does not matter
+                # that the GStreamer clock is monotonic and time.time() is not.
+                try:
+                    clock = self.pipeline.get_clock()
+                    base_time = self.pipeline.get_base_time()
+
+                    if clock is not None and base_time != Gst.CLOCK_TIME_NONE:
+                        clock_time = clock.get_time()
+
+                        if clock_time != Gst.CLOCK_TIME_NONE and clock_time >= base_time:
+                            running_now = (clock_time - base_time)/1e9
+                            anchored = time.time() - running_now \
+                                       - (self.config.camera_buffer/self.config.fps
+                                          + self.config.camera_latency)
+
+                            if self.start_timestamp is not None:
+                                shift = anchored - self.start_timestamp
+                                if abs(shift) > 0.5:
+                                    log.info("Start time re-anchored to the pipeline base time, "
+                                             "moved by %.2f s (source start-up time)", shift)
+
+                            self.start_timestamp = anchored
+
+                except Exception as clock_exc:
+                    log.debug("Could not anchor the start time to the pipeline clock: %s", clock_exc)
+
                 # Log start time
                 start_time_str = (UTCFromTimestamp.utcfromtimestamp(self.start_timestamp)
                                     .strftime('%Y-%m-%d %H:%M:%S.%f'))
@@ -1499,11 +1571,14 @@ class BufferedCapture(Process):
                     else:
                         self.frame_shape = (height, width, 3)
 
-                    frame = np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8)
+                    # Copied, because the frame is inspected below after the buffer has been unmapped.
+                    # On sources backed by dma-buf, such as libcamera, unmapping really takes the pages
+                    # away, and reading a view of them afterwards kills the process
+                    frame = np.ndarray(shape=self.frame_shape, buffer=map_info.data, dtype=np.uint8).copy()
 
                     # Unmap the buffer
                     buffer.unmap(map_info)
-                    
+
                     # Check if frame is grayscale and set flag
                     gray_result = self.isGrayscale(frame)
                     if gray_result is not None:
@@ -1582,6 +1657,9 @@ class BufferedCapture(Process):
             log.debug("releaseResources: Already in progress, skipping duplicate call")
             return
         self._releasing_resources = True
+
+        # Give the last frame's mapping back before the pipeline it belongs to goes away
+        self.releaseHeldFrame()
 
         log.debug("releaseResources: Starting")
 
@@ -1840,18 +1918,49 @@ class BufferedCapture(Process):
             # GStreamer debug setup
             if GST_IMPORTED:
                 try:
+                    # Gst.debug_set_active() raises "Please call Gst.init(argv) before using
+                    # GStreamer" when the library is not initialised yet, which only happens later in
+                    # initVideoDevice(). The except below then swallowed it, the log handler was never
+                    # registered and no GStreamer message ever reached the RMS log. Gst.init is
+                    # idempotent, so initialising here is safe.
+                    if not Gst.is_initialized():
+                        Gst.init(None)
+
                     # Activate debug system
                     Gst.debug_set_active(True)
 
                     # Set debug level from environment or default given value
                     # The Gst debug level is set in Logger.py
                     debug_env = os.environ.get("GST_DEBUG", "2")
-                    Gst.debug_set_default_threshold(int(debug_env))
+
+                    # GST_DEBUG is a comma separated list, where an entry is either a bare level,
+                    # which is the default for every category, or category:level. Only the default
+                    # belongs here; the per category parts are applied by Gst.init from the same
+                    # variable. int() of the whole string throws on anything but a bare number, and
+                    # since the log handler is registered below, that exception took the RMS log's
+                    # GStreamer messages with it - so asking for detail from one element by setting
+                    # GST_DEBUG=2,someelement:4 silenced the lot.
+                    default_level = 2
+
+                    for part in debug_env.split(','):
+                        part = part.strip()
+
+                        if part.isdigit():
+                            default_level = int(part)
+                            continue
+
+                        name, _, level = part.rpartition(':')
+
+                        if name in ('*', '') and level.isdigit():
+                            default_level = int(level)
+
+                    Gst.debug_set_default_threshold(default_level)
 
                     # Comment out if higher than logging level 3 is needed
                     Gst.debug_add_log_function(gstDebugLogger, None)
 
-                    log.info("GStreamer logging initialized at level: {}".format(debug_env))
+                    log.info("GStreamer logging initialized, default level %d (GST_DEBUG=%s)",
+                             default_level, debug_env)
 
                 except Exception as e:
                     log.error("Failed to initialize GStreamer logging: {}".format(e))
@@ -2088,12 +2197,35 @@ class BufferedCapture(Process):
 
                 # Read the frame (keep track how long it took to grab it), and check for color if saving raw frame
                 t1_frame = time.time()
-                ret, frame, frame_timestamp = self.read()
+
+                # Retried here rather than by going round the outer loop again, so a failed read does
+                # not consume a slot in the block - that would leave the previous block's pixels in it.
+                failed_reads = 0
+
+                while True:
+                    ret, frame, frame_timestamp = self.read()
+
+                    if ret or (self.video_file is not None) or self.exit.is_set():
+                        break
+
+                    failed_reads += 1
+
+                    if failed_reads >= MAX_FAILED_READS:
+                        break
+
+                    log.info('Frame grabbing failed (%d/%d), retrying before giving up on the device',
+                             failed_reads, MAX_FAILED_READS)
+
                 t_frame = time.time() - t1_frame
+
+                if failed_reads and ret:
+                    log.info('Frame grabbing recovered after %d failed attempt(s); the device was '
+                             'slow, not gone', failed_reads)
 
                 # If the video device was disconnected, wait for reconnection
                 if (self.video_file is None) and (not ret):
-                    log.info('Frame grabbing failed, video device is probably disconnected!')
+                    log.info('Frame grabbing failed %d times in a row, video device is probably '
+                             'disconnected!', failed_reads)
                     self.releaseResources()
                     # Note: releaseResources() includes proper RTSP cleanup with fallback force close
                     wait_for_reconnect = True
