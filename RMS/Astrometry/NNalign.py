@@ -91,12 +91,12 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
 
         if photometry_calibrated:
             valid_intens = det_intens[det_intens > 0]
-            if len(valid_intens) > 0:
-                inst_mags = -2.5 * np.log10(valid_intens)
-                est_cat_mags = inst_mags + platepar.mag_lev
+            detected_lim_mag = StarCatalog.detectedStarsLimMag(valid_intens, platepar.mag_lev,
+                                                               platepar.mag_lev_stddev)
+            if detected_lim_mag is not None:
 
                 # Use 95th percentile + margin to ensure catalog covers all detections
-                inferred_lim_mag = min(np.percentile(est_cat_mags, 95) + 1.0, 12.0)
+                inferred_lim_mag = min(detected_lim_mag, 12.0)
                 inferred_lim_mag = max(inferred_lim_mag, 4.0)  # Floor at 4.0
 
                 log.info("alignPlatepar: Inferred LM={:.1f} from {} detected stars (mag_lev={:.1f})".format(
