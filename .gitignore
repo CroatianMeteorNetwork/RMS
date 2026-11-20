@@ -121,3 +121,5 @@ Catalogs/GMN_StarCatalog_LM12.0.bin
 # Agents
 .agents/
 skills-lock.json
+# Station list read by Scripts/add_Station.sh (sample: Scripts/stations_template.csv)
+stations.csv
