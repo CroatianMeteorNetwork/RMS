@@ -3,7 +3,12 @@
 # UDP Buffer Size Configuration Script
 # -----------------------------------
 # Purpose: Configures system UDP buffer sizes for GStreamer UDP streaming
-# Usage: sudo ./Scripts/UpdateBuffers.sh
+# Usage: sudo ./Scripts/UpdateBuffers.sh [--check] [--yes]
+#
+#   --check  Report whether the buffers need raising and exit. Requires no
+#            root privileges: reading sysctl values is unprivileged.
+#            Exit 0 = buffers are adequate, 10 = they need raising.
+#   --yes    Apply the recommended values without prompting.
 #
 # This script checks and optionally updates UDP buffer sizes to handle
 # GStreamer's UDP source requirements (rtspsrc udp-buffer-size, default 16MB).
@@ -16,16 +21,35 @@
 # - Update settings if confirmed
 # - Show before/after comparison
 
-
-# Check if running as root
-if [ "$EUID" -ne 0 ]; then 
-    echo "Please run as root (sudo)"
-    exit 1
-fi
-
 # Configuration
 RECOMMENDED_SIZE=16777216  # 16MB in bytes - must be >= rtspsrc udp-buffer-size in BufferedCapture.py
 MIN_RECOMMENDED=1048576    # 1MB in bytes (old default; below this UDP RtspSrc bursts overflow)
+
+CHECK_ONLY=false
+ASSUME_YES=false
+
+# Parse arguments before the root check, so --check works unprivileged
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --check)
+            CHECK_ONLY=true
+            shift
+            ;;
+        --yes|-y)
+            ASSUME_YES=true
+            shift
+            ;;
+        --help|-h)
+            sed -n '3,10p' "$0"
+            exit 0
+            ;;
+        *)
+            echo "Unknown argument: $1" >&2
+            echo "Usage: sudo $0 [--check] [--yes]" >&2
+            exit 1
+            ;;
+    esac
+done
 
 # Function to convert bytes to human readable format
 human_readable() {
@@ -35,6 +59,19 @@ human_readable() {
     else
         echo "$(( bytes / 1024 )) KB"
     fi
+}
+
+# Return 0 if both buffers are at or above the recommended size, 1 otherwise.
+# Reads /proc/sys via sysctl, which needs no privileges.
+buffers_adequate() {
+    local rmem wmem
+    rmem=$(sysctl -n net.core.rmem_max 2>/dev/null) || return 1
+    wmem=$(sysctl -n net.core.wmem_max 2>/dev/null) || return 1
+
+    if [ "$rmem" -lt "$RECOMMENDED_SIZE" ] || [ "$wmem" -lt "$RECOMMENDED_SIZE" ]; then
+        return 1
+    fi
+    return 0
 }
 
 # Function to display buffer settings
@@ -48,36 +85,57 @@ show_settings() {
     echo "Send buffer max (wmem_max): $current_wmem_max bytes ($(human_readable $current_wmem_max))"
     echo "----------------------"
 
-    # Check if buffers are below recommended size
-    local update_needed=false
+    # Report how far below the thresholds we are, if at all
     if [ $current_rmem_max -lt $MIN_RECOMMENDED ] || [ $current_wmem_max -lt $MIN_RECOMMENDED ]; then
-        echo -e "WARNING: Current buffer sizes are below the minimum recommended size ($(human_readable $MIN_RECOMMENDED))"
+        echo "WARNING: Current buffer sizes are below the minimum recommended size ($(human_readable $MIN_RECOMMENDED))"
         echo "This may cause issues with GStreamer UDP buffer allocation."
-        update_needed=true
     elif [ $current_rmem_max -lt $RECOMMENDED_SIZE ] || [ $current_wmem_max -lt $RECOMMENDED_SIZE ]; then
-        echo -e "NOTE: Current buffer sizes are below the recommended size ($(human_readable $RECOMMENDED_SIZE))"
-        echo "Increasing them would provide more headroom for UDP operations."
-        update_needed=true
-    fi
-
-    if [ "$update_needed" = true ]; then
-        echo -e "\nWould you like to update the buffer sizes to the recommended values? (y/n)"
-        read -r response
-        if [[ "$response" =~ ^[Yy]$ ]]; then
-            return 0  # proceed with update
-        else
-            echo "No changes made. Exiting..."
-            exit 0
-        fi
-    else
-        echo -e "Current buffer sizes are at or above recommended values."
-        exit 0
+        echo "NOTE: Current buffer sizes are below the recommended size ($(human_readable $RECOMMENDED_SIZE))"
+        echo "GStreamer requests $(human_readable $RECOMMENDED_SIZE); the kernel clamps the request to these values."
     fi
 }
 
-# Show initial settings and check if update is needed
+# --check: report status and exit without touching anything
+if [ "$CHECK_ONLY" = true ]; then
+    if buffers_adequate; then
+        echo "UDP buffers are at or above the recommended size ($(human_readable $RECOMMENDED_SIZE))."
+        exit 0
+    fi
+    show_settings
+    exit 10
+fi
+
+# Check if running as root (only the applying path needs privileges)
+if [ "$EUID" -ne 0 ]; then
+    echo "Please run as root (sudo)"
+    exit 1
+fi
+
+# Show initial settings and check if an update is needed
 echo "CHECKING CURRENT SETTINGS:"
 show_settings
+
+if buffers_adequate; then
+    echo -e "\nCurrent buffer sizes are at or above recommended values."
+    exit 0
+fi
+
+# Confirm, unless --yes was given
+if [ "$ASSUME_YES" != true ]; then
+    if [ ! -t 0 ]; then
+        # No terminal to ask on. Fail loudly rather than silently doing nothing,
+        # so a calling script cannot mistake a no-op for success.
+        echo "ERROR: Buffers need raising but stdin is not a terminal. Re-run with --yes." >&2
+        exit 1
+    fi
+
+    echo -e "\nWould you like to update the buffer sizes to the recommended values? (y/n)"
+    read -r response
+    if [[ ! "$response" =~ ^[Yy]$ ]]; then
+        echo "No changes made. Exiting..."
+        exit 0
+    fi
+fi
 echo
 
 # Use drop-in file in /etc/sysctl.d/ for systemd compatibility
@@ -123,5 +181,12 @@ sysctl -p "$SYSCTL_DROP_IN" >/dev/null 2>&1
 
 echo -e "\nAFTER CHANGES:"
 show_settings
+
+# Verify the values actually took, rather than assuming
+if ! buffers_adequate; then
+    echo -e "\nERROR: Buffers are still below the recommended size after applying changes." >&2
+    echo "Check for a conflicting setting in /etc/sysctl.d/ or a read-only /proc." >&2
+    exit 1
+fi
 
 echo -e "\nDone! Settings will persist across reboots via $SYSCTL_DROP_IN"
