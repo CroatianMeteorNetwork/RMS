@@ -16,6 +16,7 @@ import traceback
 #import time
 import datetime
 import shutil
+import json
 
 # --- TensorFlow-Lite import cascade -----------------------------------------
 #
@@ -70,6 +71,49 @@ log = getLogger("rmslogger")
 FTPDETECTINFO_UNFILTERED_SUFFIX = '_unfiltered.txt'
 
 
+# Image preparation each model was trained with, keyed by the model file name:
+#   padding   - margin in pixels added around the detection when cropping
+#   normalize - scale the crop so its brightest pixel is 1
+# meteorml32 ran with a 20 px margin and normalisation from 2022 until hyper_model replaced it as the
+# default, which also changed the preparation for every model. Models not listed get the hyper_model
+# preparation, unless a <model name>.json next to the model file gives its own (written by training
+# scripts, e.g. {"padding": 20, "normalize": true}).
+MODEL_PREPROCESSING = {
+    "meteorml32.tflite": {"padding": 20, "normalize": True},
+}
+DEFAULT_PREPROCESSING = {"padding": 10, "normalize": False}
+
+
+def modelPreprocessing(model_path):
+    """ Image preparation (crop padding, normalisation) the given model expects.
+
+    Arguments:
+        model_path: [str] Path to the .tflite model.
+
+    Return:
+        [dict] With keys 'padding' (int) and 'normalize' (bool).
+    """
+
+    preprocessing = dict(MODEL_PREPROCESSING.get(os.path.basename(model_path), DEFAULT_PREPROCESSING))
+
+    sidecar_path = os.path.splitext(model_path)[0] + ".json"
+    if os.path.isfile(sidecar_path):
+        try:
+            with open(sidecar_path) as f:
+                sidecar = json.load(f)
+
+            if "padding" in sidecar:
+                preprocessing["padding"] = int(sidecar["padding"])
+
+            if "normalize" in sidecar:
+                preprocessing["normalize"] = bool(sidecar["normalize"])
+
+        except (OSError, ValueError, TypeError) as e:
+            log.warning("Could not read the model preprocessing from {:s}: {:s}".format(sidecar_path, repr(e)))
+
+    return preprocessing
+
+
 def standardize_me1(a, axis=None): 
     # axis param denotes axes along which mean & std reductions are to be performed
     mean = np.mean(a, axis=axis, keepdims=True)
@@ -86,7 +130,10 @@ def rescale_me1(image):
 # normalize between min and max    
 def normalize_me1(image):
     #image = (image - np.amin(image)) / (np.amax(image) - np.amin(image))
-    image *= 1/image.max()
+    # An all-black crop stays black instead of turning into NaNs
+    max_value = image.max()
+    if max_value > 0:
+        image *= 1/max_value
     return image
 
 
@@ -112,9 +159,12 @@ def classify_image(interpreter, image, top_k=1):
     return output    
 
 
-def classifyPNGs(file_dir, model_path):
+def classifyPNGs(file_dir, model_path, normalize=False):
     """ Given a directory with PNG files of meteors, classify them into meteors vs artefacts using the ML 
         model. 
+
+    Keyword arguments:
+        normalize: [bool] Scale each crop so its brightest pixel is 1 (see MODEL_PREPROCESSING).
     """
 
     # Load the model
@@ -146,8 +196,9 @@ def classifyPNGs(file_dir, model_path):
         # rescale values to (0;1)
         image = rescale_me1(image)
 
-        # normalize min and max values not currently needed
-        #image = normalize_me1(image)
+        # Normalise to the brightest pixel, for the models trained that way
+        if normalize:
+            image = normalize_me1(image)
 
         #image = standardize_me1(image)
         
@@ -250,11 +301,12 @@ def blackfill(image, leftover_top=0, leftover_bottom=0, leftover_left=0, leftove
     return
 
 
-def crop_detections(detection_info, fits_dir):
+def crop_detections(detection_info, fits_dir, padding=DEFAULT_PREPROCESSING["padding"]):
     """
     crops the detection from the fits file using the information provided from the FTPdetectinfo files
     detection_info is a single element of the list returned by the RMS.RMS.Formats.FTPdetectinfo.readFTPdetectinfo() function. This list contains only information on a single detection
     fits_dir is the the directory where the fits file is located
+    padding is the margin in pixels added around the detection
 
     returns the cropped image as a Numpy array
     """
@@ -307,28 +359,26 @@ def crop_detections(detection_info, fits_dir):
 
         #add some space around the meteor detection so that its not touching the edges
         #leftover terms need to be set to 0 outside if statements otherwise they wont be set if there's nothing left over which will cause an error with the blackfill.blackfill() line
-        PADDING = 10
-
-        left_side = left_side - PADDING
+        left_side = left_side - padding
         leftover_left = 0
         if left_side < 0:
             #this will be used later to determine how to fill in the rest of the image to make it square but also have the meteor centered in the image
             leftover_left = 0 - left_side
             left_side = 0
 
-        right_side = right_side + PADDING
+        right_side = right_side + padding
         leftover_right = 0
         if right_side > col_size:
             leftover_right = right_side - col_size
             right_side = col_size
 
-        top_side = top_side - PADDING
+        top_side = top_side - padding
         leftover_top = 0
         if top_side < 0:
             leftover_top = 0 - top_side
             top_side = 0
 
-        bottom_side = bottom_side + PADDING
+        bottom_side = bottom_side + padding
         leftover_bottom = 0
         if bottom_side > row_size:
             leftover_bottom = bottom_side - row_size
@@ -355,7 +405,7 @@ def makePNGname(fits_file_name, meteor_num):
 
 
 
-def makePNGCrops(FTP_path, FF_dir_path):
+def makePNGCrops(FTP_path, FF_dir_path, padding=DEFAULT_PREPROCESSING["padding"]):
     """ Take the FTPdetectinfo file and the FF files in the directory, and make PNG crops centered around
         the detection. These will be fed into the ML algorithm.
     """
@@ -392,7 +442,7 @@ def makePNGCrops(FTP_path, FF_dir_path):
             # If the FF file is found in the directory, make a PNG cutout
             if fits_file_name in fits_file_list:
 
-                square_crop_image = crop_detections(detection_entry, FF_dir_path)
+                square_crop_image = crop_detections(detection_entry, FF_dir_path, padding=padding)
 
                 #save the Numpy array as a png using PIL
                 im = Image.fromarray(square_crop_image)
@@ -474,11 +524,15 @@ def filterFTPdetectinfoML(config, ftpdetectinfo_path, threshold=0.5, keep_pngs=F
 
     # Create cropped images from observations in FTPdetectinfo file
     log.info("Creating images for inference...")
-    png_dir = makePNGCrops(ftpdetectinfo_path, dir_path)
+    preprocessing = modelPreprocessing(config.ml_model_path)
+    log.info("Model {:s}: crop padding {:d} px, normalisation {:s}".format(
+        os.path.basename(config.ml_model_path), preprocessing["padding"],
+        "on" if preprocessing["normalize"] else "off"))
+    png_dir = makePNGCrops(ftpdetectinfo_path, dir_path, padding=preprocessing["padding"])
     
     # Run inference and return probabilities along with file names
     log.info("Inference starting...")
-    prediction_dict = classifyPNGs(png_dir, config.ml_model_path)
+    prediction_dict = classifyPNGs(png_dir, config.ml_model_path, normalize=preprocessing["normalize"])
     
 
     # create list of PNG images to be moved into subdirs later on

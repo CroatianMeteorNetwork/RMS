@@ -7,7 +7,7 @@ import os
 import numpy as np
 
 from RMS.Astrometry.ApplyAstrometry import calculateMagnitudes
-from RMS.Astrometry.Conversions import date2JD, altAz2RADec
+from RMS.Astrometry.Conversions import date2JD, apparentAltAz2TrueRADec
 
 class AstPlate(object):
     """ AST type plate structure. """
@@ -150,13 +150,13 @@ def loadAST(dir_path, file_name):
     ast.r3 = np.fromfile(fid, dtype=np.int32, count=1)
 
     # Text description
-    ast.text = np.fromfile(fid, dtype='|S'+str(256), count=1)[0].tostring().decode()
+    ast.text = np.fromfile(fid, dtype='|S'+str(256), count=1)[0].tobytes().decode()
 
     # Name of catalogue
-    ast.starcat = np.fromfile(fid, dtype='|S'+str(32), count=1)[0].tostring().decode()
+    ast.starcat = np.fromfile(fid, dtype='|S'+str(32), count=1)[0].tobytes().decode()
 
     # Name of observing site
-    ast.sitename = np.fromfile(fid, dtype='|S'+str(32), count=1)[0].tostring().decode()
+    ast.sitename = np.fromfile(fid, dtype='|S'+str(32), count=1)[0].tobytes().decode()
 
     # Site geo coordinates
     ast.lat = np.fromfile(fid, dtype=np.float64, count=1)[0]
@@ -212,7 +212,9 @@ def loadAST(dir_path, file_name):
     dot += np.cos(a)*np.cos(c)
 
     # FOV width in radians
-    ast.fov = np.arccos(dot)
+    # The dot product of the two unit direction vectors can round outside [-1, 1], which would
+    #   make arccos return NaN, so clamp it
+    ast.fov = np.arccos(np.clip(dot, -1.0, 1.0))
 
     
     a, b = plateASTMap(ast, u, 0.0)
@@ -223,7 +225,7 @@ def loadAST(dir_path, file_name):
     dot += np.cos(a)*np.cos(c)
 
     # FOV ascept (width/height)
-    ast.asp = ast.fov/np.arccos(dot)
+    ast.asp = ast.fov/np.arccos(np.clip(dot, -1.0, 1.0))
 
     ######
 
@@ -404,8 +406,8 @@ def xyToRaDecAST(time_data, X_data, Y_data, level_data, ast, photom_offset):
     Return:
         (JD_data, RA_data, dec_data, magnitude_data): [tuple of ndarrays]
             JD_data: [ndarray] Julian date of each data point.
-            RA_data: [ndarray] Right ascension of each point (deg).
-            dec_data: [ndarray] Declination of each point (deg).
+            RA_data: [ndarray] Right ascension of each point (deg, J2000).
+            dec_data: [ndarray] Declination of each point (deg, J2000).
             magnitude_data: [ndarray] Array of meteor's lightcurve apparent magnitudes.
     """
 
@@ -419,10 +421,11 @@ def xyToRaDecAST(time_data, X_data, Y_data, level_data, ast, photom_offset):
     azimuth_data = np.degrees(np.pi/2 - phi_data)
     altitude_data = np.degrees(np.pi/2 - theta_data)
 
-    # Convert azimuth (+E of due N) and altitude to RA and Dec
+    # Convert azimuth (+E of due N) and altitude to RA and Dec in J2000, through the true equator and equinox
+    #   of the date of each point (no refraction is removed from the altitude of the plate, as before)
     JD_data = [date2JD(*t) for t in time_data]
-    RA_data, dec_data = altAz2RADec(azimuth_data, altitude_data, JD_data, np.degrees(ast.lat), \
-        np.degrees(ast.lon))
+    RA_data, dec_data = np.array([apparentAltAz2TrueRADec(float(azim), float(alt), jd, np.degrees(ast.lat), \
+        np.degrees(ast.lon), refraction=False) for azim, alt, jd in zip(azimuth_data, altitude_data, JD_data)]).T
 
 
     # Calculate magnitudes (ignore vignetting)

@@ -62,6 +62,12 @@ def plotFieldsums(dir_path, config):
 
             except TypeError:
                 print('File {:s} is corrupted!'.format(file_name))
+                continue
+
+            # Skip empty/zero-length arrays (np.max on empty raises ValueError)
+            if len(intensity_array) == 0:
+                print('File {:s} has no entries, skipping!'.format(file_name))
+                continue
 
             # Extract the date and time from the FS file
             dt = filenameToDatetime(file_name)

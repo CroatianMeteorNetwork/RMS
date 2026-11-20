@@ -6,6 +6,8 @@ import time
 import numpy as np
 import multiprocessing
 
+from RMS.Misc import AtomicFlag
+
 GST_IMPORTED = False
 try:
     import gi
@@ -16,7 +18,7 @@ try:
 except ImportError as e:
     print('Could not import gi: {}. Using OpenCV.'.format(e))
 
-except ValueError as e:
+except (ValueError, Exception) as e:
     print('Could not import Gst: {}. Using OpenCV.'.format(e))
 
 
@@ -54,7 +56,7 @@ class GstCaptureTest(multiprocessing.Process):
 
         super(GstCaptureTest, self).__init__()
 
-        self.exit = multiprocessing.Event()
+        self.exit = AtomicFlag()
 
         self.device_url = device_url
         self.gst_decoder = gst_decoder

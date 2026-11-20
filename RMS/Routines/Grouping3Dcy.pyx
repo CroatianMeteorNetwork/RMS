@@ -6,12 +6,19 @@ from time import time
 
 import numpy as np
 cimport numpy as np
+
+# Initialize the NumPy C API (explicit for clarity: Cython 3 (required to build against NumPy 2) emits it itself)
+np.import_array()
 cimport cython
 
 
 # Define numpy types
 UINT16_TYPE = np.uint16
 ctypedef np.uint16_t UINT16_TYPE_t
+
+# Point clouds (x, y, frame) are signed 32-bit, so frame numbers above 65535 (long videos) don't wrap around
+POINT_TYPE = np.int32
+ctypedef np.int32_t POINT_TYPE_t
 
 UINT8_TYPE = np.uint8
 ctypedef np.uint8_t UINT8_TYPE_t
@@ -46,20 +53,18 @@ cdef float line3DDistance_simple(int x1, int y1, int z1, int x2, int y2, int z2,
     # np.linalg.norm(np.cross((point0 - point1), (point0 - point2))) / np.linalg.norm(point2 - point1)
 
     # Length of vector in the numerator
-    cdef int dx1 = x0 - x1
-    cdef int dy1 = y0 - y1
-    cdef int dz1 = z0 - z1
+    cdef long long dx1 = x0 - x1
+    cdef long long dy1 = y0 - y1
+    cdef long long dz1 = z0 - z1
 
-    cdef int dx2 = x0 - x2
-    cdef int dy2 = y0 - y2
-    cdef int dz2 = z0 - z2
+    cdef long long dx2 = x0 - x2
+    cdef long long dy2 = y0 - y2
+    cdef long long dz2 = z0 - z2
 
-    
-
-    cdef int n_len = (dx1*dy2 - dx2*dy1)**2 + (dx2*dz1 - dx1*dz2)**2 + (dy1*dz2 - dy2*dz1)**2
+    cdef long long n_len = (dx1*dy2 - dx2*dy1)**2 + (dx2*dz1 - dx1*dz2)**2 + (dy1*dz2 - dy2*dz1)**2
 
     # Length of denominator vector
-    cdef int d_len = (x2 - x1)**2 + (y2 - y1)**2 + (z2 - z1)**2
+    cdef long long d_len = (x2 - x1)**2 + (y2 - y1)**2 + (z2 - z1)**2
 
     cdef float result = (<float> n_len) / (<float> d_len)
 
@@ -68,20 +73,24 @@ cdef float line3DDistance_simple(int x1, int y1, int z1, int x2, int y2, int z2,
 
 
 
-cdef int point3DDistance(int x1, int y1, int z1, int x2, int y2, int z2):
+cdef long long point3DDistance(int x1, int y1, int z1, int x2, int y2, int z2):
     """ Calculate distance between two points in 3D space.
-    
+
     @param x1: X coordinate of first point
     @param y1: Y coordinate of first point
     @param z1: Z coordinate of first point
     @param x2: X coordinate of second point
     @param y2: Y coordinate of second point
     @param z2: Z coordinate of second point
-    
+
     @return: squared distance
     """
 
-    return (x2 - x1)**2 + (y2 - y1)**2 + (z2 - z1)**2
+    cdef long long dx = x2 - x1
+    cdef long long dy = y2 - y1
+    cdef long long dz = z2 - z1
+
+    return dx*dx + dy*dy + dz*dz
 
 
 
@@ -123,7 +132,7 @@ cdef class Line:
 
 
 @cython.boundscheck(False)
-def getAllPoints(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, z2, distance_threshold, gap_threshold, max_array_size=0):
+def getAllPoints(np.ndarray[POINT_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y2, z2, distance_threshold, gap_threshold, max_array_size=0):
     """ Returns all points describing a particular line. 
     
     @param point_list: [ndarray] list of all points
@@ -144,11 +153,12 @@ def getAllPoints(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y
     if point_list_size == 0:
         return np.array([[]])
 
-    def propagateLine(np.ndarray[UINT16_TYPE_t, ndim=2] max_line_points, np.ndarray[UINT16_TYPE_t, ndim=2] propagation_list, int i):
+    def propagateLine(np.ndarray[POINT_TYPE_t, ndim=2] max_line_points, np.ndarray[POINT_TYPE_t, ndim=2] propagation_list, int i):
         """ Finds all points present on a line starting from a point on that line.
         """
 
         cdef int x3, y3, z3, x_prev, y_prev, z_prev, z
+        cdef int arr_size = max_line_points.shape[0]
 
         x_prev, y_prev, z_prev = x1, y1, z1
 
@@ -168,6 +178,10 @@ def getAllPoints(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y
                 if point3DDistance(x_prev, y_prev, z_prev, x3, y3, z3) > gap_threshold:
                     break
 
+                # Stop if the output array is full
+                if i >= arr_size:
+                    break
+
                 max_line_points[i,0] = x3
                 max_line_points[i,1] = y3
                 max_line_points[i,2] = z3
@@ -178,17 +192,17 @@ def getAllPoints(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y
         return max_line_points, i
 
 
-    if max_array_size == 0:
+    if max_array_size <= 0 or max_array_size < point_list_size:
         max_array_size = point_list_size
 
     # Get all points belonging to the best line
-    cdef np.ndarray[UINT16_TYPE_t, ndim=2] max_line_points = np.zeros(shape=(max_array_size, 3), dtype=UINT16_TYPE)
+    cdef np.ndarray[POINT_TYPE_t, ndim=2] max_line_points = np.zeros(shape=(max_array_size, 3), dtype=POINT_TYPE)
 
     # Get the index of the first point
     point1_index = np.where(np.all(point_list == np.array((x1, y1, z1)), axis=1))[0]
 
     # Check if the first point exists, if not start from the point closes to the given point
-    if not point1_index:
+    if point1_index.size == 0:
 
         best_distance = np.inf
 
@@ -216,7 +230,7 @@ def getAllPoints(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, x1, y1, z1, x2, y
 
 
 
-def remove3DPoints(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, Line max_line, distance_threshold, gap_threshold):
+def remove3DPoints(np.ndarray[POINT_TYPE_t, ndim=2] point_list, Line max_line, distance_threshold, gap_threshold):
     """ Remove points from a point list that belong to the given line.
     
     @param point_list: [ndarray] list of all points
@@ -269,17 +283,21 @@ def _formatLine(line, first_frame, last_frame):
 
 @cython.boundscheck(False)
 @cython.wraparound(False) 
-def find3DLines(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, start_time, config, get_single=False, line_list=[]):
+def find3DLines(np.ndarray[POINT_TYPE_t, ndim=2] point_list, start_time, config, get_single=False, line_list=None):
     """ Iteratively find N straight lines in 3D space.
     
     @param point_list: [ndarray] list of all points
     @param start_time: [time.time() object] starting time of the loop
     @param config: [config object] defines configuration parameters fro the config file
     @param get_single: [bool] returns only 1 line, does not perform recusrive line searching
-    @param line_list: [list] list of lines found previously
+    @param line_list: [list] list of lines found previously (None to start a new list)
     
     @return: list of found lines
     """
+
+    # Start a new list of lines on the first call (a default [] would be shared between calls)
+    if line_list is None:
+        line_list = []
 
     # Load config parameters
     cdef float distance_threshold = config.distance_threshold
@@ -393,7 +411,13 @@ def find3DLines(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, start_time, config
         if results_list[i].line_quality > max_line.line_quality:
             max_line = results_list[i]
 
-    # Ratio of points inside and and all points
+    # Points on the best line over the number of candidate lines (compared to point_ratio_threshold below). This
+    #   isn't the share of all points on the best line: the candidate lines grow as the square of the points, so
+    #   the ratio stays below the threshold unless only a few candidate lines are left, and the search for more
+    #   lines goes on until no line is found or max_lines are found. Dividing by the number of points instead
+    #   stops the search after a line holding most of the points, such as the glare of a bright source, and the
+    #   meteors on the same frames lose their lines (2838 FF files of 4 nights: 31 meteors lost, 4 gained), so
+    #   the ratio is kept as it is
     cdef float line_ratio = max_line.counter / results_counter
 
     # Remove points from the point cloud that belong to line with the best quality
@@ -403,9 +427,10 @@ def find3DLines(np.ndarray[UINT16_TYPE_t, ndim=2] point_list, start_time, config
     if not max_line_points.size:
         return None
 
-    # Get the first and the last frame from the max_line point could
-    first_frame = max_line_points[0,2]
-    last_frame = max_line_points[len(max_line_points) - 1,2]
+    # Get the first and the last frame from the max_line point cloud. Convert them to plain ints, as under
+    #   NumPy 2 a NumPy scalar keeps its type in arithmetic (an unsigned one wrapped: 1 - 3 -> 65534)
+    first_frame = int(max_line_points[0,2])
+    last_frame = int(max_line_points[len(max_line_points) - 1,2])
 
 
     # Reject the line if all points are only in very close frames (eliminate flashes):
@@ -435,7 +460,9 @@ def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=3] frames, \
         passers on the given frame. 
 
     Arguments:
-        frames: [3D ndarray] Numpy array containing video frames. Structure: (nframe, y, x).
+        frames: [3D ndarray] Numpy array containing video frames. Structure: (nframe, y, x). Only the number
+            of frames is used. The frame buffer may be padded by a row and a column (see
+            RMS.Misc.frameBufferShape), so the image size is taken from the compressed frames.
         compressed: [3D ndarray] Numpy array containing compressed video frames. Structure: (frame, y, x), 
             where frames are: maxpixel, maxframe, avepixel, stdpixel
         min_level: [int] The point will be subsampled if it has this minimum pixel level (i.e. brightness).
@@ -443,7 +470,8 @@ def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=3] frames, \
             threshold.
         k1: [float] Threhsold max > avg + k1*stddev
         j1: [float] Constant level offset in the threshold
-        f: [int] Decimation scale
+        f: [int] Decimation scale. When the image size is not a multiple of f, the pixels of the partial
+            blocks at the bottom and right edges are not used.
 
     Return:
         num: [int] Number threshold passers.
@@ -454,12 +482,13 @@ def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=3] frames, \
 
     cdef unsigned int x, y, x2, y2, n, max_val, nframes, x_size, y_size
     cdef unsigned int num = 0
-    cdef unsigned int avg_std
+    cdef int avg_std
 
-    # Calculate the shapes of the subsamples image
-    cdef shape_z = frames.shape[0]
-    cdef shape_y = int(floor(frames.shape[1]//f))
-    cdef shape_x = int(floor(frames.shape[2]//f))
+    # Calculate the shape of the subsampled image (only the full f*f blocks) from the size of the compressed
+    #   frames, which are never padded
+    cdef unsigned int shape_z = frames.shape[0]
+    cdef unsigned int shape_y = int(floor(compressed.shape[1]//f))
+    cdef unsigned int shape_x = int(floor(compressed.shape[2]//f))
     
     # Init subsampled image arrays
     cdef np.ndarray[np.int32_t, ndim=3] count = np.zeros((shape_z, shape_y, shape_x), np.int32)
@@ -467,21 +496,29 @@ def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=3] frames, \
     cdef np.ndarray[UINT16_TYPE_t, ndim=1] pointsx = np.zeros((shape_z*shape_y*shape_x), UINT16_TYPE)
     cdef np.ndarray[UINT16_TYPE_t, ndim=1] pointsz = np.zeros((shape_z*shape_y*shape_x), UINT16_TYPE)
 
-    # Extract frames dimensions 
+    # Extract the image dimensions from the compressed frames. The frame buffer can be one row and one
+    #   column larger, and reading the compressed frames at that size goes to the wrong pixels (or past the
+    #   end of the array) when they are a contiguous copy, as under the forkserver/spawn start methods
     nframes = frames.shape[0]
-    y_size = frames.shape[1]
-    x_size = frames.shape[2]
+    y_size = compressed.shape[1]
+    x_size = compressed.shape[2]
     
     for y in range(y_size):
         for x in range(x_size):
 
             max_val = compressed[0, y, x]
 
-            # Compute the threshold limit
-            avg_std = int(float(compressed[2, y, x]) + k1*float(compressed[3, y, x])) + j1
+            # Compute the threshold as a signed value (a negative j1 can make it negative, which would wrap
+            #   to a huge number if narrowed to an unsigned type), keeping the original truncation order
+            avg_std = <int> (
+                <int> (<double> compressed[2, y, x] + k1*<double> compressed[3, y, x])
+                + <double> j1
+            )
 
-            # Make sure the threshold limit is not above the maximum possible value
-            if avg_std > 255:
+            # Clamp the threshold to the valid pixel value range
+            if avg_std < 0:
+                avg_std = 0
+            elif avg_std > 255:
                 avg_std = 255
             
             if ((max_val > min_level) and (max_val >= avg_std)):
@@ -492,6 +529,12 @@ def thresholdAndSubsample(np.ndarray[UINT8_TYPE_t, ndim=3] frames, \
                 # Subsample frame in f*f squares
                 y2 = int(floor(y//f))
                 x2 = int(floor(x//f))
+
+                # Skip the partial edge block when the image size is not a multiple of f, as the count
+                #   array only covers the full blocks (an index past its edge would land in the counts of the
+                #   next block row or frame, or past the end of the array)
+                if (y2 >= shape_y) or (x2 >= shape_x):
+                    continue
                 
                 # Check if there are enough of threshold passers inside of this square
                 if count[n, y2, x2] >= min_points:
