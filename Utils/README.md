@@ -24,11 +24,39 @@ Tools for sky fitting, making flat fields, calibrating night data, and astrometr
 
 - **`SkyFit2.py`**: A comprehensive GUI application for sky fitting, meteor detection, and manual astrometric reduction.
 - **`Astra.py`**: Astrometric Streak Tracking and Refinement Algorithm.
-- **`MakeFlat.py`**: Generates a flat field image from frames accumulated throughout the night to estimate the background and correct vignetting.
+- **`MakeFlat.py`**: Generates a flat field image from frames accumulated throughout the night to estimate the background and correct vignetting. Also generates dark frames (see below).
 - **`CalibrationReport.py`**: Generates a calibration report with the quality of astrometric and photometric calibration given the folder of a night.
 - **`RetroactiveFixup.py`**: Recalibrates all data older than a specified date and optionally applies the most recent config to older directories.
 - **`TrackStack.py`**: Generates a stack image with aligned stars so the sky appears static. Useful for making mosaics of meteor shower meteors.
 - **`KalmanFilter.py`**: Applies a Kalman filter to astrometric measurements.
+
+### Generating a dark frame
+
+On cameras with many hot pixels, hot pixels get extracted as stars: they are a single pixel wide, and so
+is a star on a wide field lens, so the PSF fit cannot tell them apart. The star count then stays high no
+matter the weather, `ff_min_stars` is always satisfied, and meteor detection runs even during rain, where
+raindrop glints turn into false detections. Subtracting a dark frame removes the hot pixels, so the star
+count reflects the actual sky again.
+
+The lens does **not** need to be covered. Hot pixels sit still while the sky rotates, so the per-pixel
+minimum over a night's worth of FF files contains no stars:
+
+```
+python -m Utils.MakeFlat -n -p ~/RMS_data/CapturedFiles/<night directory>
+```
+
+`-p` (`--fixedpattern`) removes the sky background from the result, leaving only the hot pixels. Use it
+rather than plain `--dark`: a dark that still holds the sky pedestal pushes faint stars below zero when
+subtracted, which costs real detections. `-n` (`--nostars`) skips the CALSTARS star count requirement,
+which does not apply to darks.
+
+Copy the resulting `dark.bmp` next to the config file and set `use_dark: true`.
+
+Hot pixels accumulate as the sensor ages and shift with temperature, so regenerate the dark periodically
+(monthly is a reasonable starting point) and after any camera or optics change. To check whether the
+current dark is still good, compare the star counts in CALSTARS between a clear and an overcast night:
+they should differ substantially. If they are similar, the dark is stale and hot pixels are being counted
+as stars again.
 
 ## 🔄 Data Conversion & Extraction
 
