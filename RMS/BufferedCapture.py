@@ -1130,6 +1130,26 @@ class BufferedCapture(Process):
                 which can be used for further processing of the captured video frames.
         """
 
+        # A device string that already names an appsink is a complete pipeline written by the user.
+        # Take it as it is: it is the only way to express what RMS cannot build itself, such as the two
+        # independent streams of different resolutions a Raspberry Pi camera can deliver, which a tee
+        # cannot reproduce. Everything below the parse_launch works on any pipeline, so a user supplied
+        # one also gets the timestamped segment names and the frame timing of the GStreamer backend.
+        if 'name=appsink' in self.config.deviceID:
+
+            log.info("Device is a complete GStreamer pipeline, using it as given.")
+
+            # RMS adds no storage branch to a pipeline it did not build, so raw video saving is down to
+            # the pipeline itself
+            if video_file_dir is not None:
+                log.info("raw_video_save has no effect on a user supplied pipeline. Put a splitmuxsink "
+                         "named splitmuxsink0 in the pipeline to save video and have its segments named "
+                         "after their timestamp.")
+
+            return self.startGstPipeline(self.config.deviceID, max_retries=max_retries,
+                                         retry_interval=retry_interval)
+
+
         device_url = self.extractRtspUrl(self.config.deviceID)
 
         # Common timeout settings for both UDP and TCP
@@ -1202,6 +1222,269 @@ class BufferedCapture(Process):
          # Combine all parts of the pipeline
         pipeline_str = "{:s} {:s} {:s}".format(source_to_tee, processing_branch, storage_branch)
 
+        return self.startGstPipeline(pipeline_str, max_retries=max_retries, retry_interval=retry_interval)
+
+
+
+    @staticmethod
+    def coerceGstValue(element, prop, value):
+        """ Convert a value read from JSON to the type the GStreamer property actually wants.
+
+        JSON cannot express the difference between an integer and a double, so 30 in the file is an int
+        whatever the property is, and setting an int on a double property - or the reverse - fails. The
+        property itself knows its type, so take it from there.
+
+        Arguments:
+            element: [Gst.Element] Element the property belongs to.
+            prop: [str] Property name.
+            value: Value as read from the JSON file.
+
+        Return:
+            The value converted to the property's type.
+        """
+
+        pspec = element.find_property(prop)
+
+        if pspec is None:
+            raise AttributeError("element has no property '{:s}'".format(prop))
+
+        type_name = pspec.value_type.name
+
+        if type_name in ("gint", "guint", "gint64", "guint64", "glong", "gulong", "guchar"):
+            return int(value)
+
+        if type_name in ("gfloat", "gdouble"):
+            return float(value)
+
+        if type_name == "gboolean":
+            return bool(value)
+
+        if type_name == "gchararray":
+            return None if value is None else str(value)
+
+        # An enum takes either its nick as a string or its number, and both arrive usable from JSON
+        return value
+
+
+    def dvripReachable(self):
+        """ Whether CameraControl can address this camera at all.
+
+        CameraControl finds the camera by taking the first IPv4 address out of deviceID, using the same
+        regex as below, so a deviceID without one (a GStreamer pipeline, an analog device index, an
+        RTSP URL with a host name) fails with IndexError before anything touches the network.
+
+        Return:
+            [bool] False when a dvrip mode switch cannot work, whatever camera_settings.json says.
+        """
+
+        device = str(self.config.deviceID)
+
+        if device.isdigit():
+            return False
+
+        return re.search(r"[0-9]+(?:\.[0-9]+){3}", device) is not None
+
+
+    def gstModeSettings(self, mode_name):
+        """ Read the GStreamer property settings for a camera mode from the "gst" section of
+            camera_settings.json.
+
+        Arguments:
+            mode_name: [str] Either "day" or "night".
+
+        Return:
+            (settings, owns_switch): settings is the {element: {property: value}} map for this mode, or
+                None if the file does not define one. owns_switch is True when those settings are the
+                whole switch, i.e. the mode has no dvrip commands, or dvrip cannot reach this camera.
+        """
+
+        mode_path = self.config.camera_settings_path
+
+        if not os.path.isfile(mode_path):
+            return None, False
+
+        try:
+            with open(mode_path, 'r') as f:
+                modes = json.load(f)
+
+        except Exception as e:
+            log.warning("Could not read camera settings from %s: %s", mode_path, e)
+            return None, False
+
+        settings = (modes.get("gst") or {}).get(mode_name)
+
+        if not settings:
+            return None, False
+
+        # Checking dvripReachable() means the stock day/night dvrip command lists do not have to be
+        # emptied by hand before a camera driven by a pipeline can switch modes
+        return settings, (not modes.get(mode_name)) or (not self.dvripReachable())
+
+
+    def pipelineElements(self):
+        """ Every element in the pipeline, as (name, factory name, element).
+
+        Used to match a settings key by element type, and to list what is there when a key matches
+        nothing.
+        """
+
+        found = []
+
+        try:
+            it = self.pipeline.iterate_elements()
+
+            while True:
+                ok, elem = it.next()
+
+                if ok != Gst.IteratorResult.OK:
+                    break
+
+                factory = elem.get_factory()
+                found.append((elem.get_name(), factory.get_name() if factory else None, elem))
+
+        except Exception as e:
+            log.debug("Could not list the pipeline elements: %s", e)
+
+        return found
+
+
+    def applyGstModeSettings(self, mode_name):
+        """ Apply the day or night camera settings to the running GStreamer pipeline.
+
+        The day/night modes in camera_settings.json are dvrip commands sent by cameraControlV2, which
+        does nothing for a camera driven directly by a GStreamer source element (e.g. a MIPI sensor):
+        day and night would both run with whatever the pipeline string set at startup. Such cameras
+        can instead list element properties per mode under a top level "gst" key, keyed by element
+        name or element type:
+
+            "gst": {
+                "night": {"mipimvsrc0": {"cam-auto-exposure": 0, "exposure": 40000, "gain": 30}},
+                "day":   {"mipimvsrc0": {"cam-auto-exposure": 2, "cam-auto-gain": 2,
+                                         "cam-ae-target": 75, "cam-ag-max-gain": 0,
+                                         "cam-ae-roi": "400,232,1600,1600"}}
+            }
+
+        The properties are set on the live pipeline instead of rebuilding it. Nothing here can stop
+        capture: a missing file, mode, element or property is logged and the pipeline carries on with
+        the settings it had.
+
+        Arguments:
+            mode_name: [str] Either "day" or "night".
+
+        Return:
+            [int] Number of properties set.
+        """
+
+        if not GST_IMPORTED or getattr(self, 'pipeline', None) is None:
+            return 0
+
+        settings, _ = self.gstModeSettings(mode_name)
+
+        if not settings:
+            return 0
+
+        applied = 0
+
+        for element_name, props in settings.items():
+
+            element = self.pipeline.get_by_name(element_name)
+
+            if element is None:
+
+                # Try the key as an element type: an unnamed element gets an index appended by
+                # gst_parse_launch (mipimvsrc0, not mipimvsrc). Only when it is unambiguous.
+                elements = self.pipelineElements()
+                matches = [elem for _, factory, elem in elements if factory == element_name]
+
+                if len(matches) == 1:
+                    element = matches[0]
+                    log.info("No element is named %s; using the one %s element in the pipeline, %s",
+                             element_name, element_name, element.get_name())
+
+                elif len(matches) > 1:
+                    log.warning("%d elements of type %s in the pipeline, so %r is ambiguous. Give the "
+                                "one you mean a name= in the pipeline and use that here. Skipping its "
+                                "%s settings.", len(matches), element_name, element_name, mode_name)
+                    continue
+
+                else:
+                    log.warning("Nothing named %s in the pipeline and no element of that type either, "
+                                "skipping its %s settings. The pipeline has: %s", element_name,
+                                mode_name,
+                                ", ".join("%s (%s)" % (n, f) for n, f, _ in elements) or "nothing")
+                    continue
+
+            for prop, value in props.items():
+
+                try:
+                    element.set_property(prop, self.coerceGstValue(element, prop, value))
+                    log.info("Camera %s mode: %s %s = %s", mode_name, element_name, prop, value)
+                    applied += 1
+
+                except Exception as e:
+                    log.warning("Could not set %s %s = %r: %s", element_name, prop, value, e)
+
+        return applied
+
+
+    def switchCameraModeIfTriggered(self, apply_gst=True):
+        """ Carry out a pending day/night camera mode switch.
+
+        The mode is switched through the GStreamer element properties in camera_settings.json when they
+        are the whole switch (see gstModeSettings), otherwise through dvrip via switchCameraMode(). The
+        trigger is cleared whenever there is nothing dvrip could do, because switchCameraMode() re-arms
+        it on failure and would otherwise retry and warn on every block until the next mode change.
+
+        Keyword arguments:
+            apply_gst: [bool] Apply the GStreamer properties to the running pipeline. False when the
+                pipeline is about to be (re)built, as startGstPipeline() applies them itself.
+
+        Return:
+            [bool] True if a dvrip mode switch was attempted, so the camera needs to be reprobed.
+        """
+
+        mode_name = "day" if self.daytime_mode.value else "night"
+
+        if apply_gst:
+            self.applyGstModeSettings(mode_name)
+
+        _, owns_switch = self.gstModeSettings(mode_name)
+
+        if owns_switch:
+            self.camera_mode_switch_trigger.value = False
+            return False
+
+        if not self.dvripReachable():
+            log.warning("Camera %s mode: switch_camera_modes is on, but deviceID has no IP address "
+                        "CameraControl could use and camera_settings.json has no \"gst\" settings for "
+                        "this mode. Nothing to switch.", mode_name)
+            self.camera_mode_switch_trigger.value = False
+            return False
+
+        switchCameraMode(self.config, self.daytime_mode, self.camera_mode_switch_trigger)
+
+        return True
+
+
+    def startGstPipeline(self, pipeline_str, max_retries=5, retry_interval=5):
+        """
+        Parse the given GStreamer pipeline, bring it to PLAYING and return its appsink.
+
+        Works on any pipeline, whether built by createGstreamDevice or supplied whole by the user, as
+        long as it names its appsink "appsink". A splitmuxsink named "splitmuxsink0" gets the segment
+        naming callback connected to it.
+
+        Arguments:
+            pipeline_str: [str] The GStreamer pipeline description.
+
+        Keyword arguments:
+            max_retries: [int] The maximum number of retry attempts
+            retry_interval: [float] The number of seconds to wait between retries
+
+        Returns:
+            Gst.Element: The appsink element of the pipeline, or False if it could not be started.
+        """
+
         # Obfuscate the password in the pipeline string before logging
         obfuscated_pipeline_str = obfuscatePassword(pipeline_str)
 
@@ -1226,11 +1509,10 @@ class BufferedCapture(Process):
                 self._bus_thread = threading.Thread(target=self._busPoller, daemon=True)
                 self._bus_thread.start()
                 
-                # If raw video saving is enabled, connect the "format-location-full" signal to the
-                # moveSegment function
-                if video_file_dir is not None:
-                    
-                    splitmuxsink = self.pipeline.get_by_name("splitmuxsink0")
+                # Name the segments after their timestamp. Keyed on the element being there rather than
+                # on the config, so a splitmuxsink in a user supplied pipeline is picked up too
+                splitmuxsink = self.pipeline.get_by_name("splitmuxsink0")
+                if splitmuxsink is not None:
                     splitmuxsink.connect("format-location-full", self.moveSegment)
 
                 # Transition through states
@@ -1263,6 +1545,18 @@ class BufferedCapture(Process):
                     raise ValueError("Could not get appsink from pipeline")
                 
                 log.info("Pipeline successfully created and started")
+
+                # The pipeline string cannot carry different settings for day and night, so apply the
+                # current mode's GStreamer properties now that the elements exist. If they are the whole
+                # switch, clear the trigger so the capture loop does not apply them a second time.
+                if self.config.switch_camera_modes:
+                    mode_now = "day" if (self.daytime_mode is not None
+                                         and self.daytime_mode.value) else "night"
+
+                    if self.applyGstModeSettings(mode_now) and self.gstModeSettings(mode_now)[1] \
+                       and self.camera_mode_switch_trigger is not None:
+                        self.camera_mode_switch_trigger.value = False
+
                 return appsink
             
             except Exception as e:
@@ -1389,8 +1683,10 @@ class BufferedCapture(Process):
                     # -------------------------------------------
                     if self.config.continuous_capture and self.config.switch_camera_modes:
                         if self.camera_mode_switch_trigger.value:
-                            reprobe = True
-                            switchCameraMode(self.config, self.daytime_mode, self.camera_mode_switch_trigger)
+                            # The pipeline is built below, and startGstPipeline() applies any
+                            # GStreamer properties itself
+                            if self.switchCameraModeIfTriggered(apply_gst=False):
+                                reprobe = True
 
             if reprobe:
                 # Wait 5 seconds for the camera to register all commands after mode switching / reboot
@@ -2074,9 +2370,9 @@ class BufferedCapture(Process):
 
                 # Check that the camera mode switch is triggered
                 if self.camera_mode_switch_trigger.value:
-                    
+
                     # If the camera mode switch trigger is set, switch the camera mode
-                    switchCameraMode(self.config, self.daytime_mode, self.camera_mode_switch_trigger)
+                    self.switchCameraModeIfTriggered()
 
 
             log.info('Grabbing a new block of {:d} frames...'.format(block_frames))
