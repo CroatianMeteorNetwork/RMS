@@ -960,7 +960,7 @@ if __name__ == "__main__":
     arg_parser.add_argument('-o', '--outdir', metavar='OUTPUT_DIRECTORY', type=str,
         help="Path to a directory where the plots will be saved. If not given, the data directory will be used.")
 
-    arg_parser.add_argument('-c', '--csvdir', metavar='CSV_DIRECTORY', type=str,
+    arg_parser.add_argument('--csvdir', metavar='CSV_DIRECTORY', type=str,
         help="Path to a directory where the CSV files will be saved. If not given, the output directory will be used.")
 
     arg_parser.add_argument('-i', '--indexdir', metavar='INDEX_DIRECTORY', type=str,

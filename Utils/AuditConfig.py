@@ -3,7 +3,9 @@ from __future__ import print_function, division, absolute_import
 import re
 import argparse
 import os
+import subprocess
 import sys
+import tempfile
 
 
 # Map FileNotFoundError to IOError in Python 2 as it does not exist
@@ -61,6 +63,30 @@ def extractConfigOptions(file_path):
             content)
         options.update(match.lower() for match in matches)
     return options
+
+
+def readTemplateFromGit():
+    """ Read the pristine .config tracked in the repository using git.
+
+    .configTemplate is normally created by RMS_Update.sh, so it does not exist on a fresh clone or on
+    a station that never updated. The repository's own .config is the same content, so it can be used
+    as the template instead.
+
+    Returns:
+        [str or None] Contents of the repository .config, or None if git is unavailable.
+    """
+
+    rms_root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    try:
+        with open(os.devnull, 'w') as devnull:
+            content = subprocess.check_output(['git', 'show', 'HEAD:.config'], cwd=rms_root_dir,
+                stderr=devnull)
+
+        return content.decode('utf-8', 'replace')
+
+    except Exception:
+        return None
 
 
 def parseConfigFile(config_path):
@@ -143,32 +169,64 @@ def compareConfigs(config_path, template_path, configreader_path, dev_report=Fal
         dev_report = True
         print("Error loading .config file: {}".format(e))
 
+    # The temporary template extracted from git (if used) is removed in the finally block below
+    template_tmp_path = None
     try:
-        validatePath(template_path, ".configTemplate")
-        template_file_options = parseConfigFile(template_path)
-        found_template = True
-    except (ValueError, FileNotFoundError) as e:
-        dev_report = True
-        print("Error loading .configTemplate file: {}".format(e))
+        try:
+            validatePath(template_path, ".configTemplate")
+            template_file_options = parseConfigFile(template_path)
+            found_template = True
+        except (ValueError, FileNotFoundError) as e:
 
-    try:
-        validatePath(configreader_path, "ConfigReader.py")
-        configreader_file_options = extractConfigOptions(configreader_path)
-        found_configreader = True
-    except (ValueError, FileNotFoundError) as e:
-        dev_report = True
-        print("Error loading ConfigReader.py file: {}".format(e))
+            # Fall back to the pristine .config tracked in git, so fresh clones which don't have a
+            # .configTemplate yet still get a complete comparison
+            template_content = readTemplateFromGit()
 
-    # Find missing and extra options
-    missing_in_config_wrt_template = template_file_options - config_file_options if found_template and found_config else set()
-    missing_in_config_wrt_cr = configreader_file_options - config_file_options if found_configreader and found_config else set()
-    missing_in_template_wrt_cr = configreader_file_options - template_file_options if found_configreader and found_template else set()
-    extra_in_config = config_file_options - configreader_file_options if found_config and found_configreader else set()
-    extra_in_template = template_file_options - configreader_file_options if found_template and found_configreader else set()
+            if template_content is not None:
 
-    # Find commented out options (only if respective files are found)
-    commented_options_in_config = checkCommentedOptions(config_path, missing_in_config_wrt_cr) if found_config else set()
-    commented_options_in_template = checkCommentedOptions(template_path, missing_in_template_wrt_cr) if found_template else set()
+                tmp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.configTemplate', delete=False)
+                tmp_file.write(template_content)
+                tmp_file.close()
+
+                template_tmp_path = tmp_file.name
+                template_path = template_tmp_path
+
+                template_file_options = parseConfigFile(template_path)
+                found_template = True
+
+                print("Note: .configTemplate not found, using the repository default .config (via git) "
+                      "as the template.")
+
+            else:
+                dev_report = True
+                print("Error loading .configTemplate file: {}".format(e))
+
+        try:
+            validatePath(configreader_path, "ConfigReader.py")
+            configreader_file_options = extractConfigOptions(configreader_path)
+            found_configreader = True
+        except (ValueError, FileNotFoundError) as e:
+            dev_report = True
+            print("Error loading ConfigReader.py file: {}".format(e))
+
+        # Find missing and extra options
+        missing_in_config_wrt_template = template_file_options - config_file_options if found_template and found_config else set()
+        missing_in_config_wrt_cr = configreader_file_options - config_file_options if found_configreader and found_config else set()
+        missing_in_template_wrt_cr = configreader_file_options - template_file_options if found_configreader and found_template else set()
+        extra_in_config = config_file_options - configreader_file_options if found_config and found_configreader else set()
+        extra_in_template = template_file_options - configreader_file_options if found_template and found_configreader else set()
+
+        # Find commented out options (only if respective files are found)
+        commented_options_in_config = checkCommentedOptions(config_path, missing_in_config_wrt_cr) if found_config else set()
+        commented_options_in_template = checkCommentedOptions(template_path, missing_in_template_wrt_cr) if found_template else set()
+
+    finally:
+        # Clean up the temporary template extracted from git
+        if template_tmp_path is not None:
+            try:
+                os.remove(template_tmp_path)
+            except OSError:
+                pass
 
     # Remove commented out options from missing
     missing_in_config_wrt_template -= commented_options_in_config
@@ -274,13 +332,18 @@ if __name__ == "__main__":
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description="Audit .config and optionally .configTemplate files.")
 
-    arg_parser.add_argument("config_path", nargs='?', default="./.config", help="Path to the .config file")
+    # Resolve defaults relative to the RMS repository root so the script works from any directory
+    rms_root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-    arg_parser.add_argument("--template", default="./.configTemplate",
-                        help="Path to .configTemplate (default: ./.configTemplate)")
+    arg_parser.add_argument("config_path", nargs='?', default=os.path.join(rms_root_dir, ".config"),
+                        help="Path to the .config file (default: the one in the RMS repository root)")
 
-    arg_parser.add_argument("--configreader", default="./RMS/ConfigReader.py",
-                        help="Path to ConfigReader.py (default: ./RMS/ConfigReader.py)")
+    arg_parser.add_argument("--template", default=os.path.join(rms_root_dir, ".configTemplate"),
+                        help="Path to .configTemplate (default: the one in the RMS repository root; "
+                             "if missing, the repository default .config is used via git)")
+
+    arg_parser.add_argument("--configreader", default=os.path.join(rms_root_dir, "RMS", "ConfigReader.py"),
+                        help="Path to ConfigReader.py (default: the one in the RMS repository root)")
 
     arg_parser.add_argument('-d', '--dev', action="store_true", help="""Audit template file. """)
 
