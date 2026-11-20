@@ -1989,7 +1989,9 @@ class ASTRA:
 
         # 2. Background subtraction
         unsub_frame = corr_frame.copy()
-        sub_frame = corr_frame.astype(np.int32) - self.corrected_avepixel.astype(np.int32)
+        # Both operands are float32 photometric quantities - subtract in float instead of
+        # truncating them to integers first
+        sub_frame = corr_frame.astype(np.float32) - self.corrected_avepixel.astype(np.float32)
 
         # 3. Star masking
         final_frame = np.ma.masked_array(sub_frame, mask=self.star_mask)
