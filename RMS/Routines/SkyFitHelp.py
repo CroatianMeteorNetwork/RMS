@@ -670,7 +670,8 @@ def _topic_settings(gui):
         ("Show Distortion", "Draw the lens-distortion grid."),
         ("Invert Colors", "Invert the image (dark stars on a light background)."),
         ("Auto Pan To Next Star", "Recentre the view on the next star while picking."),
-        ("Single Click Photometry", "Measure photometry with a single click while picking."),
+        ("Single Click Photometry", "Colour the aperture as the photometry with every pick, "
+         "instead of with SHIFT + click."),
     ]
 
     if _has_geopoints(gui):
@@ -914,8 +915,10 @@ def _topic_mr_overview(gui):
         "<li>Press " + _key(c + " + R") + " to start picking (see "
         "<a href=\"topic:mr_picking\">picking</a>).</li>"
         "<li>Step through frames with " + _key("Left / Right") + " and mark the meteor.</li>"
+        "<li>Colour the meteor on each frame with " + _key("SHIFT + Left click") + " to measure its "
+        "brightness (see <a href=\"topic:mr_picking\">photometry</a>).</li>"
         "<li>Press " + _key("P") + " for the <a href=\"topic:mr_lightcurve\">light curve</a>.</li>"
-        "<li>Save with " + _key(c + " + S") + " (FTPdetectinfo).</li>"
+        "<li>Save with " + _key(c + " + S") + " (FTPdetectinfo and ECSV).</li>"
         "</ol>"
         + _nav_links(next_pair=('mr_picking', 'Pick meteor positions'),
                      related=[('mr_fireballs', 'Measuring fireballs'), ('mr_lightcurve', 'Light curve & saving')])
@@ -942,10 +945,25 @@ def _topic_mr_picking(gui):
         "<h3>Aperture</h3>"
         "<p>Hold " + _key(c + " + Scroll") + " to resize the circular aperture. Match it to the "
         "segment: big enough to enclose all of its light, small enough to exclude neighbours and "
-        "background. The aperture also sets the photometry region and, for saturated blobs, doubles "
-        "as a positioning aid (see <a href=\"topic:mr_fireballs\">fireballs</a>).</p>"
+        "background. The same circle is the brush that colours the photometry (below) and, for "
+        "saturated blobs, doubles as a positioning aid (see "
+        "<a href=\"topic:mr_fireballs\">fireballs</a>).</p>"
 
-        "<h3>Slow vs fast meteors</h3>"
+        "<h3>Photometry: colour the meteor</h3>"
+        "<p>A pick only measures the <b>position</b>. The brightness is measured on the pixels you "
+        "<b>colour</b> on each frame: hold " + _key("SHIFT") + " and left click, or drag, over the "
+        "meteor to colour the pixels inside the aperture, and " + _key("SHIFT + Right click") + " "
+        "to uncolour them. Colour all of the meteor's light and as little background as you can. "
+        "The photometry of a frame is computed when you move to another frame, show the light "
+        "curve, or save.</p>"
+        "<p>To colour the aperture with every pick instead, turn on <b>Single Click Photometry</b> "
+        "(Settings). It only applies to the picks made after you turn it on.</p>"
+        + _callout("A frame with no coloured pixels has no photometry: its intensity is saved as 1 "
+                   "in the FTPdetectinfo and the ECSV, and its magnitude is meaningless. The "
+                   + _btn("Photometry") + " button of the calibration only fits the photometric "
+                   "offset on the stars; it does not measure the meteor.", kind="note")
+
+        + "<h3>Slow vs fast meteors</h3>"
         "<ul>"
         "<li><b>Slow</b> (short, roughly round segment each frame): just <b>centroid</b> (left "
         "click) &ndash; the centre is well defined.</li>"
@@ -968,6 +986,8 @@ def _topic_mr_picking(gui):
             (c + " + LEFT CLICK", "Force a pick at the exact cursor position"),
             (c + " + SCROLL", "Resize the aperture"),
             ("RIGHT CLICK", "Remove the pick on this frame"),
+            ("SHIFT + LEFT CLICK / DRAG", "Colour photometry pixels"),
+            ("SHIFT + RIGHT CLICK / DRAG", "Uncolour photometry pixels"),
             ("ALT / Num0 + LEFT CLICK", "Mark a gap (DFN sequences)"),
             ("Left / Right", "Previous / next frame"),
             (c + " + Left / Right", "+/- 10 frames"),
@@ -1020,10 +1040,13 @@ def _topic_fireballs(gui):
 def _topic_mr_lightcurve(gui):
     c = _ctrl(gui)
     body = (
-        "<p>Press " + _key("P") + " to show the light curve (intensity vs frame) of your picks.</p>"
+        "<p>Press " + _key("P") + " to show the light curve (intensity vs frame) of your picks. It "
+        "is measured on the <a href=\"topic:mr_picking\">coloured photometry pixels</a>, so a flat "
+        "curve means the frames have not been coloured.</p>"
         "<p>Save your reduction with " + _key(c + " + S") + " - this writes an FTPdetectinfo file "
-        "(named <i>..._manual.txt</i>) in the data folder, applying the platepar astrometry to each "
-        "centroid. Save the current frame image with " + _key(c + " + W") + ".</p>"
+        "(named <i>..._manual.txt</i>) and an ECSV file (named <i>..._RMS_&lt;station&gt;.ecsv</i>) "
+        "in the data folder, applying the platepar astrometry and photometry to each centroid. Save "
+        "the current frame image with " + _key(c + " + W") + ".</p>"
     )
     return _page("Light curve &amp; saving", body)
 
@@ -1090,6 +1113,8 @@ def _topic_shortcuts_mr(gui):
         (c + " + R", "Enter / exit picking"),
         ("LEFT CLICK", "Centroid"),
         (c + " + LEFT CLICK", "Force pick"),
+        ("SHIFT + LEFT CLICK / DRAG", "Colour photometry pixels"),
+        ("SHIFT + RIGHT CLICK / DRAG", "Uncolour photometry pixels"),
         ("ALT / Num0 + LEFT CLICK", "Mark gap (DFN)"),
         ("M", "Show maxpixel"),
         ("K", "Subtract average"),
@@ -1100,7 +1125,7 @@ def _topic_shortcuts_mr(gui):
         (c + " + D / " + c + " + F", "Load dark / flat"),
         (c + " + P", "Load platepar"),
         (c + " + W", "Save current frame"),
-        (c + " + S", "Save FTPdetectinfo"),
+        (c + " + S", "Save FTPdetectinfo and ECSV"),
         (c + " + K", "Open ASTRA GUI"),
     ])
     body = "<h3>Navigation</h3>" + nav + "<h3>Picking &amp; files</h3>" + actions
