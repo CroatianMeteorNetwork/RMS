@@ -496,10 +496,17 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
         catalog_mags = extinctionCorrectionTrueToApparent(catalog_mags, catalog_ra, catalog_dec, max_jd, \
             platepar)
 
+        # Build correction params from platepar
+        vignetting_poly = getattr(platepar, 'vignetting_poly', None)
+        sat_slope = getattr(platepar, 'saturation_slope', 0.0)
+        sat_break = getattr(platepar, 'saturation_mag_break', 5.0)
+        sat_params = (sat_slope, sat_break, catalog_mags) if sat_slope != 0 else None
+
         # Fit the photometry on automated star intensities (use the fixed vignetting coeff, use robust fit)
         photom_params, fit_stddev, fit_resid, star_intensities, radius_arr, catalog_mags = \
-            photometryFitRobust(star_intensities, radius_arr, catalog_mags, \
-            fixed_vignetting=platepar.vignetting_coeff)
+            photometryFitRobust(star_intensities, radius_arr, catalog_mags,
+            fixed_vignetting=platepar.vignetting_coeff, vignetting_poly=vignetting_poly,
+            saturation_params=sat_params)
 
 
         photom_offset, _ = photom_params
@@ -509,7 +516,8 @@ def generateCalibrationReport(config, night_dir_path, match_radius=2.0, platepar
         # still holds the S/N at column 6 (CALSTARS format) aligned with all matched stars.
         lm_intens = image_stars[:, 2]
         lm_radius = np.hypot(image_stars[:, 0] - img_h/2, image_stars[:, 1] - img_w/2)
-        lm_pred_mags = photomLine((lm_intens, lm_radius), photom_offset, platepar.vignetting_coeff)
+        lm_pred_mags = photomLine((lm_intens, lm_radius), photom_offset, platepar.vignetting_coeff,
+            vignetting_poly=vignetting_poly)
         lm_info = limitingMagnitude(lm_pred_mags, image_stars[:, 6], snr_targets=(5, 10))
 
         ### ###
