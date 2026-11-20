@@ -650,6 +650,17 @@ def _topic_mask(gui):
         "<li><b>Brush mode</b>: paint / erase the mask freehand; adjust the brush size.</li>"
         "<li>Undo strokes, clear polygons, invert, and toggle the overlay from the same tab.</li>"
         "</ul>"
+
+        "<h3>Photometry-only mask</h3>"
+        "<p>Stars behind the mask are always left out of the <b>photometric</b> fit. Tick <b>Exclude from "
+        "photometry only</b> to keep them for the <b>astrometric</b> fit: they are "
+        "detected, shown and paired as usual, but their flux is not used. Use it over regions where "
+        "the star positions are good but the brightness is not (dome reflections, glow, partial "
+        "obstructions). It applies to the whole mask, the station mask included: the stars are then "
+        "detected over the whole image, so false detections in masked areas (lights, the horizon) "
+        "come back too. The CALSTARS stars were detected with the station mask applied, so "
+        "re-detect the stars in the <b>Star Detection</b> tab to pick up the ones behind it. In the "
+        "photometry plot those stars are boxed, and their residuals on the image are grey.</p>"
         "<p>Launch with <b>-m / --mask PATH</b> to start from an existing mask.</p>"
     )
     return _page("Mask drawing", body)
