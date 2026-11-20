@@ -507,6 +507,12 @@ def loadECSV(ECSV_file_path):
             raise ValueError("ECSV file must contain 'x_image', 'y_image', "
                             "and 'datetime' columns.")
 
+        # The frames on which only additional fragments were picked have no main fragment position, and the
+        #   filtered picks are written back to every row
+        if np.ma.is_masked(table['x_image']):
+            raise ValueError("ECSV file has frames without a main fragment pick, which the Kalman filter "
+                            "does not support.")
+
         # Populate arrays
         picks = np.column_stack((table['x_image'].data, table['y_image'].data))
         
