@@ -46,7 +46,8 @@ sudo apt-get install -y \
     gstreamer1.0-plugins-ugly \
     gstreamer1.0-libav \
     python3-opencv \
-    python3-pyqt5
+    python3-pyqt5 \
+    python3-pyqt5.qtsvg
 
 # Install gstreamer python plugin loader if available (not present on all platforms)
 sudo apt-get install -y gstreamer1.0-python3-plugin-loader 2>/dev/null || true
