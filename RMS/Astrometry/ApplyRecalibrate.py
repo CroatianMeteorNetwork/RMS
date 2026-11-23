@@ -369,9 +369,50 @@ def recalibrateFF(
             config.recalibration_min_match_fraction. Set to 0 to disable the coverage gate (e.g. for
             interactive use).
 
+    The pointing and the scale are searched as offsets (CheckFit.SearchOffsets). If that recalibration fails, it is
+    run again with the search of earlier versions (CheckFit.SearchRaDec), as a safety net, and its result is used.
+
     Return:
         result: [?] A Platepar instance if refinement is successful, None if it failed.
         min_match_radius: [float] Minimum radius that successfully matched the stars (pixels).
+    """
+
+    args = (config, working_platepar, jd, star_dict_ff, catalog_stars)
+    kwargs = dict(max_match_radius=max_match_radius, force_platepar_save=force_platepar_save, lim_mag=lim_mag,
+                  ignore_distance_threshold=ignore_distance_threshold, ignore_max_stars=ignore_max_stars,
+                  min_match_fraction=min_match_fraction)
+
+    # The search of the offsets, and if it fails the search of earlier versions
+    result, min_match_radius = _recalibrateSearch(*args, search_class=CheckFit.SearchOffsets, **kwargs)
+    if result is None:
+        log.info('Recalibration with the offsets of the pointing failed, running the search of RA, Dec and '
+                 'rotation...')
+        result, min_match_radius = _recalibrateSearch(*args, search_class=CheckFit.SearchRaDec, **kwargs)
+
+    return result, min_match_radius
+
+
+def _recalibrateSearch(
+    config,
+    working_platepar,
+    jd,
+    star_dict_ff,
+    catalog_stars,
+    max_match_radius=None,
+    force_platepar_save=False,
+    lim_mag=None,
+    ignore_distance_threshold=False,
+    ignore_max_stars=False,
+    min_match_fraction=None,
+    search_class=None,
+):
+    """ The recalibration of recalibrateFF with the given search (see recalibrateFF for the other arguments).
+
+    Keyword arguments:
+        search_class: [class] CheckFit.SearchOffsets or CheckFit.SearchRaDec.
+
+    Return:
+        (result, min_match_radius): See recalibrateFF.
     """
 
     working_platepar = copy.deepcopy(working_platepar)
@@ -434,7 +475,7 @@ def recalibrateFF(
 
     # Calculate the function tolerance, so the desired precision can be reached (the number is calculated
     # in the same regard as the cost function)
-    fatol, xatol = CheckFit.computeMinimizationTolerances(config, working_platepar, len(star_dict_ff))
+    fatol, _ = CheckFit.computeMinimizationTolerances(config, working_platepar, len(star_dict_ff))
 
     ### If the initial match is good enough, do only quick recalibration ###
 
@@ -525,30 +566,29 @@ def recalibrateFF(
 
         ### Recalibrate the platepar just on these stars, use the default platepar for initial params ###
 
-        # Init initial parameters: no offset from the pointing and the scale of the platepar (px, see
-        #   Platepar.PointingOffsets), which move the stars by the same amount in the same direction on the image
-        #   wherever the camera points
-        pointing = Platepar.PointingOffsets(working_platepar)
-        p0 = [0.0, 0.0, 0.0, 0.0]
+        # Init initial parameters: with SearchOffsets no offset from the pointing and the scale of the platepar
+        #   (px, see Platepar.PointingOffsets), which move the stars by the same amount in the same direction on
+        #   the image wherever the camera points
+        search = search_class(config, working_platepar)
 
         # Compute the minimization tolerance
-        fatol, xatol = CheckFit.computeMinimizationTolerances(config, working_platepar, len(star_dict_ff))
+        fatol, _ = CheckFit.computeMinimizationTolerances(config, working_platepar, len(star_dict_ff))
 
-        simplex = CheckFit.buildNelderMeadSimplex(p0, CheckFit.searchSimplexSteps(pointing))
+        simplex = CheckFit.buildNelderMeadSimplex(search.p0, search.steps)
 
         res = scipy.optimize.minimize(
             CheckFit._calcImageResidualsAstro,
-            p0,
-            args=(config, working_platepar, catalog_stars, star_dict_ff, match_radius, pointing),
+            search.p0,
+            args=(config, working_platepar, catalog_stars, star_dict_ff, match_radius, search),
             method='Nelder-Mead',
-            options={'fatol': fatol, 'xatol': xatol, 'initial_simplex': simplex},
+            options={'fatol': fatol, 'xatol': search.xatol, 'initial_simplex': simplex},
         )
 
         ###
 
         # Compute matched stars
         temp_platepar = copy.deepcopy(working_platepar)
-        pointing.apply(temp_platepar, res.x)
+        search.apply(temp_platepar, res.x)
 
         n_matched, dist, cost, matched_stars = CheckFit.matchStarsResiduals(
             config,
