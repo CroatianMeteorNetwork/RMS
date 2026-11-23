@@ -453,8 +453,22 @@ def recalibrateFF(
              'of the pointing...')
     result_offsets, min_match_radius_offsets, _ = _recalibrateSearch(*args, search_class=CheckFit.SearchOffsets,
                                                                      require_alignment=(not inaccurate), **kwargs)
+
+    # The recalibration with the offsets is used only if it matches at least as many stars within half a pixel
+    #   (scaled to the resolution) as the given platepar, which is used for the FF when the recalibration fails: a
+    #   recalibration which the checks accepted with fewer such stars was worse on real FFs than the platepar
+    #   before
     if result_offsets is not None:
-        return result_offsets, min_match_radius_offsets
+        radius = 0.5*max(1.0, np.hypot(config.width, config.height)/np.hypot(1280, 720))
+        n_offsets, _, _, _ = CheckFit.matchStarsResiduals(config, result_offsets, catalog_stars, star_dict_ff,
+                                                          radius, ret_nmatch=True, lim_mag=lim_mag)
+        n_given, _, _, _ = CheckFit.matchStarsResiduals(config, working_platepar, catalog_stars, star_dict_ff,
+                                                        radius, ret_nmatch=True, lim_mag=lim_mag)
+        if n_offsets >= n_given:
+            return result_offsets, min_match_radius_offsets
+
+        log.info('Recalibration with the offsets not used: {:d} stars within {:.2f} px, with the given platepar '
+                 '{:d}'.format(n_offsets, radius, n_given))
 
     return result, min_match_radius
 

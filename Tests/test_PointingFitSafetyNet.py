@@ -100,6 +100,31 @@ def test_recalibration_with_the_offsets_needs_a_better_pointing_after_other_fail
     assert min_match_radius == 0.5
 
 
+def test_recalibration_with_the_offsets_matching_fewer_stars_is_not_used(monkeypatch):
+
+    # The search of earlier versions fails and the search of the offsets returns a platepar 1 px off, which meets
+    #   its checks but matches fewer stars within half a pixel than the given platepar: it is not used, and the
+    #   failure is handed over
+    pp = makePlatepar()
+    catalog_stars, rows = makeImage(pp)
+
+    def _search(*args, **kwargs):
+        """ The searches: the one of earlier versions fails, the one of the offsets ends 1 px off. """
+
+        if kwargs['search_class'] is CheckFit.SearchRaDec:
+            return None, 0.5, True
+
+        return _turned(pp, 1.0), 0.5, False
+
+    monkeypatch.setattr(ApplyRecalibrate, '_recalibrateSearch', _search)
+
+    result, min_match_radius = ApplyRecalibrate.recalibrateFF(makeConfig(), perturbed(pp), pp.JD, {pp.JD: rows},
+                                                              catalog_stars)
+
+    assert result is None
+    assert min_match_radius == 0.5
+
+
 def test_recalibration_of_earlier_versions_needs_no_fallback(monkeypatch):
 
     # A successful recalibration with the search of earlier versions is used as it is
