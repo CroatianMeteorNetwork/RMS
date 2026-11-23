@@ -369,8 +369,9 @@ def recalibrateFF(
             config.recalibration_min_match_fraction. Set to 0 to disable the coverage gate (e.g. for
             interactive use).
 
-    The pointing and the scale are searched as offsets (CheckFit.SearchOffsets). If that recalibration fails, it is
-    run again with the search of earlier versions (CheckFit.SearchRaDec), as a safety net, and its result is used.
+    The pointing and the scale are searched as offsets (CheckFit.SearchOffsets), from the coarse alignment of the
+    stars if the platepar does not match them. If that recalibration fails, it is run again with the search of
+    earlier versions (CheckFit.SearchRaDec), as a safety net, and its result is used.
 
     Return:
         result: [?] A Platepar instance if refinement is successful, None if it failed.
@@ -521,6 +522,19 @@ def _recalibrateSearch(
 
     log.info('Pre-filtered catalog to {:d} stars within {:.1f} deg FOV radius'.format(
         len(catalog_stars), fov_radius))
+
+    # Without the quick fit, bring the pointing onto the stars first if clearly more of them agree with the coarse
+    #   alignment than with the platepar (with the search of the offsets)
+    if (radius_list[0] != 1.5) and (search_class is CheckFit.SearchOffsets):
+        aligned = CheckFit.coarseAlignStars(config, working_platepar, catalog_stars, star_dict_ff,
+                                            lim_mag=effective_lim_mag)
+        if aligned is not None:
+            log.info('Coarse alignment of the pointing on the stars: RA {:.4f} -> {:.4f}, Dec {:.4f} -> {:.4f}, '
+                     'rotation {:.4f} -> {:.4f} deg'.format(working_platepar.RA_d, aligned.RA_d,
+                                                            working_platepar.dec_d, aligned.dec_d,
+                                                            working_platepar.pos_angle_ref, aligned.pos_angle_ref))
+            working_platepar.RA_d, working_platepar.dec_d, working_platepar.pos_angle_ref = aligned.RA_d, \
+                aligned.dec_d, aligned.pos_angle_ref
 
     # Go through all radii and match the stars
     min_match_radius = None

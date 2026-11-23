@@ -1199,9 +1199,10 @@ class Platepar(object):
         catalog stars onto the image and computing pixel distances. This is more robust
         than working in sky coordinates because it correctly handles distortion and timing.
 
-        The pointing is fitted as offsets of the pointing (see PointingOffsets). If that fit is not accepted, the
-        fit of RA, Dec and position angle of earlier versions is run from the given pointing, as a safety net, and
-        its result is used.
+        The pointing is first brought onto the stars by the coarse alignment (CoarseAlignment), if more stars
+        agree with its result than with the given pointing, and then fitted as offsets of the pointing (see
+        PointingOffsets). If that fit is not accepted, the fit of RA, Dec and position angle of earlier versions is
+        run from the given pointing, as a safety net, and its result is used.
 
         Arguments:
             jd: [float] Julian date of the image.
@@ -1252,7 +1253,7 @@ class Platepar(object):
 
         Keyword arguments:
             legacy: [bool] Fit RA, Dec and position angle from the given pointing, as earlier versions did, instead
-                of the offsets of the pointing. False by default.
+                of the offsets of the pointing from its coarse alignment. False by default.
 
         Return:
             (accepted, success, cost, inlier_fraction, inlier_rmsd, platepar): [tuple] Whether enough stars have a
@@ -1288,6 +1289,14 @@ class Platepar(object):
 
         # Pre-extract detected star positions (constant across iterations)
         img_x, img_y, _ = img_stars.T
+
+        # Bring the pointing onto the stars first, if more of them agree with the coarse alignment than with it
+        if not legacy:
+            from RMS.Astrometry.CoarseAlignment import alignIfBetter
+            aligned = alignIfBetter(pp_work, jd, img_x, img_y, catalog_stars)
+            if aligned is not None:
+                pp_work.RA_d, pp_work.dec_d, pp_work.pos_angle_ref = aligned.RA_d, aligned.dec_d, \
+                    aligned.pos_angle_ref
 
         # The pointing is fitted as offsets (px) from the starting pointing at the time of the image, which
         #   move the field by the same amount in the same direction on the image wherever the camera points
@@ -1526,7 +1535,7 @@ class Platepar(object):
         fit_by='fitAstrometry', legacy=False):
         """ The fit of fitAstrometry, which has the description and the arguments. With legacy, the RANSAC fit
             (use_nn_cost) fits RA, Dec and position angle from the given pointing, as earlier versions did, instead
-            of the offsets of the pointing.
+            of the offsets of the pointing from its coarse alignment.
 
         Return:
             See fitAstrometry.
@@ -2172,6 +2181,17 @@ class Platepar(object):
                         self.y_poly_rev = radial3_y.copy()
                     else:
                         self.setDistortionType("radial3-odd", reset_params=False)
+
+                    # Bring the pointing onto the stars first, if more of them agree with the coarse alignment than
+                    #   with it
+                    if not legacy:
+                        from RMS.Astrometry.CoarseAlignment import alignIfBetter
+                        aligned = alignIfBetter(self, jd, img_x_all, img_y_all, catalog_stars)
+                        if aligned is not None:
+                            print("    Coarse alignment: RA {:.3f} -> {:.3f}, Dec {:.3f} -> {:.3f}".format(
+                                self.RA_d, aligned.RA_d, self.dec_d, aligned.dec_d))
+                            self.RA_d, self.dec_d, self.pos_angle_ref = aligned.RA_d, aligned.dec_d, \
+                                aligned.pos_angle_ref
 
                     # The parameters at the start of the stage, with the pointing of the platepar
                     p0_current = ransacStart()

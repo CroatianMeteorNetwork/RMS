@@ -162,6 +162,40 @@ class SearchRaDec(object):
         platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref, platepar.F_scale = params
 
 
+def coarseAlignStars(config, platepar, catalog_stars, star_dict, lim_mag=None):
+    """ The coarse alignment of the platepar (CoarseAlignment.alignIfBetter) on the image with the most stars of
+        the star dictionary, if clearly more stars agree with it than with the platepar.
+
+    Arguments:
+        config: [Config] Configuration.
+        platepar: [Platepar] Platepar (not changed).
+        catalog_stars: [ndarray] Catalog stars (ra, dec, mag).
+        star_dict: [dict] Julian dates of the images and their stars (y, x, ...).
+
+    Keyword arguments:
+        lim_mag: [float] Limiting magnitude of the catalog stars. config.catalog_mag_limit by default.
+
+    Return:
+        [Platepar] A copy of the platepar with the aligned pointing, or None.
+    """
+
+    from RMS.Astrometry.CoarseAlignment import alignIfBetter
+
+    if lim_mag is None:
+        lim_mag = config.catalog_mag_limit
+
+    # The image with the most stars
+    jd = max(star_dict, key=lambda key: len(star_dict[key]))
+    stars = np.array(star_dict[jd], dtype=np.float64)
+    if (stars.ndim != 2) or (len(stars) < 3):
+        return None
+
+    catalog_stars = np.asarray(catalog_stars)
+    catalog_stars = catalog_stars[catalog_stars[:, 2] <= lim_mag]
+
+    return alignIfBetter(platepar, jd, stars[:, 1], stars[:, 0], catalog_stars)
+
+
 
 
 def matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius, ret_nmatch=False, \
@@ -553,9 +587,9 @@ def starListToDict(config, calstars_data, max_ffs=None):
 def autoCheckFit(config, platepar, calstars_data, _nn_refinement=False):
     """ Attempts to refine the astrometry fit with the given stars and and initial astrometry parameters.
 
-    The pointing and the scale are searched as offsets (SearchOffsets). If the check fails, it is run again with
-    the search of earlier versions (SearchRaDec) from the initial platepar, as a safety net, and its result is
-    used.
+    The pointing and the scale are searched as offsets (SearchOffsets), from the coarse alignment of the stars if
+    the initial platepar does not match them. If the check fails, it is run again with the search of earlier
+    versions (SearchRaDec) from the initial platepar, as a safety net, and its result is used.
 
     Arguments:
         config: [Config structure]
@@ -754,6 +788,18 @@ def _autoCheckFit(config, platepar, calstars_data, _nn_refinement, search_class)
 
             # Use a reduced set of initial radius values
             radius_list = [1.5, min_radius]
+
+    # Otherwise, bring the pointing onto the stars first if clearly more of them agree with the coarse alignment
+    #   than with the platepar (with the search of the offsets)
+    if (radius_list[0] != 1.5) and (search_class is SearchOffsets):
+        aligned = coarseAlignStars(config, platepar, catalog_stars, star_dict)
+        if aligned is not None:
+            log.info("Coarse alignment of the pointing on the stars: RA {:.4f} -> {:.4f}, Dec {:.4f} -> {:.4f}, "
+                     "rotation {:.4f} -> {:.4f} deg".format(platepar.RA_d, aligned.RA_d, platepar.dec_d,
+                                                            aligned.dec_d, platepar.pos_angle_ref,
+                                                            aligned.pos_angle_ref))
+            platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref = aligned.RA_d, aligned.dec_d, \
+                aligned.pos_angle_ref
 
     ##########
 
