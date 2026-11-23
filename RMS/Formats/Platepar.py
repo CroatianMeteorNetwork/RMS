@@ -1025,13 +1025,16 @@ class Platepar(object):
 
         """
 
+        # The pointing is fitted as offsets (px) from the pointing of the platepar, which move the field by the
+        #   same amount in the same direction on the image wherever the camera points (see PointingOffsets)
+        pointing = PointingOffsets(self)
+
         def _calcImageResidualsAstro(params, platepar, jd, catalog_stars, img_stars):
             """Calculates the differences between the stars on the image and catalog stars in image
             coordinates with the given astrometrical solution.
             """
 
             # Extract fitting parameters
-            ra_ref, dec_ref, pos_angle_ref = params[:3]
             if not fixed_scale:
                 F_scale = params[3]
 
@@ -1039,11 +1042,8 @@ class Platepar(object):
 
             pp_copy = copy.copy(platepar)
 
-            # Assign guessed parameters. The declination is stepped freely, so a pointing past a pole is
-            #   reflected back onto the sphere and the position angle turned with it
-            pp_copy.RA_d, pp_copy.dec_d, pos_angle_offset = normalizeRaDec(ra_ref, dec_ref,
-                                                                           refraction=platepar.refraction)
-            pp_copy.pos_angle_ref = (pos_angle_ref + pos_angle_offset)%360
+            # Assign guessed parameters: the pointing turned by the offsets
+            pointing.apply(pp_copy, params[:3])
 
             if not fixed_scale:
                 pp_copy.F_scale = abs(F_scale)
@@ -1066,7 +1066,6 @@ class Platepar(object):
             """
 
             # Extract fitting parameters
-            ra_ref, dec_ref, pos_angle_ref = params[:3]
             if not fixed_scale:
                 F_scale = params[3]
 
@@ -1074,10 +1073,8 @@ class Platepar(object):
 
             pp_copy = copy.copy(platepar)
 
-            # Assign guessed parameters
-            pp_copy.RA_d = ra_ref
-            pp_copy.dec_d = dec_ref
-            pp_copy.pos_angle_ref = pos_angle_ref
+            # Assign guessed parameters: the pointing turned by the offsets
+            pointing.apply(pp_copy, params[:3])
 
             if not fixed_scale:
                 pp_copy.F_scale = abs(F_scale)
@@ -1102,8 +1099,8 @@ class Platepar(object):
 
             return separation_sum
 
-        # Initial parameters for the astrometric fit
-        p0 = [self.RA_d, self.dec_d, self.pos_angle_ref]
+        # Initial parameters for the astrometric fit: no offset of the pointing
+        p0 = [0.0, 0.0, 0.0]
 
         # Add fitting scale if not fixed
         if not fixed_scale:
@@ -1119,10 +1116,8 @@ class Platepar(object):
         # res = scipy.optimize.minimize(_calcSkyResidualsAstro, p0, args=(self, jd, \
         #     catalog_stars, img_stars), method='Nelder-Mead')
 
-        # Update fitted astrometric parameters, with the pointing brought back onto the sphere as in the fit
-        self.RA_d, self.dec_d, pos_angle_offset = normalizeRaDec(res.x[0], res.x[1],
-                                                                 refraction=self.refraction)
-        self.pos_angle_ref = (res.x[2] + pos_angle_offset)%360
+        # Update fitted astrometric parameters
+        pointing.apply(self, res.x[:3])
         if not fixed_scale:
             self.F_scale = res.x[3]
 
@@ -1189,22 +1184,24 @@ class Platepar(object):
         # Pre-extract detected star positions (constant across iterations)
         img_x, img_y, _ = img_stars.T
 
+        # The pointing is fitted as offsets (px) from the starting pointing at the time of the image, which
+        #   move the field by the same amount in the same direction on the image wherever the camera points
+        #   (see PointingOffsets)
+        pointing = PointingOffsets(pp_work)
+
         def _setNNPointing(pp, params):
             """ Set the pointing of the given platepar from the fit parameters.
 
             Arguments:
                 pp: [Platepar] Platepar which is updated in place.
-                params: [list] RA_d, dec_d, pos_angle_ref and, if the scale is not fixed, F_scale.
+                params: [list] Offsets of the pointing (dx, dy, droll, px, see PointingOffsets) and, if the scale
+                    is not fixed, F_scale.
 
             Return:
                 None
             """
 
-            # The declination is stepped freely, so a pointing past a pole is reflected back onto the sphere
-            #   and the position angle turned with it
-            pp.RA_d, pp.dec_d, pos_angle_offset = normalizeRaDec(params[0], params[1],
-                                                                 refraction=pp.refraction)
-            pp.pos_angle_ref = (params[2] + pos_angle_offset)%360
+            pointing.apply(pp, params[:3])
             if not fixed_scale:
                 pp.F_scale = abs(params[3])
 
@@ -1244,14 +1241,17 @@ class Platepar(object):
 
             return rmsd
 
-        # Initial parameters - use pp_work.RA_d which has been adjusted for the new JD/Ho
-        p0 = [pp_work.RA_d, self.dec_d, self.pos_angle_ref]
+        # Initial parameters: no offset from the pointing of pp_work, which has been adjusted for the new JD/Ho
+        p0 = [0.0, 0.0, 0.0]
         if not fixed_scale:
             p0.append(abs(self.F_scale))
 
-        # Import here to avoid circular import (CheckFit imports Platepar)
-        from RMS.Astrometry.CheckFit import buildNelderMeadSimplex
-        simplex = buildNelderMeadSimplex(p0, self.dec_d, mode="fixed", angular_step=2.0)
+        # The first simplex moves the pointing by 1 deg on the sky along x and y and rolls it by 2 deg, for the
+        #   large corrections this fit is used for, and changes the scale by 10%
+        steps = [np.radians(1.0)/pointing.shift_unit]*2 + [np.radians(2.0)/pointing.roll_unit]
+        if not fixed_scale:
+            steps.append(0.1*abs(self.F_scale))
+        simplex = np.vstack([p0, np.array(p0) + np.diag(steps)])
 
         # Fit using Nelder-Mead (robust for NN cost landscape)
         res = scipy.optimize.minimize(
