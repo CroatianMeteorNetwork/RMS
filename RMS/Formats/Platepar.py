@@ -1526,7 +1526,32 @@ class Platepar(object):
         def _calcSkyResidualsDistortionListArguments(params, *args, **kwargs):
             return [_calcSkyResidualsDistortion(param_line, *args, **kwargs) for param_line in params]
 
-        def _calcImageResidualsAstroAndDistortionRadial(params, platepar, jd, catalog_stars, img_stars):
+        # The pointing of the radial fits is fitted as offsets from a reference pointing (see PointingOffsets),
+        #   which move the field by the same amount in the same direction on the image wherever the camera
+        #   points. The optimizers get them as the parameters 1 + offset/diagonal (offset and image diagonal in
+        #   px): both optimizers step a parameter in proportion to its value (the finite differences of the least
+        #   squares fits, the first simplex of Nelder-Mead), which for a parameter of about 1 moves the stars by
+        #   about 2e-5 px for the finite differences, well above the rounding of the projection, and the
+        #   tolerance of Nelder-Mead (1e-4) is 1e-4 of the image diagonal (0.15 px on a 720p image)
+        diagonal = np.hypot(self.X_res, self.Y_res)
+        pointing_start = [1.0, 1.0, 1.0]
+
+        def _setPointingAndScale(pp, params, pointing):
+            """ Set the pointing and the scale of the fit parameters to a platepar.
+
+            Arguments:
+                pp: [Platepar] Platepar which is updated in place.
+                params: [list] Fit parameters: the three pointing parameters, the scale and the distortion.
+                pointing: [PointingOffsets] Offsets about the reference pointing of the fit.
+
+            Return:
+                None
+            """
+
+            pointing.apply(pp, [(param - 1.0)*diagonal for param in params[:3]])
+            pp.F_scale = f_scale_fixed if fixed_scale else abs(params[3])
+
+        def _calcImageResidualsAstroAndDistortionRadial(params, platepar, jd, catalog_stars, img_stars, pointing):
             """Calculates the differences between the stars on the image and catalog stars in image
                 coordinates with the given astrometrical solution. Pointing and distortion parameters are used
                 in the fit.
@@ -1536,18 +1561,12 @@ class Platepar(object):
                 dimension: [str] 'x' for X polynomial fit, 'y' for Y polynomial fit
             """
 
-            # Unpack pointing parameters and assign to the copy of platepar used for the fit
-            ra_ref, dec_ref, pos_angle_ref, F_scale = params[:4]
-
             # Shallow copy: the residual only rebinds scalar/poly attributes below and the
             # projection reads the rest, so a full deepcopy (per optimizer eval) is wasted.
             pp_copy = copy.copy(platepar)
 
-            # Unnormalize the pointing parameters
-            pp_copy.RA_d, pp_copy.dec_d, pos_angle_offset = normalizeRaDec(360*ra_ref, 90*dec_ref,
-                                                                           refraction=platepar.refraction)
-            pp_copy.pos_angle_ref = (360*pos_angle_ref + pos_angle_offset)%360
-            pp_copy.F_scale = f_scale_fixed if fixed_scale else abs(F_scale)
+            # Assign the pointing and the scale to the copy of platepar used for the fit
+            _setPointingAndScale(pp_copy, params, pointing)
 
             # Assign distortion parameters
             pp_copy.x_poly_rev = params[4:]
@@ -1562,16 +1581,13 @@ class Platepar(object):
 
             return dist_sum
 
-        def _calcImageResidualsAstroAndDistortionRadialVect(params, platepar, jd, catalog_stars, img_stars):
+        def _calcImageResidualsAstroAndDistortionRadialVect(params, platepar, jd, catalog_stars, img_stars,
+                                                            pointing):
             """Vector-residual form of _calcImageResidualsAstroAndDistortionRadial for least_squares:
                fits pointing + reverse distortion on the per-star pixel residual."""
 
             pp_copy = copy.copy(platepar)
-            ra_ref, dec_ref, pos_angle_ref, F_scale = params[:4]
-            pp_copy.RA_d, pp_copy.dec_d, pos_angle_offset = normalizeRaDec(360*ra_ref, 90*dec_ref,
-                                                                           refraction=platepar.refraction)
-            pp_copy.pos_angle_ref = (360*pos_angle_ref + pos_angle_offset)%360
-            pp_copy.F_scale = f_scale_fixed if fixed_scale else abs(F_scale)
+            _setPointingAndScale(pp_copy, params, pointing)
             pp_copy.x_poly_rev = np.array(params[4:])
 
             img_x, img_y, _ = img_stars.T
@@ -1579,25 +1595,19 @@ class Platepar(object):
 
             return np.concatenate([catalog_x - img_x, catalog_y - img_y])
 
-        def _calcSkyResidualsAstroAndDistortionRadial(params, platepar, jd, catalog_stars, img_stars):
+        def _calcSkyResidualsAstroAndDistortionRadial(params, platepar, jd, catalog_stars, img_stars, pointing):
             """Calculates the differences between the stars on the image and catalog stars in celestial
             coordinates with the given astrometrical solution. Pointing and distortion parameters are used
             in the fit.
 
             """
 
-            # Unpack pointing parameters and assign to the copy of platepar used for the fit
-            ra_ref, dec_ref, pos_angle_ref, F_scale = params[:4]
-
             # Shallow copy: the residual only rebinds scalar/poly attributes below and the
             # projection reads the rest, so a full deepcopy (per optimizer eval) is wasted.
             pp_copy = copy.copy(platepar)
 
-            # Unnormalize the pointing parameters
-            pp_copy.RA_d, pp_copy.dec_d, pos_angle_offset = normalizeRaDec(360*ra_ref, 90*dec_ref,
-                                                                           refraction=platepar.refraction)
-            pp_copy.pos_angle_ref = (360*pos_angle_ref + pos_angle_offset)%360
-            pp_copy.F_scale = f_scale_fixed if fixed_scale else abs(F_scale)
+            # Assign the pointing and the scale to the copy of platepar used for the fit
+            _setPointingAndScale(pp_copy, params, pointing)
 
             # Assign distortion parameters
             pp_copy.x_poly_fwd = np.array(params[4:])
@@ -1622,18 +1632,15 @@ class Platepar(object):
 
             return separation_sum
 
-        def _calcSkyResidualsAstroAndDistortionRadialVect(params, platepar, jd, catalog_stars, img_stars):
+        def _calcSkyResidualsAstroAndDistortionRadialVect(params, platepar, jd, catalog_stars, img_stars,
+                                                          pointing):
             """Vector-residual form of _calcSkyResidualsAstroAndDistortionRadial for scipy.least_squares.
                Returns per-star angular separations; least_squares minimizes their sum of squares,
                which equals the scalar separation_sum above, so the optimum is identical."""
 
             pp_copy = copy.copy(platepar)
 
-            ra_ref, dec_ref, pos_angle_ref, F_scale = params[:4]
-            pp_copy.RA_d, pp_copy.dec_d, pos_angle_offset = normalizeRaDec(360*ra_ref, 90*dec_ref,
-                                                                           refraction=platepar.refraction)
-            pp_copy.pos_angle_ref = (360*pos_angle_ref + pos_angle_offset)%360
-            pp_copy.F_scale = f_scale_fixed if fixed_scale else abs(F_scale)
+            _setPointingAndScale(pp_copy, params, pointing)
             pp_copy.x_poly_fwd = np.array(params[4:])
 
             img_x, img_y, _ = img_stars.T
@@ -1646,18 +1653,19 @@ class Platepar(object):
             )
 
         def _calcSkyResidualsAstroAndDistortionRadialNN(params, platepar, jd, catalog_stars, img_stars,
-                                                        cat_tree=None):
+                                                        pointing, cat_tree=None):
             """Like _calcSkyResidualsAstroAndDistortionRadial but uses nearest-neighbor matching.
 
             Instead of requiring pre-matched pairs, this finds the nearest catalog star for each
             detected star and sums those distances. This eliminates the need for explicit matching.
 
             Args:
-                params: [RA_d/360, dec_d/90, pos_angle_ref/360, F_scale, x_poly_fwd...]
+                params: [pointing parameters (3, 1 + offset/diagonal), F_scale, x_poly_fwd...]
                 platepar: Platepar object
                 jd: Julian date
                 catalog_stars: Pre-filtered catalog stars in FOV (Mx3 array [ra, dec, mag])
                 img_stars: detected image stars (Nx3 array [x, y, intensity])
+                pointing: PointingOffsets about the reference pointing of the fit
 
             Returns:
                 Sum of squared angular separations to nearest catalog star for each detected star
@@ -1665,14 +1673,8 @@ class Platepar(object):
             # Set distortion parameters
             pp_copy = copy.copy(platepar)
 
-            # Unpack pointing parameters and assign to the copy of platepar used for the fit
-            ra_ref, dec_ref, pos_angle_ref, F_scale = params[:4]
-
-            # Unnormalize the pointing parameters
-            pp_copy.RA_d, pp_copy.dec_d, pos_angle_offset = normalizeRaDec(360*ra_ref, 90*dec_ref,
-                                                                           refraction=platepar.refraction)
-            pp_copy.pos_angle_ref = (360*pos_angle_ref + pos_angle_offset)%360
-            pp_copy.F_scale = f_scale_fixed if fixed_scale else abs(F_scale)
+            # Assign the pointing and the scale to the copy of platepar used for the fit
+            _setPointingAndScale(pp_copy, params, pointing)
 
             # Assign distortion parameters
             pp_copy.x_poly_fwd = np.array(params[4:])
@@ -1919,7 +1921,7 @@ class Platepar(object):
                 # and every extraction/temporary below reads this held value instead of the (drifting under
                 # Nelder-Mead) parameter. fixed_scale is forwarded through the recursive matched-pair fit too.
                 f_scale_fixed = abs(self.F_scale)
-                p0 = [self.RA_d / 360, self.dec_d / 90, self.pos_angle_ref / 360, abs(self.F_scale)]
+                p0 = pointing_start + [abs(self.F_scale)]
                 p0 += self.x_poly_fwd.tolist()
 
                 # Choose cost function based on use_nn_cost flag
@@ -1962,8 +1964,10 @@ class Platepar(object):
                     # Save original distortion type for final fit
                     original_dist_type = self.distortion_type
 
-                    # Keep track of the best result across all stages
+                    # Keep track of the best result across all stages, with the offsets of the pointing its
+                    #   parameters are about
                     best_res = None
+                    best_pointing = None
                     best_cost = float('inf')
 
                     # RANSAC outlier detection: radial3-odd -> radial5-odd -> radial7-odd with warm start
@@ -2013,12 +2017,8 @@ class Platepar(object):
                     else:
                         self.setDistortionType("radial3-odd", reset_params=False)
 
-                    p0_current = [
-                        self.RA_d / 360.0,
-                        self.dec_d / 90,
-                        self.pos_angle_ref / 360.0,
-                        self.F_scale,
-                    ] + self.x_poly_fwd.tolist()
+                    # The parameters at the start of the stage, with the pointing of the platepar
+                    p0_current = pointing_start + [self.F_scale] + self.x_poly_fwd.tolist()
 
                     # Weighted outlier scoring: later iterations count more (fit is more refined)
                     # Outliers get +weight, inliers get -weight (redemption)
@@ -2045,11 +2045,7 @@ class Platepar(object):
                         if iteration == switch_iter_r5:
                             # Save current best params from radial3-odd
                             if best_res is not None:
-                                ra_ref, dec_ref, pos_angle_ref, F_scale = best_res.x[:4]
-                                self.RA_d, self.dec_d, pos_angle_offset = \
-                                    normalizeRaDec(360*ra_ref, 90*dec_ref, refraction=self.refraction)
-                                self.pos_angle_ref = (360*pos_angle_ref + pos_angle_offset)%360
-                                self.F_scale = f_scale_fixed if fixed_scale else abs(F_scale)
+                                _setPointingAndScale(self, best_res.x, best_pointing)
                                 # Update x_poly_fwd with best radial3-odd coefficients
                                 self.x_poly_fwd = np.array(best_res.x[4:])
                                 self.x_poly_rev = self.x_poly_fwd.copy()
@@ -2063,12 +2059,7 @@ class Platepar(object):
                             self.y_poly_fwd = radial5_y
                             self.y_poly_rev = radial5_y.copy()
 
-                            p0_current = [
-                                self.RA_d / 360.0,
-                                self.dec_d / 90,
-                                self.pos_angle_ref / 360.0,
-                                self.F_scale,
-                            ] + self.x_poly_fwd.tolist()
+                            p0_current = pointing_start + [self.F_scale] + self.x_poly_fwd.tolist()
                             best_res = None  # Reset best result for new distortion type
                             best_cost = float('inf')
                             print("      --- Switching to radial5-odd (warm start with coefficient conversion) ---")
@@ -2077,11 +2068,7 @@ class Platepar(object):
                         elif iteration == switch_iter_r7:
                             # Save current best params from radial5-odd
                             if best_res is not None:
-                                ra_ref, dec_ref, pos_angle_ref, F_scale = best_res.x[:4]
-                                self.RA_d, self.dec_d, pos_angle_offset = \
-                                    normalizeRaDec(360*ra_ref, 90*dec_ref, refraction=self.refraction)
-                                self.pos_angle_ref = (360*pos_angle_ref + pos_angle_offset)%360
-                                self.F_scale = f_scale_fixed if fixed_scale else abs(F_scale)
+                                _setPointingAndScale(self, best_res.x, best_pointing)
                                 # Update x_poly_fwd with best radial5-odd coefficients
                                 self.x_poly_fwd = np.array(best_res.x[4:])
                                 self.x_poly_rev = self.x_poly_fwd.copy()
@@ -2095,12 +2082,7 @@ class Platepar(object):
                             self.y_poly_fwd = radial7_y
                             self.y_poly_rev = radial7_y.copy()
 
-                            p0_current = [
-                                self.RA_d / 360.0,
-                                self.dec_d / 90,
-                                self.pos_angle_ref / 360.0,
-                                self.F_scale,
-                            ] + self.x_poly_fwd.tolist()
+                            p0_current = pointing_start + [self.F_scale] + self.x_poly_fwd.tolist()
                             best_res = None  # Reset best result for new distortion type
                             best_cost = float('inf')
                             print("      --- Switching to radial7-odd (warm start with coefficient conversion) ---")
@@ -2155,16 +2137,17 @@ class Platepar(object):
 
                         img_stars_subset = img_stars[subset_indices]
 
-                        start_params = best_res.x if best_res is not None else p0_current
-                        if len(start_params) != len(p0_current):
-                            start_params = p0_current
+                        # Start from the best fit of the stage so far, or from the start of the stage. The fit is
+                        #   centred on its starting pointing: the pointing parameters are offsets about it
+                        pp_filter = copy.deepcopy(self)
+                        start_params = p0_current
+                        if (best_res is not None) and (len(best_res.x) == len(p0_current)):
+                            _setPointingAndScale(pp_filter, best_res.x, best_pointing)
+                            start_params = pointing_start + list(best_res.x[3:])
+                        pointing = PointingOffsets(pp_filter)
 
                         # Pre-filter catalog to FOV using current pointing (from start_params)
                         # This avoids re-filtering inside every optimizer function evaluation
-                        pp_filter = copy.deepcopy(self)
-                        pp_filter.RA_d, pp_filter.dec_d, pos_angle_offset = normalizeRaDec(
-                            360*start_params[0], 90*start_params[1], refraction=self.refraction)
-                        pp_filter.pos_angle_ref = (360*start_params[2] + pos_angle_offset)%360
                         pp_filter.F_scale = f_scale_fixed if fixed_scale else abs(start_params[3])
                         ra_cat_all, dec_cat_all, _ = catalog_stars.T
                         cat_x, cat_y = RMS.Astrometry.ApplyAstrometry.raDecToXYPP(
@@ -2195,10 +2178,19 @@ class Platepar(object):
                         # ops/eval, identical nearest-neighbour result).
                         ra_cat_fov, dec_cat_fov, _ = catalog_stars_fov.T
                         cat_tree = cKDTree(_raDecToUnitVectors(ra_cat_fov, dec_cat_fov))
+
+                        # The first simplex moves the pointing by 1% of the image diagonal in each offset (about
+                        #   15 px on a 720p image), as the fit starts from a plate solution or a fitted platepar,
+                        #   and the nearest catalog stars of a wider simplex are other stars. The scale and the
+                        #   distortion take Nelder-Mead's default steps (5% of the value, 0.00025 for a zero)
+                        ransac_steps = [0.01]*3 + [0.05*value if value != 0 else 0.00025
+                                                   for value in start_params[3:]]
+                        ransac_simplex = np.vstack([start_params,
+                                                    np.array(start_params) + np.diag(ransac_steps)])
                         res = scipy.optimize.minimize(
                             cost_func, start_params,
-                            args=(self, jd, catalog_stars_fov, img_stars_subset, cat_tree),
-                            method='Nelder-Mead', options=ransac_opts,
+                            args=(self, jd, catalog_stars_fov, img_stars_subset, pointing, cat_tree),
+                            method='Nelder-Mead', options=dict(ransac_opts, initial_simplex=ransac_simplex),
                         )
 
                         # Debug: show optimizer exit reason
@@ -2208,11 +2200,7 @@ class Platepar(object):
 
                         # Score on ALL stars
                         pp_temp = copy.deepcopy(self)
-                        ra_ref, dec_ref, pos_angle_ref, F_scale = res.x[:4]
-                        pp_temp.RA_d, pp_temp.dec_d, pos_angle_offset = \
-                            normalizeRaDec(360*ra_ref, 90*dec_ref, refraction=self.refraction)
-                        pp_temp.pos_angle_ref = (360*pos_angle_ref + pos_angle_offset)%360
-                        pp_temp.F_scale = f_scale_fixed if fixed_scale else abs(F_scale)
+                        _setPointingAndScale(pp_temp, res.x, pointing)
                         pp_temp.x_poly_fwd = np.array(res.x[4:])
 
                         img_x, img_y, _ = img_stars.T
@@ -2267,6 +2255,7 @@ class Platepar(object):
                         if rmsd_arcmin < best_cost:
                             best_cost = rmsd_arcmin
                             best_res = res
+                            best_pointing = pointing
 
                         if iteration < switch_iter_r5:
                             dist_label = "radial3-odd"
@@ -2275,22 +2264,16 @@ class Platepar(object):
                         else:
                             dist_label = "radial7-odd"
                         # Debug: show RA/Dec at each iteration
-                        iter_ra, iter_dec, iter_pos_angle_offset = \
-                            normalizeRaDec(360*res.x[0], 90*res.x[1], refraction=self.refraction)
                         print("      Iter {}: {} (w={}) fit on {}, {} outliers, RMSD={:.2f}', RA={:.2f} Dec={:.2f}".format(
                             iteration + 1, dist_label, weight, len(subset_indices),
-                            np.sum(iteration_outliers), rmsd_arcmin, iter_ra, iter_dec))
+                            np.sum(iteration_outliers), rmsd_arcmin, pp_temp.RA_d, pp_temp.dec_d))
 
                         # Call iteration callback for visual debugging if provided
                         if iteration_callback is not None:
-                            # Create a platepar copy with current iteration's parameters
-                            # Decode it as the NN cost function does, with the position angle turned when the
-                            #   pointing was reflected across a pole
+                            # Create a platepar copy with current iteration's parameters, decoded as the NN cost
+                            #   function does
                             pp_iter = copy.deepcopy(self)
-                            pp_iter.RA_d = iter_ra
-                            pp_iter.dec_d = iter_dec
-                            pp_iter.pos_angle_ref = (360*res.x[2] + iter_pos_angle_offset)%360
-                            pp_iter.F_scale = f_scale_fixed if fixed_scale else abs(res.x[3])
+                            _setPointingAndScale(pp_iter, res.x, pointing)
                             if len(res.x) > 4:
                                 pp_iter.x_poly_fwd = np.array(res.x[4:])
                                 pp_iter.x_poly_rev = np.array(res.x[4:])
@@ -2344,11 +2327,7 @@ class Platepar(object):
                         return None
 
                     # Apply best RANSAC params to platepar
-                    ra_ref, dec_ref, pos_angle_ref, F_scale = best_res.x[:4]
-                    self.RA_d, self.dec_d, pos_angle_offset = \
-                        normalizeRaDec(360*ra_ref, 90*dec_ref, refraction=self.refraction)
-                    self.pos_angle_ref = (360*pos_angle_ref + pos_angle_offset)%360
-                    self.F_scale = f_scale_fixed if fixed_scale else abs(F_scale)
+                    _setPointingAndScale(self, best_res.x, best_pointing)
                     self.x_poly_fwd = np.array(best_res.x[4:])  # Ensure numpy array
                     self.x_poly_rev = np.array(self.x_poly_fwd)  # Sync reverse with forward!
                     self.updateRefAltAz()
@@ -2434,31 +2413,30 @@ class Platepar(object):
                         # Prototype: Levenberg-Marquardt least-squares on the vector residual.
                         # Converges in far fewer evals than Nelder-Mead and lands on the same
                         # (or lower-residual) least-squares minimum.
+                        # The pointing is fitted as offsets about the pointing of the platepar, which every
+                        #   iteration starts from
+                        pointing = PointingOffsets(self)
                         res = _lstsqFit(
                             _calcSkyResidualsAstroAndDistortionRadialVect,
                             p0,
-                            (self, jd, catalog_stars, img_stars),
+                            (self, jd, catalog_stars, img_stars, pointing),
                         )
                         fwd_status = "converged" if res.success else "stopped"
 
-                        # Update fitted astrometric parameters (Unnormalize the pointing parameters)
-                        ra_ref, dec_ref, pos_angle_ref, F_scale = res.x[:4]
-                        self.RA_d, self.dec_d, pos_angle_offset = \
-                            normalizeRaDec(360*ra_ref, 90*dec_ref, refraction=self.refraction)
-                        self.pos_angle_ref = (360*pos_angle_ref + pos_angle_offset)%360
+                        # Update fitted astrometric parameters
                         # Hold the scale when fixed_scale is set. The patched residual makes the fit
                         # objective independent of the F_scale parameter, so LM leaves res.x[3] at its
                         # seed; read the held value explicitly rather than relying on that.
-                        self.F_scale = f_scale_fixed if fixed_scale else abs(F_scale)
+                        _setPointingAndScale(self, res.x, pointing)
 
                         self.updateRefAltAz()
 
                         # Extract distortion parameters
                         self.x_poly_fwd = np.array(res.x[4:])
 
-                        # Update p0 for next iteration with current fitted values
-                        p0 = [self.RA_d / 360.0, self.dec_d / 90.0, self.pos_angle_ref / 360.0,
-                              abs(self.F_scale)]
+                        # Update p0 for next iteration with current fitted values (no offset from the fitted
+                        #   pointing)
+                        p0 = pointing_start + [abs(self.F_scale)]
                         p0 += self.x_poly_fwd.tolist()
 
                         ### REVERSE MAPPING FIT ###
@@ -2510,20 +2488,18 @@ class Platepar(object):
 
                         return res
 
-                    p_final = [self.RA_d/360.0, self.dec_d/90.0, self.pos_angle_ref/360.0,
-                               abs(self.F_scale)] + ([] if exact_reverse else self.x_poly_rev.tolist())
+                    pointing = PointingOffsets(self)
+                    p_final = pointing_start + [abs(self.F_scale)] \
+                        + ([] if exact_reverse else self.x_poly_rev.tolist())
                     res_final = _lstsqFit(
                         _calcImageResidualsAstroVect if exact_reverse
                             else _calcImageResidualsAstroAndDistortionRadialVect,
                         p_final,
-                        (self, jd, catalog_stars, img_stars),
+                        (self, jd, catalog_stars, img_stars, pointing),
                     )
                     xf = np.concatenate([res_final.x, rev_fixed]) if exact_reverse else res_final.x
-                    self.RA_d, self.dec_d, pos_angle_offset = \
-                        normalizeRaDec(360*xf[0], 90*xf[1], refraction=self.refraction)
-                    self.pos_angle_ref = (360*xf[2] + pos_angle_offset)%360
                     # Hold the scale when fixed_scale is set (see fwd-rev loop note above).
-                    self.F_scale = f_scale_fixed if fixed_scale else abs(xf[3])
+                    _setPointingAndScale(self, xf, pointing)
                     self.x_poly_rev = np.array(xf[4:])
                     self.updateRefAltAz()
 
