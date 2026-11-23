@@ -919,6 +919,7 @@ def recalibratePlateparsForFF(
         star_dict_ff = {jd: calstars[ff_name]}
 
         result = None
+        tried_after_nn = None
 
         # Skip recalibration if less than a minimum number of stars were detected
         if (len(calstars[ff_name]) >= config.ff_min_stars) and (
@@ -953,6 +954,7 @@ def recalibratePlateparsForFF(
                     config, test_platepar, jd, star_dict_ff, catalog_stars, lim_mag=lim_mag,
                     ignore_distance_threshold=True
                 )
+                tried_after_nn = test_platepar.jsonStr()
 
                 # If the NN alignment failed, align the previous platepar using the smallest radius that
                 # matched and force save the the platepar
@@ -985,8 +987,13 @@ def recalibratePlateparsForFF(
                 working_platepar = result
 
 
-            # If the working platepar keeps failing, try using the original platepar before any NN alignment
-            if result is None:
+            # If the working platepar keeps failing, try using the original platepar before any NN alignment. The
+            #   recalibration gives the same result for the same platepar, so it is not run again if the original
+            #   platepar is the one just tried after the NN alignment (as on a night when no FF is recalibrated)
+            if (result is None) and (tried_after_nn is not None) and (orig_platepar.jsonStr() == tried_after_nn):
+                log.info('Recalibration failed, the original platepar was the one just tried')
+
+            elif result is None:
                 log.info('Recalibration failed, trying to use the original platepar...')
                 result, _ = recalibrateFF(
                     config,

@@ -359,3 +359,67 @@ def test_nn_fit_of_the_offsets_needs_a_better_pointing(monkeypatch):
     assert not (accepted or success)
     assert not fit_success
     assert test_CheckFit.pointing(fitted) == test_CheckFit.pointing(start)
+
+
+### Retries of the recalibration of an FF ###
+
+def _recordRecalibrations(monkeypatch, aligned_differs):
+    """ Make every recalibration of an FF fail and record the platepars they start from; the NN alignment returns
+        the platepar it is given, or a moved copy if asked.
+
+    Return:
+        [list] The JSON of the starting platepars, in the order of the recalibrations.
+    """
+
+    starts = []
+
+    def _recalibrate(config, platepar, *args, **kwargs):
+        """ A failed recalibration, recorded. """
+
+        starts.append(platepar.jsonStr())
+        return None, None
+
+    def _align(config, platepar, *args, **kwargs):
+        """ The NN alignment, which fails (or moves the platepar if asked). """
+
+        if aligned_differs:
+            platepar = copy.deepcopy(platepar)
+            platepar.RA_d += 0.1
+        return platepar, None
+
+    monkeypatch.setattr(ApplyRecalibrate, 'recalibrateFF', _recalibrate)
+    monkeypatch.setattr(ApplyRecalibrate, 'alignPlatepar', _align)
+
+    return starts
+
+
+def test_failed_recalibration_is_not_repeated_from_the_same_platepar(monkeypatch):
+
+    # On an FF which no recalibration matches, the retry from the original platepar is the recalibration just run
+    #   after the failed NN alignment (same platepar, same arguments), so it is not run again; the result is the same
+    pp = makePlatepar()
+    _, rows = makeImage(pp)
+    ff_name = 'FF_XX0001_20251214_014211_000_0000000.fits'
+    starts = _recordRecalibrations(monkeypatch, aligned_differs=False)
+
+    platepars = ApplyRecalibrate.recalibratePlateparsForFF(pp, [ff_name], {ff_name: rows}, np.zeros((10, 3)),
+                                                          makeConfig())
+
+    assert len(starts) == 2
+    assert starts[0] == starts[1] == pp.jsonStr()
+    assert not platepars[ff_name].auto_recalibrated
+
+
+def test_failed_recalibration_is_retried_from_another_platepar(monkeypatch):
+
+    # If the NN alignment moved the platepar, the retry from the original platepar is run as before
+    pp = makePlatepar()
+    _, rows = makeImage(pp)
+    ff_name = 'FF_XX0001_20251214_014211_000_0000000.fits'
+    starts = _recordRecalibrations(monkeypatch, aligned_differs=True)
+
+    ApplyRecalibrate.recalibratePlateparsForFF(pp, [ff_name], {ff_name: rows}, np.zeros((10, 3)), makeConfig())
+
+    assert len(starts) == 3
+    assert starts[0] == starts[2] == pp.jsonStr()
+    assert starts[1] != pp.jsonStr()
