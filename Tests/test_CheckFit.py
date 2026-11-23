@@ -219,10 +219,9 @@ def test_failed_check_hands_over_the_starting_platepar(monkeypatch):
 
     result, fit_status = CheckFit.autoCheckFit(config, pp_start, calstars_data)
 
-    # The check failed, and both the NN alignment (of the check and of its safety net, the check with the search
-    #   of RA, Dec and rotation) and the caller got the starting pointing
+    # The check failed, and both the NN alignment and the caller got the starting pointing
     assert not fit_status
-    assert aligned == [params_start, params_start]
+    assert aligned == [params_start]
     assert pointing(result) == params_start
     assert result.aberration
 

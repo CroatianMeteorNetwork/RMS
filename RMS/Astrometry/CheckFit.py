@@ -123,8 +123,9 @@ class SearchOffsets(object):
 
 class SearchRaDec(object):
     """ The parameters of the search of the pointing and the scale of earlier versions, kept as a safety net: the
-        right ascension, declination, position angle and scale as they are, from a simplex of 5% of each value (at
-        least 0.5 deg on the sky), with the tolerance dist_check_threshold converted to degrees for all of them.
+        right ascension, declination, position angle and scale, from a simplex of 5% of each value (at least 0.5 deg
+        on the sky), with the tolerance dist_check_threshold converted to degrees for all of them. A declination
+        stepped past a pole is reflected back onto the sphere (Platepar.normalizeRaDec).
     """
 
     def __init__(self, config, platepar):
@@ -159,7 +160,12 @@ class SearchRaDec(object):
             None
         """
 
-        platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref, platepar.F_scale = params
+        # The declination is stepped freely, so a pointing past a pole is reflected back onto the sphere and the
+        #   position angle turned with it (a pointing on the sphere is kept as it is, bit for bit)
+        platepar.RA_d, platepar.dec_d, pos_angle_offset = Platepar.normalizeRaDec(params[0], params[1],
+                                                                                  refraction=platepar.refraction)
+        platepar.pos_angle_ref = (params[2] + pos_angle_offset)%360
+        platepar.F_scale = params[3]
 
 
 # A fit of the search may change the scale by at most this fraction; a larger change is no camera of the platepar
@@ -592,10 +598,10 @@ def starListToDict(config, calstars_data, max_ffs=None):
 def autoCheckFit(config, platepar, calstars_data, _nn_refinement=False):
     """ Attempts to refine the astrometry fit with the given stars and and initial astrometry parameters.
 
-    The pointing and the scale are searched as offsets (SearchOffsets), from the coarse alignment of the stars if
-    the initial platepar does not match them, and polished by least squares on the matched stars. If the check
-    fails, it is run again with the search of earlier versions (SearchRaDec) from the initial platepar, as a safety
-    net, and its result is used.
+    The pointing and the scale are first searched as earlier versions did (SearchRaDec), so a check which succeeded
+    before gives the same platepar at the same cost. If the check fails, it is run again from the initial platepar
+    with the search of the offsets of the pointing (SearchOffsets), from the coarse alignment of the stars if the
+    platepar does not match them and polished by least squares on the matched stars, and its result is used.
 
     Arguments:
         config: [Config structure]
@@ -615,19 +621,28 @@ def autoCheckFit(config, platepar, calstars_data, _nn_refinement=False):
             fit_status: [bool] True if fit was successful, False if not.
     """
 
-    # The check with the offsets, which changes the given platepar, and the random draws of the images it uses
+    # The check with the search of earlier versions first, which changes the given platepar, so a check which
+    #   succeeded before gives the same platepar at the same cost; the random draws of the images it uses are kept
+    #   for the check with the offsets
     platepar_start = copy.deepcopy(platepar)
     random_state = random.getstate()
-    platepar, fit_status = _autoCheckFit(config, platepar, calstars_data, _nn_refinement, SearchOffsets)
+    platepar, fit_status = _autoCheckFit(config, platepar, calstars_data, _nn_refinement, SearchRaDec)
     if fit_status:
         return platepar, fit_status
 
-    # The check of earlier versions on the same images
+    # If it fails, the check with the offsets of the pointing on the same images, from the initial platepar
     log.info('')
-    log.info('The check with the offsets of the pointing failed, running the search of RA, Dec and rotation...')
+    log.info('The check with the search of RA, Dec and rotation failed, running the search of the offsets of the '
+             'pointing...')
     random.setstate(random_state)
+    platepar_offsets, fit_status_offsets = _autoCheckFit(config, platepar_start, calstars_data, _nn_refinement,
+                                                         SearchOffsets)
 
-    return _autoCheckFit(config, platepar_start, calstars_data, _nn_refinement, SearchRaDec)
+    # The failed check of earlier versions is handed over if the check with the offsets did not run
+    if platepar_offsets is None:
+        return platepar, fit_status
+
+    return platepar_offsets, fit_status_offsets
 
 
 def _autoCheckFit(config, platepar, calstars_data, _nn_refinement, search_class):
@@ -641,7 +656,8 @@ def _autoCheckFit(config, platepar, calstars_data, _nn_refinement, search_class)
         search_class: [class] SearchOffsets or SearchRaDec.
 
     Return:
-        (platepar, fit_status): See autoCheckFit.
+        (platepar, fit_status): See autoCheckFit; (None, False) if the check with the offsets is not run (no better
+            pointing from the coarse alignment).
     """
 
 
@@ -809,6 +825,13 @@ def _autoCheckFit(config, platepar, calstars_data, _nn_refinement, search_class)
             platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref = aligned.RA_d, aligned.dec_d, \
                 aligned.pos_angle_ref
 
+    # The check with the offsets runs after the check of earlier versions failed from the same platepar, so without
+    #   the quick fit and without a better pointing from the coarse alignment it is not run (on a night far off it
+    #   doubled the time of the check, which then fails as well)
+    if (radius_list[0] != 1.5) and (search_class is SearchOffsets) and (not coarse_aligned) and (not _nn_refinement):
+        log.info("No coarse alignment of the pointing on the stars, the check with the offsets is not run")
+        return None, False
+
     # The scale the fits start from, which they may change by at most SEARCH_MAX_SCALE_CHANGE
     scale_start = abs(platepar.F_scale)
 
@@ -826,7 +849,7 @@ def _autoCheckFit(config, platepar, calstars_data, _nn_refinement, search_class)
         n_check, _, _, _ = matchStarsResiduals(config, platepar, catalog_stars, star_dict, min_radius,
                                                ret_nmatch=True)
         refined, _ = refinePointingLSQ(config, platepar, None, star_dict, catalog_stars, min_radius, min_radius,
-                                       n_check)
+                                       n_check, polish=True)
         if (refined is not None) and checkFitGoodness(config, refined, catalog_stars, star_dict, min_radius):
             refined.recordFit(pointing=True, fit_by='autoCheckFit')
             return refined

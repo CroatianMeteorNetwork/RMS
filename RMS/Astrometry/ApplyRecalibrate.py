@@ -192,7 +192,7 @@ def coverageMatchFraction(n_matched, n_detected, catalog_stars, jd, platepar, n_
 
 
 def refinePointingLSQ(config, platepar, jd, star_dict_ff, catalog_stars, fit_radius, check_radius, n_check,
-                      lim_mag=None):
+                      lim_mag=None, polish=False):
     """ Refine the pointing (reference RA, Dec, position angle and scale) of a recalibrated platepar by least
         squares on the matched stars.
 
@@ -219,6 +219,8 @@ def refinePointingLSQ(config, platepar, jd, star_dict_ff, catalog_stars, fit_rad
 
     Keyword arguments:
         lim_mag: [float] Override the limiting magnitude from config. None by default.
+        polish: [bool] Fit the first round on the stars within LSQ_REFINE_WIDE_FACTOR times the fit radius, as the
+            searches of the offsets of the pointing do. False by default, which refines as earlier versions did.
 
     Return:
         (platepar, matched_stars): [tuple] The refined platepar and its matched stars within check_radius, or
@@ -289,12 +291,13 @@ def refinePointingLSQ(config, platepar, jd, star_dict_ff, catalog_stars, fit_rad
     #   pulling much), so that the rounds within the fit radius start near the optimum whichever pointing within
     #   the radius the search stopped at
     img_stars, cat_stars, pair_jds = img_start, cat_start, jd_start
-    n_wide, _, _, matched_wide = CheckFit.matchStarsResiduals(config, platepar, catalog_stars, star_dict_ff,
-                                                              LSQ_REFINE_WIDE_FACTOR*fit_radius, ret_nmatch=True,
-                                                              lim_mag=lim_mag)
-    pairs_wide = _matchedPairs(matched_wide)
-    if (pairs_wide is not None) and (n_wide >= n_start):
-        img_stars, cat_stars, pair_jds = pairs_wide
+    if polish:
+        n_wide, _, _, matched_wide = CheckFit.matchStarsResiduals(config, platepar, catalog_stars, star_dict_ff,
+                                                                  LSQ_REFINE_WIDE_FACTOR*fit_radius,
+                                                                  ret_nmatch=True, lim_mag=lim_mag)
+        pairs_wide = _matchedPairs(matched_wide)
+        if (pairs_wide is not None) and (n_wide >= n_start):
+            img_stars, cat_stars, pair_jds = pairs_wide
     for _ in range(LSQ_REFINE_MAX_ROUNDS):
 
         # The pointing and the scale are fitted as offsets (px) from those at the start of the round (see
@@ -409,9 +412,10 @@ def recalibrateFF(
             config.recalibration_min_match_fraction. Set to 0 to disable the coverage gate (e.g. for
             interactive use).
 
-    The pointing and the scale are searched as offsets (CheckFit.SearchOffsets), from the coarse alignment of the
-    stars if the platepar does not match them. If that recalibration fails, it is run again with the search of
-    earlier versions (CheckFit.SearchRaDec), as a safety net, and its result is used.
+    The pointing and the scale are first searched as earlier versions did (CheckFit.SearchRaDec), so a
+    recalibration which succeeded before gives the same platepar at the same cost. If it fails, the recalibration
+    is run again with the search of the offsets of the pointing (CheckFit.SearchOffsets), from the coarse alignment
+    of the stars, which reaches pointings further off and near the poles, and its result is used.
 
     Return:
         result: [?] A Platepar instance if refinement is successful, None if it failed.
@@ -423,12 +427,14 @@ def recalibrateFF(
                   ignore_distance_threshold=ignore_distance_threshold, ignore_max_stars=ignore_max_stars,
                   min_match_fraction=min_match_fraction)
 
-    # The search of the offsets, and if it fails the search of earlier versions
-    result, min_match_radius = _recalibrateSearch(*args, search_class=CheckFit.SearchOffsets, **kwargs)
+    # The search of earlier versions first, so a recalibration which succeeded before is the same, and only if it
+    #   fails the search of the offsets, from the coarse alignment of the stars, which reaches pointings further
+    #   off and near the poles
+    result, min_match_radius = _recalibrateSearch(*args, search_class=CheckFit.SearchRaDec, **kwargs)
     if result is None:
-        log.info('Recalibration with the offsets of the pointing failed, running the search of RA, Dec and '
-                 'rotation...')
-        result, min_match_radius = _recalibrateSearch(*args, search_class=CheckFit.SearchRaDec, **kwargs)
+        log.info('Recalibration with the search of RA, Dec and rotation failed, running the search of the offsets '
+                 'of the pointing...')
+        result, min_match_radius = _recalibrateSearch(*args, search_class=CheckFit.SearchOffsets, **kwargs)
 
     return result, min_match_radius
 
@@ -711,9 +717,12 @@ def _recalibrateSearch(
     if config.recalibration_lsq_refine and (matched_stars_good is not None) and (max_match_radius is None) \
             and (not force_platepar_save):
 
-        refined, matched_refined = refinePointingLSQ(config, working_platepar, jd, star_dict_ff, catalog_stars,
-                                                     scaling_factor*min_radius, min_match_radius,
-                                                     len(matched_stars_good[jd][0]), lim_mag=lim_mag)
+        refine_args = (config, working_platepar, jd, star_dict_ff, catalog_stars, scaling_factor*min_radius,
+                       min_match_radius, len(matched_stars_good[jd][0]))
+        if search_class is CheckFit.SearchOffsets:
+            refined, matched_refined = refinePointingLSQ(*refine_args, lim_mag=lim_mag, polish=True)
+        else:
+            refined, matched_refined = refinePointingLSQ(*refine_args, lim_mag=lim_mag)
 
         # The least squares fit can lower the distances while raising their median, which the goodness check below
         #   uses, so the refined pointing is used only if it is good enough on its own. Otherwise the result of the

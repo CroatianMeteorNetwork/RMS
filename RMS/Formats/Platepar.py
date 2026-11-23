@@ -609,6 +609,11 @@ def offsetsJacobian(residuals, step=OFFSET_JACOBIAN_STEP_PX):
     return _jacobian
 
 
+# The NN fit of the offsets of the pointing (Platepar.fitPointingNN) is used only if its inliers (the image stars
+#   within 5 px of a catalog star) are at most this RMS distance (px) from their catalog stars after its polish
+NN_OFFSETS_MAX_RMSD_PX = 1.0
+
+
 # A RANSAC fit (Platepar.fitAstrometry with use_nn_cost) is clearly good if at least this share of the image stars
 #   ended in its matched pairs, and the final fit on the pairs left an RMS distance of at most RANSAC_GOOD_RMS_PX
 RANSAC_GOOD_FRACTION = 0.6
@@ -1301,10 +1306,11 @@ class Platepar(object):
         catalog stars onto the image and computing pixel distances. This is more robust
         than working in sky coordinates because it correctly handles distortion and timing.
 
-        The pointing is first brought onto the stars by the coarse alignment (CoarseAlignment), if more stars
-        agree with its result than with the given pointing, and then fitted as offsets of the pointing (see
-        PointingOffsets). If that fit is not accepted, the fit of RA, Dec and position angle of earlier versions is
-        run from the given pointing, as a safety net, and its result is used.
+        The fit of RA, Dec and position angle of earlier versions runs first, so a fit which succeeded before gives
+        the same pointing. If it does not succeed and the coarse alignment (CoarseAlignment) finds a pointing with
+        clearly more stars on their catalog stars, the pointing is fitted from it as offsets (see PointingOffsets)
+        and polished on the inliers, and that fit is used if its inliers are within NN_OFFSETS_MAX_RMSD_PX of their
+        catalog stars.
 
         Arguments:
             jd: [float] Julian date of the image.
@@ -1317,10 +1323,15 @@ class Platepar(object):
 
         """
 
-        # The fit of the offsets of the pointing, and if it is not accepted, the fit of RA, Dec and position angle
-        result = self._fitPointingNNOnce(jd, img_stars, catalog_stars, fixed_scale, legacy=False)
+        # The fit of RA, Dec and position angle of earlier versions first, so a fit which succeeded before gives the
+        #   same pointing. If it does not succeed, the fit of the offsets of the pointing, whose result is used only
+        #   if it is clearly good: enough inliers, and after its polish on them, a small RMS distance (a pointing
+        #   which only puts the stars near other catalog stars leaves a few pixels)
+        result = self._fitPointingNNOnce(jd, img_stars, catalog_stars, fixed_scale, legacy=True)
         if not (result[0] and result[1]):
-            result = self._fitPointingNNOnce(jd, img_stars, catalog_stars, fixed_scale, legacy=True)
+            result_offsets = self._fitPointingNNOnce(jd, img_stars, catalog_stars, fixed_scale, legacy=False)
+            if result_offsets[0] and result_offsets[1] and (result_offsets[4] <= NN_OFFSETS_MAX_RMSD_PX):
+                result = result_offsets
         accepted, success, cost, inlier_fraction, inlier_rmsd, pp_fit = result
 
         if not accepted:
@@ -1355,7 +1366,8 @@ class Platepar(object):
 
         Keyword arguments:
             legacy: [bool] Fit RA, Dec and position angle from the given pointing, as earlier versions did, instead
-                of the offsets of the pointing from its coarse alignment. False by default.
+                of the offsets of the pointing from its coarse alignment (not run, and not accepted, if the
+                alignment finds no better pointing). False by default.
 
         Return:
             (accepted, success, cost, inlier_fraction, inlier_rmsd, platepar): [tuple] Whether enough stars have a
@@ -1392,13 +1404,17 @@ class Platepar(object):
         # Pre-extract detected star positions (constant across iterations)
         img_x, img_y, _ = img_stars.T
 
-        # Bring the pointing onto the stars first, if more of them agree with the coarse alignment than with it
+        # Bring the pointing onto the stars first, if more of them agree with the coarse alignment than with it.
+        #   The fit of the offsets runs after the fit of earlier versions failed from the same pointing, so without
+        #   a better pointing from the alignment it is not run (on real nights it then never found the stars, and
+        #   on a night far off it doubled the time of the NN alignment)
         if not legacy:
             from RMS.Astrometry.CoarseAlignment import alignIfBetter
             aligned = alignIfBetter(pp_work, jd, img_x, img_y, catalog_stars)
-            if aligned is not None:
-                pp_work.RA_d, pp_work.dec_d, pp_work.pos_angle_ref = aligned.RA_d, aligned.dec_d, \
-                    aligned.pos_angle_ref
+            if aligned is None:
+                return False, False, np.inf, 0.0, 0.0, pp_work
+            pp_work.RA_d, pp_work.dec_d, pp_work.pos_angle_ref = aligned.RA_d, aligned.dec_d, \
+                aligned.pos_angle_ref
 
         # The pointing is fitted as offsets (px) from the starting pointing at the time of the image, which
         #   move the field by the same amount in the same direction on the image wherever the camera points
@@ -1624,23 +1640,24 @@ class Platepar(object):
             fit_args = dict(first_platepar_fit=first_platepar_fit, fit_only_pointing=fit_only_pointing,
                 fixed_scale=fixed_scale, use_nn_cost=use_nn_cost, final_catalog_stars=final_catalog_stars,
                 iteration_callback=iteration_callback, fit_by=fit_by)
-            result = self._fitAstrometry(jd, img_stars, catalog_stars, **fit_args)
-
-            # Safety net of the RANSAC fit: if its result is not clearly good, the RANSAC fit of earlier versions
-            #   (RA, Dec and position angle from the given pointing) is run as well, from the platepar as it was
-            #   given, and the result with more matched pairs (and then the smaller residuals) is kept
+            # The RANSAC fit of earlier versions (RA, Dec and position angle from the given pointing) runs first,
+            #   so a fit which succeeded before gives the same plate. If its result is not clearly good, the RANSAC
+            #   fit of the offsets of the pointing (from the coarse alignment of the stars) runs as well, from the
+            #   platepar as it was given, and its result is kept if it has more matched pairs (or as many with
+            #   smaller residuals)
+            result = self._fitAstrometry(jd, img_stars, catalog_stars, legacy=use_nn_cost, **fit_args)
             if use_nn_cost and (not ransacResultGood(self, jd, img_stars, result)):
-                print("    RANSAC result not clearly good, running the RANSAC fit of RA, Dec and position angle")
-                result_new, state_new = result, copy.deepcopy(self.__dict__)
+                print("    RANSAC result not clearly good, running the RANSAC fit of the offsets of the pointing")
+                result_prev, state_fit = result, copy.deepcopy(self.__dict__)
                 self.__dict__.clear()
                 self.__dict__.update(copy.deepcopy(state_prev))
-                result = self._fitAstrometry(jd, img_stars, catalog_stars, legacy=True, **fit_args)
+                result = self._fitAstrometry(jd, img_stars, catalog_stars, **fit_args)
 
-                # The new result is kept unless the other one is better
-                if ransacQuality(self, jd, result) <= ransacQuality(state_new, jd, result_new):
-                    result = result_new
+                # The result of earlier versions is kept unless the other one is better
+                if ransacQuality(self, jd, result) <= ransacQuality(state_fit, jd, result_prev):
+                    result = result_prev
                     self.__dict__.clear()
-                    self.__dict__.update(state_new)
+                    self.__dict__.update(state_fit)
 
             completed = True
 
@@ -2706,10 +2723,11 @@ class Platepar(object):
                                        first_platepar_fit=False, use_nn_cost=False, fixed_scale=fixed_scale,
                                        fit_by=fit_by)
 
-                    # Complete the pairs: the stars which the fitted platepar puts near a catalog star (within 3
-                    #   times the RMS of the pairs, at least a pixel) but which the RANSAC left out are added, and
-                    #   the platepar is fitted again on them if that does not raise the RMS by more than 10%
-                    for _ in range(2):
+                    # Complete the pairs (the fit of the offsets): the stars which the fitted platepar puts near a
+                    #   catalog star (within 3 times the RMS of the pairs, at least a pixel) but which the RANSAC
+                    #   left out are added, and the platepar is fitted again on them if that does not raise the RMS
+                    #   by more than 10%
+                    for _ in range(0 if legacy else 2):
                         rms_pairs = -ransacQuality(self, jd, (img_stars_clean, matched_catalog))[1]
                         if not np.isfinite(rms_pairs):
                             break

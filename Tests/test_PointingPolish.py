@@ -5,10 +5,10 @@ The derivatives of the least squares fits step the offsets of the pointing (Plat
 fraction of a pixel (Platepar.offsetsJacobian). The fit of the pointing on star pairs (Platepar.fitPointing) is
 polished by least squares after SLSQP, the NN fit (Platepar.fitPointingNN) on its inliers and their nearest catalog
 stars, and the RANSAC fit (Platepar.fitAstrometry with use_nn_cost) gets the pairs it left out within 3 times their
-RMS distance (Platepar.nearestPairs). The least squares refinement of a recalibration
-(ApplyRecalibrate.refinePointingLSQ) starts from the stars within a wider radius, and also runs on the stars of
-several images, with which the calibration check (CheckFit.autoCheckFit) polishes its result, also a platepar which
-the coarse alignment brought onto the stars and which is good enough at once.
+RMS distance (Platepar.nearestPairs). The least squares refinement of a recalibration with the offsets
+(ApplyRecalibrate.refinePointingLSQ with polish) starts from the stars within a wider radius, and also runs on the
+stars of several images, with which the calibration check with the offsets (CheckFit.autoCheckFit) polishes its
+result, also a platepar which the coarse alignment brought onto the stars and which is good enough at once.
 """
 
 import copy
@@ -73,15 +73,17 @@ def test_pointing_fit_near_the_pole_reaches_the_least_squares_optimum():
 
 def test_nn_fit_is_polished_on_its_inliers():
 
-    # The NN fit of an image with 10 hot pixels from 5 px and 1 deg of roll off ends within the noise of the stars
-    #   from the true pointing (the NN cost alone is pulled by the hot pixels by a part of a pixel)
+    # The NN fit of the offsets of an image with 10 hot pixels from 5 px and 1 deg of roll off ends within the
+    #   noise of the stars from the true pointing (the NN cost alone is pulled by the hot pixels by a part of a
+    #   pixel)
     pp, img_x, img_y, catalog_stars = _scene(40.0, n_detected=60, n_hot=10)
     img_stars = np.column_stack([img_x, img_y, np.ones(len(img_x))])
 
-    fitted = _turned(pp, 5.0, 1.0)
-    success, _, inlier_fraction, inlier_rmsd = fitted.fitPointingNN(pp.JD, img_stars, catalog_stars)
+    start = _turned(pp, 5.0, 1.0)
+    accepted, success, _, inlier_fraction, inlier_rmsd, fitted = start._fitPointingNNOnce(pp.JD, img_stars,
+                                                                                         catalog_stars, True)
 
-    assert success
+    assert accepted and success
     assert inlier_fraction >= 60/70
     assert inlier_rmsd < 0.4
     assert displacement(pp, fitted, catalog_stars[:300]) < 0.15
@@ -145,22 +147,39 @@ def test_lsq_refinement_ends_on_the_same_pointing_from_starts_across_the_radius(
         n_check, _, _, _ = CheckFit.matchStarsResiduals(config, start, catalog_stars, star_dict, 0.5,
                                                         ret_nmatch=True)
         result, _ = ApplyRecalibrate.refinePointingLSQ(config, start, pp.JD, star_dict, catalog_stars, 0.5, 0.5,
-                                                       n_check)
+                                                       n_check, polish=True)
         assert result is not None
         refined.append(result)
 
     assert max(displacement(refined[0], result, catalog_stars) for result in refined[1:]) < 0.005
 
 
+def _failEarlierCheck(monkeypatch):
+    """ Make the check with the search of earlier versions fail, so the check of the offsets runs. """
+
+    check = CheckFit._autoCheckFit
+
+    def _check(config, platepar, calstars_data, _nn_refinement, search_class):
+        """ The check, failing at once with the search of earlier versions. """
+
+        if search_class is CheckFit.SearchRaDec:
+            return platepar, False
+
+        return check(config, platepar, calstars_data, _nn_refinement, search_class)
+
+    monkeypatch.setattr(CheckFit, '_autoCheckFit', _check)
+
+
 def test_check_polishes_a_coarsely_aligned_platepar(monkeypatch):
 
-    # A platepar 3 deg off and with the scale off by 0.05% (0.3 px in the corners), which the coarse alignment
-    #   brings within the tolerance of the check, is polished by least squares instead of being handed over with
-    #   the scale the alignment does not fit
+    # A platepar 3 deg off and with the scale off by 0.05% (0.3 px in the corners), which the coarse alignment of
+    #   the check with the offsets brings within the tolerance of the check, is polished by least squares instead
+    #   of being handed over with the scale the alignment does not fit
     pp = test_CheckFit.makePlatepar()
     config = test_CheckFit.makeConfig()
     catalog_stars, calstars_data = test_CheckFit.makeNight(pp, config)
     test_CheckFit.useCatalog(monkeypatch, catalog_stars)
+    _failEarlierCheck(monkeypatch)
 
     start = _turned(pp, 3.0*pp.F_scale, 2.0)
     start.F_scale *= 1.0005
@@ -172,14 +191,15 @@ def test_check_polishes_a_coarsely_aligned_platepar(monkeypatch):
 
 def test_check_is_polished(monkeypatch):
 
-    # The check of a platepar 2 px off ends within the noise of the stars from the true platepar (the search alone
-    #   ends within its tolerance, a third of dist_check_threshold)
+    # The check with the offsets of a platepar 1 deg off and rolled by 3 deg ends within the noise of the stars from
+    #   the true platepar (the search alone ends within its tolerance, a third of dist_check_threshold)
     pp = test_CheckFit.makePlatepar()
     config = test_CheckFit.makeConfig()
     catalog_stars, calstars_data = test_CheckFit.makeNight(pp, config)
     test_CheckFit.useCatalog(monkeypatch, catalog_stars)
+    _failEarlierCheck(monkeypatch)
 
-    result, fit_status = CheckFit.autoCheckFit(config, test_CheckFit.offsetPlatepar(pp), calstars_data)
+    result, fit_status = CheckFit.autoCheckFit(config, _turned(pp, 1.0*pp.F_scale, 3.0), calstars_data)
 
     assert fit_status
     assert displacement(pp, result, catalog_stars) < 0.01
