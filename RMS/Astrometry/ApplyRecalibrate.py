@@ -254,37 +254,33 @@ def refinePointingLSQ(config, platepar, jd, star_dict_ff, catalog_stars, fit_rad
 
 
     # The fitted parameters, on a copy of the platepar (the given one is kept if the refinement isn't used)
-    keys = ('RA_d', 'dec_d', 'pos_angle_ref', 'F_scale')
     refined = copy.deepcopy(platepar)
-
-    # The parameters are fitted in steps which move the stars by about one pixel (the rotation and the scale at
-    #   a quarter of the image diagonal), so the fit is equally well conditioned in all of them
-    r_typ = np.hypot(platepar.X_res, platepar.Y_res)/4.0
-    steps = np.array([1.0/(platepar.F_scale*max(np.cos(np.radians(platepar.dec_d)), 0.1)),
-                      1.0/platepar.F_scale, np.degrees(1.0/r_typ), platepar.F_scale/r_typ])
 
     # Fit the pointing on the matched pairs, match the stars again with it and repeat until it converges
     img_stars, cat_stars = img_start, cat_start
     for _ in range(LSQ_REFINE_MAX_ROUNDS):
 
-        # The pointing at the start of the round, and where it puts the stars
-        p0 = np.array([getattr(refined, k) for k in keys])
+        # The pointing and the scale are fitted as offsets (px) from those at the start of the round (see
+        #   Platepar.PointingOffsets), which move the stars by about one pixel each (the rotation and the scale
+        #   at a quarter of the image diagonal) wherever the camera points, so the fit is equally well
+        #   conditioned in all of them
+        pointing = Platepar.PointingOffsets(refined)
+
+        # Where the pointing at the start of the round puts the stars
         x_before, y_before = _positions(refined, cat_stars)
 
         def _residuals(q):
-            """ Distances of the image stars from their catalog stars (px) with the pointing p0 + q*steps. """
+            """ Distances of the image stars from their catalog stars (px) with the offsets q. """
 
-            for k, v in zip(keys, p0 + q*steps):
-                setattr(refined, k, v)
+            pointing.apply(refined, q)
             x_cat, y_cat = _positions(refined, cat_stars)
 
             return np.concatenate([img_stars[:, 1] - x_cat, img_stars[:, 0] - y_cat])
 
         # The fit has a robust loss, so a wrong pair pulls the pointing less than its share of the stars
-        fit = scipy.optimize.least_squares(_residuals, np.zeros(len(keys)), loss='soft_l1',
+        fit = scipy.optimize.least_squares(_residuals, np.zeros(4), loss='soft_l1',
                                            f_scale=f_scale, diff_step=1e-2)
-        for k, v in zip(keys, p0 + fit.x*steps):
-            setattr(refined, k, v)
+        pointing.apply(refined, fit.x)
 
         # Converged when the stars no longer move
         x_after, y_after = _positions(refined, cat_stars)
