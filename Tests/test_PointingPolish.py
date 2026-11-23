@@ -19,7 +19,7 @@ from RMS.Astrometry import ApplyRecalibrate, CheckFit
 from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
 from RMS.Formats import Platepar as PlateparModule
 from RMS.Formats.Platepar import PointingOffsets, nearestPairs, offsetsJacobian
-from Tests import test_CheckFit
+from Tests import test_CheckFit, test_RecalibrateLSQRefine
 from Tests.test_CoarseAlignment import _scene
 from Tests.test_RecalibrateLSQRefine import displacement, makeConfig, makeImage, makePlatepar
 
@@ -222,3 +222,26 @@ def test_lsq_refinement_on_several_images():
 
     assert refined is not None
     assert displacement(pp, refined, catalog_stars) < 0.01
+
+
+def test_stars_at_the_edge_of_the_fit_radius_may_be_lost_within_the_check_radius():
+
+    # A refinement which moves 3 of 100 stars matched within 0.5 px out of that radius (more than the allowed 2 %)
+    #   but keeps all stars within the check radius of 1.5 px is used with the polish of the searches of the
+    #   offsets, and not as earlier versions did
+    pp = makePlatepar()
+    config = makeConfig()
+    pp_start, catalog_stars, rows = test_RecalibrateLSQRefine.makeLostStarsImage(pp, 100, 3, seed=7)
+    star_dict = {pp.JD: rows}
+    n_check, _, _, _ = CheckFit.matchStarsResiduals(config, pp_start, catalog_stars, star_dict, 1.5,
+                                                    ret_nmatch=True)
+
+    refined = []
+    for polish in (True, False):
+        result, _ = ApplyRecalibrate.refinePointingLSQ(config, pp_start, pp.JD, star_dict, catalog_stars, 0.5,
+                                                       1.5, n_check, polish=polish)
+        refined.append(result)
+
+    assert refined[0] is not None
+    assert displacement(pp, refined[0], catalog_stars) < 0.03
+    assert refined[1] is None

@@ -219,7 +219,8 @@ def refinePointingLSQ(config, platepar, jd, star_dict_ff, catalog_stars, fit_rad
 
     Keyword arguments:
         lim_mag: [float] Override the limiting magnitude from config. None by default.
-        polish: [bool] Fit the first round on the stars within LSQ_REFINE_WIDE_FACTOR times the fit radius, as the
+        polish: [bool] Fit the first round on the stars within LSQ_REFINE_WIDE_FACTOR times the fit radius, and let
+            the stars at the edge of a fit radius smaller than the check radius come and go (see below), as the
             searches of the offsets of the pointing do. False by default, which refines as earlier versions did.
 
     Return:
@@ -354,7 +355,14 @@ def refinePointingLSQ(config, platepar, jd, star_dict_ff, catalog_stars, fit_rad
                                                                   check_radius, ret_nmatch=True, lim_mag=lim_mag)
     cost_start = _robustCost(platepar, img_start, cat_start, jd_start)
     cost_refined = _robustCost(refined, img_start, cat_start, jd_start)
-    if ((n_start - n_fit) > max_lost_fit) or ((n_check - n_refined) > max_lost_check) \
+
+    # With a fit radius smaller than the check radius (the recalibration fits within half a pixel), the stars at
+    #   the edge of the fit radius come and go with their noise wherever the search stopped: losing more of them
+    #   is no sign of a wrong fit if the refined pointing keeps every star within the check radius
+    lost_fit_ok = ((n_start - n_fit) <= max_lost_fit) \
+        or (polish and (check_radius > fit_radius) and (n_refined >= n_check))
+
+    if (not lost_fit_ok) or ((n_check - n_refined) > max_lost_check) \
             or (_matchedPairs(matched_check) is None) or (cost_refined > cost_start):
 
         log.info('Least squares refinement of the pointing not used: stars within {:.2f} px {:d} (before {:d}), '
