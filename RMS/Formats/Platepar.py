@@ -1410,7 +1410,7 @@ class Platepar(object):
         #   on a night far off it doubled the time of the NN alignment)
         if not legacy:
             from RMS.Astrometry.CoarseAlignment import alignIfBetter
-            aligned = alignIfBetter(pp_work, jd, img_x, img_y, catalog_stars)
+            aligned = alignIfBetter(pp_work, jd, img_x, img_y, catalog_stars, img_intensity=img_stars[:, 2])
             if aligned is None:
                 return False, False, np.inf, 0.0, 0.0, pp_work
             pp_work.RA_d, pp_work.dec_d, pp_work.pos_angle_ref = aligned.RA_d, aligned.dec_d, \
@@ -2330,7 +2330,8 @@ class Platepar(object):
                     #   with it
                     if not legacy:
                         from RMS.Astrometry.CoarseAlignment import alignIfBetter
-                        aligned = alignIfBetter(self, jd, img_x_all, img_y_all, catalog_stars)
+                        aligned = alignIfBetter(self, jd, img_x_all, img_y_all, catalog_stars,
+                                                img_intensity=img_stars[:, 2])
                         if aligned is not None:
                             print("    Coarse alignment: RA {:.3f} -> {:.3f}, Dec {:.3f} -> {:.3f}".format(
                                 self.RA_d, aligned.RA_d, self.dec_d, aligned.dec_d))

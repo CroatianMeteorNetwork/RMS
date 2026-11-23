@@ -204,7 +204,8 @@ def coarseAlignStars(config, platepar, catalog_stars, star_dict, lim_mag=None):
     catalog_stars = np.asarray(catalog_stars)
     catalog_stars = catalog_stars[catalog_stars[:, 2] <= lim_mag]
 
-    return alignIfBetter(platepar, jd, stars[:, 1], stars[:, 0], catalog_stars)
+    return alignIfBetter(platepar, jd, stars[:, 1], stars[:, 0], catalog_stars,
+                         img_intensity=(stars[:, 2] if stars.shape[1] > 2 else None))
 
 
 

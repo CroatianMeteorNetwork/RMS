@@ -181,3 +181,22 @@ def test_nn_fit_from_far_off():
 
     assert success and (inlier_fraction >= 80/90)
     assert displacement(pp, fitted, catalog_stars[:300]) < 0.15
+
+
+def test_brightest_stars_are_used():
+
+    # Of 300 image stars (80 detected catalog stars and 220 faint hot pixels), the MAX_IMAGE_STARS brightest by
+    #   their intensities are used, which are the catalog stars: the platepar is aligned. Without the intensities
+    #   the first MAX_IMAGE_STARS (here the hot pixels) are used, and there is no alignment
+    pp, img_x, img_y, catalog_stars = _scene(30.0, n_detected=80, n_hot=0)
+    rng = np.random.default_rng(7)
+    hot_x, hot_y = rng.uniform(0, pp.X_res, 220), rng.uniform(0, pp.Y_res, 220)
+    all_x, all_y = np.concatenate([hot_x, img_x]), np.concatenate([hot_y, img_y])
+    intensity = np.concatenate([np.ones(220), np.full(len(img_x), 100.0)])
+    start = _turned(pp, 2.0, 60.0, 5.0)
+
+    aligned = alignIfBetter(start, pp.JD, all_x, all_y, catalog_stars, img_intensity=intensity)
+
+    assert aligned is not None
+    assert displacement(pp, aligned, catalog_stars[:300]) < 1.0
+    assert alignIfBetter(start, pp.JD, all_x, all_y, catalog_stars) is None

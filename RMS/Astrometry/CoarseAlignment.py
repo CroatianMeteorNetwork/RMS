@@ -39,6 +39,10 @@ FINE_BIN_PX = 2.0
 CATALOG_FACTOR = 3
 MIN_CATALOG_STARS = 100
 
+# At most this many image stars are used, the brightest ones if their intensities are given: the cost grows with
+#   the number of image stars times the number of catalog stars, and a hundred stars align a field as well
+MAX_IMAGE_STARS = 100
+
 
 def _displacements(img_tree, cat_x, cat_y, max_shift):
     """ Displacements from the catalog stars to all image stars closer than the largest shift.
@@ -299,7 +303,7 @@ MIN_EXTRA_FRACTION = 0.1
 
 
 def alignIfBetter(platepar, jd, img_x, img_y, catalog_stars, max_shift_deg=MAX_SHIFT_DEG,
-                  max_roll_deg=MAX_ROLL_DEG):
+                  max_roll_deg=MAX_ROLL_DEG, img_intensity=None):
     """ The coarse alignment of the platepar (coarseAlignment), if clearly more pairs of catalog and image stars
         agree with it than with the starting pointing. A pointing which already puts the stars near their catalog
         stars is left to the fits, which are more precise.
@@ -314,10 +318,21 @@ def alignIfBetter(platepar, jd, img_x, img_y, catalog_stars, max_shift_deg=MAX_S
     Keyword arguments:
         max_shift_deg: [float] Largest shift of the pointing searched (deg on the sky). MAX_SHIFT_DEG by default.
         max_roll_deg: [float] Largest roll searched (deg). MAX_ROLL_DEG by default.
+        img_intensity: [ndarray] Intensities of the image stars, to use the MAX_IMAGE_STARS brightest of them.
+            None by default (the first MAX_IMAGE_STARS stars with a position are used).
 
     Return:
         [Platepar] A copy of the platepar with the aligned pointing, or None if it is not clearly better.
     """
+
+    # The brightest image stars with a position, at most MAX_IMAGE_STARS
+    img_x, img_y = np.asarray(img_x, dtype=np.float64), np.asarray(img_y, dtype=np.float64)
+    keep = np.where(np.isfinite(img_x) & np.isfinite(img_y))[0]
+    if img_intensity is not None:
+        intensity = np.asarray(img_intensity, dtype=np.float64)[keep]
+        keep = keep[np.argsort(-np.nan_to_num(intensity, nan=-np.inf))]
+    keep = keep[:MAX_IMAGE_STARS]
+    img_x, img_y = img_x[keep], img_y[keep]
 
     aligned, votes, votes_start = coarseAlignment(platepar, jd, img_x, img_y, catalog_stars,
                                                   max_shift_deg=max_shift_deg, max_roll_deg=max_roll_deg)
