@@ -46,6 +46,10 @@ from RMS.Misc import RmsDateTime
 #   A size of e.g. 3 means that an FF before, the FF with the detection, an an FF after will be taken
 RECALIBRATE_NEIGHBOURHOOD_SIZE = 3
 
+# Label of the fit record of a recalibration with the search of the offsets of the pointing (the rescue of a failed
+#   recalibration with the search of earlier versions)
+RECALIBRATE_OFFSETS_FIT_BY = 'recalibrateFF offsets'
+
 # Least squares refinement of the pointing: at most this many rounds of matching and fitting, and the largest
 #   change of the star positions (px) at which the refinement has converged
 LSQ_REFINE_MAX_ROUNDS = 5
@@ -881,7 +885,8 @@ def _recalibrateSearch(
 
         # Record the pointing fit: the search, refined by least squares if it was
         working_platepar.recordFit(pointing=True,
-                                   fit_by=('recalibrateFF+LSQ' if lsq_refined else 'recalibrateFF'))
+                                   fit_by=(RECALIBRATE_OFFSETS_FIT_BY if search_class is CheckFit.SearchOffsets
+                                           else 'recalibrateFF') + ('+LSQ' if lsq_refined else ''))
 
         # Store the platepar to the list of recalibrated platepars
         result = working_platepar
@@ -1062,7 +1067,14 @@ def recalibratePlateparsForFF(
             working_platepar.auto_recalibrated = True
 
             recalibrated_platepars[ff_name] = working_platepar
-            prev_platepar = working_platepar
+
+            # The next FF starts from this platepar, unless it is the rescue of a recalibration which failed with
+            #   the search of earlier versions: then it starts from the previous platepar as before, so the FFs
+            #   which the search of earlier versions recalibrates give the same platepars as before
+            fitted_by = (Platepar.normalFitRecord(getattr(working_platepar, 'fit_record', None))['pointing']
+                         or {}).get('by', '')
+            if not fitted_by.startswith(RECALIBRATE_OFFSETS_FIT_BY):
+                prev_platepar = working_platepar
 
         else:
 

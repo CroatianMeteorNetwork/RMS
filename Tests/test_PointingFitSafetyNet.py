@@ -514,3 +514,33 @@ def test_failed_recalibration_is_retried_from_another_platepar(monkeypatch):
     assert len(starts) == 3
     assert starts[0] == starts[2] == pp.jsonStr()
     assert starts[1] != pp.jsonStr()
+
+
+def test_rescued_recalibration_does_not_seed_the_next_ff(monkeypatch):
+
+    # The recalibration of the first FF is a rescue by the search of the offsets, of the second one a success of the
+    #   search of earlier versions: the second FF starts from the platepar given to the first one, as before
+    pp = makePlatepar()
+    _, rows = makeImage(pp)
+    ff_names = ['FF_XX0001_20251214_014211_000_0000000.fits', 'FF_XX0001_20251214_014221_240_0000256.fits']
+    starts = []
+
+    def _recalibrate(config, platepar, *args, **kwargs):
+        """ A successful recalibration, recorded: the first by the search of the offsets, moved by 0.1 deg. """
+
+        starts.append(platepar.RA_d)
+        result = copy.deepcopy(platepar)
+        if len(starts) == 1:
+            result.RA_d += 0.1
+            result.recordFit(pointing=True, fit_by=ApplyRecalibrate.RECALIBRATE_OFFSETS_FIT_BY)
+        else:
+            result.recordFit(pointing=True, fit_by='recalibrateFF')
+        return result, 0.5
+
+    monkeypatch.setattr(ApplyRecalibrate, 'recalibrateFF', _recalibrate)
+
+    platepars = ApplyRecalibrate.recalibratePlateparsForFF(pp, ff_names, {name: rows for name in ff_names},
+                                                          np.zeros((10, 3)), makeConfig())
+
+    assert starts == [pp.RA_d, pp.RA_d]
+    assert platepars[ff_names[0]].RA_d == pp.RA_d + 0.1
