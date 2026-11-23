@@ -438,7 +438,7 @@ def recalibrateFF(
 
     # Calculate the function tolerance, so the desired precision can be reached (the number is calculated
     # in the same regard as the cost function)
-    fatol, xatol_ang = CheckFit.computeMinimizationTolerances(config, working_platepar, len(star_dict_ff))
+    fatol, xatol = CheckFit.computeMinimizationTolerances(config, working_platepar, len(star_dict_ff))
 
     ### If the initial match is good enough, do only quick recalibration ###
 
@@ -529,37 +529,30 @@ def recalibrateFF(
 
         ### Recalibrate the platepar just on these stars, use the default platepar for initial params ###
 
-        # Init initial parameters
-        p0 = [
-            working_platepar.RA_d,
-            working_platepar.dec_d,
-            working_platepar.pos_angle_ref,
-            working_platepar.F_scale,
-        ]
+        # Init initial parameters: no offset from the pointing and the scale of the platepar (px, see
+        #   Platepar.PointingOffsets), which move the stars by the same amount in the same direction on the image
+        #   wherever the camera points
+        pointing = Platepar.PointingOffsets(working_platepar)
+        p0 = [0.0, 0.0, 0.0, 0.0]
 
         # Compute the minimization tolerance
-        fatol, xatol_ang = CheckFit.computeMinimizationTolerances(config, working_platepar, len(star_dict_ff))
+        fatol, xatol = CheckFit.computeMinimizationTolerances(config, working_platepar, len(star_dict_ff))
 
-        simplex = CheckFit.buildNelderMeadSimplex(p0, working_platepar.dec_d, mode="floor")
+        simplex = CheckFit.buildNelderMeadSimplex(p0, CheckFit.searchSimplexSteps(pointing))
 
         res = scipy.optimize.minimize(
             CheckFit._calcImageResidualsAstro,
             p0,
-            args=(config, working_platepar, catalog_stars, star_dict_ff, match_radius),
+            args=(config, working_platepar, catalog_stars, star_dict_ff, match_radius, pointing),
             method='Nelder-Mead',
-            options={'fatol': fatol, 'xatol': xatol_ang, 'initial_simplex': simplex},
+            options={'fatol': fatol, 'xatol': xatol, 'initial_simplex': simplex},
         )
 
         ###
 
         # Compute matched stars
         temp_platepar = copy.deepcopy(working_platepar)
-
-        ra_ref, dec_ref, pos_angle_ref, F_scale_ref = res.x
-        temp_platepar.RA_d = ra_ref
-        temp_platepar.dec_d = dec_ref
-        temp_platepar.pos_angle_ref = pos_angle_ref
-        temp_platepar.F_scale = F_scale_ref
+        pointing.apply(temp_platepar, res.x)
 
         n_matched, dist, cost, matched_stars = CheckFit.matchStarsResiduals(
             config,

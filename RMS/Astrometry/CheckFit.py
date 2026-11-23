@@ -35,67 +35,57 @@ from RMS.Astrometry.MatchStars import matchStars
 log = getLogger("rmslogger")
 
 
-def buildNelderMeadSimplex(p0, dec_d, mode="floor", angular_step=2.0, min_step_deg=0.5):
-    """Build initial simplex for Nelder-Mead optimization of astrometric parameters.
-
-    Scipy's default simplex perturbs each parameter by 5% of its value. This gives
-    ~0 step when RA or Dec is near 0, breaking the optimizer.
+def buildNelderMeadSimplex(p0, steps):
+    """ Build the initial simplex of a Nelder-Mead fit: the starting parameters, and the starting parameters with
+        each one changed by its step in turn. Scipy's default simplex changes each parameter by 5% of its value,
+        which for the pointing gives steps that depend on where the camera points, not on how far it may be off.
 
     Arguments:
-        p0: [list/array] Initial parameter vector. First 3 elements must be angular
-            parameters (RA, Dec, Rot). Additional parameters (e.g. scale) keep the
-            default 10% step.
-        dec_d: [float] Declination in degrees, for cos(dec) correction on the RA step.
-        mode: [str] "floor" or "fixed".
-            "floor": Keep scipy's 5% default but enforce min_step_deg minimum for
-                     angular params. Use for fine-tuning (recalibrateFF, autoCheckFit).
-            "fixed": Use angular_step for all angular params regardless of parameter
-                     values. Use for large corrections (fitPointingNN).
-        angular_step: [float] Fixed step in degrees of sky (used in "fixed" mode).
-        min_step_deg: [float] Minimum angular step in degrees (used in "floor" mode).
+        p0: [list] Starting parameters.
+        steps: [list] Step of each parameter.
 
     Return:
-        simplex: [ndarray] (N+1) x N array suitable for the initial_simplex option.
+        simplex: [ndarray] (N+1) x N array for the initial_simplex option.
     """
 
-    p0_arr = np.array(p0, dtype=float)
-    n = len(p0_arr)
-    simplex = np.tile(p0_arr, (n + 1, 1))
+    p0 = np.array(p0, dtype=float)
 
-    cos_dec = max(np.cos(np.radians(dec_d)), 0.1)
+    return np.vstack([p0, p0 + np.diag(np.array(steps, dtype=float))])
 
-    if mode == "fixed":
-        # Fixed angular step for all angular params
-        steps = [angular_step / cos_dec, angular_step, angular_step]
-        # Extra params (e.g. scale) get 10% step
-        for j in range(3, n):
-            steps.append(abs(p0_arr[j]) * 0.1)
 
-    else:
-        # Floor mode: scipy's 5% default with a minimum angular step enforced
-        steps = [abs(v) * 0.05 if v != 0 else 0.00025 for v in p0_arr]
-        steps[0] = max(steps[0], min_step_deg / cos_dec)   # RA
-        steps[1] = max(steps[1], min_step_deg)              # Dec
-        steps[2] = max(steps[2], min_step_deg)              # Rot
-
-    for j in range(n):
-        simplex[j + 1, j] += steps[j]
-
-    return simplex
 
 
 def computeMinimizationTolerances(config, platepar, star_dict_len):
-    """ Compute tolerances for minimization. """
+    """ Compute tolerances for minimization. The parameters of the fit are the offsets of the pointing and the
+        scale in pixels (see Platepar.PointingOffsets).
+    """
 
     # Calculate the function tolerance, so the desired precision can be reached (the number is calculated
     # in the same regard as the cost function)
     fatol = (config.dist_check_threshold**2)/np.sqrt(star_dict_len*config.min_matched_stars + 1)
 
-    # Parameter estimation tolerance for angular values
-    fov_w = platepar.X_res/platepar.F_scale
-    xatol_ang = config.dist_check_threshold*fov_w/platepar.X_res
+    # Parameter estimation tolerance (px): a third of the distance threshold, so that the fitted pointing moves
+    #   the stars by well less than the threshold from where the best fit puts them
+    xatol = config.dist_check_threshold/3.0
 
-    return fatol, xatol_ang
+    return fatol, xatol
+
+
+def searchSimplexSteps(pointing):
+    """ The steps of the first simplex of the search of the pointing and the scale on matched stars
+        (_calcImageResidualsAstro, in autoCheckFit and ApplyRecalibrate.recalibrateFF), in the offsets of
+        Platepar.PointingOffsets (px): the pointing is moved by 2 deg on the sky along x and along y and rolled by
+        2 deg, and the scale is changed by 5%. The search shrinks the simplex from there to the size of the basin
+        of the matched stars, wherever the camera points.
+
+    Arguments:
+        pointing: [Platepar.PointingOffsets] The offsets of the fit.
+
+    Return:
+        [list] Steps of the offsets (dx, dy, droll, dscale) (px).
+    """
+
+    return [np.radians(2.0)/pointing.shift_unit]*2 + [np.radians(2.0)/pointing.roll_unit, 0.05*pointing.radius]
 
 
 
@@ -396,12 +386,13 @@ def checkFitGoodness(config, platepar, catalog_stars, star_dict, match_radius, v
 
 
 
-def _calcImageResidualsAstro(params, config, platepar, catalog_stars, star_dict, match_radius):
+def _calcImageResidualsAstro(params, config, platepar, catalog_stars, star_dict, match_radius, pointing=None):
     """ Calculates the differences between the stars on the image and catalog stars in image coordinates with 
         the given astrometrical solution. 
 
     Arguments:
-        params: [list] Fit parameters - reference RA, Dec, position angle, and scale.
+        params: [list] Fit parameters - the offsets (dx, dy, droll, dscale) of the pointing and the scale from
+            those of the platepar (px, see Platepar.PointingOffsets).
         config: [Config]
         platepar: [Platepar]
         catalog_stars: [list] List of (ra, dec, mag) entries (angles in degrees).
@@ -409,16 +400,23 @@ def _calcImageResidualsAstro(params, config, platepar, catalog_stars, star_dict,
             stars on the image.
         match_radius: [float] Star match radius (px).
 
+    Keyword arguments:
+        pointing: [Platepar.PointingOffsets] The offsets about the platepar, made once for a fit. None by
+            default, in which case they are made from the platepar.
+
     Return:
         [float] The average pixel residual (difference between image and catalog positions) normalized
             by the square root of the total number of matched stars.
     """
 
+    # The offsets are about the pointing and the scale of the platepar
+    if pointing is None:
+        pointing = Platepar.PointingOffsets(platepar)
 
     # Set the fitting parameters on the platepar for this evaluation, remembering its own (no deep copy is
     #   needed, matchStarsResiduals only reads from the platepar)
     params_prev = (platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref, platepar.F_scale)
-    platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref, platepar.F_scale = params
+    pointing.apply(platepar, params)
 
     try:
 
@@ -630,7 +628,7 @@ def autoCheckFit(config, platepar, calstars_data, _nn_refinement=False):
 
     # Calculate the function tolerance, so the desired precision can be reached (the number is calculated
     # in the same regard as the cost function)
-    fatol, xatol_ang = computeMinimizationTolerances(config, platepar, len(star_dict))
+    fatol, xatol = computeMinimizationTolerances(config, platepar, len(star_dict))
 
 
     ### If the initial match is good enough, do only quick recalibration ###
@@ -688,15 +686,18 @@ def autoCheckFit(config, platepar, calstars_data, _nn_refinement=False):
             return platepar, True
 
 
-        # Initial parameters for the astrometric fit
-        p0 = [platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref, platepar.F_scale]
+        # Initial parameters for the astrometric fit: no offset from the pointing and the scale of the platepar
+        #   (px, see Platepar.PointingOffsets), which move the stars by the same amount in the same direction on
+        #   the image wherever the camera points
+        pointing = Platepar.PointingOffsets(platepar)
+        p0 = [0.0, 0.0, 0.0, 0.0]
 
-        simplex = buildNelderMeadSimplex(p0, platepar.dec_d, mode="floor")
+        simplex = buildNelderMeadSimplex(p0, searchSimplexSteps(pointing))
 
         # Fit the astrometric parameters
         res = scipy.optimize.minimize(_calcImageResidualsAstro, p0, args=(config, platepar, catalog_stars, \
-            star_dict, match_radius), method='Nelder-Mead', \
-            options={'fatol': fatol, 'xatol': xatol_ang, 'initial_simplex': simplex})
+            star_dict, match_radius, pointing), method='Nelder-Mead', \
+            options={'fatol': fatol, 'xatol': xatol, 'initial_simplex': simplex})
 
         log.info(res)
 
@@ -710,12 +711,7 @@ def autoCheckFit(config, platepar, calstars_data, _nn_refinement=False):
 
         else:
             # If the fit was successful, use the new parameters from now on
-            ra_ref, dec_ref, pos_angle_ref, F_scale = res.x
-
-            platepar.RA_d = ra_ref
-            platepar.dec_d = dec_ref
-            platepar.pos_angle_ref = pos_angle_ref
-            platepar.F_scale = F_scale
+            pointing.apply(platepar, res.x)
             aberration_refit = False
 
             # Record the pointing fit

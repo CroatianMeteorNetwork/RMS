@@ -14,6 +14,7 @@ import copy
 import datetime
 
 import numpy as np
+import pytest
 import scipy.optimize
 
 import RMS.ConfigReader as cr
@@ -21,7 +22,7 @@ from RMS.Astrometry import ApplyRecalibrate, CheckFit
 from RMS.Astrometry.ApplyAstrometry import raDecToXYPP, xyToRaDecPP
 from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, jd2Date
 from RMS.Formats import FFfile
-from RMS.Formats.Platepar import Platepar
+from RMS.Formats.Platepar import Platepar, PointingOffsets
 
 
 # Julian date of the first synthetic image (2023-02-28 ~18 UT)
@@ -171,11 +172,14 @@ def test_residual_function_leaves_the_platepar_unchanged():
     pp_start = offsetPlatepar(pp)
     params_start = pointing(pp_start)
 
-    # Trial parameters at the true pointing
-    cost = CheckFit._calcImageResidualsAstro(pointing(pp), config, pp_start, catalog_stars, star_dict, 5.0)
+    # Trial parameters at the true pointing: its offsets from the starting pointing (px)
+    offsets = PointingOffsets(pp_start)
+    params = list(offsets.fromPointing(pp.RA_d, pp.dec_d, pp.pos_angle_ref)) + [offsets.fromScale(pp.F_scale)]
+    cost = CheckFit._calcImageResidualsAstro(params, config, pp_start, catalog_stars, star_dict, 5.0)
 
     assert pointing(pp_start) == params_start
-    assert cost == CheckFit.matchStarsResiduals(config, pp, catalog_stars, star_dict, 5.0)
+    assert cost == pytest.approx(CheckFit.matchStarsResiduals(config, pp, catalog_stars, star_dict, 5.0),
+                                 abs=1e-12)
 
 
 def test_failed_check_hands_over_the_starting_platepar(monkeypatch):
@@ -269,12 +273,15 @@ def test_recalibration_keeps_the_last_successful_fit(monkeypatch):
         if fun is not CheckFit._calcImageResidualsAstro:
             return minimize(fun, x0, args=args, **kwargs)
 
-        # The fit with the 1.5 px radius is stopped after one iteration
-        match_radius = args[-1]
+        # The fit with the 1.5 px radius is stopped after one iteration. The fit gives the offsets of the
+        #   pointing from the platepar it starts from, kept with its result
+        match_radius = args[4]
         if match_radius == 1.5:
             kwargs['options'] = dict(kwargs.get('options') or {}, maxiter=1)
         res = minimize(fun, x0, args=args, **kwargs)
-        fits[match_radius] = res
+        fitted = copy.deepcopy(args[1])
+        args[5].apply(fitted, res.x)
+        fits[match_radius] = (res, fitted)
 
         return res
 
@@ -286,9 +293,9 @@ def test_recalibration_keeps_the_last_successful_fit(monkeypatch):
 
     # The fits with the radii down to 3 px succeeded, the one with 1.5 px didn't
     assert sorted(fits) == [1.5, 3, 5, 10]
-    assert fits[3].success and (not fits[1.5].success)
+    assert fits[3][0].success and (not fits[1.5][0].success)
     assert min_match_radius == 3
 
     # The recalibrated platepar is the result of the fit with the 3 px radius
     assert result is not None
-    assert pointing(result) == list(fits[3].x)
+    assert pointing(result) == pointing(fits[3][1])
