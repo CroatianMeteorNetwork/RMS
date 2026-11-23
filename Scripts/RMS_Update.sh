@@ -33,6 +33,9 @@ BACKUP_MASK="$RMSBACKUPDIR/mask.bmp"    # Mutable - can change to alt locations
 BACKUP_CAMERA_SETTINGS="$RMSBACKUPDIR/camera_settings.json"  # Mutable - can change to alt locations
 readonly SYSTEM_PACKAGES="$RMSSOURCEDIR/system_packages.txt"
 readonly BACKUP_STATE_FILE=$RMSBACKUPDIR/backup_state
+# The commit from which the compiled (Cython) modules were last built, written after a successful build. It
+#   lives outside the repository, so no git operation removes it
+readonly BUILD_STAMP_FILE=$RMSBACKUPDIR/build_sha
 readonly LOCKFILE="/tmp/rms_update.$(printf '%s' "$RMSSOURCEDIR" | sha1sum | cut -c1-8).lock"
 readonly MIN_SPACE_MB=200  # Minimum required space in MB
 readonly RETRY_LIMIT=3  # Retries for critical file operations
@@ -1199,10 +1202,18 @@ main() {
             # Check for modified tracked files (excluding allowed config/template/mask files)
             MODIFIED_FILES=$(git diff --name-only | grep -v -E '^(\.config|camera_settings\.json|\.configTemplate|camera_settings_template\.json|mask\.bmp)$' || true)
             
-            if [[ "$REMOTE_SHA" == "$LOCAL_SHA" && -z "$MODIFIED_FILES" ]]; then
+            # The commit the compiled modules were built from. A branch changed with git directly (e.g.
+            #   'git checkout prerelease') is already at the remote commit, but its modules are still those of
+            #   the old branch, and RMS then fails to import them
+            BUILT_SHA=$(cat "$BUILD_STAMP_FILE" 2>/dev/null || true)
+
+            if [[ "$REMOTE_SHA" == "$LOCAL_SHA" && -z "$MODIFIED_FILES" && "$BUILT_SHA" == "$LOCAL_SHA" ]]; then
                 print_status "success" "Nothing new on $RMS_BRANCH and no tracked file modifications - exiting."
                 print_status "info" "Use './Scripts/RMS_Update.sh --force' to force rebuild and reinstall."
                 exit 0
+            elif [[ "$REMOTE_SHA" == "$LOCAL_SHA" && -z "$MODIFIED_FILES" ]]; then
+                print_status "info" "Repository up to date, but the compiled modules were not built from $LOCAL_SHA"
+                print_status "info" "Proceeding with update to rebuild them"
             elif [[ "$REMOTE_SHA" == "$LOCAL_SHA" && -n "$MODIFIED_FILES" ]]; then
                 print_status "info" "Repository up to date but tracked files modified:"
                 echo "$MODIFIED_FILES" | sed 's/^/  /'
@@ -1539,7 +1550,10 @@ PY
 
     print_header "Running Setup"
     print_status "info" "Building RMS (this may take a while)..."
-    
+
+    # Forget the commit of the previous build, so a failed build is not taken as built
+    rm -f "$BUILD_STAMP_FILE" 2>/dev/null || true
+
     # Try build with multiple recovery attempts
     local build_attempts=0
     local max_build_attempts=2
@@ -1580,7 +1594,12 @@ PY
     fi
     
     print_status "success" "Build completed successfully"
-    
+
+    # Record the commit the compiled modules were built from, for the early check of the next update
+    if ! { mkdir -p "$RMSBACKUPDIR" && git rev-parse HEAD > "$BUILD_STAMP_FILE"; } 2>/dev/null; then
+        print_status "warning" "Could not record the built commit in $BUILD_STAMP_FILE"
+    fi
+
     # Print the update report
     print_update_report
     print_status "success" "Update process completed successfully!"
