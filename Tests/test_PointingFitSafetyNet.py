@@ -1,12 +1,13 @@
 """
-Tests of the safety net of the fits of the pointing.
+Tests of the safety net of the fits of the pointing, and of the scale bound of the calibration check.
 
 Every search of the pointing runs first with the offsets of the pointing (Platepar.PointingOffsets). If its result
 is not clearly good by the fit's own measures, the search of earlier versions (RA, Dec and position angle) runs as
 well, from the same start, and its result is used if it is better: the recalibration of an image
 (ApplyRecalibrate.recalibrateFF) and the calibration check (CheckFit.autoCheckFit) when they fail, the NN fit
 (Platepar.fitPointingNN) when it is not accepted, and the RANSAC fit (Platepar.fitAstrometry with use_nn_cost) when
-it matches too few stars or leaves large residuals.
+it matches too few stars or leaves large residuals. A fit of the check that changes the scale by more than 10% or
+matches too few stars is not used, so the check of a platepar far off fails cleanly.
 """
 
 import copy
@@ -138,6 +139,22 @@ def test_check_falls_back_to_the_search_of_earlier_versions(monkeypatch):
     assert runs[0][2] == runs[1][2]
     assert fit_status
     assert displacement(pp, result, catalog_stars) < 0.5
+
+
+def test_check_of_a_platepar_far_off_fails_cleanly(monkeypatch):
+
+    # A platepar pointing 90 deg away matches no stars: the check fails and hands over a platepar with the scale it
+    #   was given (a fit that changes the scale by more than 10% or matches too few stars is not used)
+    pp = test_CheckFit.makePlatepar()
+    config = test_CheckFit.makeConfig()
+    catalog_stars, calstars_data = test_CheckFit.makeNight(pp, config)
+    test_CheckFit.useCatalog(monkeypatch, catalog_stars)
+
+    start = _turned(pp, 90.0*pp.F_scale)
+    result, fit_status = CheckFit.autoCheckFit(config, copy.deepcopy(start), calstars_data)
+
+    assert not fit_status
+    assert abs(result.F_scale/start.F_scale - 1) <= CheckFit.SEARCH_MAX_SCALE_CHANGE
 
 
 ### NN fit and RANSAC fit ###

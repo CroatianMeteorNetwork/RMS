@@ -162,6 +162,11 @@ class SearchRaDec(object):
         platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref, platepar.F_scale = params
 
 
+# A fit of the search may change the scale by at most this fraction; a larger change is no camera of the platepar
+#   but a fit that found no stars to hold it (it is then not used)
+SEARCH_MAX_SCALE_CHANGE = 0.1
+
+
 def coarseAlignStars(config, platepar, catalog_stars, star_dict, lim_mag=None):
     """ The coarse alignment of the platepar (CoarseAlignment.alignIfBetter) on the image with the most stars of
         the star dictionary, if clearly more stars agree with it than with the platepar.
@@ -804,6 +809,8 @@ def _autoCheckFit(config, platepar, calstars_data, _nn_refinement, search_class)
             platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref = aligned.RA_d, aligned.dec_d, \
                 aligned.pos_angle_ref
 
+    # The scale the fits start from, which they may change by at most SEARCH_MAX_SCALE_CHANGE
+    scale_start = abs(platepar.F_scale)
 
 
     def _polished(platepar):
@@ -883,8 +890,22 @@ def _autoCheckFit(config, platepar, calstars_data, _nn_refinement, search_class)
 
         log.info(res)
 
+        # The fitted pointing, which has to keep the scale and enough matched stars: a search that finds no stars
+        #   (on a platepar far off) can still converge, anywhere
+        fitted = copy.deepcopy(platepar)
+        search.apply(fitted, res.x)
+        n_fitted = 0
+        scale_kept = abs(abs(fitted.F_scale)/scale_start - 1) <= SEARCH_MAX_SCALE_CHANGE
+        if res.success and scale_kept:
+            n_fitted, _, _, _ = matchStarsResiduals(config, fitted, catalog_stars, star_dict, match_radius,
+                                                    ret_nmatch=True)
+
         # If the fit was not successful, stop further fitting
-        if not res.success:
+        if (not res.success) or (not scale_kept) or (n_fitted < config.min_matched_stars):
+
+            if res.success:
+                log.info("The fit changed the scale by {:.1f}% or matched only {:d} stars, it is not used".format(
+                    100*(abs(fitted.F_scale)/scale_start - 1), n_fitted))
 
             # Try to refine the platepar with NN alignment and redo the ACF
             platepar.aberration = not aberration_refit
