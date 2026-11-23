@@ -945,6 +945,10 @@ class Platepar(object):
         with an exception leaves the flag as it was. What was fitted (the pointing, and the distortion unless
         only the pointing is fitted) is recorded in the fit record.
 
+        A NN fit (use_nn_cost) that stops without a result or fails with an exception leaves the whole platepar
+        as it was, with an empty star list, as no star pairs came out of it. The NN fit only works with a radial
+        distortion and enough stars for it, and is not run for a fit of the pointing alone.
+
         Arguments:
             jd: [float] Julian date of the image.
             img_stars: [list] A list of (x, y, intensity_sum) entires for every star.
@@ -966,7 +970,7 @@ class Platepar(object):
 
         Return:
             None, or with use_nn_cost the matched pairs (img_stars, catalog_stars) of the RANSAC fit (None if
-                it stopped without a result).
+                it stopped without a result, the platepar then being as it was before the fit).
 
         """
 
@@ -974,6 +978,10 @@ class Platepar(object):
         #   that stops without a result restores it itself)
         aberration_prev = self.aberration
         completed = False
+
+        # The NN fit changes the distortion type, the pointing and the distortion while it runs, so the whole
+        #   state of the plate before it is kept, for a NN fit that stops without a result or fails
+        state_prev = copy.deepcopy(self.__dict__) if use_nn_cost else None
 
         try:
             result = self._fitAstrometry(jd, img_stars, catalog_stars, first_platepar_fit=first_platepar_fit,
@@ -984,6 +992,13 @@ class Platepar(object):
         finally:
             if not completed:
                 self.aberration = aberration_prev
+
+            # A NN fit without a result puts the plate back as it was. No star pairs came out of it, so the star
+            #   list is emptied (callers read it as the pairs of the fit)
+            if use_nn_cost and ((not completed) or (result is None)):
+                self.__dict__.clear()
+                self.__dict__.update(state_prev)
+                self.star_list = []
 
         return result
 
@@ -1284,8 +1299,15 @@ class Platepar(object):
             if cat_tree is not None:
                 # Fast path: query a prebuilt KD-tree of catalog unit vectors. Same nearest
                 # neighbour as the matrix below, but O(N log M) instead of O(N*M) per eval.
-                chord_dist, _ = cat_tree.query(_raDecToUnitVectors(ra_det, dec_det), k=1)
-                nn_distances = 2.0*np.arcsin(np.clip(chord_dist/2.0, 0.0, 1.0))  # chord -> angle
+
+                # The tree query rejects non-finite points (a star without a sky position with the trial
+                #   parameters), so only the finite ones are queried, the others are given a separation below
+                det_vectors = _raDecToUnitVectors(ra_det, dec_det)
+                finite = np.all(np.isfinite(det_vectors), axis=1)
+                nn_distances = np.full(len(det_vectors), np.nan)
+                if np.any(finite):
+                    chord_dist, _ = cat_tree.query(det_vectors[finite], k=1)
+                    nn_distances[finite] = 2.0*np.arcsin(np.clip(chord_dist/2.0, 0.0, 1.0))  # chord -> angle
             else:
                 # Catalog is pre-filtered to FOV by caller - no need to re-filter here
                 ra_catalog, dec_catalog, _ = catalog_stars.T
@@ -1299,6 +1321,11 @@ class Platepar(object):
                 # angularSeparation broadcasts to (N, M) separation matrix
                 sep_matrix = angularSeparation(ra_det_rad, dec_det_rad, ra_cat_rad, dec_cat_rad)
                 nn_distances = np.min(sep_matrix, axis=1)  # (N,)
+
+            # A star without a finite sky position is given the largest possible separation, so the cost stays
+            #   finite and steers the optimizer away from such parameters
+            nn_distances = np.where(np.isfinite(nn_distances), nn_distances, np.pi)
+
             total_cost = np.sum(nn_distances ** 2)
 
             return total_cost
@@ -1315,6 +1342,14 @@ class Platepar(object):
         # The distortion is fitted below unless only the pointing is fitted, or there are too few stars for it
         min_fit_stars = self.poly_length + 1
         fit_distortion = (len(img_stars) >= min_fit_stars) and (not fit_only_pointing)
+
+        # The NN fit only exists as the RANSAC of the radial distortion fit. With a polynomial distortion, too few
+        #   stars for the distortion, or a fit of the pointing alone, the stars would be fitted to the catalog stars
+        #   of the same index, which are not their matches, so such a NN fit is stopped before any fit
+        if use_nn_cost and (self.distortion_type.startswith("poly") or (not fit_distortion)):
+            print("    -> NN fit not run ({:s}, {:d} stars, {:d} needed, fit_only_pointing={})".format(
+                self.distortion_type, len(img_stars), min_fit_stars, fit_only_pointing))
+            return None
 
         # The fit models the aberration, whatever the plate had absorbed before: the flag is turned on below
         #   where the pointing is fitted. The flag before the fit is kept for the fits that stop without a
@@ -1722,6 +1757,10 @@ class Platepar(object):
                                                        intensity_median * 10)   # cap at 10x median
                             weights = np.sqrt(intensity_clipped)
                             weights = weights / weights.sum()  # normalize to probabilities
+                            # The stars are selected uniformly if their intensities cannot be used as weights (a
+                            #   median intensity <= 0, or NaN intensities)
+                            if not ((intensity_median > 0) and np.all(np.isfinite(weights))):
+                                weights = None
 
                             np.random.seed(42 + iteration)
                             subset_indices = np.random.choice(available_indices, n_subset, replace=False,
@@ -1809,12 +1848,21 @@ class Platepar(object):
                         ra_cat_rad = np.radians(ra_catalog)[np.newaxis, :]  # (1, M)
                         dec_cat_rad = np.radians(dec_catalog)[np.newaxis, :]  # (1, M)
                         sep_matrix = angularSeparation(ra_det_rad, dec_det_rad, ra_cat_rad, dec_cat_rad)
-                        nn_seps = np.min(sep_matrix, axis=1)  # (N,)
 
-                        median_sep = np.median(nn_seps)
+                        # Without catalog stars in the field of this fit no star has a nearest one
+                        if len(catalog_stars_iter) > 0:
+                            nn_seps = np.min(sep_matrix, axis=1)  # (N,)
+                        else:
+                            nn_seps = np.full(len(img_stars), np.nan)
+
+                        # Flag the stars further from their nearest catalog star than 3x the median, with the
+                        #   threshold relaxed towards the image corners. A star without a finite separation (no
+                        #   sky position, or no catalog stars in the field) is always an outlier
+                        finite_seps = np.isfinite(nn_seps)
+                        median_sep = np.median(nn_seps[finite_seps]) if np.any(finite_seps) else np.inf
                         base_threshold = 3.0 * median_sep
                         per_star_threshold = base_threshold * radial_scale
-                        iteration_outliers = nn_seps > per_star_threshold
+                        iteration_outliers = ~(nn_seps <= per_star_threshold)
 
                         # Weighted scoring: outliers get +weight, inliers get -weight (redemption!)
                         outlier_scores[iteration_outliers] += weight
@@ -1932,6 +1980,11 @@ class Platepar(object):
                     catalog_stars_fov = catalog_stars[in_fov_final]
                     ra_catalog, dec_catalog, _ = catalog_stars_fov.T
 
+                    # Nothing can be matched if no catalog star is inside the image with the fitted parameters
+                    if len(catalog_stars_fov) == 0:
+                        print("    -> No catalog stars in the field of the RANSAC fit, skipping final fit")
+                        return None
+
                     # Vectorized NN matching: compute NxM separation matrix
                     ra_det_rad = np.radians(ra_det)[:, np.newaxis]  # (N, 1)
                     dec_det_rad = np.radians(dec_det)[:, np.newaxis]  # (N, 1)
@@ -1958,6 +2011,9 @@ class Platepar(object):
                     if n_dupes > 0:
                         print("    Dropped {} duplicate matches (multiple detections -> one catalog "
                               "star)".format(n_dupes))
+
+                    # A star without a finite sky position has no real nearest catalog star
+                    keep_mask &= np.isfinite(nearest_sep)
 
                     img_stars_clean = img_stars_clean[keep_mask]
                     matched_catalog = catalog_stars_fov[nearest_indices[keep_mask]]
