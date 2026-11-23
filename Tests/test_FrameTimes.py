@@ -11,6 +11,7 @@ finds the FT files, also in their daily archives). Without a file of frame times
 import datetime
 import json
 import os
+import subprocess
 import tarfile
 import types
 
@@ -23,6 +24,8 @@ from RMS.Formats import FTfile
 from RMS.Formats.FTStruct import FTStruct
 from RMS.Formats.FrameInterface import InputTypeImages, InputTypeVideo, detectInputType
 from RMS.Formats import FrameTimes
+from RMS.Formats import FrameInterface
+from RMS.Formats.FTPdetectinfo import timesToFrames, writtenFPS
 from RMS.Formats.FrameTimes import FrameTimeTable, alignCaptureTimes, datetimeToUnix, findCaptureTimeSources, \
     findFrameTimesFile, frameTimesPaths, parseCaptureVideoName, parseTime, parseTimelapseName, readCaptureTimes, \
     readJSONFrameTimes, unixToDatetime
@@ -479,30 +482,79 @@ def test_generated_timelapse_round_trip(tmp_path):
     assert frameTimes(handle) == captureTimes()
 
 
-def test_capture_video_timed_from_given_ft_files(tmp_path):
+def writeCaptureVideo(dir_path, start_time, n_frames=40, gap_after=20, gap=0.2):
+    """ A video of the capture (MKV, named by the time of its first frame) at the frame rate of the capture, with
+        a gap of the given length in the timestamps of the frames after the given frame (frames the camera
+        dropped). Return the path and the timestamps of the frames (s from the first).
+    """
 
-    # A video of the capture with its FT files given; the capture dropped the frames between 0.5 and 0.7 s
-    times = syntheticCapture(T0, 3.0, gaps=[(0.5, 0.7)])
+    name = "XX0001_" + start_time.strftime("%Y%m%d_%H%M%S_%f") + "_video.mkv"
+    path = os.path.join(str(dir_path), name)
+
+    subprocess.check_call(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+                           "testsrc=size=64x48:rate={:d}".format(int(CAPTURE_FPS)), "-frames:v", str(n_frames),
+                           "-vf", "setpts='PTS+if(gte(N,{:d}),{:f}/TB,0)'".format(gap_after, gap),
+                           "-fps_mode", "passthrough", "-c:v", "libx264", "-pix_fmt", "yuv420p", path])
+
+    secs = np.arange(n_frames)/CAPTURE_FPS
+    secs[gap_after:] += gap
+
+    return path, secs
+
+
+def test_capture_video_timed_from_timestamps_snapped_to_ft(tmp_path):
+
+    # A video of the capture with a gap of 0.2 s (frames the camera dropped) after frame 20, and the FT files of
+    #   the processing, which also dropped frames 5, 6 and 30 (they are in the video, not in the FT files)
+    if not isFfmpegWorking():
+        pytest.skip("ffmpeg is not available")
+
+    start = T0
+    path, secs = writeCaptureVideo(tmp_path, start)
+    rng = np.random.RandomState(2)
+    capture = datetimeToUnix(start) + secs + rng.uniform(-0.003, 0.003, len(secs))
+    processed = np.delete(capture, [5, 6, 30])
     ft_dir = tmp_path/"ft"
     ft_dir.mkdir()
-    writeFT(ft_dir, times)
+    writeFT(ft_dir, processed)
 
-    name = "XX0001_" + unixToDatetime(times[0]).strftime("%Y%m%d_%H%M%S_%f") + "_video.avi"
-    path = str(tmp_path/name)
-    writeVideo(path, n_frames=40, fps=CAPTURE_FPS)
-
-    # The frames are the captured frames, the frames after the dropped ones are later than by the frame rate
     handle = InputTypeVideo(path, makeConfig(OFFSET), frame_times=str(ft_dir))
+
+    # Every frame of the video is timed: the processed frames at their capture time, the others at the time in
+    #   the name plus their timestamp; the number of frames is the number of frames in the video
     offset = datetime.timedelta(seconds=OFFSET)
-    assert frameTimes(handle, range(40)) == [unixToDatetime(t) + offset for t in times[:40]]
-    assert (handle.currentFrameTime(frame_no=20, dt_obj=True) - handle.currentFrameTime(frame_no=0, dt_obj=True))\
-        .total_seconds() > 20/CAPTURE_FPS + 0.15
+    expected = [unixToDatetime(capture[k]) if k not in (5, 6, 30)
+                else start + datetime.timedelta(seconds=secs[k]) for k in range(len(secs))]
+    assert handle.total_frames == len(secs)
+    for k in range(len(secs)):
+        assert abs((handle.currentFrameTime(frame_no=k, dt_obj=True) - (expected[k] + offset)).total_seconds()) \
+            < 2e-6
+    assert "37 of 40 frames snapped" in handle.frame_times_source
 
     # Without the FT files given, the video is timed from its name and its frame rate, as before
     plain = InputTypeVideo(path, makeConfig())
     assert plain.frame_time_table is None
-    assert plain.currentFrameTime(frame_no=20, dt_obj=True) == parseCaptureVideoName(name) \
-        + datetime.timedelta(seconds=20/plain.fps)
+    assert plain.currentFrameTime(frame_no=20, dt_obj=True) == start + datetime.timedelta(seconds=20/plain.fps)
+
+
+def test_capture_video_without_timestamps_not_timed_from_ft(tmp_path, monkeypatch):
+
+    # A video whose frame timestamps cannot be read is not timed from the FT files (they cannot be matched to its
+    #   frames by their order), but from its name and its frame rate
+    times = syntheticCapture(T0, 3.0)
+    name = "XX0001_" + unixToDatetime(times[0]).strftime("%Y%m%d_%H%M%S_%f") + "_video.avi"
+    path = str(tmp_path/name)
+    writeVideo(path, n_frames=40, fps=CAPTURE_FPS)
+
+    def noTimestamps(video_path):
+        raise ValueError("no timestamps")
+
+    monkeypatch.setattr(FrameInterface, "readVideoTimestamps", noTimestamps)
+    handle = InputTypeVideo(path, makeConfig(), frame_times=times)
+
+    assert handle.frame_time_table is None
+    assert handle.currentFrameTime(frame_no=20, dt_obj=True) == parseCaptureVideoName(name) \
+        + datetime.timedelta(seconds=20/handle.fps)
 
 
 def test_ft_files_do_not_time_a_timelapse(tmp_path):
@@ -826,9 +878,10 @@ def test_skyfit2_finds_the_ft_archive_of_ff_files(tmp_path):
 
 def test_skyfit2_finds_the_ft_files_of_a_capture_video(tmp_path):
 
-    # A video of the capture in the station folders, with its FT files in the FT folder of the same hour
+    # A video of the capture in the station folders, with its FT files in the FT folder of the same hour: the
+    #   frames are snapped to the capture times
     skyfit2 = pytest.importorskip("Utils.SkyFit2")
-    times = syntheticCapture(T0, 3.0, gaps=[(0.5, 0.7)])
+    times = syntheticCapture(T0, 3.0)
     hour = T0.strftime("%Y/%Y%m%d-%j/%Y%m%d-%j_%H")
     video_dir = tmp_path/"VideoFiles"/hour
     ft_dir = tmp_path/"TimeFiles"/hour
@@ -863,3 +916,39 @@ def test_skyfit2_warns_about_a_timelapse_without_frame_times(tmp_path, monkeypat
     pt = skyFitStandIn(skyfit2, writeTimelapse(tmp_path), makeConfig())
     skyfit2.PlateTool.detectInputType(pt)
     assert boxes == []
+
+
+def test_ftpdetectinfo_frames_from_times():
+
+    # The frame numbers which give the times back with the FF name and the frame rate as written in the file
+    ff_name = "FF_XX0001_20261122_224725_002_0000000.fits"
+    times = [T0 + datetime.timedelta(seconds=s) for s in (0.0, 5.003, 55.012)]
+    frames = timesToFrames(times, ff_name, 0.19984)
+
+    assert writtenFPS(0.19984) == 0.2
+    assert writtenFPS(0.001) == 0.01
+    for t, fr in zip(times, frames):
+        assert abs((FFfile.filenameToDatetime(ff_name) + datetime.timedelta(seconds=fr/0.2) - t).total_seconds()) \
+            < 1e-6
+
+
+def test_detection_ftpdetectinfo_frames_have_the_frame_times(tmp_path):
+
+    # Centroids of a detection on a timelapse (frames with their own times): the frame numbers written to the
+    #   FTPdetectinfo file give back the times of the frames (plus the fractional part of a frame of the camera)
+    from RMS.Detection import ftpCentroidFrames
+
+    handle = InputTypeVideo(writeTimelapse(tmp_path), makeConfig())
+    centroids = np.array([[1.0, 10.0, 10.0], [2.5, 11.0, 11.0], [5.25, 12.0, 12.0]])
+    ff_name = FFfile.constructFFName("XX0001", handle.currentFrameTime(frame_no=1, dt_obj=True))
+
+    out = ftpCentroidFrames(handle, centroids, ff_name, CAPTURE_FPS)
+
+    expected = [captureTimes()[1], captureTimes()[2] + datetime.timedelta(seconds=0.5/CAPTURE_FPS),
+                captureTimes()[5] + datetime.timedelta(seconds=0.25/CAPTURE_FPS)]
+    t_ref = FFfile.filenameToDatetime(ff_name)
+    for fr, t in zip(out[:, 0], expected):
+        assert abs((t_ref + datetime.timedelta(seconds=fr/writtenFPS(CAPTURE_FPS)) - t).total_seconds()) < 1e-6
+
+    # The centroids of the detection are not changed (they are used for the event files)
+    assert centroids[1, 0] == 2.5
