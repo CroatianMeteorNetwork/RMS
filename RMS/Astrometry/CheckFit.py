@@ -123,9 +123,8 @@ class SearchOffsets(object):
 
 class SearchRaDec(object):
     """ The parameters of the search of the pointing and the scale of earlier versions, kept as a safety net: the
-        right ascension, declination, position angle and scale, from a simplex of 5% of each value (at least 0.5 deg
-        on the sky), with the tolerance dist_check_threshold converted to degrees for all of them. A declination
-        stepped past a pole is reflected back onto the sphere (Platepar.normalizeRaDec).
+        right ascension, declination, position angle and scale as they are, from a simplex of 5% of each value (at
+        least 0.5 deg on the sky), with the tolerance dist_check_threshold converted to degrees for all of them.
     """
 
     def __init__(self, config, platepar):
@@ -160,12 +159,24 @@ class SearchRaDec(object):
             None
         """
 
-        # The declination is stepped freely, so a pointing past a pole is reflected back onto the sphere and the
-        #   position angle turned with it (a pointing on the sphere is kept as it is, bit for bit)
-        platepar.RA_d, platepar.dec_d, pos_angle_offset = Platepar.normalizeRaDec(params[0], params[1],
-                                                                                  refraction=platepar.refraction)
-        platepar.pos_angle_ref = (params[2] + pos_angle_offset)%360
-        platepar.F_scale = params[3]
+        platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref, platepar.F_scale = params
+
+    @staticmethod
+    def normalize(platepar):
+        """ Reflect a pointing whose declination the search stepped past a pole back onto the sphere, the position
+            angle turned with it (Platepar.normalizeRaDec); earlier versions stored the declination as it was.
+
+        Arguments:
+            platepar: [Platepar] Platepar which is updated in place.
+
+        Return:
+            None
+        """
+
+        if not (-90.0 <= platepar.dec_d <= 90.0):
+            platepar.RA_d, platepar.dec_d, pos_angle_offset = Platepar.normalizeRaDec(
+                platepar.RA_d, platepar.dec_d, refraction=platepar.refraction)
+            platepar.pos_angle_ref = (platepar.pos_angle_ref + pos_angle_offset)%360
 
 
 # A fit of the search may change the scale by at most this fraction; a larger change is no camera of the platepar
@@ -629,6 +640,7 @@ def autoCheckFit(config, platepar, calstars_data, _nn_refinement=False):
     random_state = random.getstate()
     platepar, fit_status = _autoCheckFit(config, platepar, calstars_data, _nn_refinement, SearchRaDec)
     if fit_status:
+        SearchRaDec.normalize(platepar)
         return platepar, fit_status
 
     # If it fails, the check with the offsets of the pointing on the same images, from the initial platepar

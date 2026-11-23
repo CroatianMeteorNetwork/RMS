@@ -18,6 +18,7 @@ import random
 import numpy as np
 
 from RMS.Astrometry import ApplyRecalibrate, CheckFit
+from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
 from RMS.Formats import Platepar as PlateparModule
 from RMS.Formats.Platepar import PointingOffsets
 from Tests import test_CheckFit
@@ -37,11 +38,14 @@ def _turned(pp, shift_px, roll_deg=0.0):
 
 ### Recalibration of an image ###
 
-def _recordSearches(monkeypatch, fail_earlier):
-    """ Record the searches run by recalibrateFF, with the search of earlier versions failing if asked.
+def _recordSearches(monkeypatch, fail_earlier, inaccurate=True):
+    """ Record the searches run by recalibrateFF and whether the search of the offsets had to start from the coarse
+        alignment, with the search of earlier versions failing if asked (with the stars not within the distance
+        threshold, or for another reason).
 
     Return:
-        [list] The search classes, in the order they are run.
+        [list] The search classes, and for the search of the offsets whether it required the alignment, in the
+            order they are run.
     """
 
     searches = []
@@ -51,8 +55,10 @@ def _recordSearches(monkeypatch, fail_earlier):
         """ The recalibration with the given search, recorded. """
 
         searches.append(kwargs['search_class'])
+        if kwargs['search_class'] is CheckFit.SearchOffsets:
+            searches.append(kwargs.get('require_alignment', False))
         if fail_earlier and (kwargs['search_class'] is CheckFit.SearchRaDec):
-            return None, None
+            return None, 0.5, inaccurate
 
         return search(*args, **kwargs)
 
@@ -71,9 +77,27 @@ def test_recalibration_falls_back_to_the_search_of_the_offsets(monkeypatch):
 
     result, _ = ApplyRecalibrate.recalibrateFF(makeConfig(), perturbed(pp), pp.JD, {pp.JD: rows}, catalog_stars)
 
-    assert searches == [CheckFit.SearchRaDec, CheckFit.SearchOffsets]
+    assert searches == [CheckFit.SearchRaDec, CheckFit.SearchOffsets, False]
     assert result is not None
     assert displacement(pp, result, catalog_stars) < 0.05
+
+
+def test_recalibration_with_the_offsets_needs_a_better_pointing_after_other_failures(monkeypatch):
+
+    # The recalibration with the search of RA, Dec and rotation of a platepar 0.2 px off fails for another reason
+    #   than the distance of the stars (no stars matched, too few, the coverage): the search of the offsets has to
+    #   start from a better pointing of the coarse alignment, finds none, and the failure of the search of earlier
+    #   versions (its match radius) is handed over
+    pp = makePlatepar()
+    catalog_stars, rows = makeImage(pp)
+    searches = _recordSearches(monkeypatch, fail_earlier=True, inaccurate=False)
+
+    result, min_match_radius = ApplyRecalibrate.recalibrateFF(makeConfig(), perturbed(pp), pp.JD, {pp.JD: rows},
+                                                              catalog_stars)
+
+    assert searches == [CheckFit.SearchRaDec, CheckFit.SearchOffsets, True]
+    assert result is None
+    assert min_match_radius == 0.5
 
 
 def test_recalibration_of_earlier_versions_needs_no_fallback(monkeypatch):
@@ -106,9 +130,16 @@ def test_search_of_earlier_versions():
     search.apply(fitted, [341.0, 61.0, 6.0, 15.0])
     assert (fitted.RA_d, fitted.dec_d, fitted.pos_angle_ref, fitted.F_scale) == (341.0, 61.0, 6.0, 15.0)
 
-    # A declination stepped past the pole is reflected back onto the sphere (prerelease stored it as it was)
+    # A declination stepped past the pole is searched as it is, and the result reflected back onto the sphere
+    #   (prerelease stored it as it was), with the same field
     search.apply(fitted, [341.0, 90.5, 6.0, 15.0])
+    assert fitted.dec_d == 90.5
+    fitted.refraction = False
+    x_raw, y_raw = raDecToXYPP(np.array([0.0, 120.0]), np.array([88.0, 88.5]), fitted.JD, fitted)
+    CheckFit.SearchRaDec.normalize(fitted)
+    x, y = raDecToXYPP(np.array([0.0, 120.0]), np.array([88.0, 88.5]), fitted.JD, fitted)
     assert -90.0 <= fitted.dec_d <= 90.0
+    assert np.max(np.abs(np.concatenate([x - x_raw, y - y_raw]))) < 1e-6
 
 
 ### Calibration check ###
