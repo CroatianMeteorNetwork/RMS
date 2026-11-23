@@ -473,9 +473,12 @@ import RMS.ConfigReader as cr
 from RMS.ExtractStars import extractStarsAndSave, extractStarsFF
 import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.Platepar import Platepar, getCatalogStarsImagePositions
-from RMS.Formats.FFfile import convertFRNameToFF, constructFFName, ffStructFromImage
-from RMS.Formats.FrameInterface import detectInputTypeFolder, detectInputTypeFile
-from RMS.Formats.FTPdetectinfo import writeFTPdetectinfo
+from RMS.Formats.FFfile import convertFRNameToFF, constructFFName, ffStructFromImage, filenameToDatetime, \
+    validFFName
+from RMS.Formats.FRbin import validFRName
+from RMS.Formats.FrameInterface import detectInputTypeFolder, detectInputTypeFile, messagebox
+from RMS.Formats.FrameTimes import findCaptureTimeSources, parseCaptureVideoName, readCaptureTimes
+from RMS.Formats.FTPdetectinfo import writeFTPdetectinfo, timesToFrames, writtenFPS
 from RMS.Formats import StarCatalog
 from RMS.Pickling import loadPickle, savePickle
 from RMS.Math import angularSeparation, RMSD, vectNorm
@@ -2625,7 +2628,8 @@ class GeoPoints(object):
 class PlateTool(QtWidgets.QMainWindow):
     def __init__(self, input_path=None, config=None, beginning_time=None, fps=None, gamma=None,
         use_fr_files=False, geo_points_input=None, startUI=True, mask=None, nobg=False, peribg=False,
-        flipud=False, flatbiassub=False, exposure_ratio=1.0, show_sattracks=False, tle_file=None):
+        flipud=False, flatbiassub=False, exposure_ratio=1.0, show_sattracks=False, tle_file=None,
+        frame_times=None):
         """ SkyFit interactive window.
 
         Arguments:
@@ -2637,6 +2641,9 @@ class PlateTool(QtWidgets.QMainWindow):
             beginning_time: [datetime] Datetime of the video beginning. Optional, only can be given for
                 video input formats.
             fps: [float] Frames per second, used only when images in a folder are used.
+            frame_times: [str] Path to a file with the time of every frame of a video or an image folder (a JSON
+                file, an FT file, a folder of FT files or an FT archive, see RMS.Formats.FrameTimes). None by
+                default (the frametimes file next to a timelapse is still used).
             gamma: [float] Camera gamma. None by default, then it will be used from the platepar file or
                 config.
             use_fr_files: [bool] Include FR files together with FF files. False by default.
@@ -2695,6 +2702,9 @@ class PlateTool(QtWidgets.QMainWindow):
         # Store forced time of first frame
         self.beginning_time = beginning_time
 
+        # Store the path to the file with the times of the frames (kept in the state file)
+        self.frame_times_path = os.path.abspath(frame_times) if frame_times is not None else None
+
         # Store the background subtraction flag
         self.no_background_subtraction = nobg
 
@@ -2717,6 +2727,10 @@ class PlateTool(QtWidgets.QMainWindow):
         # If camera gamma was given, change the value in config
         if gamma is not None:
             config.gamma = gamma
+
+        # The frame rate of the camera, before a given FPS replaces it (the rolling shutter delay of a pick on a
+        #   frame of a timelapse is within one frame period of the camera, see pickTime)
+        self.camera_fps = config.fps
 
         # If the FPS was given, change the FPS in the config file
         self.fps = fps
@@ -3056,7 +3070,13 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Force FPS for videos if needed
         if (self.fps is not None) and (self.img_handle is not None):
-            if self.img_handle.input_type == "video":
+
+            # The frames are timed from the times of the frames, the given FPS would not change their times
+            if self.perFrameTimes():
+                print("The frames are timed from {:s}, the given FPS is not used"\
+                    .format(self.img_handle.frame_times_source))
+
+            elif self.img_handle.input_type == "video":
                 self.img_handle.fps = self.fps
                 print("Forcing video FPS to:", self.fps)
 
@@ -4079,16 +4099,25 @@ class PlateTool(QtWidgets.QMainWindow):
         prev_dir_path = self.dir_path
         prev_config = self.config
         prev_img_handle = self.img_handle if self.hasData() else None
+        prev_frame_times_path = getattr(self, 'frame_times_path', None)
+        prev_camera_fps = getattr(self, 'camera_fps', None)
 
         try:
             self.input_path = dir_path
             self.dir_path = dir_path
+
+            # A file with the times of the frames belongs to the previous input (if there was one)
+            if prev_img_handle is not None:
+                self.frame_times_path = None
 
             # Load config - use override if provided, otherwise auto-detect from dir
             if config_override is not None:
                 self.config = cr.loadConfigFromDirectory(config_override, self.dir_path)
             else:
                 self.config = cr.loadConfigFromDirectory('.', self.dir_path)
+
+            # The frame rate of the camera of the new station
+            self.camera_fps = self.config.fps
 
             # Force the CV2 backend
             self.config.media_backend = 'cv2'
@@ -4202,6 +4231,8 @@ class PlateTool(QtWidgets.QMainWindow):
             self.input_path = prev_input_path
             self.dir_path = prev_dir_path
             self.config = prev_config
+            self.frame_times_path = prev_frame_times_path
+            self.camera_fps = prev_camera_fps
             if prev_img_handle is not None:
                 self.img_handle = prev_img_handle
             qmessagebox(title="Change Station Failed",
@@ -9875,7 +9906,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.loadState(os.path.dirname(file_), os.path.basename(file_))
 
 
-    def loadState(self, dir_path, state_name, beginning_time=None, mask=None):
+    def loadState(self, dir_path, state_name, beginning_time=None, mask=None, frame_times=None):
         """ Loads state with path to file dir_path and file name state_name. Works mid-program and at the start of
         the program (if done properly).
 
@@ -9890,6 +9921,9 @@ class PlateTool(QtWidgets.QMainWindow):
         Keyword arguments:
             beginning_time: [datetime] Datetime of the video beginning. Optional, only can be given for
                 video input formats.
+            mask: [MaskStructure] The mask, if the state has none. None by default.
+            frame_times: [str] Path to a file with the times of the frames, used instead of the one in the state.
+                None by default.
 
         """
 
@@ -10112,6 +10146,14 @@ class PlateTool(QtWidgets.QMainWindow):
         # If the previous beginning time is None and the new one is not, update the beginning time
         if (self.beginning_time is None) and (beginning_time is not None):
             self.beginning_time = beginning_time
+
+        # The file with the times of the frames: the given one, or the one in the state (states saved before it
+        #   was introduced have none)
+        if frame_times is not None:
+            self.frame_times_path = os.path.abspath(frame_times)
+
+        elif not hasattr(self, "frame_times_path"):
+            self.frame_times_path = None
 
 
         if not hasattr(self, "pick_list"):
@@ -14418,17 +14460,22 @@ class PlateTool(QtWidgets.QMainWindow):
 
         img_handle = None
 
+        # The file with the times of the frames, if given, or the capture times from the FT files of the input
+        frame_times = getattr(self, 'frame_times_path', None)
+        if frame_times is None:
+            frame_times = self.findCaptureTimes()
+
         # Load a state file
         if os.path.isfile(self.input_path):
             img_handle = detectInputTypeFile(self.input_path, self.config, beginning_time=beginning_time, 
-                                             flipud=self.flipud)
+                                             flipud=self.flipud, frame_times=frame_times)
         
         # Load given data from a folder
         elif os.path.isdir(self.input_path):
 
             # Detect input file type and load appropriate input plugin
             img_handle = detectInputTypeFolder(self.dir_path, self.config, beginning_time=beginning_time, \
-                use_fr_files=self.use_fr_files, flipud=self.flipud)
+                use_fr_files=self.use_fr_files, flipud=self.flipud, frame_times=frame_times)
 
             # If the data was not being able to load from the folder, choose a file to load
             if img_handle is None:
@@ -14446,9 +14493,61 @@ class PlateTool(QtWidgets.QMainWindow):
         # If no previous ways of opening data was successful, open a file
         if img_handle is None:
             img_handle = detectInputTypeFile(self.input_path, self.config, beginning_time=beginning_time, 
-                                             flipud=self.flipud)
+                                             flipud=self.flipud, frame_times=frame_times)
 
         self.img_handle = img_handle
+
+        # Tell the user when a timelapse has no frame times (its frames are timed at the nominal spacing)
+        if getattr(img_handle, 'timelapse_without_times', False):
+            messagebox(title="Timelapse without frame times", message=img_handle.timelapseWithoutTimesMessage())
+
+    def findCaptureTimes(self):
+        """ The capture times of the frames of a video of the capture or of FF files, from the FT files in the
+            folder of the input (also in their daily archives, *_FT.tar.bz2) and in the FT folders of the station
+            (see RMS.Formats.FrameTimes.findCaptureTimeSources).
+
+        Return:
+            [ndarray] The capture times (Unix seconds) of the span of the input, None without FT files.
+        """
+
+        input_path = self.input_path
+        if (input_path is None) or (not os.path.exists(input_path)):
+            return None
+
+        # The span of the frames of the input: a video of the capture (shorter than an hour), an FF or FR file, or
+        #   a folder of FF files
+        names = [os.path.basename(input_path)] if os.path.isfile(input_path) else sorted(os.listdir(input_path))
+        video_time = parseCaptureVideoName(names[0]) if os.path.isfile(input_path) else None
+        if video_time is not None:
+            t_start, t_end = video_time, video_time + datetime.timedelta(hours=1)
+
+        else:
+            ff_times = [filenameToDatetime(name) for name in names if validFFName(name) or validFRName(name)]
+            if not ff_times:
+                return None
+
+            t_start, t_end = min(ff_times), max(ff_times) + datetime.timedelta(seconds=256/self.config.fps)
+
+        # The FT files and archives of the span
+        sources = findCaptureTimeSources(input_path, t_start, t_end,
+            data_dirs=(self.config.video_dir, self.config.captured_dir, self.config.archived_dir),
+            times_dir=self.config.times_dir)
+        if not sources:
+            return None
+
+        # Read the capture times of the span (an archive is read once, see FrameTimes.readArchiveCaptureTimes)
+        try:
+            margin = datetime.timedelta(seconds=60)
+            capture_times = readCaptureTimes(sources, t_start=t_start - margin, t_end=t_end + margin)
+
+        except (IOError, OSError, ValueError) as e:
+            print("The FT files of the input cannot be used: {:s}".format(str(e)))
+            return None
+
+        print("Capture times of {:d} frames read from {:s}".format(len(capture_times),
+            ", ".join(os.path.basename(path) for path in sources[:3]) + (", ..." if len(sources) > 3 else "")))
+
+        return capture_times
 
 
     def loadCalstars(self):
@@ -15562,8 +15661,7 @@ class PlateTool(QtWidgets.QMainWindow):
             if self.platepar is not None:
 
                 # Compute time data
-                time_data = [jd2Date(datetime2JD(self.img_handle.beginning_datetime \
-                    + datetime.timedelta(seconds=frame/self.img_handle.fps))) for frame in frames]
+                time_data = [self.img_handle.currentFrameTime(frame_no=frame) for frame in frames]
 
                 # Compute measured RA/Dec from image coordinates
                 _, ra_data, dec_data, _ = xyToRaDecPP(time_data, x_data, \
@@ -17143,6 +17241,12 @@ class PlateTool(QtWidgets.QMainWindow):
 
         print(self.img_handle.beginning_datetime.strftime("%Y%m%d_%H%M%S_"))
 
+        # The frame rate in the file: with the times of the frames, the frame numbers are computed from the times
+        #   of the picks with the frame rate as written (see FTPdetectinfo.timesToFrames)
+        ftp_fps = self.img_handle.fps
+        if self.perFrameTimes():
+            ftp_fps = writtenFPS(ftp_fps)
+
         # Create the list of picks for saving
         centroids = []
         for frame, pick in sorted(self.pick_list.items(), key=lambda x: x[0]):
@@ -17155,18 +17259,24 @@ class PlateTool(QtWidgets.QMainWindow):
             if pick['mode'] == 0:
                 continue
 
-            # Normalize the frame number to the actual time
-            frame_dt = self.img_handle.currentFrameTime(frame_no=frame, dt_obj=True)
-            frame_no = (frame_dt - self.img_handle.beginning_datetime).total_seconds()*self.img_handle.fps
+            # With the times of the frames, the frame number which gives the time of the pick when read back with
+            #   the FF name and the frame rate of the file (not rounded, the frames are not evenly spaced)
+            if self.perFrameTimes():
+                frame_no = timesToFrames([self.pickTime(frame, pick)], ff_name_ftp, ftp_fps)[0]
 
+            else:
 
-            # Get the rolling shutter corrected (or not, depending on the config) frame number
-            if self.config.deinterlace_order == -1:
-                frame_no = self.getRollingShutterCorrectedFrameNo(frame_no, pick)
+                # Normalize the frame number to the actual time
+                frame_dt = self.img_handle.currentFrameTime(frame_no=frame, dt_obj=True)
+                frame_no = (frame_dt - self.img_handle.beginning_datetime).total_seconds()*self.img_handle.fps
 
-            # If the global shutter is used, the frame number can only be an integer
-            if self.config.deinterlace_order == -2:
-                frame_no = round(frame_no, 0)
+                # Get the rolling shutter corrected (or not, depending on the config) frame number
+                if self.config.deinterlace_order == -1:
+                    frame_no = self.getRollingShutterCorrectedFrameNo(frame_no, pick)
+
+                # If the global shutter is used, the frame number can only be an integer
+                if self.config.deinterlace_order == -2:
+                    frame_no = round(frame_no, 0)
 
             # If the intensity sum is masked, assume it's 1
             if np.ma.is_masked(pick['intensity_sum']):
@@ -17217,7 +17327,7 @@ class PlateTool(QtWidgets.QMainWindow):
         station_id = ff_name_ftp.split('_')[1]
 
         # Write the FTPdetect info
-        writeFTPdetectinfo(meteor_list, dir_path, ftpdetectinfo_name, '', station_id, self.img_handle.fps)
+        writeFTPdetectinfo(meteor_list, dir_path, ftpdetectinfo_name, '', station_id, ftp_fps)
 
         print('FTPdetecinfo written to:', os.path.join(dir_path, ftpdetectinfo_name))
 
@@ -17257,8 +17367,15 @@ class PlateTool(QtWidgets.QMainWindow):
         t_end = None
         
         try:
+            # With the times of the frames, from the first to the last frame
+            if hasattr(self, 'img_handle') and (self.img_handle is not None) and self.perFrameTimes():
+                t_start = self.img_handle.currentFrameTime(frame_no=0, dt_obj=True)\
+                    .replace(tzinfo=datetime.timezone.utc)
+                t_end = self.img_handle.currentFrameTime(frame_no=self.img_handle.total_frames - 1, dt_obj=True)\
+                    .replace(tzinfo=datetime.timezone.utc)
+
             # Use manually provided start time if available
-            if hasattr(self, 'beginning_time') and self.beginning_time is not None:
+            elif hasattr(self, 'beginning_time') and self.beginning_time is not None:
                 t_start = self.beginning_time
                 if t_start.tzinfo is None:
                     t_start = t_start.replace(tzinfo=datetime.timezone.utc)
@@ -17884,6 +18001,10 @@ class PlateTool(QtWidgets.QMainWindow):
             # For UWO .vid files DFN data, don't normalize the time to the FPS, as the time is GPS-synced
             if save_raw_times:
                 frame_time = frame_dt
+
+            # With the times of the frames, the time of the frame of the pick (and its row)
+            elif self.perFrameTimes():
+                frame_time = self.pickTime(frame, pick)
             
             else:
                 
@@ -17921,9 +18042,45 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
 
-    def getRollingShutterCorrectedFrameNo(self, frame, pick):
+    def perFrameTimes(self):
+        """ Whether the frames are timed from a file with the time of every frame (e.g. the frametimes file of a
+            timelapse, see RMS.Formats.FrameTimes), and not from a beginning and a frame rate.
+        """
+
+        return getattr(self.img_handle, 'frame_time_table', None) is not None
+
+    def pickTime(self, frame, pick):
+        """ The time of a pick on an input with the time of every frame: the time of its frame, plus the rolling
+            shutter delay of its row within one frame period of the camera (camera_fps). The frames are not evenly
+            spaced (e.g. a timelapse, single frames of the camera seconds apart), so the delay is not a fraction of
+            the spacing of the frames, and the time is not rounded to a frame.
+
+        Arguments:
+            frame: [int] Frame of the pick.
+            pick: [dict] The pick (its row is y_centroid).
+
+        Return:
+            [datetime] The time of the pick.
+        """
+
+        frame_dt = self.img_handle.currentFrameTime(frame_no=frame, dt_obj=True)
+
+        # The delay of the row of the pick in frames of the camera, as a time (the frame rate of the camera, not a
+        #   given FPS, see __init__)
+        if self.config.deinterlace_order == -1:
+            camera_fps = getattr(self, 'camera_fps', None) or self.config.fps
+            delay = self.getRollingShutterCorrectedFrameNo(0.0, pick, fps=camera_fps)/camera_fps
+            frame_dt += datetime.timedelta(seconds=float(delay))
+
+        return frame_dt
+
+    def getRollingShutterCorrectedFrameNo(self, frame, pick, fps=None):
         """ Given a pick object, return rolling shutter corrected (or not, depending on the config) frame
             number.
+
+        Keyword arguments:
+            fps: [float] The frame rate of the frames (the readout time in frames depends on it). None by default
+                (the frame rate of the input).
         """
 
         # Correct the rolling shutter effect
@@ -17938,7 +18095,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Compute the corrected frame time, with the readout time of the rows of the sensor and the crop of
             #   the capture for the inputs from the RMS capture (see RMS.Routines.RollingShutterCorrection)
-            fps = getattr(self.img_handle, 'fps', None) if self.img_handle is not None else None
+            if fps is None:
+                fps = getattr(self.img_handle, 'fps', None) if self.img_handle is not None else None
             cropped = (self.img_handle is None) or RollingShutterCorrection.croppedInput(self.img_handle.input_type)
             frame_no = RollingShutterCorrection.correctFrameTime(frame, pick['y_centroid'], img_h, self.config,
                                                                  fps=fps, cropped=cropped)
@@ -18178,6 +18336,16 @@ if __name__ == '__main__':
     arg_parser.add_argument('-f', '--fps', metavar='FPS', type=float,
                             help="Frames per second when images are used. If not given, it will be read from the config file.")
 
+    arg_parser.add_argument('--frametimes', metavar='FRAME_TIMES_PATH', type=str,
+                            help="File with the time of every frame of a video or an image folder, for frames which "
+                            "are not evenly spaced. A JSON file with {frame index: time} or a list of times, the "
+                            "times as YYYYMMDD_HHMMSS_mmm, ISO 8601 (YYYY-MM-DDTHH:MM:SS.ffffff, UTC) or Unix "
+                            "seconds (e.g. the *_frametimes.json of a timelapse, which is used without this "
+                            "option when it is next to the video); or the FT files of the capture for a video of "
+                            "the capture or FF files: an FT_*.bin file, a folder of them or an *_FT.tar.bz2 "
+                            "archive (without this option, they are looked for in the folder of the input and in "
+                            "the TimeFiles folder of the station).")
+
     arg_parser.add_argument('-g', '--gamma', metavar='CAMERA_GAMMA', type=float,
                             help="Camera gamma value. Science grade cameras have 1.0, consumer grade cameras have 0.45. "
                                  "Adjusting this is essential for good photometry, and doing star photometry through SkyFit"
@@ -18284,7 +18452,8 @@ if __name__ == '__main__':
                 mask.width, mask.height, config.width, config.height))
             mask = None
 
-        plate_tool.loadState(dir_path, state_name, beginning_time=beginning_time, mask=mask)
+        plate_tool.loadState(dir_path, state_name, beginning_time=beginning_time, mask=mask,
+                             frame_times=cml_args.frametimes)
 
         # Initialize satellite track related attributes for loaded state
         plate_tool.show_sattracks = cml_args.sattracks
@@ -18336,7 +18505,7 @@ if __name__ == '__main__':
             gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints, \
             mask=mask, nobg=cml_args.nobg, peribg=cml_args.peribg, flipud=cml_args.flipud, \
             flatbiassub=cml_args.flatbiassub, exposure_ratio=cml_args.expratio, show_sattracks=cml_args.sattracks, \
-            tle_file=cml_args.tle_file)
+            tle_file=cml_args.tle_file, frame_times=cml_args.frametimes)
 
     else:
 
@@ -18345,7 +18514,7 @@ if __name__ == '__main__':
             gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints,
             nobg=cml_args.nobg, peribg=cml_args.peribg, flipud=cml_args.flipud,
             flatbiassub=cml_args.flatbiassub, exposure_ratio=cml_args.expratio,
-            show_sattracks=cml_args.sattracks, tle_file=cml_args.tle_file)
+            show_sattracks=cml_args.sattracks, tle_file=cml_args.tle_file, frame_times=cml_args.frametimes)
 
 
 

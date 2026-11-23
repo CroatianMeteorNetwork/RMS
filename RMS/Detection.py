@@ -1515,7 +1515,8 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                         #   inputs from the RMS capture are cropped)
                         bin_factor = config.detection_binning_factor if (img_handle.input_type != 'ff') else 1
                         frame_no = RollingShutterCorrection.correctFrameTime(frame_no, y_centroid*bin_factor,
-                            img_handle.ff.maxpixel.shape[0]*bin_factor, config, fps=getattr(img_handle, 'fps', None),
+                            img_handle.ff.maxpixel.shape[0]*bin_factor, config,
+                            fps=rollingShutterFPS(img_handle, config),
                             cropped=RollingShutterCorrection.croppedInput(img_handle.input_type))
 
 
@@ -1712,6 +1713,55 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
 
 
+def rollingShutterFPS(img_handle, config):
+    """ The frame rate in which the rolling shutter correction of a centroid is expressed (as the fractional part
+        of its frame): the frame rate of the input, or the frame rate of the camera (config.fps) when the frames have
+        their own times. Those frames are not evenly spaced (e.g. a timelapse, single frames of the camera seconds
+        apart), and the readout of the rows takes a part of a frame period of the camera, not of their spacing (see
+        ftpCentroidFrames).
+
+    Arguments:
+        img_handle: [InputType] The input of the detection.
+        config: [Config] The configuration (fps is the frame rate of the camera).
+
+    Return:
+        [float] The frame rate.
+    """
+
+    if getattr(img_handle, 'frame_time_table', None) is not None:
+        return config.fps
+
+    return getattr(img_handle, 'fps', None)
+
+
+def ftpCentroidFrames(img_handle, centroids, ff_name, fps):
+    """ The centroids of a detection on an input whose frames have their own times (e.g. a timelapse, frames timed
+        from FT files, see RMS.Formats.FrameTimes), with the frame numbers which give the times of the centroids
+        when the FTPdetectinfo file is read back (the time in the FF name plus the frame number over the frame
+        rate of the file). The frames are not evenly spaced, so the frame index over the frame rate is not the time.
+
+    Arguments:
+        img_handle: [InputType] The input of the detection.
+        centroids: [ndarray] The centroids, the frame (with the rolling shutter correction as its fractional part,
+            a fraction of a frame period of the camera, see rollingShutterFPS) in the first column.
+        ff_name: [str] The FF name of the detection in the file.
+        fps: [float] The frame rate given to writeFTPdetectinfo (the frame rate of the camera).
+
+    Return:
+        [ndarray] A copy of the centroids with the frame numbers of the file.
+    """
+
+    # The time of every centroid: the time of its frame plus the fractional part of a frame of the camera
+    centroid_times = [img_handle.currentFrameTime(frame_no=int(fr), dt_obj=True)
+                      + datetime.timedelta(seconds=(fr - int(fr))/fps) for fr in centroids[:, 0]]
+
+    # The frame numbers which give these times when read back
+    centroids = centroids.astype(np.float64)
+    centroids[:, 0] = FTPdetectinfo.timesToFrames(centroid_times, ff_name, fps)
+
+    return centroids
+
+
 if __name__ == "__main__":
 
 
@@ -1735,6 +1785,9 @@ if __name__ == "__main__":
 
     arg_parser.add_argument('-f', '--fps', metavar='FPS', type=float, \
         help="Frames per second when images are used. If not given, it will be read from the config file. Not needed for FF or vid files.")
+
+    arg_parser.add_argument('--frametimes', metavar='FRAME_TIMES_PATH', type=str, \
+        help="File with the time of every frame of a single input (a video, an image folder or FF files), for frames which are not evenly spaced: a JSON file ({frame index: time} or a list of times, as YYYYMMDD_HHMMSS_mmm, ISO 8601 or Unix seconds), or the FT files of the capture for a video of the capture or FF files (an FT_*.bin file, a folder of them or an *_FT.tar.bz2 archive). The *_frametimes.json next to a timelapse is used without it.")
 
     arg_parser.add_argument('-g', '--gamma', metavar='CAMERA_GAMMA', type=float, \
         help="Camera gamma value. Science grade cameras have 1.0, consumer grade cameras have 0.45. Adjusting this is essential for good photometry, and doing star photometry through SkyFit can reveal the real camera gamma.")
@@ -1824,6 +1877,10 @@ if __name__ == "__main__":
     # Check if a list of files is given
     if len(cml_args.dir_path) > 1:
 
+        # A file of frame times belongs to a single input
+        if cml_args.frametimes is not None:
+            print("The frame times file is only used with a single input, it is ignored")
+
         img_handle_list = []
 
         # If it is, load files individually as separate image handles
@@ -1858,7 +1915,8 @@ if __name__ == "__main__":
 
         # Detect the input file format
         img_handle_main = detectInputType(dir_path_input, config, beginning_time=beginning_time, \
-            fps=cml_args.fps, detection=True, preload_video=cml_args.preloadvid)
+            fps=cml_args.fps, detection=True, preload_video=cml_args.preloadvid,
+            frame_times=cml_args.frametimes)
 
         img_handle_list = []
 
@@ -1870,7 +1928,7 @@ if __name__ == "__main__":
                 for file_name in img_handle_main.ff_list:
 
                     img_handle = detectInputType(os.path.join(dir_path_input, file_name), config, \
-                        skip_ff_dir=True, detection=True)
+                        skip_ff_dir=True, detection=True, frame_times=cml_args.frametimes)
 
                     img_handle_list.append(img_handle)
 
@@ -1964,10 +2022,17 @@ if __name__ == "__main__":
                 # Construct the FF file name from the time of the first pick
                 ff_file_name = FFfile.constructFFName(config.stationID, first_pick_time)
 
-                # Reset the frame numbers so that the first pick is at frame 0 
+                # Reset the frame numbers so that the first pick is at frame 0 (not with the times of the frames,
+                #   see below)
                 # frame[i] - int(frame[0]) to preserve the rolling shutter correction encoded as the 
                 #   fractional part of the frame number
-                centroids[:,0] -= int(centroids[0,0])
+                if getattr(img_handle, 'frame_time_table', None) is None:
+                    centroids[:,0] -= int(centroids[0,0])
+
+            # With the times of the frames (e.g. a timelapse, frames timed from FT files), the frame numbers in the
+            #   file give the times of the centroids (a copy, the frames are still used below for the event files)
+            if getattr(img_handle, 'frame_time_table', None) is not None:
+                centroids = ftpCentroidFrames(img_handle, centroids, ff_file_name, config.fps)
 
 
             # Append to the results list
