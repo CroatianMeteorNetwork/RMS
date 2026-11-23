@@ -382,6 +382,9 @@ a camera which moved. `.night_reports.json` records the numbers for every night 
 
 - A file which fails is tried once more after `fail_wait_time` (5 minutes). After the second failure it is
   given up, and stays given up after restarts. The failures are recorded in `OUTPUT/.failed_files.json`.
+- The [live status](#live-status-for-external-monitoring) reports the failed and given up files as faults
+  for 24 hours after their last failure. After that they are only listed (`failed_files`, `given_up`), so an
+  old failure doesn't keep the status at an error.
 - Typical causes: a corrupt or truncated file, a video whose name has no time, a file that can't be decoded.
 - To process the given up files again (e.g. after fixing a problem), start the monitor once with
   `--retry_failed`.
@@ -608,7 +611,8 @@ An example (shortened; the processing statistics and the calibration of the nigh
 | | `last_done`, `recent_files` | The last processed file, and the latest ones with their outcome, input, size, processing time and length. |
 | | `processing_time_min_last_24h`, `processing_time_min_last_hour` | Processing time per file: number, minimum, 10th, 25th, 50th (median), 75th and 90th percentile, maximum, of all files of the last day and hour. |
 | | `processing_to_file_length_ratio` | Processing time over the length of the file, the same statistics. Above 1 per worker the processing falls behind. |
-| | `files_done_last_24h`, `files_failed_last_24h`, `failed_files`, `given_up` | Processed and failed files, the files which failed and will be retried, and the ones given up. |
+| | `files_done_last_24h`, `files_failed_last_24h`, `failed_files`, `given_up` | Processed and failed files of the last day, every file in the record of the failed files (also the given up ones), and the given up ones. The record is kept, so the lists also hold old failures. |
+| | `failed_files_recent`, `given_up_recent`, `failed_files_recent_hours` | The failed and the given up files whose last failure was in the last 24 hours (`failed_files_recent_hours`). Only these are faults (`FILE_FAILED`, `FILE_GIVEN_UP`). |
 | `sky` | `state` | The sky at the end of the latest processed data: `clear`, `partly_clouded`, `clouded`, `too_few_stars` (not searched), or `no_data` (nothing measured yet, or the latest files were not measured, e.g. with the normal detection). |
 | | `observed_utc`, `age_min` | When the sky was observed, and how long ago. |
 | | `observable` | At least 80% of the observed time in the last 10 minutes of the data had at least 80% of the image clear. `null` with less than about 3 minutes of data. |
@@ -636,8 +640,8 @@ An example (shortened; the processing statistics and the calibration of the nigh
 | `MONITOR_STOPPED` | error | The monitor has stopped. |
 | `INPUT_UNREADABLE` | error | The input directory can't be read (e.g. the network share is down). |
 | `DISK_LOW` | error | The processing is paused as the output disk is full. |
-| `FILE_GIVEN_UP` | error | Files failed too often and are not processed, see [Failed files](#failed-files). |
-| `FILE_FAILED` | warning | Files failed and will be processed again. |
+| `FILE_GIVEN_UP` | error | Files failed too often and are not processed, see [Failed files](#failed-files). Only files whose last failure was in the last 24 hours. |
+| `FILE_FAILED` | warning | Files failed in the last 24 hours and will be processed again. |
 | `NOT_KEEPING_UP` | warning | The oldest waiting file was recorded more than three file lengths ago. |
 | `CALIBRATION_FAILING` | error | Fewer than half of the latest chunks on clear sky could be recalibrated (which requires the stars to match within `dist_check_threshold`, 0.33 px, with at least `min_matched_stars` stars): the platepar doesn't fit. |
 | `CAMERA_MOVED` | warning | The pointing differs from the reference platepar by more than 2 px (it normally changes by a fraction of a pixel through the night). |
