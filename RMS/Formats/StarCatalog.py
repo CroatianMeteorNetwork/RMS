@@ -451,9 +451,11 @@ def loadGMNStarCatalog(file_path,
 
         # Convert combined flux back to magnitude
         # Stars where ALL requested bands are missing get ~75 mag and are filtered by LM cut
+        # if lim_mag is valid
         total_flux = np.maximum(total_flux, 1e-30)
         synthetic_mag = -2.5 * np.log10(total_flux)
-        mag_mask = synthetic_mag <= lim_mag
+        if lim_mag is not None:
+            mag_mask = synthetic_mag <= lim_mag
 
     else:
         synthetic_mag = catalog_data['V']
