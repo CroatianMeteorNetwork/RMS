@@ -1736,6 +1736,9 @@ if __name__ == "__main__":
     arg_parser.add_argument('-f', '--fps', metavar='FPS', type=float, \
         help="Frames per second when images are used. If not given, it will be read from the config file. Not needed for FF or vid files.")
 
+    arg_parser.add_argument('--frametimes', metavar='FRAME_TIMES_PATH', type=str, \
+        help="File with the time of every frame of a single input (a video, an image folder or FF files), for frames which are not evenly spaced: a JSON file ({frame index: time} or a list of times, as YYYYMMDD_HHMMSS_mmm, ISO 8601 or Unix seconds), or the FT files of the capture for a video of the capture or FF files (an FT_*.bin file, a folder of them or an *_FT.tar.bz2 archive). The *_frametimes.json next to a timelapse is used without it.")
+
     arg_parser.add_argument('-g', '--gamma', metavar='CAMERA_GAMMA', type=float, \
         help="Camera gamma value. Science grade cameras have 1.0, consumer grade cameras have 0.45. Adjusting this is essential for good photometry, and doing star photometry through SkyFit can reveal the real camera gamma.")
 
@@ -1824,6 +1827,10 @@ if __name__ == "__main__":
     # Check if a list of files is given
     if len(cml_args.dir_path) > 1:
 
+        # A file of frame times belongs to a single input
+        if cml_args.frametimes is not None:
+            print("The frame times file is only used with a single input, it is ignored")
+
         img_handle_list = []
 
         # If it is, load files individually as separate image handles
@@ -1858,7 +1865,8 @@ if __name__ == "__main__":
 
         # Detect the input file format
         img_handle_main = detectInputType(dir_path_input, config, beginning_time=beginning_time, \
-            fps=cml_args.fps, detection=True, preload_video=cml_args.preloadvid)
+            fps=cml_args.fps, detection=True, preload_video=cml_args.preloadvid,
+            frame_times=cml_args.frametimes)
 
         img_handle_list = []
 
@@ -1870,7 +1878,7 @@ if __name__ == "__main__":
                 for file_name in img_handle_main.ff_list:
 
                     img_handle = detectInputType(os.path.join(dir_path_input, file_name), config, \
-                        skip_ff_dir=True, detection=True)
+                        skip_ff_dir=True, detection=True, frame_times=cml_args.frametimes)
 
                     img_handle_list.append(img_handle)
 

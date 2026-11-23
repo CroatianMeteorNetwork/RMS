@@ -21,6 +21,7 @@ from PIL import ImageFont
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName, filenameToDatetime
 from RMS.Misc import mkdirP, RmsDateTime, tarWithProgress, getRmsRootDir
+from RMS.Formats.FrameTimes import FNAME_TEMPLATE, MP4_SUFFIX, TS_JSON_SUFFIX, frameTimesPaths
 from RMS.Logger import getLogger
 
 log = getLogger("rmslogger")
@@ -195,13 +196,8 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
 #  Timelapse generation from image files (Contrails)
 # --------------------------------------------------------------------
 
-#  Output-naming helpers - one place to tweak naming scheme
-FNAME_TEMPLATE = (
-    "{station}_{start:%Y%m%d-%H%M%S}_to_{end:%Y%m%d-%H%M%S}_{suffix}"
-)
-
-MP4_SUFFIX = "frames_timelapse.mp4"
-TS_JSON_SUFFIX = "frametimes.json"
+#  Output-naming helpers - one place to tweak naming scheme (the names of the timelapses and of their frame times
+#   files, FNAME_TEMPLATE, MP4_SUFFIX and TS_JSON_SUFFIX, are in RMS.Formats.FrameTimes, which reads them)
 TAR_SUFFIX_BZ2 = "frames_timelapse.tar.bz2"
 TAR_SUFFIX_GZ = "frames_timelapse.tar.gz"
 
@@ -777,8 +773,13 @@ def generateTimelapseFromFrames(image_files,
             # Record timestamp data (only for frames that are successfully processed)
             timestamp_data[str(processed_count)] = "_".join(os.path.basename(img_path).split('.')[0].split('_')[1:])
 
+            # The tenths of a second from the milliseconds in the name (truncated, as the seconds), so the time on
+            #   the image agrees with the frame times file
+            msec = image_name_parts[3][:3] if len(image_name_parts) > 3 else ''
+            tenths = ".{:d}".format(int(msec)//100) if msec.isdigit() else ''
+
             # Add timestamp with outline for better visibility
-            text = station_id + " " + extracted_time.strftime("%Y-%m-%d %H:%M:%S") + " UTC"
+            text = station_id + " " + extracted_time.strftime("%Y-%m-%d %H:%M:%S") + tenths + " UTC"
             position = (10, image.shape[0] - 6)
             font = cv2.FONT_HERSHEY_SIMPLEX
             font_scale = 0.4
@@ -814,10 +815,7 @@ def generateTimelapseFromFrames(image_files,
     
     # Create a temporary timestamp JSON file
     # note that if an output video filename was provided, then it may not contain MP4_SUFFIX
-    if MP4_SUFFIX in video_path:
-        timestamp_path = video_path.replace(MP4_SUFFIX, TS_JSON_SUFFIX)
-    else: 
-        timestamp_path = video_path.replace('.mp4', '_' + TS_JSON_SUFFIX)
+    timestamp_path = frameTimesPaths(video_path)[0]
     temp_timestamp_path = os.path.join(output_dir, "{}_temp_timestamps.json".format(output_name))
     
     try:
