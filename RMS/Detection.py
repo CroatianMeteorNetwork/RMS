@@ -1515,7 +1515,8 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
                         #   inputs from the RMS capture are cropped)
                         bin_factor = config.detection_binning_factor if (img_handle.input_type != 'ff') else 1
                         frame_no = RollingShutterCorrection.correctFrameTime(frame_no, y_centroid*bin_factor,
-                            img_handle.ff.maxpixel.shape[0]*bin_factor, config, fps=getattr(img_handle, 'fps', None),
+                            img_handle.ff.maxpixel.shape[0]*bin_factor, config,
+                            fps=rollingShutterFPS(img_handle, config),
                             cropped=RollingShutterCorrection.croppedInput(img_handle.input_type))
 
 
@@ -1712,6 +1713,27 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
 
 
+def rollingShutterFPS(img_handle, config):
+    """ The frame rate in which the rolling shutter correction of a centroid is expressed (as the fractional part
+        of its frame): the frame rate of the input, or the frame rate of the camera (config.fps) when the frames have
+        their own times. Those frames are not evenly spaced (e.g. a timelapse, single frames of the camera seconds
+        apart), and the readout of the rows takes a part of a frame period of the camera, not of their spacing (see
+        ftpCentroidFrames).
+
+    Arguments:
+        img_handle: [InputType] The input of the detection.
+        config: [Config] The configuration (fps is the frame rate of the camera).
+
+    Return:
+        [float] The frame rate.
+    """
+
+    if getattr(img_handle, 'frame_time_table', None) is not None:
+        return config.fps
+
+    return getattr(img_handle, 'fps', None)
+
+
 def ftpCentroidFrames(img_handle, centroids, ff_name, fps):
     """ The centroids of a detection on an input whose frames have their own times (e.g. a timelapse, frames timed
         from FT files, see RMS.Formats.FrameTimes), with the frame numbers which give the times of the centroids
@@ -1721,7 +1743,7 @@ def ftpCentroidFrames(img_handle, centroids, ff_name, fps):
     Arguments:
         img_handle: [InputType] The input of the detection.
         centroids: [ndarray] The centroids, the frame (with the rolling shutter correction as its fractional part,
-            a fraction of a frame period of the camera) in the first column.
+            a fraction of a frame period of the camera, see rollingShutterFPS) in the first column.
         ff_name: [str] The FF name of the detection in the file.
         fps: [float] The frame rate given to writeFTPdetectinfo (the frame rate of the camera).
 

@@ -309,6 +309,19 @@ class InputType(object):
 
         return self.offsetDatetime(self.frame_time_table.time(frame_no))
 
+    def chunkFrameCount(self, first_frame):
+        """ The number of frames of the chunk which begins at the given frame (the chunk size, fewer at the end of
+            the input), as loadChunk reads them.
+
+        Arguments:
+            first_frame: [int] The first frame of the chunk.
+
+        Return:
+            [int] The number of frames.
+        """
+
+        return computeFramesToRead(None, self.total_frames, self.chunk_frames, first_frame)
+
     def tableChunkTime(self, first_frame, n_frames, beginning=False):
         """ The time of a chunk of frames from the frame times (corrected by frame_time_offset): the mean time of
             its frames, or the time of its first frame.
@@ -1566,8 +1579,8 @@ class InputTypeVideo(InputType):
 
         # With the times of the frames, the mean time of the frames of the chunk (or the time of its first frame)
         if self.frame_time_table is not None:
-            dt = self.tableChunkTime(self.current_frame_chunk*self.chunk_frames, self.current_fr_chunk_size,
-                                     beginning=beginning)
+            first_frame = self.current_frame_chunk*self.chunk_frames
+            dt = self.tableChunkTime(first_frame, self.chunkFrameCount(first_frame), beginning=beginning)
 
         else:
 
@@ -2779,8 +2792,8 @@ class InputTypeImages(InputType):
 
         # With the times of the images, the mean time of the images of the chunk (or the time of its first image)
         if self.frame_time_table is not None:
-            dt = self.tableChunkTime(self.current_frame_chunk*self.chunk_frames, self.current_fr_chunk_size,
-                                     beginning=beginning)
+            first_frame = self.current_frame_chunk*self.chunk_frames
+            dt = self.tableChunkTime(first_frame, self.chunkFrameCount(first_frame), beginning=beginning)
 
         elif self.uwo_png_mode or self.fripon_mode:
 
