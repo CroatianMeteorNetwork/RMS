@@ -26,9 +26,10 @@ from RMS.Formats.FrameInterface import InputTypeImages, InputTypeVideo, detectIn
 from RMS.Formats import FrameTimes
 from RMS.Formats import FrameInterface
 from RMS.Formats.FTPdetectinfo import timesToFrames, writtenFPS
-from RMS.Formats.FrameTimes import FrameTimeTable, alignCaptureTimes, datetimeToUnix, findCaptureTimeSources, \
-    findFrameTimesFile, frameTimesPaths, parseCaptureVideoName, parseTime, parseTimelapseName, readCaptureTimes, \
-    readJSONFrameTimes, unixToDatetime
+from RMS.Astrometry.Conversions import datetime2UnixTime, timeStringToDatetime
+from RMS.Formats.FrameTimes import FrameTimeTable, alignCaptureTimes, findCaptureTimeSources, findFrameTimesFile, \
+    frameTimesPaths, parseCaptureVideoName, parseTimelapseName, readCaptureTimes, readJSONFrameTimes
+from RMS.Misc import UTCFromTimestamp
 from RMS.Formats import FFfile
 from RMS.Formats.FFStruct import FFStruct
 from RMS.Formats.FrameInterface import InputTypeFRFF
@@ -52,6 +53,9 @@ T0 = datetime.datetime(2026, 11, 22, 22, 47, 25, 2000)
 FRAME_SECS = [0.0, 5.003, 55.012, 60.015, 65.019, 70.119, 75.018, 80.022, 85.025, 90.029, 95.033, 100.037]
 
 TIMELAPSE_NAME = "XX0001_20261122-224725_to_20261122-224905"
+
+# A Unix time as a naive UTC datetime
+fromUnix = UTCFromTimestamp.utcfromtimestamp
 
 
 def makeConfig(offset=0.0):
@@ -134,7 +138,7 @@ def syntheticCapture(t_start, duration, gaps=(), fps=CAPTURE_FPS, seed=1):
     for g0, g1 in gaps:
         secs = secs[(secs < g0) | (secs >= g1)]
 
-    return datetimeToUnix(t_start) + secs
+    return datetime2UnixTime(t_start) + secs
 
 
 def writeFT(dir_path, times, block=256, station="XX0001"):
@@ -144,7 +148,7 @@ def writeFT(dir_path, times, block=256, station="XX0001"):
     for i in range(0, len(times), block):
         ft = FTStruct()
         ft.timestamps = [(i + k, float(t)) for k, t in enumerate(times[i:i + block])]
-        name = unixToDatetime(times[i]).strftime("FT_{:s}_%Y%m%d_%H%M%S.bin".format(station))
+        name = fromUnix(times[i]).strftime("FT_{:s}_%Y%m%d_%H%M%S.bin".format(station))
         FTfile.write(ft, str(dir_path), name)
         paths.append(os.path.join(str(dir_path), name))
 
@@ -152,29 +156,6 @@ def writeFT(dir_path, times, block=256, station="XX0001"):
 
 
 ### Reading the times ###
-
-@pytest.mark.parametrize("value, expected", [
-    ("20261122_224725_002_n", datetime.datetime(2026, 11, 22, 22, 47, 25, 2000)),
-    ("20261122_224725_002_d", datetime.datetime(2026, 11, 22, 22, 47, 25, 2000)),
-    ("20261122_224725_002", datetime.datetime(2026, 11, 22, 22, 47, 25, 2000)),
-    ("2026-11-22T22:47:25.002000", datetime.datetime(2026, 11, 22, 22, 47, 25, 2000)),
-    ("2026-11-22T22:47:25Z", datetime.datetime(2026, 11, 22, 22, 47, 25)),
-    ("2026-11-22 23:47:25.5+01:00", datetime.datetime(2026, 11, 22, 22, 47, 25, 500000)),
-    (1795387645.25, datetime.datetime(2026, 11, 22, 22, 47, 25, 250000)),
-    ("1795387645", datetime.datetime(2026, 11, 22, 22, 47, 25)),
-])
-def test_parse_time(value, expected):
-
-    # The stamp of the saved frames, ISO 8601 (UTC or with an offset) and Unix seconds
-    assert parseTime(value) == expected
-
-
-@pytest.mark.parametrize("value", ["broken", "2026-13-01T00:00:00", True, None, [1]])
-def test_parse_time_rejects(value):
-
-    with pytest.raises(ValueError):
-        parseTime(value)
-
 
 def test_read_json_dictionary_and_list(tmp_path):
 
@@ -277,17 +258,17 @@ def test_align_capture_times_with_dropped_frames():
     times = syntheticCapture(T0, 10.0, gaps=[(2.0, 3.0)])
 
     # A video beginning at a captured frame (its name has the time to the microsecond, close to the frame)
-    start = unixToDatetime(times[10]) + datetime.timedelta(microseconds=300)
+    start = fromUnix(times[10]) + datetime.timedelta(microseconds=300)
     frame_times = alignCaptureTimes(times, start, 100)
 
     # The frames are the captured frames from there on, also after the dropped ones
-    assert frame_times[0] == unixToDatetime(times[10])
-    assert frame_times[60] == unixToDatetime(times[70])
-    assert np.max(np.diff([datetimeToUnix(frame_times[k]) for k in range(100)])) > 0.9
+    assert frame_times[0] == fromUnix(times[10])
+    assert frame_times[60] == fromUnix(times[70])
+    assert np.max(np.diff([datetime2UnixTime(frame_times[k]) for k in range(100)])) > 0.9
 
     # No captured frame at the beginning
     with pytest.raises(ValueError):
-        alignCaptureTimes(times, unixToDatetime(times[0]) - datetime.timedelta(seconds=5), 100)
+        alignCaptureTimes(times, fromUnix(times[0]) - datetime.timedelta(seconds=5), 100)
 
 
 ### Video, image and FF inputs ###
@@ -512,7 +493,7 @@ def test_capture_video_timed_from_timestamps_snapped_to_ft(tmp_path):
     start = T0
     path, secs = writeCaptureVideo(tmp_path, start)
     rng = np.random.RandomState(2)
-    capture = datetimeToUnix(start) + secs + rng.uniform(-0.003, 0.003, len(secs))
+    capture = datetime2UnixTime(start) + secs + rng.uniform(-0.003, 0.003, len(secs))
     processed = np.delete(capture, [5, 6, 30])
     ft_dir = tmp_path/"ft"
     ft_dir.mkdir()
@@ -523,7 +504,7 @@ def test_capture_video_timed_from_timestamps_snapped_to_ft(tmp_path):
     # Every frame of the video is timed: the processed frames at their capture time, the others at the time in
     #   the name plus their timestamp; the number of frames is the number of frames in the video
     offset = datetime.timedelta(seconds=OFFSET)
-    expected = [unixToDatetime(capture[k]) if k not in (5, 6, 30)
+    expected = [fromUnix(capture[k]) if k not in (5, 6, 30)
                 else start + datetime.timedelta(seconds=secs[k]) for k in range(len(secs))]
     assert handle.total_frames == len(secs)
     for k in range(len(secs)):
@@ -542,7 +523,7 @@ def test_capture_video_without_timestamps_not_timed_from_ft(tmp_path, monkeypatc
     # A video whose frame timestamps cannot be read is not timed from the FT files (they cannot be matched to its
     #   frames by their order), but from its name and its frame rate
     times = syntheticCapture(T0, 3.0)
-    name = "XX0001_" + unixToDatetime(times[0]).strftime("%Y%m%d_%H%M%S_%f") + "_video.avi"
+    name = "XX0001_" + fromUnix(times[0]).strftime("%Y%m%d_%H%M%S_%f") + "_video.avi"
     path = str(tmp_path/name)
     writeVideo(path, n_frames=40, fps=CAPTURE_FPS)
 
@@ -599,7 +580,7 @@ def ffCapture(n_blocks=3, gap=(3.0, 3.4)):
     """
 
     times = syntheticCapture(T0, n_blocks*256/CAPTURE_FPS + 5.0, gaps=[gap])
-    names = [ffName(unixToDatetime(times[256*k])) for k in range(n_blocks)]
+    names = [ffName(fromUnix(times[256*k])) for k in range(n_blocks)]
 
     return times, names
 
@@ -620,7 +601,7 @@ def test_ff_files_timed_from_ft_files(tmp_path):
     # Every frame of every FF file is its captured frame (no frame_time_offset, as for the names of FF files)
     for k, name in enumerate(names):
         handle.setCurrentFF(name)
-        assert frameTimes(handle, range(256)) == [unixToDatetime(t) for t in times[256*k:256*(k + 1)]]
+        assert frameTimes(handle, range(256)) == [fromUnix(t) for t in times[256*k:256*(k + 1)]]
 
         # The middle of the file is the time at half of its frames
         assert handle.currentTime(dt_obj=True) == handle.frame_time_table.time(128)
@@ -689,8 +670,8 @@ def test_archive_read_once(tmp_path, monkeypatch):
                         or real_open(*args, **kwargs))
 
     first = readCaptureTimes(archive)
-    second = readCaptureTimes(archive, t_start=unixToDatetime(times[100] - 0.001),
-                              t_end=unixToDatetime(times[200] + 0.001))
+    second = readCaptureTimes(archive, t_start=fromUnix(times[100] - 0.001),
+                              t_end=fromUnix(times[200] + 0.001))
 
     assert np.array_equal(first, times)
     assert np.array_equal(second, times[100:201])
@@ -873,7 +854,7 @@ def test_skyfit2_finds_the_ft_archive_of_ff_files(tmp_path):
     # The frames of the FF files are the captured frames
     handle = pt.img_handle
     handle.setCurrentFF(names[1])
-    assert frameTimes(handle, [0, 100, 255]) == [unixToDatetime(times[256 + k]) for k in [0, 100, 255]]
+    assert frameTimes(handle, [0, 100, 255]) == [fromUnix(times[256 + k]) for k in [0, 100, 255]]
 
 
 def test_skyfit2_finds_the_ft_files_of_a_capture_video(tmp_path):
@@ -889,13 +870,13 @@ def test_skyfit2_finds_the_ft_files_of_a_capture_video(tmp_path):
     ft_dir.mkdir(parents=True)
     writeFT(ft_dir, times)
 
-    path = str(video_dir/("XX0001_" + unixToDatetime(times[0]).strftime("%Y%m%d_%H%M%S_%f") + "_video.avi"))
+    path = str(video_dir/("XX0001_" + fromUnix(times[0]).strftime("%Y%m%d_%H%M%S_%f") + "_video.avi"))
     writeVideo(path, n_frames=40, fps=CAPTURE_FPS)
 
     pt = skyFitStandIn(skyfit2, path, makeConfig())
     skyfit2.PlateTool.detectInputType(pt)
 
-    assert frameTimes(pt.img_handle, range(40)) == [unixToDatetime(t) for t in times[:40]]
+    assert frameTimes(pt.img_handle, range(40)) == [fromUnix(t) for t in times[:40]]
 
 
 def test_skyfit2_warns_about_a_timelapse_without_frame_times(tmp_path, monkeypatch):

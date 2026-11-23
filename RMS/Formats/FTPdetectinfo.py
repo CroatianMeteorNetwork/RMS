@@ -44,8 +44,8 @@ def validDefaultFTPdetectinfo(file_name):
 
 
 def writtenFPS(fps):
-    """ The frame rate as writeFTPdetectinfo writes it (two decimals, at least 0.01), with which the frame numbers of
-        the file are read back.
+    """ The frame rate written in an FTPdetectinfo file (two decimals, at least 0.01), with which the frame numbers
+        of the file are read back.
 
     Arguments:
         fps: [float] Frame rate.
@@ -162,7 +162,7 @@ def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_
                 str(cam_code),
                 int(meteor_No),
                 int(len(centroids)),
-                round(float(fps), 2),
+                writtenFPS(fps),
                 round(ang_vel, 1),
                 round(rho, 1),
                 round(theta, 1),

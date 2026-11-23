@@ -21,7 +21,6 @@ from PIL import ImageFont
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import validFFName, filenameToDatetime
 from RMS.Misc import mkdirP, RmsDateTime, tarWithProgress, getRmsRootDir
-from RMS.Formats.FrameTimes import FNAME_TEMPLATE, MP4_SUFFIX, TS_JSON_SUFFIX, frameTimesPaths
 from RMS.Logger import getLogger
 
 log = getLogger("rmslogger")
@@ -196,8 +195,13 @@ def generateTimelapse(dir_path, keep_images=False, fps=None, output_file=None, h
 #  Timelapse generation from image files (Contrails)
 # --------------------------------------------------------------------
 
-#  Output-naming helpers - one place to tweak naming scheme (the names of the timelapses and of their frame times
-#   files, FNAME_TEMPLATE, MP4_SUFFIX and TS_JSON_SUFFIX, are in RMS.Formats.FrameTimes, which reads them)
+#  Output-naming helpers - one place to tweak naming scheme
+FNAME_TEMPLATE = (
+    "{station}_{start:%Y%m%d-%H%M%S}_to_{end:%Y%m%d-%H%M%S}_{suffix}"
+)
+
+MP4_SUFFIX = "frames_timelapse.mp4"
+TS_JSON_SUFFIX = "frametimes.json"
 TAR_SUFFIX_BZ2 = "frames_timelapse.tar.bz2"
 TAR_SUFFIX_GZ = "frames_timelapse.tar.gz"
 
@@ -215,6 +219,32 @@ IMAGE_PATTERN = re.compile(
 )
 
 ONE_DAY = timedelta(days=1)
+
+
+def frameTimesPaths(video_path):
+    """ The paths where the frametimes JSON file of a timelapse is written (see generateTimelapseFromFrames): the
+        MP4 suffix replaced by the JSON suffix for the default names, or the JSON suffix appended to the name of the
+        video for other names. RMS.Formats.FrameTimes reads the file.
+
+    Arguments:
+        video_path: [str] Path to the video file.
+
+    Return:
+        paths: [list of str] Candidate paths of the JSON file, the most likely first.
+    """
+
+    dir_path, file_name = os.path.split(video_path)
+
+    paths = []
+
+    # A default name: <station>_<start>_to_<end>_frames_timelapse.mp4 -> ..._frametimes.json
+    if file_name.endswith(MP4_SUFFIX):
+        paths.append(os.path.join(dir_path, file_name[:-len(MP4_SUFFIX)] + TS_JSON_SUFFIX))
+
+    # Any other name: <name>.mp4 -> <name>_frametimes.json
+    paths.append(os.path.join(dir_path, os.path.splitext(file_name)[0] + '_' + TS_JSON_SUFFIX))
+
+    return paths
 
 
 def _buildName(station, t0, t1, suffix):

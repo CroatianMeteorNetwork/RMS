@@ -35,23 +35,18 @@ import tarfile
 import cv2
 import numpy as np
 
+from RMS.Astrometry.Conversions import datetime2UnixTime, timeStringToDatetime
 from RMS.Formats import FTfile
 from RMS.Logger import getLogger
+from RMS.Misc import UTCFromTimestamp
+from Utils.GenerateTimelapse import frameTimesPaths
 
 
 log = getLogger("rmslogger")
 
 
-# The names of the timelapses of the saved frames and of their frame times files (written by Utils.GenerateTimelapse)
-FNAME_TEMPLATE = "{station}_{start:%Y%m%d-%H%M%S}_to_{end:%Y%m%d-%H%M%S}_{suffix}"
-MP4_SUFFIX = "frames_timelapse.mp4"
-TS_JSON_SUFFIX = "frametimes.json"
-
-# The beginning and the end of a timelapse in its name (FNAME_TEMPLATE)
+# The beginning and the end of a timelapse in its name (GenerateTimelapse.FNAME_TEMPLATE)
 TIMELAPSE_NAME_PATTERN = re.compile(r"^(?P<station>.+?)_(?P<start>\d{8}-\d{6})_to_(?P<end>\d{8}-\d{6})_")
-
-# The time of a saved frame as in its name and in the frametimes file (e.g. 20261122_224725_002_n)
-RMS_STAMP_PATTERN = re.compile(r"^(?P<stamp>\d{8}_\d{6}_\d{3})(?:_[dn])?$", re.IGNORECASE)
 
 # The names of the FT files (with the time of their first frame) and of their daily archives (with their day)
 FT_FILE_PATTERN = re.compile(r"^FT_.+\.bin$")
@@ -66,24 +61,9 @@ _CAPTURE_TIMES_CACHE = {}
 # The name of a video of the capture (STATION_YYYYMMDD_HHMMSS_ffffff_video.mkv, see BufferedCapture.moveSegment)
 CAPTURE_VIDEO_PATTERN = re.compile(r"^(?P<station>.+?)_(?P<time>\d{8}_\d{6}_\d{6})_video\.\w+$")
 
-UNIX_EPOCH = datetime.datetime(1970, 1, 1)
-
-
-def unixToDatetime(t):
-    """ A Unix time (s) as a naive UTC datetime. """
-
-    return UNIX_EPOCH + datetime.timedelta(seconds=float(t))
-
-
-def datetimeToUnix(dt):
-    """ A naive UTC datetime as a Unix time (s). """
-
-    return (dt - UNIX_EPOCH).total_seconds()
-
-
 def parseTimelapseName(file_name):
     """ The station and the times of the first and the last frame (whole seconds) in the name of a timelapse (see
-        FNAME_TEMPLATE), e.g. CAWEC4_20261122-224725_to_20261123-113909_frames_timelapse.mp4.
+        GenerateTimelapse.FNAME_TEMPLATE), e.g. CAWEC4_20261122-224725_to_20261123-113909_frames_timelapse.mp4.
 
     Arguments:
         file_name: [str] Name or path of the file.
@@ -129,34 +109,8 @@ def parseCaptureVideoName(file_name):
         return None
 
 
-def frameTimesPaths(video_path):
-    """ The paths where the frametimes JSON file of a timelapse is written (see
-        GenerateTimelapse.generateTimelapseFromFrames): the MP4 suffix replaced by the JSON suffix for the default
-        names, or the JSON suffix appended to the name of the video for other names.
-
-    Arguments:
-        video_path: [str] Path to the video file.
-
-    Return:
-        paths: [list of str] Candidate paths of the JSON file, the most likely first.
-    """
-
-    dir_path, file_name = os.path.split(video_path)
-
-    paths = []
-
-    # A default name: <station>_<start>_to_<end>_frames_timelapse.mp4 -> ..._frametimes.json
-    if file_name.endswith(MP4_SUFFIX):
-        paths.append(os.path.join(dir_path, file_name[:-len(MP4_SUFFIX)] + TS_JSON_SUFFIX))
-
-    # Any other name: <name>.mp4 -> <name>_frametimes.json
-    paths.append(os.path.join(dir_path, os.path.splitext(file_name)[0] + '_' + TS_JSON_SUFFIX))
-
-    return paths
-
-
 def findFrameTimesFile(video_path):
-    """ The frametimes JSON file next to a video (see frameTimesPaths), None if there is none. """
+    """ The frametimes JSON file next to a video (see GenerateTimelapse.frameTimesPaths), None if there is none. """
 
     for path in frameTimesPaths(video_path):
         if os.path.isfile(path):
@@ -266,72 +220,10 @@ def findCaptureTimeSources(input_path, t_start, t_end, data_dirs=('VideoFiles', 
     return paths
 
 
-def parseTime(value):
-    """ Read the time of a frame: the stamp of a saved frame (YYYYMMDD_HHMMSS_mmm[_d|_n]), ISO 8601
-        (YYYY-MM-DDTHH:MM:SS[.ffffff], optionally with Z or a UTC offset, a space instead of the T) or Unix seconds
-        (a number or a string of a number).
-
-    Arguments:
-        value: [str, int or float] The time.
-
-    Return:
-        [datetime] The time, naive UTC.
-
-    Raises:
-        ValueError: The time cannot be read.
-    """
-
-    # Unix seconds
-    if isinstance(value, bool):
-        raise ValueError("not a time: {}".format(value))
-
-    if isinstance(value, (int, float)):
-        return unixToDatetime(value)
-
-    if not isinstance(value, str):
-        raise ValueError("not a time: {}".format(value))
-
-    value = value.strip()
-
-    # The stamp of a saved frame
-    match = RMS_STAMP_PATTERN.match(value)
-    if match is not None:
-        return datetime.datetime.strptime(match.group("stamp"), "%Y%m%d_%H%M%S_%f")
-
-    # Unix seconds in a string
-    try:
-        unix_time = float(value)
-
-    except ValueError:
-        unix_time = None
-
-    if unix_time is not None:
-        return unixToDatetime(unix_time)
-
-    # ISO 8601, with an optional UTC offset (Z is UTC)
-    iso = value.replace(' ', 'T')
-    if iso.endswith('Z'):
-        iso = iso[:-1] + '+00:00'
-
-    for fmt in ("%Y-%m-%dT%H:%M:%S.%f%z", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S"):
-        try:
-            dt = datetime.datetime.strptime(iso, fmt)
-
-        except ValueError:
-            continue
-
-        # A time with a UTC offset as naive UTC
-        if dt.tzinfo is not None:
-            dt = (dt - dt.utcoffset()).replace(tzinfo=None)
-
-        return dt
-
-    raise ValueError("not a time: {}".format(value))
-
-
 def readJSONFrameTimes(json_path):
     """ Read the times of the frames from a JSON file: {frame index: time} (e.g. the frametimes file of a
-        timelapse) or a list of the times of the frames in order. The times can be in any form parseTime reads.
+        timelapse) or a list of the times of the frames in order. The times can be in any form
+        RMS.Astrometry.Conversions.timeStringToDatetime reads.
 
     Arguments:
         json_path: [str] Path to the JSON file.
@@ -370,9 +262,9 @@ def readJSONFrameTimes(json_path):
             frame_no = int(key)
             if frame_no < 0:
                 raise ValueError
-            frame_times[frame_no] = parseTime(value)
+            frame_times[frame_no] = timeStringToDatetime(value)
 
-        except (ValueError, TypeError, OverflowError):
+        except (ValueError, TypeError, OverflowError, OSError):
             invalid.append((key, value))
 
     return frame_times, invalid
@@ -458,9 +350,9 @@ def readCaptureTimes(paths, t_start=None, t_end=None):
 
     # Only the times of the given span
     if t_start is not None:
-        times = times[times >= datetimeToUnix(t_start)]
+        times = times[times >= datetime2UnixTime(t_start)]
     if t_end is not None:
-        times = times[times <= datetimeToUnix(t_end)]
+        times = times[times <= datetime2UnixTime(t_end)]
 
     if len(times) < 2:
         raise ValueError("the FT files in {} hold fewer than two frames of the input".format(", ".join(paths)))
@@ -493,7 +385,7 @@ def alignCaptureTimes(capture_times, start_time, n_frames):
     """
 
     period = framePeriod(capture_times)
-    t_start = datetimeToUnix(start_time)
+    t_start = datetime2UnixTime(start_time)
 
     # The capture time closest to the beginning of the video
     i = int(np.searchsorted(capture_times, t_start))
@@ -505,7 +397,7 @@ def alignCaptureTimes(capture_times, start_time, n_frames):
             .format(period/2, start_time))
 
     # The frames of the video are the captured frames from there on
-    return {k: unixToDatetime(t) for k, t in enumerate(capture_times[first:first + n_frames])}
+    return {k: UTCFromTimestamp.utcfromtimestamp(float(t)) for k, t in enumerate(capture_times[first:first + n_frames])}
 
 
 def readVideoTimestamps(video_path):

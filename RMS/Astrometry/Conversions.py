@@ -34,6 +34,7 @@ Includes:
 from __future__ import print_function, division, absolute_import, unicode_literals
 
 import math
+import re
 from datetime import datetime, timedelta, MINYEAR
 
 import numpy as np
@@ -184,6 +185,74 @@ def datetime2UnixTime(dt):
     unix_timestamp = (dt - datetime(1970, 1, 1)).total_seconds()
 
     return unix_timestamp
+
+
+# The time in the names of the saved frames of the capture (e.g. 20261122_224725_002_n: the date, the time, the
+#   milliseconds, and an optional _d or _n for the day and the night mode)
+RMS_TIME_STAMP_PATTERN = re.compile(r"^(?P<stamp>\d{8}_\d{6}_\d{3})(?:_[dn])?$", re.IGNORECASE)
+
+
+def timeStringToDatetime(value):
+    """ Read a time given as a string or a number: the time stamp in the names of the saved frames
+        (YYYYMMDD_HHMMSS_mmm with an optional _d or _n), ISO 8601 (YYYY-MM-DDTHH:MM:SS[.ffffff], optionally with Z
+        or a UTC offset, a space instead of the T) or Unix seconds (a number or a string of a number).
+
+    Arguments:
+        value: [str, int or float] The time.
+
+    Return:
+        [datetime] The time, naive UTC.
+
+    Raises:
+        ValueError: The time cannot be read.
+    """
+
+    # Unix seconds
+    if isinstance(value, bool):
+        raise ValueError("not a time: {}".format(value))
+
+    if isinstance(value, (int, float)):
+        return UTCFromTimestamp.utcfromtimestamp(float(value))
+
+    if not isinstance(value, str):
+        raise ValueError("not a time: {}".format(value))
+
+    value = value.strip()
+
+    # The time stamp of a saved frame
+    match = RMS_TIME_STAMP_PATTERN.match(value)
+    if match is not None:
+        return datetime.strptime(match.group("stamp"), "%Y%m%d_%H%M%S_%f")
+
+    # Unix seconds in a string
+    try:
+        unix_time = float(value)
+
+    except ValueError:
+        unix_time = None
+
+    if unix_time is not None:
+        return UTCFromTimestamp.utcfromtimestamp(unix_time)
+
+    # ISO 8601, with an optional UTC offset (Z is UTC)
+    iso = value.replace(' ', 'T')
+    if iso.endswith('Z'):
+        iso = iso[:-1] + '+00:00'
+
+    for fmt in ("%Y-%m-%dT%H:%M:%S.%f%z", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            dt = datetime.strptime(iso, fmt)
+
+        except ValueError:
+            continue
+
+        # A time with a UTC offset as naive UTC
+        if dt.tzinfo is not None:
+            dt = (dt - dt.utcoffset()).replace(tzinfo=None)
+
+        return dt
+
+    raise ValueError("not a time: {}".format(value))
 
 
 def date2UnixTime(year, month, day, hour, minute, second, millisecond=0, UT_corr=0.0):

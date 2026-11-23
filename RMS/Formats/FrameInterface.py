@@ -21,6 +21,7 @@ import numpy as np
 from astropy.io import fits
 
 from RMS.Astrometry.Conversions import unixTime2Date, datetime2UnixTime
+from RMS.Misc import UTCFromTimestamp
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import reconstructFrame as reconstructFrameFF
 from RMS.Formats.FFfile import validFFName, filenameToDatetime
@@ -28,7 +29,7 @@ from RMS.Formats.FFfile import getMiddleTimeFF, selectFFFrames
 from RMS.Formats.FRbin import read as readFR, validFRName
 from RMS.Formats.FrameTimes import FrameTimeTable, loadFrameTimes, findFrameTimesFile, frameTimesPaths, \
     isCaptureTimesSource, parseTimelapseName, readCaptureTimes, alignCaptureTimes, readVideoTimestamps, \
-    snapCaptureTimes, datetimeToUnix, unixToDatetime
+    snapCaptureTimes
 from RMS.Formats.Vid import readFrame as readVidFrame
 from RMS.Formats.Vid import VidStruct
 from RMS.GeoidHeightEGM96 import wgs84toMSLHeight
@@ -1369,7 +1370,7 @@ class InputTypeVideo(InputType):
         # The capture times, and the times of the frames from their timestamps
         try:
             capture_times = frame_times if isinstance(frame_times, np.ndarray) else readCaptureTimes(frame_times)
-            frame_secs = datetimeToUnix(self.beginning_datetime) + readVideoTimestamps(self.file_path)
+            frame_secs = datetime2UnixTime(self.beginning_datetime) + readVideoTimestamps(self.file_path)
 
         except (IOError, OSError, ValueError) as e:
             log.warning("The FT files are not used for {:s} ({:s}), the frames are timed from the beginning and "
@@ -1389,7 +1390,8 @@ class InputTypeVideo(InputType):
             "shift {:.4f} s)".format(int(np.sum(matched)), len(snapped),
                                      float(np.median((snapped - frame_secs)[matched])) if np.any(matched) else 0.0)
 
-        return self.setFrameTimes({k: unixToDatetime(t) for k, t in enumerate(snapped)}, source=source)
+        return self.setFrameTimes({k: UTCFromTimestamp.utcfromtimestamp(float(t)) for k, t in enumerate(snapped)},
+                                  source=source)
 
     def exitWithoutBeginning(self):
         """ Tell the user that the time of the beginning cannot be read, and exit. """
