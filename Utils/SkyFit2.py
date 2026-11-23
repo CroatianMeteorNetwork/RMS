@@ -464,7 +464,7 @@ from RMS.Astrometry.StarClasses import CatalogStar, GeoPoint, PlanetPoint, Paire
 from RMS.Astrometry.StarFilters import filterPhotometricOutliers, filterBlendedStars
 from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, trueRaDec2ApparentAltAz, \
     trueOfDateRaDec2ApparentAltAz, apparentAltAz2TrueOfDateRaDec, \
-    jd2Date, datetime2JD, JD2LST, geo2Cartesian, vector2RaDec, raDec2Vector
+    jd2Date, datetime2JD, JD2LST, geo2Cartesian, vector2RaDec, raDec2Vector, raDec2AltAz
 from RMS.Astrometry.AstrometryNet import astrometryNetSolve
 from RMS.Astrometry.ApplyRecalibrate import recalibrateFF
 from RMS.Astrometry.AutoPlatepar import selectBestFrame, autoFitPlatepar, plateparModel, applyPlateparModel
@@ -4987,6 +4987,14 @@ class PlateTool(QtWidgets.QMainWindow):
                 np.radians(fov_ra), np.radians(fov_dec)
             ))
             if ang_sep > fov_radius:
+                continue
+
+            # Skip bodies below the horizon, with the same -5 deg limit subsetCatalog uses for the stars.
+            #   On an all-sky camera the image corners lie off the sky, so the selection radius comes out
+            #   close to 180 deg and the gate above lets everything through - the Sun at night would then
+            #   be folded into the image by the extrapolated distortion
+            _, elev = raDec2AltAz(ra_deg, dec_deg, ff_jd, self.platepar.lat, self.platepar.lon)
+            if elev < -5:
                 continue
 
             # Convert RA/Dec to image coordinates
