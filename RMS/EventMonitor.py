@@ -73,7 +73,8 @@ from Utils.StackFFs import stackFFs
 from Utils.FRbinViewer import view
 from Utils.BatchFFtoImage import batchFFtoImage
 from RMS.CaptureDuration import captureDuration
-from RMS.Misc import sanitise, RmsDateTime, getRmsRootDir, mkdirP, AtomicFlag
+from RMS.Misc import sanitise, RmsDateTime, getRmsRootDir, mkdirP, AtomicFlag, setParentDeathSignal, \
+    exitIfParentGone, startParentWatch
 from RMS.Formats.FFfile import read
 from matplotlib.dates import DateFormatter
 
@@ -769,6 +770,10 @@ class EventMonitor(multiprocessing.Process):
         # Grab the logging queue on the parent side so the child can re-attach logging
         # under the 'forkserver'/'spawn' start methods (handlers are not inherited there)
         self.logging_queue = getLoggingQueue()
+
+        # PID of the logical parent, recorded here because __init__ runs in the parent. The monitor stops when
+        #   the parent is gone (see run())
+        self.parent_pid = os.getpid()
 
         log.info("EventMonitor is starting")
         log.info("Monitoring {} ".format(self.syscon.event_monitor_webpage))
@@ -2533,8 +2538,17 @@ class EventMonitor(multiprocessing.Process):
 
         """
 
+        # Die with the parent: an orphaned monitor would keep checking for events and uploading after
+        #   StartCapture was killed, next to the monitor of the restarted instance
+        death_signal = setParentDeathSignal()
+
         # Re-establish logging and signal handling in the child (no-op under 'fork')
         initChildProcess(self.logging_queue, self.config)
+
+        # Exit if the parent died before the death signal was armed, and keep watching the parent where the
+        #   death signal does not see it (forkserver)
+        exitIfParentGone(self.parent_pid, 'EventMonitor')
+        startParentWatch(self.parent_pid, 'EventMonitor', self.exit, death_signal=death_signal)
 
         # Open a sqlite connection owned by this (child) process. Under 'forkserver'/'spawn'
         # the connection from __init__ is not inherited (it was dropped during pickling);

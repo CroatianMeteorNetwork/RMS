@@ -33,7 +33,8 @@ from RMS.Formats import FFfile, FFStruct
 from RMS.Formats import FieldIntensities
 from RMS.Logger import getLogger, getLoggingQueue, initChildProcess, flushChildLogging, \
     LOG_CHILD_EXIT_FLUSH_TIMEOUT
-from RMS.Misc import UTCFromTimestamp, frameBufferShape, AtomicFlag, stableDoubleRead
+from RMS.Misc import UTCFromTimestamp, frameBufferShape, AtomicFlag, stableDoubleRead, setParentDeathSignal, \
+    exitIfParentGone, startParentWatch
 from RMS.Routines.Image import saveImage
 
 # Import Cython functions
@@ -171,6 +172,10 @@ class Compressor(multiprocessing.Process):
         # Grab the logging queue on the parent side so the child can re-attach logging
         # under the 'forkserver'/'spawn' start methods (handlers are not inherited there)
         self.logging_queue = getLoggingQueue()
+
+        # PID of the logical parent, recorded here because __init__ runs in the parent. The compression stops
+        #   when the parent is gone (see run())
+        self.parent_pid = os.getpid()
 
 
     def compress(self, frames):
@@ -365,8 +370,18 @@ class Compressor(multiprocessing.Process):
         """ Retrieve frames from list, convert, compress and save them.
         """
 
+        # Die with the parent: an orphaned compressor would keep running after StartCapture was killed,
+        #   next to the compressor of the restarted instance
+        death_signal = setParentDeathSignal()
+
         # Re-establish logging and signal handling in the child (no-op under 'fork')
         initChildProcess(self.logging_queue, self.config)
+
+        # Exit if the parent died before the death signal was armed, and keep watching the parent where the
+        #   death signal does not see it (forkserver). The block in hand is compressed and saved before the
+        #   normal exit, so the grace is longer
+        exitIfParentGone(self.parent_pid, 'Compressor')
+        startParentWatch(self.parent_pid, 'Compressor', self.exit, death_signal=death_signal, grace=45.0)
 
         # Rebuild numpy views over the shared frame buffers in this process. Under forkserver/spawn
         # the views cannot be inherited, so build them here from the shared multiprocessing.Array

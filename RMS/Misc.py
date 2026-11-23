@@ -39,7 +39,7 @@ from matplotlib import scale as mscale
 from matplotlib import transforms as mtransforms
 from matplotlib.ticker import FixedLocator
 
-from RMS.Logger import getLogger
+from RMS.Logger import getLogger, flushChildLogging
 
 # Map FileNotFoundError to IOError in Python 2 as it does not exist
 if sys.version_info[0] < 3:
@@ -249,14 +249,15 @@ def setParentDeathSignal(sig=9):
     NOTE: per prctl(2), PR_SET_PDEATHSIG fires when the parent *thread* that created this
     process terminates - not when the whole parent process exits. Only call this from
     children spawned by the parent's main thread (RawFrameSaver is spawned from
-    BufferedCapture.run()); a child spawned from a short-lived helper thread would be
-    killed as soon as that thread exits.
+    BufferedCapture.run(); BufferedCapture, Compressor, UploadManager and EventMonitor from
+    the main thread of StartCapture); a child spawned from a short-lived helper thread would
+    be killed as soon as that thread exits.
 
     NOTE: under the multiprocessing 'forkserver' start method (Python 3.14's new default
     on Linux) the OS parent is the fork-server, not the logical parent, so this fires on
     the wrong death. Callers that must survive forkserver should ALSO use an explicit
-    parent-PID liveness check (see RawFrameSaver). This remains a fast, exact fast-path
-    under 'fork' (3.6-3.13 default) and 'spawn'.
+    parent-PID liveness check (see RawFrameSaver and startParentWatch). This remains a
+    fast, exact fast-path under 'fork' (3.6-3.13 default) and 'spawn'.
 
     Prevents a worker forked by another worker from being orphaned and living forever when
     its parent is force-killed. Without this, a BufferedCapture that the watchdog SIGKILLs
@@ -273,6 +274,9 @@ def setParentDeathSignal(sig=9):
     Arguments:
         sig: [int] Signal to receive on parent death. Default 9 (SIGKILL; numeric because
             signal.SIGKILL does not exist on Windows).
+
+    Return:
+        [bool] True if the death signal was armed, False if it is not available here.
     """
     try:
         import ctypes
@@ -285,17 +289,136 @@ def setParentDeathSignal(sig=9):
         if libc.prctl(1, int(sig), 0, 0, 0) != 0:  # 1 == PR_SET_PDEATHSIG
             log.debug("setParentDeathSignal: prctl failed (errno %d), orphan protection "
                       "unavailable", ctypes.get_errno())
-            return
+            return False
 
         # If the parent already exited before we armed the signal we were reparented to
         # init (ppid == 1): exit now rather than linger as an orphan.
         if os.getppid() == 1:
             os._exit(0)
 
+        return True
+
     except Exception as e:
         # Non-Linux or no usable prctl: protection is simply unavailable. Log at debug
         # so a station silently losing this guard is at least visible.
         log.debug("setParentDeathSignal: unavailable (%s)", e)
+
+        return False
+
+
+def _processExists(pid):
+    """ Tell whether a process with the given PID exists.
+
+    POSIX only: on Windows signal 0 is CTRL_C_EVENT, so os.kill(pid, 0) is not a probe there.
+
+    Arguments:
+        pid: [int] Process ID.
+
+    Return:
+        [bool] False only if no process has this PID.
+    """
+
+    # Only ESRCH means that the process is gone, EPERM comes from a live process of another user
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+
+    return True
+
+
+def exitIfParentGone(parent_pid, name):
+    """ Exit this child process at once if its logical parent process is gone.
+
+    The death signal (setParentDeathSignal) only comes for a parent which dies after it was armed, and its
+    getppid() == 1 check misses a parent which died before that when the orphan goes to a subreaper, or
+    when the OS parent is the fork server. This check of the PID recorded in the child's __init__ (which
+    runs in the parent) covers that window. Call it at the top of run(), right after
+    setParentDeathSignal() and initChildProcess(). POSIX only, a no-op elsewhere.
+
+    Arguments:
+        parent_pid: [int] PID of the logical parent, or None to skip the check.
+        name: [str] Name of the child process for the log message.
+    """
+
+    # The probe needs POSIX and a recorded parent
+    if (os.name != 'posix') or (parent_pid is None):
+        return
+
+    # Nobody is left to stop this child, so exit now, after pushing the log record out
+    if not _processExists(parent_pid):
+        log.warning("{:s}: parent process {:d} is gone, exiting".format(name, parent_pid))
+        flushChildLogging(timeout=1.0)
+        os._exit(0)
+
+
+def startParentWatch(parent_pid, name, exit_flag, death_signal=False, grace=15.0, interval=1.0):
+    """ Stop this child process when its logical parent is gone and the death signal does not see it.
+
+    The death signal (setParentDeathSignal) comes when the OS parent dies. Under the 'fork' start method
+    that is the logical parent, but under 'forkserver' (the default on Linux from Python 3.14) it is the
+    fork server, which keeps running while any of its children runs. When StartCapture is killed, its
+    capture, compression and upload processes would then keep running next to the ones of the restarted
+    instance. In that case, and where the death signal is not available, a daemon thread probes the parent
+    every interval seconds (this also works while the child's main thread is blocked in I/O or a long
+    wait). Once the parent is gone, the thread sets the child's exit flag, so the child stops through its
+    normal exit path, and exits the child after the grace period if it is still running then.
+
+    Under 'fork' with the death signal armed, no thread is started: the signal is enough, and a thread
+    would make the processes this child forks (the raw frame saver, the extractor) start from a
+    multi-threaded process.
+
+    POSIX only (os.kill(pid, 0) is not a probe on Windows), a no-op elsewhere.
+
+    Arguments:
+        parent_pid: [int] PID of the logical parent recorded in the child's __init__, or None to not watch.
+        name: [str] Name of the child process for the log messages.
+        exit_flag: [AtomicFlag] The child's exit flag, set when the parent is gone.
+
+    Keyword arguments:
+        death_signal: [bool] True if setParentDeathSignal() armed the death signal in this process. False by
+            default.
+        grace: [float] Seconds the child has to leave through its normal exit path before it is exited. 15 by
+            default.
+        interval: [float] Seconds between two probes of the parent. 1 by default.
+
+    Return:
+        [Thread] The watching thread, None if none was started.
+    """
+
+    # The probe needs POSIX and a recorded parent
+    if (os.name != 'posix') or (parent_pid is None):
+        return None
+
+    # The death signal already covers a logical parent which is also the OS parent
+    if death_signal and (os.getppid() == parent_pid):
+        return None
+
+    def _watch():
+        """ Probe the parent until it is gone, then stop this process. """
+
+        # Wait for the parent to disappear
+        while _processExists(parent_pid):
+            time.sleep(interval)
+
+        # Ask the child to stop through its normal exit path
+        log.warning("{:s}: parent process {:d} is gone, stopping".format(name, parent_pid))
+        exit_flag.set()
+
+        # Exit if the normal exit path did not finish in time (e.g. blocked in device I/O)
+        time.sleep(grace)
+        log.warning("{:s}: still running {:.0f} s after its parent was gone, exiting".format(name, grace))
+        flushChildLogging(timeout=1.0)
+        os._exit(0)
+
+    # Watch from a daemon thread, which the process exit leaves behind
+    watcher = threading.Thread(target=_watch, name='rms-parent-watch')
+    watcher.daemon = True
+    watcher.start()
+
+    return watcher
 
 
 def interruptibleWait(seconds):
