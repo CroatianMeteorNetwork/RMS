@@ -952,3 +952,67 @@ def test_detection_ftpdetectinfo_frames_have_the_frame_times(tmp_path):
 
     # The centroids of the detection are not changed (they are used for the event files)
     assert centroids[1, 0] == 2.5
+
+
+def test_image_folder_chunk_time_is_the_mean_of_all_its_images(tmp_path):
+
+    # Chunks of 4 images with irregular times: the chunk time is the mean time of its 4 images
+    img_dir = tmp_path/"images"
+    img_dir.mkdir()
+    for i in range(len(FRAME_SECS)):
+        cv2.imwrite(str(img_dir/"img_{:03d}.png".format(i)), np.full((48, 64), 20, dtype=np.uint8))
+
+    times_path = str(tmp_path/"times.json")
+    writeJSON(times_path, {str(i): stamp(t) for i, t in enumerate(captureTimes())})
+
+    config = makeConfig()
+    config.width, config.height = 64, 48
+    handle = InputTypeImages(str(img_dir), config, frame_times=times_path, chunk_frames=4)
+
+    for chunk in range(2):
+        secs = FRAME_SECS[4*chunk:4*chunk + 4]
+        expected = T0 + datetime.timedelta(seconds=float(np.mean(secs)))
+        assert abs((handle.currentTime(dt_obj=True) - expected).total_seconds()) < 1e-6
+        handle.nextChunk()
+        handle.loadChunk()
+
+
+def test_detection_rolling_shutter_delay_on_a_timelapse(tmp_path):
+
+    # A centroid halfway down a frame of a timelapse, with a measured readout time of 20 ms: the time written to the
+    #   FTPdetectinfo file is 10 ms after the time of the frame (the readout is a part of a frame period of the
+    #   camera, not of the 5 s spacing of the timelapse)
+    from RMS.Detection import ftpCentroidFrames, rollingShutterFPS
+
+    handle = InputTypeVideo(writeTimelapse(tmp_path), makeConfig())
+    config = makeConfig()
+    config.deinterlace_order = -1
+    config.rolling_shutter_readout = 0.02
+
+    frame = RollingShutterCorrection.correctFrameTime(2.0, 24.0, 48, config, fps=rollingShutterFPS(handle, config),
+                                                      cropped=False)
+    ff_name = FFfile.constructFFName("XX0001", captureTimes()[2])
+    out = ftpCentroidFrames(handle, np.array([[frame, 10.0, 10.0]]), ff_name, config.fps)
+
+    t = FFfile.filenameToDatetime(ff_name) + datetime.timedelta(seconds=out[0, 0]/writtenFPS(config.fps))
+    assert (t - captureTimes()[2]).total_seconds() == pytest.approx(0.010, abs=1e-5)
+
+
+@pytest.mark.parametrize("given_fps", [None, 0.2])
+def test_skyfit2_rolling_shutter_delay_with_a_readout(tmp_path, given_fps):
+
+    # A pick at the bottom row of a timelapse frame with a measured readout time of 20 ms: the delay is 20 ms times
+    #   its share of the rows, with and without a given FPS (-f 0.2 replaces the frame rate in the config)
+    skyfit2 = pytest.importorskip("Utils.SkyFit2")
+    handle = InputTypeVideo(writeTimelapse(tmp_path), makeConfig())
+    config = makeConfig()
+    config.rolling_shutter_readout = 0.02
+
+    pt = makePlateTool(skyfit2, handle, config, -1)
+    pt.camera_fps = config.fps
+    if given_fps is not None:
+        config.fps = given_fps
+
+    for frame in PICK_FRAMES:
+        delay = (skyfit2.PlateTool.pickTime(pt, frame, pt.pick_list[frame]) - captureTimes()[frame]).total_seconds()
+        assert delay == pytest.approx(0.02*PICK_Y/48, abs=1e-6)
