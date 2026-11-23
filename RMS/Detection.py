@@ -1712,6 +1712,34 @@ def detectMeteors(img_handle, config, flat_struct=None, dark=None, mask=None, as
 
 
 
+def ftpCentroidFrames(img_handle, centroids, ff_name, fps):
+    """ The centroids of a detection on an input whose frames have their own times (e.g. a timelapse, frames timed
+        from FT files, see RMS.Formats.FrameTimes), with the frame numbers which give the times of the centroids
+        when the FTPdetectinfo file is read back (the time in the FF name plus the frame number over the frame
+        rate of the file). The frames are not evenly spaced, so the frame index over the frame rate is not the time.
+
+    Arguments:
+        img_handle: [InputType] The input of the detection.
+        centroids: [ndarray] The centroids, the frame (with the rolling shutter correction as its fractional part,
+            a fraction of a frame period of the camera) in the first column.
+        ff_name: [str] The FF name of the detection in the file.
+        fps: [float] The frame rate given to writeFTPdetectinfo (the frame rate of the camera).
+
+    Return:
+        [ndarray] A copy of the centroids with the frame numbers of the file.
+    """
+
+    # The time of every centroid: the time of its frame plus the fractional part of a frame of the camera
+    centroid_times = [img_handle.currentFrameTime(frame_no=int(fr), dt_obj=True)
+                      + datetime.timedelta(seconds=(fr - int(fr))/fps) for fr in centroids[:, 0]]
+
+    # The frame numbers which give these times when read back
+    centroids = centroids.astype(np.float64)
+    centroids[:, 0] = FTPdetectinfo.timesToFrames(centroid_times, ff_name, fps)
+
+    return centroids
+
+
 if __name__ == "__main__":
 
 
@@ -1972,10 +2000,17 @@ if __name__ == "__main__":
                 # Construct the FF file name from the time of the first pick
                 ff_file_name = FFfile.constructFFName(config.stationID, first_pick_time)
 
-                # Reset the frame numbers so that the first pick is at frame 0 
+                # Reset the frame numbers so that the first pick is at frame 0 (not with the times of the frames,
+                #   see below)
                 # frame[i] - int(frame[0]) to preserve the rolling shutter correction encoded as the 
                 #   fractional part of the frame number
-                centroids[:,0] -= int(centroids[0,0])
+                if getattr(img_handle, 'frame_time_table', None) is None:
+                    centroids[:,0] -= int(centroids[0,0])
+
+            # With the times of the frames (e.g. a timelapse, frames timed from FT files), the frame numbers in the
+            #   file give the times of the centroids (a copy, the frames are still used below for the event files)
+            if getattr(img_handle, 'frame_time_table', None) is not None:
+                centroids = ftpCentroidFrames(img_handle, centroids, ff_file_name, config.fps)
 
 
             # Append to the results list

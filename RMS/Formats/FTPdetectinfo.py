@@ -22,6 +22,7 @@ import sys
 import git
 import numpy as np
 from RMS.Misc import RmsDateTime, UTCFromTimestamp
+from RMS.Formats.FFfile import filenameToDatetime
 
 # Map FileNotFoundError to IOError in Python 2 as it does not exist
 if sys.version_info[0] < 3:
@@ -40,6 +41,41 @@ def validDefaultFTPdetectinfo(file_name):
 
 
     return False
+
+
+def writtenFPS(fps):
+    """ The frame rate as writeFTPdetectinfo writes it (two decimals, at least 0.01), with which the frame numbers of
+        the file are read back.
+
+    Arguments:
+        fps: [float] Frame rate.
+
+    Return:
+        [float] The frame rate in the file.
+    """
+
+    return max(round(float(fps), 2), 0.01)
+
+
+def timesToFrames(times, ff_name, fps):
+    """ The frame numbers of an FTPdetectinfo file which give the given times when they are read back, as the time
+        in the FF name plus the frame number over the frame rate in the file (see writtenFPS). Used for inputs
+        whose frames are not evenly spaced (e.g. timelapses, frames timed from FT files), where the frame index
+        over the frame rate is not the time of the frame.
+
+    Arguments:
+        times: [list of datetime] The times.
+        ff_name: [str] The FF name of the detection in the file.
+        fps: [float] The frame rate given to writeFTPdetectinfo.
+
+    Return:
+        [list of float] The frame numbers.
+    """
+
+    t_ref = filenameToDatetime(ff_name)
+    fps_file = writtenFPS(fps)
+
+    return [(t - t_ref).total_seconds()*fps_file for t in times]
 
 
 def writeFTPdetectinfo(meteor_list, ff_directory, file_name, cal_directory, cam_code, fps, calibration=None,

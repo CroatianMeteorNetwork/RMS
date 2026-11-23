@@ -27,7 +27,8 @@ from RMS.Formats.FFfile import validFFName, filenameToDatetime
 from RMS.Formats.FFfile import getMiddleTimeFF, selectFFFrames
 from RMS.Formats.FRbin import read as readFR, validFRName
 from RMS.Formats.FrameTimes import FrameTimeTable, loadFrameTimes, findFrameTimesFile, frameTimesPaths, \
-    isCaptureTimesSource, parseTimelapseName, readCaptureTimes, alignCaptureTimes
+    isCaptureTimesSource, parseTimelapseName, readCaptureTimes, alignCaptureTimes, readVideoTimestamps, \
+    snapCaptureTimes, datetimeToUnix, unixToDatetime
 from RMS.Formats.Vid import readFrame as readVidFrame
 from RMS.Formats.Vid import VidStruct
 from RMS.GeoidHeightEGM96 import wgs84toMSLHeight
@@ -259,41 +260,30 @@ class InputType(object):
 
         return total//1000000, total%1000000
 
-    def setFrameTimes(self, frame_times, n_frames=None, start_time=None):
-        """ Time the frames of the input from a file with the time of every frame (see RMS.Formats.FrameTimes):
-            a JSON file, or FT files of the capture matched to the frames. A file which cannot be used is ignored
-            with a warning, and the frames are timed as without it.
+    def setFrameTimes(self, frame_times, source=None):
+        """ Time the frames of the input from a file with the time of every frame (a JSON file, see
+            RMS.Formats.FrameTimes) or from given times. A file which cannot be used is ignored with a warning, and
+            the frames are timed as without it.
 
         Arguments:
-            frame_times: [str, list or dict] Path to the file (or the FT files, folders and archives), or the
-                times of the frames as {frame index: datetime}.
+            frame_times: [str or dict] Path to the JSON file, or the times of the frames as
+                {frame index: datetime}.
 
         Keyword arguments:
-            n_frames: [int] The number of frames of the input. self.total_frames by default.
-            start_time: [datetime] The time of the first frame from the name of the input, without
-                frame_time_offset, from which the FT files are matched to the frames. None by default.
+            source: [str] Where the given times come from, for the messages. None by default.
 
         Return:
             [bool] True if the frames are timed from the file.
         """
 
-        if n_frames is None:
-            n_frames = self.total_frames
-
         # A description of the source for the messages
-        if isinstance(frame_times, dict):
-            source = "the given frame times"
-        elif isinstance(frame_times, np.ndarray):
-            source = "the FT files"
-        elif isinstance(frame_times, (list, tuple)):
-            source = ", ".join(os.path.basename(path) for path in frame_times)
-        else:
-            source = str(frame_times)
+        if source is None:
+            source = "the given frame times" if isinstance(frame_times, dict) else str(frame_times)
 
-        # Read the times and match them to the frames
+        # Read the times
         try:
             if not isinstance(frame_times, dict):
-                frame_times = loadFrameTimes(frame_times, n_frames=n_frames, start_time=start_time)
+                frame_times = loadFrameTimes(frame_times)
 
             table = FrameTimeTable(frame_times)
 
@@ -1281,9 +1271,13 @@ class InputTypeVideo(InputType):
         print('FPS from video:', self.fps)
         print('Total frames:', self.total_frames)
 
-        # Time the frames from the file of frame times
+        # Time the frames from the file of frame times, or from their timestamps snapped to the FT files of the
+        #   capture
         if frame_times is not None:
-            self.setFrameTimes(frame_times, start_time=self.beginning_datetime)
+            if isCaptureTimesSource(frame_times):
+                self.setCaptureTimes(frame_times)
+            else:
+                self.setFrameTimes(frame_times)
 
         # A timelapse without the times of its frames (see below)
         self.timelapse_without_times = False
@@ -1339,6 +1333,50 @@ class InputTypeVideo(InputType):
 
         # Load the initial chunk
         self.loadChunk()
+
+    def setCaptureTimes(self, frame_times):
+        """ Time the frames of a video of the capture from their own timestamps (the time in the name of the video
+            plus the presentation time of the frame), snapped to the capture times of the FT files within half a
+            frame. The FT files hold the frames the capture processed, which can be fewer than the frames saved in
+            the video, so the frames are not matched by their order. A frame without an FT entry keeps its own time.
+
+        Arguments:
+            frame_times: [str, list or ndarray] FT files, folders or archives, or the capture times read from them.
+
+        Return:
+            [bool] True if the frames are timed from their timestamps.
+        """
+
+        # The time of the first frame from the name of the video (without frame_time_offset)
+        if self.beginning_datetime is None:
+            log.warning("The FT files are not used for {:s}: the time of its first frame is not known"\
+                .format(self.file_name))
+            return False
+
+        # The capture times, and the times of the frames from their timestamps
+        try:
+            capture_times = frame_times if isinstance(frame_times, np.ndarray) else readCaptureTimes(frame_times)
+            frame_secs = datetimeToUnix(self.beginning_datetime) + readVideoTimestamps(self.file_path)
+
+        except (IOError, OSError, ValueError) as e:
+            log.warning("The FT files are not used for {:s} ({:s}), the frames are timed from the beginning and "
+                        "the frame rate".format(self.file_name, str(e)))
+            return False
+
+        # Snap the frames to the capture times
+        snapped, matched = snapCaptureTimes(frame_secs, capture_times)
+        if not np.any(matched):
+            log.warning("No frame of {:s} has a capture time in the FT files, the frames are timed from their "
+                        "timestamps".format(self.file_name))
+
+        # The number of frames is the number of timestamps (the number from the video file is an estimate)
+        self.total_frames = len(snapped)
+
+        source = "the timestamps of the frames snapped to the FT files ({:d} of {:d} frames snapped, median "\
+            "shift {:.4f} s)".format(int(np.sum(matched)), len(snapped),
+                                     float(np.median((snapped - frame_secs)[matched])) if np.any(matched) else 0.0)
+
+        return self.setFrameTimes({k: unixToDatetime(t) for k, t in enumerate(snapped)}, source=source)
 
     def exitWithoutBeginning(self):
         """ Tell the user that the time of the beginning cannot be read, and exit. """
@@ -1996,9 +2034,8 @@ class InputTypeImages(InputType):
                 control whether the binning is applied or not.
             flipud: [bool] If True, the video frames will be flipped upside down. False by default.
             chunk_frames: [int] Number of frames to be used for averaging and maxpixels. 64 by default.
-            frame_times: [str, list or dict] The time of every image in the order of their names (see
-                RMS.Formats.FrameTimes): a JSON file, FT files of the capture, or {frame index: datetime}. None
-                by default.
+            frame_times: [str or dict] The time of every image in the order of their names (see
+                RMS.Formats.FrameTimes): a JSON file, or {frame index: datetime}. None by default.
 
         """
 
@@ -2254,10 +2291,7 @@ class InputTypeImages(InputType):
         # The times of the images from a file of frame times (not in the single image mode, whose frames are not
         #   images), the beginning is then the time of the first image
         if (frame_times is not None) and (self.total_frames > 1):
-            start_time = self.beginning_datetime
-            if beginning_from_frames:
-                start_time = start_time - datetime.timedelta(seconds=self.frameTimeOffset())
-            if self.setFrameTimes(frame_times, n_frames=self.total_frames, start_time=start_time):
+            if self.setFrameTimes(frame_times):
                 self.beginning_datetime = self.frame_time_table.time(0)
                 beginning_from_frames = False
 
@@ -2968,8 +3002,7 @@ class InputTypeDFN(InputType):
 
         # The times of the frames from a file of frame times
         if frame_times is not None:
-            raw_beginning = self.beginning_datetime - datetime.timedelta(seconds=self.frameTimeOffset())
-            if self.setFrameTimes(frame_times, start_time=raw_beginning):
+            if self.setFrameTimes(frame_times):
                 msg = "Frames timed from {:s}: {:d} frames with times".format(self.frame_times_source,
                                                                            len(self.frame_time_table.frame_times))
                 log.info(msg)
@@ -3080,9 +3113,9 @@ def detectInputType(input_path, config, beginning_time=None, fps=None, skip_ff_d
         flipud: [bool] Flip the image vertically. False by default.
         chunk_frames: [int] Number of frames to read in a chunk. None by default, in which case the defaults
             will be used specified for each input type.
-        frame_times: [str, list or dict] The time of every frame (see RMS.Formats.FrameTimes): a JSON file, FT
-            files of the capture (or the capture times read from them), or {frame index: datetime}. Used for FF files
-            (FT files only), videos, image folders and DFN images. None by default.
+        frame_times: [str, list, ndarray or dict] The time of every frame (see RMS.Formats.FrameTimes): a JSON
+            file or {frame index: datetime} (videos, image folders, DFN images), or FT files of the capture or the
+            capture times read from them (FF files, videos of the capture). None by default.
 
     """
     
@@ -3124,9 +3157,9 @@ def detectInputTypeFolder(input_dir, config, beginning_time=None, fps=None, skip
         flipud: [bool] Flip the image vertically. False by default.
         chunk_frames: [int] Number of frames to read in a chunk. None by default, in which case the defaults
             will be used specified for each input type.
-        frame_times: [str, list or dict] The time of every frame (see RMS.Formats.FrameTimes): a JSON file, FT
-            files of the capture, or {frame index: datetime}. Used for FF files (FT files only) and image folders. None
-            by default.
+        frame_times: [str, list, ndarray or dict] The time of every frame (see RMS.Formats.FrameTimes): a JSON
+            file or {frame index: datetime} (image folders), or FT files of the capture or the capture times read
+            from them (FF files). None by default.
 
     """
 
@@ -3214,9 +3247,9 @@ def detectInputTypeFile(input_file, config, beginning_time=None, fps=None, detec
         flipud: [bool] Flip the image vertically. False by default.
         chunk_frames: [int] Number of frames to read in a chunk. None by default, in which case the defaults
             will be used specified for each input type.
-        frame_times: [str, list or dict] The time of every frame (see RMS.Formats.FrameTimes): a JSON file, FT
-            files of the capture, or {frame index: datetime}. Used for FF files (FT files only), videos and DFN images.
-            None by default.
+        frame_times: [str, list, ndarray or dict] The time of every frame (see RMS.Formats.FrameTimes): a JSON
+            file or {frame index: datetime} (videos, DFN images), or FT files of the capture or the capture times
+            read from them (FF files, videos of the capture). None by default.
 
     """
 

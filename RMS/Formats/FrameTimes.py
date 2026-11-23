@@ -10,12 +10,14 @@ after a missing one at the wrong time, so they are timed from a file with the ti
   (YYYYMMDD_HHMMSS_mmm with an optional _d or _n), ISO 8601 (YYYY-MM-DDTHH:MM:SS[.ffffff], optionally with Z or
   a UTC offset) or Unix seconds;
 - the FT files of the capture (FT_<station>_YYYYMMDD_HHMMSS.bin, see RMS/Formats/FTfile.py), with the capture time
-  of every frame: a single file, a folder of them (searched recursively), or the daily archive *_FT.tar(.bz2/.gz)
-  read without extracting it. The capture times time the frames which come one to one from the capture: a video
-  of the capture (STATION_YYYYMMDD_HHMMSS_ffffff_video.mkv, named by the time of its first frame) and an FF file
-  (named by the time of its first frame) begin with the captured frame at the time in their name and continue
-  with the following captured frames. findCaptureTimeSources finds the FT files of an input in the station
-  folders (SkyFit2 looks for them, other tools use them when they are given).
+  of every frame the capture processed: a single file, a folder of them (searched recursively), or the daily archive
+  *_FT.tar(.bz2/.gz) read without extracting it. The frames of an FF file are the processed frames, one to one with
+  the FT entries from the one at the time in its name on (alignCaptureTimes). A video of the capture
+  (STATION_YYYYMMDD_HHMMSS_ffffff_video.mkv) is saved from the stream before the processing, which can drop frames
+  the video keeps, so its frames are timed from their own timestamps in the video (the time in its name plus the
+  presentation time of the frame), each snapped to the FT entry within half a frame (snapCaptureTimes).
+  findCaptureTimeSources finds the FT files of an input in the station folders (SkyFit2 looks for them, other tools
+  use them when they are given).
 
 The times are the capture times of the frames (the timestamps of the FF files, the saved frames and the FT files),
 without frame_time_offset, which the inputs apply as to their other times (not FF files, whose times are their
@@ -30,6 +32,7 @@ import os
 import re
 import tarfile
 
+import cv2
 import numpy as np
 
 from RMS.Formats import FTfile
@@ -472,20 +475,21 @@ def framePeriod(capture_times):
 
 
 def alignCaptureTimes(capture_times, start_time, n_frames):
-    """ The capture times of the frames of a video of the capture: the first frame is the frame captured at the
-        beginning of the video (the capture time within half a frame of it), and the following frames are the
-        following captured frames.
+    """ The capture times of the frames of an FF file: the first frame is the frame captured at the time in its name
+        (the capture time within half a frame of it), and the following frames are the following captured frames.
+        The FF files are made of the frames the capture processed, which are the frames of the FT files, one to one
+        (a video of the capture is not, see snapCaptureTimes).
 
     Arguments:
         capture_times: [ndarray] The capture times (Unix seconds, sorted, see readCaptureTimes).
-        start_time: [datetime] The beginning of the video (e.g. from its name).
-        n_frames: [int] The number of frames of the video.
+        start_time: [datetime] The time of the first frame (from the name of the FF file).
+        n_frames: [int] The number of frames of the FF file.
 
     Return:
         frame_times: [dict] Frame index: capture time (datetime), for the frames within the capture times.
 
     Raises:
-        ValueError: No capture time is within half a frame of the beginning of the video.
+        ValueError: No capture time is within half a frame of the time of the first frame.
     """
 
     period = framePeriod(capture_times)
@@ -504,36 +508,84 @@ def alignCaptureTimes(capture_times, start_time, n_frames):
     return {k: unixToDatetime(t) for k, t in enumerate(capture_times[first:first + n_frames])}
 
 
-def loadFrameTimes(source, n_frames=None, start_time=None):
-    """ Load the times of the frames of an input from a JSON file or from FT files (see the module description).
+def readVideoTimestamps(video_path):
+    """ Read the presentation times of the frames of a video file (from the time of its first frame), which keep
+        the gaps of frames the camera or the network dropped.
 
     Arguments:
-        source: [str, list or ndarray] Path to a JSON file, or FT files, folders and archives, or the capture
-            times read from them (Unix seconds, see readCaptureTimes).
+        video_path: [str] Path to the video file.
 
-    Keyword arguments:
-        n_frames: [int] The number of frames of the input (needed for FT files).
-        start_time: [datetime] The time of the first frame of the input from its name, without
-            frame_time_offset (needed for FT files, the frames are matched from it).
+    Return:
+        [ndarray] The times of the frames from the first one (s).
+
+    Raises:
+        ValueError: The video has no frames, or its timestamps do not increase (no usable timestamps).
+    """
+
+    # Read through the video (without converting the frames) and take the timestamp of every frame
+    cap = cv2.VideoCapture(video_path)
+    times = []
+    try:
+        while cap.grab():
+            times.append(cap.get(cv2.CAP_PROP_POS_MSEC)/1000.0)
+
+    finally:
+        cap.release()
+
+    times = np.array(times)
+
+    if len(times) < 2:
+        raise ValueError("fewer than two frames with timestamps in {:s}".format(video_path))
+
+    if np.any(np.diff(times) <= 0):
+        raise ValueError("the timestamps of the frames of {:s} do not increase".format(video_path))
+
+    return times - times[0]
+
+
+def snapCaptureTimes(frame_times, capture_times):
+    """ Snap the times of the frames of a video of the capture (the time in its name plus the timestamps of the
+        frames) to the capture times of the FT files: a frame takes the capture time within half a frame of it,
+        and keeps its own time without one (a frame which the capture did not process).
+
+    Arguments:
+        frame_times: [ndarray] The times of the frames (Unix seconds).
+        capture_times: [ndarray] The capture times (Unix seconds, sorted).
+
+    Return:
+        (times, matched): [tuple] The snapped times of the frames (Unix seconds), and which frames were snapped
+            (bool array).
+    """
+
+    tol = framePeriod(capture_times)/2
+
+    # The closest capture time to every frame
+    i = np.clip(np.searchsorted(capture_times, frame_times), 1, len(capture_times) - 1)
+    before, after = capture_times[i - 1], capture_times[i]
+    nearest = np.where(np.abs(frame_times - before) <= np.abs(after - frame_times), before, after)
+
+    matched = np.abs(nearest - frame_times) <= tol
+
+    return np.where(matched, nearest, frame_times), matched
+
+
+def loadFrameTimes(source):
+    """ Load the times of the frames of an input from a JSON file (see readJSONFrameTimes). FT files time FF files
+        and videos of the capture only (see alignCaptureTimes and snapCaptureTimes).
+
+    Arguments:
+        source: [str] Path to the JSON file.
 
     Return:
         frame_times: [dict] Frame index: time (naive UTC datetime).
 
     Raises:
-        ValueError: The times cannot be read or matched to the frames. IOError/OSError: a file cannot be read.
+        ValueError: The times cannot be read, or the source is FT files. IOError/OSError: the file cannot be read.
     """
 
-    # FT files: the capture times matched to the frames, from the frame captured at the beginning of the input on
     if isCaptureTimesSource(source):
+        raise ValueError("FT files time the frames of FF files and of videos of the capture only")
 
-        if (start_time is None) or (n_frames is None):
-            raise ValueError("the time of the first frame is needed to match the FT files to the frames")
-
-        capture_times = source if isinstance(source, np.ndarray) else readCaptureTimes(source)
-
-        return alignCaptureTimes(capture_times, start_time, n_frames)
-
-    # A JSON file
     frame_times, invalid = readJSONFrameTimes(source)
 
     if invalid:

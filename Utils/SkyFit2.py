@@ -478,7 +478,7 @@ from RMS.Formats.FFfile import convertFRNameToFF, constructFFName, ffStructFromI
 from RMS.Formats.FRbin import validFRName
 from RMS.Formats.FrameInterface import detectInputTypeFolder, detectInputTypeFile, messagebox
 from RMS.Formats.FrameTimes import findCaptureTimeSources, parseCaptureVideoName, readCaptureTimes
-from RMS.Formats.FTPdetectinfo import writeFTPdetectinfo
+from RMS.Formats.FTPdetectinfo import writeFTPdetectinfo, timesToFrames, writtenFPS
 from RMS.Formats import StarCatalog
 from RMS.Pickling import loadPickle, savePickle
 from RMS.Math import angularSeparation, RMSD, vectNorm
@@ -17241,14 +17241,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
         print(self.img_handle.beginning_datetime.strftime("%Y%m%d_%H%M%S_"))
 
-        # The time and the frame rate from which the frame numbers of the file are read (the time in the FF name,
-        #   in milliseconds, and the frame rate with two decimals, at least 0.01): with the times of the frames,
-        #   the frame numbers are computed from them, so the times read from the file are the times of the picks
-        beg_dt = self.img_handle.beginning_datetime
-        ftp_ref_time = beg_dt.replace(microsecond=1000*(beg_dt.microsecond//1000))
+        # The frame rate in the file: with the times of the frames, the frame numbers are computed from the times
+        #   of the picks with the frame rate as written (see FTPdetectinfo.timesToFrames)
         ftp_fps = self.img_handle.fps
         if self.perFrameTimes():
-            ftp_fps = max(round(ftp_fps, 2), 0.01)
+            ftp_fps = writtenFPS(ftp_fps)
 
         # Create the list of picks for saving
         centroids = []
@@ -17262,10 +17259,10 @@ class PlateTool(QtWidgets.QMainWindow):
             if pick['mode'] == 0:
                 continue
 
-            # With the times of the frames, the frame number of the time of the pick (not rounded, the frames are
-            #   not evenly spaced)
+            # With the times of the frames, the frame number which gives the time of the pick when read back with
+            #   the FF name and the frame rate of the file (not rounded, the frames are not evenly spaced)
             if self.perFrameTimes():
-                frame_no = (self.pickTime(frame, pick) - ftp_ref_time).total_seconds()*ftp_fps
+                frame_no = timesToFrames([self.pickTime(frame, pick)], ff_name_ftp, ftp_fps)[0]
 
             else:
 
