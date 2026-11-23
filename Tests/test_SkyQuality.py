@@ -417,6 +417,36 @@ def test_reference_order_and_reprocessing(tmp_path):
     assert sorted(values[0][np.isfinite(values[0])]) == pytest.approx(list(range(2, SkyReference.MAX_VISITS + 2)))
 
 
+def test_reference_of_an_earlier_version(tmp_path):
+    """ A reference written before its version 2 (no version in the file) keeps its residuals, but not its seen
+        fractions, which are given again by the following inputs; the reference is then written as version 2.
+    """
+
+    # A reference of the earlier format: two stars with a visit each, seen in all chunks
+    keys = np.array([11, 22])
+    times = np.full((2, SkyReference.MAX_VISITS), np.nan)
+    values = np.full((2, SkyReference.MAX_VISITS), np.nan, dtype=np.float32)
+    rates = np.full((2, SkyReference.MAX_VISITS), np.nan, dtype=np.float32)
+    t0 = (BEGIN - datetime.datetime(1970, 1, 1)).total_seconds()
+    times[:, 0], values[:, 0], rates[:, 0] = t0, [0.1, 0.2], 1.0
+    np.savez_compressed(str(tmp_path/'sky_reference_XX0001.npz'), keys=keys, times=times, values=values,
+                        rates=rates, zp_times=np.array([t0]), zp_values=np.array([0.0]))
+
+    # Read: the residuals are kept, the seen fractions are not known
+    reference = SkyReference(str(tmp_path), 'XX0001')
+    values, rates = reference.lookup(keys)
+    assert values[:, 0] == pytest.approx([0.1, 0.2])
+    assert not np.isfinite(rates).any()
+
+    # A following input gives the seen fractions again, and the reference is written as the current version
+    reference.update(BEGIN + datetime.timedelta(minutes=1), keys, np.array([0.1, 0.2]), np.array([0.5, 1.0]),
+                     0.0, [])
+    _, rates = SkyReference(str(tmp_path), 'XX0001').lookup(keys)
+    assert np.nanmedian(rates, axis=1) == pytest.approx([0.5, 1.0])
+    with np.load(str(tmp_path/'sky_reference_XX0001.npz')) as data:
+        assert int(data['version']) == SkyReference.VERSION
+
+
 def test_conditions_log(tmp_path):
     """ The conditions of every chunk are appended to the log of the date of the chunk, with the time of the
         processing.
@@ -587,6 +617,69 @@ def test_short_inputs_build_the_reference(tmp_path):
                       reference=SkyReference(str(tmp_path), 'XX0001'))
     assert not sky_map.isClear(np.array([150.0]), np.array([300.0]), np.array([CHUNK_FRAMES]))[0]
     assert sky_map.isClear(np.array([450.0]), np.array([60.0]), np.array([CHUNK_FRAMES]))[0]
+
+
+def test_short_inputs_keep_stars_near_the_limit_unreliable(monkeypatch, tmp_path):
+    """ Short inputs (two chunks) of clear sky with stars near the limit, seen in only 40% of the chunks: their seen
+        fractions in the reference are those of all inputs, also of the ones in which they were missed, so they are
+        not reliable and a later clear input is clear everywhere. Missing stars which are reliably seen (an opaque
+        cloud) are still clouded.
+    """
+
+    # 200 stars which are always seen and 800 stars near the limit, at their catalog positions (on a jittered grid,
+    #   so every star is matched unambiguously), matched through the patched calibration
+    rng = np.random.default_rng(7)
+    n_bright, n_faint = 200, 800
+    grid_x, grid_y = np.meshgrid(np.linspace(20, WIDTH - 20, 32), np.linspace(20, HEIGHT - 20, 32))
+    pick = rng.permutation(grid_x.size)[:n_bright + n_faint]
+    x = grid_x.ravel()[pick] + rng.uniform(-4, 4, len(pick))
+    y = grid_y.ravel()[pick] + rng.uniform(-4, 4, len(pick))
+    catalog = np.c_[x, y, np.full(len(x), 8.0)]
+    _patchCalibration(monkeypatch, catalog, 0.0)
+    faint = np.arange(len(x)) >= n_bright
+
+    config = cr.Config()
+    config.ff_min_stars = 100
+    platepar = Platepar()
+    platepar.X_res, platepar.Y_res = WIDTH, HEIGHT
+
+    # The stars of the two chunks of an input: the stars near the limit seen at random, none within 90 px of
+    #   (300, 200) under an opaque cloud
+    def skyMap(begin, seed, opaque=False):
+        chunk_rng = np.random.default_rng(seed)
+        star_list = []
+        for i in range(2):
+            keep = ~faint | (chunk_rng.random(len(x)) < 0.4)
+            if opaque:
+                keep &= np.hypot(x - 300, y - 200) > 90
+            star_list.append([_chunkName(i, begin), [(yy, xx, 1000.0, 100.0, 2.0, 500.0, 20.0, 0)
+                                                     for xx, yy in zip(x[keep], y[keep])]])
+        return SkyQualityMap(star_list, platepar, config, begin, FPS, CHUNK_FRAMES,
+                             reference=SkyReference(str(tmp_path), 'XX0001'))
+
+    # Ten clear inputs, 30 s apart, build the reference
+    for k in range(10):
+        skyMap(BEGIN + datetime.timedelta(seconds=30*k), seed=k).updateReference()
+
+    # The stars near the limit have the seen fractions of all their inputs (not 1, from only the inputs in which
+    #   they were seen in both chunks), and only the stars which are always seen are reliable
+    reference = SkyReference(str(tmp_path), 'XX0001')
+    _, rates = reference.lookup(sq.starKeys(x, y))
+    seen = np.nanmedian(rates, axis=1)
+    assert np.all(seen[~faint] == 1.0)
+    assert np.median(seen[faint]) == pytest.approx(0.5, abs=0.1)
+    assert np.mean(seen[faint] >= sq.RELIABLE_FRACTION) < 0.1
+
+    # A later clear input is clear everywhere, and all its reliable stars are seen
+    later = BEGIN + datetime.timedelta(minutes=10)
+    sky_map = skyMap(later, seed=50)
+    assert sky_map.clear.all()
+    assert sky_map.reliable_seen == pytest.approx(1.0, abs=0.05)
+
+    # An opaque cloud during a later input: the reliable stars behind it are missing
+    sky_map = skyMap(later, seed=51, opaque=True)
+    assert not sky_map.isClear(np.array([300.0]), np.array([200.0]), np.array([CHUNK_FRAMES]))[0]
+    assert sky_map.isClear(np.array([60.0]), np.array([460.0]), np.array([CHUNK_FRAMES]))[0]
 
 
 def test_stars_entering_during_the_input(monkeypatch):

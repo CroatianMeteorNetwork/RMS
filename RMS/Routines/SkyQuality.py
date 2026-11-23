@@ -167,12 +167,17 @@ class SkyReference(object):
     MAX_VISITS = 10
     MAX_ZERO_POINTS = 1000
 
+    # Version of the file of the reference. Before version 2, a star was visited only by the inputs in which it had a
+    #   residual (see SkyQualityMap.inputVisits), so its seen fractions are too high and they are not used
+    VERSION = 2
+
     def __init__(self, dir_path, station_id):
         """ Clear-sky reference of a camera, kept across its inputs in its output directory:
             - sky_reference_<station>.npz: for every star (by its key, see starKeys) the clear-sky residual relative
               to the zero point of the input and the fraction of the chunks in which it was seen, of each of its
-              latest inputs, with the time of the observation (the beginning of the input), and the zero points
-              of the inputs (the median clear-sky residual of their stars) with their times,
+              latest inputs, with the time of the observation (the beginning of the input), the zero points of
+              the inputs (the median clear-sky residual of their stars) with their times, and the version of the
+              file (see VERSION),
             - sky_conditions_<station>_<YYYYMMDD>.csv: the conditions of every chunk (one file per UTC date of the
               observation), appended by every input. A chunk processed again has a newer row, the latest row of a
               chunk (by the processing time) is the valid one.
@@ -216,6 +221,15 @@ class SkyReference(object):
                     self.keys, self.times = data['keys'], data['times']
                     self.values, self.rates = data['values'], data['rates']
                     self.zp_times, self.zp_values = data['zp_times'], data['zp_values']
+                    version = int(data['version']) if 'version' in data.files else 1
+
+                # The seen fractions of a reference of an earlier version are left out (the residuals are kept): they
+                #   are those of the inputs in which the stars were seen, so the stars which are often missed would
+                #   be expected where they are not seen, and the sky there would be clouded. The following inputs
+                #   give their seen fractions again
+                if version < 2:
+                    self.rates = np.full(self.values.shape, np.nan, dtype=np.float32)
+
             except Exception as e:
                 log.warning('Sky quality: the reference {:s} can\'t be read ({:s}), it is started again'.format(
                     self.stars_path, str(e)))
@@ -341,7 +355,7 @@ class SkyReference(object):
             #   sees a partly written file
             tmp_path = self.stars_path + '.tmp.npz'
             np.savez_compressed(tmp_path, keys=keys_all, times=times, values=vals, rates=rts, zp_times=zp_times,
-                                zp_values=zp_values)
+                                zp_values=zp_values, version=self.VERSION)
             os.replace(tmp_path, self.stars_path)
 
             # The reference in memory is the one written
@@ -742,26 +756,10 @@ class SkyQualityMap(object):
                 ref[found] = star_ref[pos[found]]
             excess.append(m[:, 2] - ref)
 
-        # The reliable stars and their seen fractions, to tell where stars are missing: the matched stars of this
-        #   input, and the catalog stars in the image which are not matched in it but are reliable in the reference
-        #   (behind a cloud which stays during the whole input)
+        # The reliable stars and their seen fractions, to tell where stars are missing: the stars of this input are
+        #   also the catalog stars in the image which are not matched in it (see inputVisits), so the ones which are
+        #   reliable in the reference are expected (behind a cloud which stays during the whole input)
         reliable_keys, reliable_seen = self.star_keys[reliable], star_seen[reliable]
-        if (self.reference is not None) and (self.in_image is not None):
-            # The catalog stars in the image of the usable chunks which are not matched in this input
-            in_keys = np.unique(np.concatenate([self.in_image[i][:, 2] for i in np.nonzero(usable)[0]]))
-            in_keys = in_keys[~np.isin(in_keys, self.star_keys)]
-            if len(in_keys):
-
-                # Their seen fractions in the other inputs; the reliable ones are added (sorted by key)
-                _, ref_rates = self.reference.lookup(in_keys, exclude_time=unixTime(self.begin_time))
-                with np.errstate(all='ignore'), warnings.catch_warnings():
-                    warnings.simplefilter('ignore', category=RuntimeWarning)
-                    ref_seen = np.nanmedian(ref_rates, axis=1)
-                more = np.isfinite(ref_seen) & (ref_seen >= RELIABLE_FRACTION)
-                reliable_keys = np.r_[reliable_keys, in_keys[more]]
-                reliable_seen = np.r_[reliable_seen, ref_seen[more]]
-                order = np.argsort(reliable_keys)
-                reliable_keys, reliable_seen = reliable_keys[order], reliable_seen[order]
 
         # The distance to the k-th nearest matched star of every grid point, with its reference (the densest
         #   chunks), for the chunks without enough reliable stars
@@ -836,8 +834,9 @@ class SkyQualityMap(object):
             usable: [ndarray] Boolean, the usable chunks.
 
         Return:
-            (keys, residuals, rates, zero_point): sorted keys of the matched stars, their reference residuals (NaN
-                if not known), their seen fractions (NaN if not known), and the zero point of clear sky.
+            (keys, residuals, rates, zero_point): sorted keys of the stars of this input (matched or in the image,
+                see inputVisits), their reference residuals (NaN if not known), their seen fractions (NaN if not
+                known), and the zero point of clear sky.
         """
 
         # The visits of this input: the residuals of its stars relative to its zero point (the median of the
@@ -876,8 +875,14 @@ class SkyQualityMap(object):
 
 
     def inputVisits(self, use, clear=None):
-        """ The visit of this input of every matched star: the STAR_QUANTILE quantile of its residuals, and the
-            fraction of the chunks in which it is in the image in which it is seen.
+        """ The visit of this input of every star which is matched or in the image: the STAR_QUANTILE quantile of
+            its residuals, and the fraction of the chunks in which it is in the image in which it is seen.
+
+        The seen fraction is that of every catalog star in the image, also of the stars which are matched in too
+        few chunks for a residual, or not at all. With the seen fractions of the stars with a residual only, a star
+        near the limit would be visited only by the inputs in which it happened to be seen (in all chunks of a
+        short input, a seen fraction of 1) and never by the inputs in which it was missed, and it would look
+        reliable however rarely it is seen.
 
         Arguments:
             use: [ndarray] Boolean, the chunks which are used.
@@ -888,46 +893,50 @@ class SkyQualityMap(object):
 
         Return:
             (keys, values, rates): sorted keys, residuals (NaN with fewer observations than minStarObs) and seen
-                fractions (NaN without the catalog stars in the image).
+                fractions (NaN for the stars which are not in the image, or without the catalog stars in the image).
         """
 
-        # The observations of the stars in the used chunks (on clear sky), as rows [residual, key]
-        obs = []
+        # The observations of the stars in the used chunks (on clear sky), as rows [residual, key], and the catalog
+        #   stars in the image there (on clear sky), as rows [x, y, key, seen]
+        obs, inside = [], []
         for i in np.nonzero(use)[0]:
             m = self.matched[i]
             if clear is not None:
                 m = m[clear[i, self.gridIndex(m[:, 0], m[:, 1])]]
             obs.append(m[:, 2:4])
+
+            # The catalog stars in the image of the chunk (on clear sky)
+            if self.in_image is not None:
+                in_chunk = self.in_image[i]
+                if clear is not None:
+                    in_chunk = in_chunk[clear[i, self.gridIndex(in_chunk[:, 0], in_chunk[:, 1])]]
+                inside.append(in_chunk)
         obs = np.vstack(obs) if obs else np.zeros((0, 2))
-        if len(obs) == 0:
+        inside = np.vstack(inside) if inside else np.zeros((0, 4))
+
+        # Every star which is matched or in the image, by its sorted key
+        keys = np.unique(np.r_[obs[:, 1], inside[:, 2]])
+        if len(keys) == 0:
             return np.zeros(0), np.zeros(0), np.zeros(0)
 
-        # The residuals of every star: the observations sorted by star (the stable sort keeps their order in time),
-        #   so the observations of the star j are order[bounds[j]:bounds[j + 1]]
-        keys, inverse, counts = np.unique(obs[:, 1], return_inverse=True, return_counts=True)
+        # The residuals of every matched star: the observations sorted by star (the stable sort keeps their order in
+        #   time), so the observations of the matched star j are order[bounds[j]:bounds[j + 1]], and its row among
+        #   all stars is found by a binary search in the sorted keys
+        obs_keys, inverse, counts = np.unique(obs[:, 1], return_inverse=True, return_counts=True)
         order = np.argsort(inverse, kind='stable')
         bounds = np.r_[0, np.cumsum(counts)]
+        rows = np.searchsorted(keys, obs_keys)
         values = np.full(len(keys), np.nan)
         for j in np.nonzero(counts >= minStarObs(np.count_nonzero(use)))[0]:
-            values[j] = np.percentile(obs[order[bounds[j]:bounds[j + 1]], 0], STAR_QUANTILE)
+            values[rows[j]] = np.percentile(obs[order[bounds[j]:bounds[j + 1]], 0], STAR_QUANTILE)
 
-        # The fraction of the chunks in which every star is in the image (on clear sky) in which it is seen
+        # The fraction of the chunks in which every star is in the image (on clear sky) in which it is seen, whether
+        #   it is matched or not (every star in the image has a row, found by a binary search in the sorted keys)
         rates = np.full(len(keys), np.nan)
-        if self.in_image is not None:
-            n_in, n_seen = np.zeros(len(keys)), np.zeros(len(keys))
-            for i in np.nonzero(use)[0]:
-                # The catalog stars in the image of the chunk (on clear sky)
-                inside = self.in_image[i]
-                if clear is not None:
-                    inside = inside[clear[i, self.gridIndex(inside[:, 0], inside[:, 1])]]
-
-                # Counted for the matched stars of this input (the keys are sorted, so the row of a star is found by
-                #   a binary search)
-                pos = np.clip(np.searchsorted(keys, inside[:, 2]), 0, len(keys) - 1)
-                hit = keys[pos] == inside[:, 2]
-                np.add.at(n_in, pos[hit], 1)
-                np.add.at(n_seen, pos[hit], inside[hit, 3])
-
+        if len(inside):
+            pos = np.searchsorted(keys, inside[:, 2])
+            n_in = np.bincount(pos, minlength=len(keys)).astype(np.float64)
+            n_seen = np.bincount(pos, weights=inside[:, 3], minlength=len(keys))
             with np.errstate(all='ignore'):
                 rates = np.where(n_in > 0, n_seen/n_in, np.nan)
 
@@ -963,10 +972,16 @@ class SkyQualityMap(object):
         #   input don't enter the reference
         use = self.clear.any(axis=1)
         keys, values, rates = self.inputVisits(use, clear=self.clear)
-        keep = np.isfinite(values)
 
-        # The residuals relative to the zero point of this input (the median of its stars), see starReferences
-        zero_point = np.median(values[keep]) if keep.any() else np.nan
+        # Every star with a residual or a seen fraction is visited, also the stars which were seen in only some of
+        #   the chunks or in none, so the seen fractions of the reference are not only those of the inputs in which
+        #   a star was seen (see inputVisits)
+        keep = np.isfinite(values) | np.isfinite(rates)
+
+        # The residuals relative to the zero point of this input (the median of its stars with a residual), see
+        #   starReferences
+        has_value = np.isfinite(values)
+        zero_point = np.median(values[has_value]) if has_value.any() else np.nan
         self.reference.update(self.begin_time, keys[keep], values[keep] - zero_point, rates[keep], zero_point,
                               self.conditions())
 
