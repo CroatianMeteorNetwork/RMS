@@ -170,8 +170,8 @@ def test_recalibration_from_far_off():
 
 def test_nn_fit_from_far_off():
 
-    # The NN fit of a pointing 4 deg off and rolled by 15 deg, with 10 hot pixels, finds the true pointing within
-    #   the pull of the hot pixels on the NN cost (the simplex of the fit alone reaches about a degree)
+    # The NN fit of a pointing 4 deg off and rolled by 15 deg, with 10 hot pixels, finds the true pointing (the
+    #   simplex of the fit alone reaches about a degree)
     pp, img_x, img_y, catalog_stars = _scene(50.0)
     fitted = _turned(pp, 4.0, 250.0, 15.0)
 
@@ -180,4 +180,4 @@ def test_nn_fit_from_far_off():
     success, _, inlier_fraction, _ = fitted.fitPointingNN(pp.JD, img_stars, catalog_stars)
 
     assert success and (inlier_fraction >= 80/90)
-    assert displacement(pp, fitted, catalog_stars[:300]) < 1.5
+    assert displacement(pp, fitted, catalog_stars[:300]) < 0.15

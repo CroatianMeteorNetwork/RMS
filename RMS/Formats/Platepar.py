@@ -571,6 +571,44 @@ class PointingOffsets(object):
             platepar.F_scale = self.toScale(offsets[3])
 
 
+# Step of the offsets of the pointing (px) for the derivatives of the least squares fits: well above the rounding
+#   of the projection (about 1e-5 px near a pole) and small enough that the stars move linearly
+OFFSET_JACOBIAN_STEP_PX = 1e-3
+
+
+def offsetsJacobian(residuals, step=OFFSET_JACOBIAN_STEP_PX):
+    """ The Jacobian of residuals of the offsets of the pointing (see PointingOffsets) by central differences with
+        an absolute step, for scipy.optimize.least_squares. Its own derivatives step the parameters relative to
+        their value (or by 1e-8 at zero, depending on the version of scipy), which for offsets near zero is below
+        the rounding of the projection.
+
+    Arguments:
+        residuals: [callable] Function of the offsets (px) returning the residuals.
+
+    Keyword arguments:
+        step: [float] Step of the offsets (px). OFFSET_JACOBIAN_STEP_PX by default.
+
+    Return:
+        [callable] Function of the offsets returning the Jacobian (residuals x offsets).
+    """
+
+    def _jacobian(offsets, *args, **kwargs):
+        """ The Jacobian at the given offsets (the arguments least_squares hands on to the function are not
+            used, the residuals take none). """
+
+        offsets = np.asarray(offsets, dtype=np.float64)
+        columns = []
+        for i in range(len(offsets)):
+            delta = np.zeros(len(offsets))
+            delta[i] = step
+            after, before = np.asarray(residuals(offsets + delta)), np.asarray(residuals(offsets - delta))
+            columns.append((after - before)/(2*step))
+
+        return np.column_stack(columns)
+
+    return _jacobian
+
+
 # A RANSAC fit (Platepar.fitAstrometry with use_nn_cost) is clearly good if at least this share of the image stars
 #   ended in its matched pairs, and the final fit on the pairs left an RMS distance of at most RANSAC_GOOD_RMS_PX
 RANSAC_GOOD_FRACTION = 0.6
@@ -605,6 +643,44 @@ def ransacQuality(platepar, jd, pairs):
     rms = np.sqrt(np.mean(dist_sq)) if np.all(np.isfinite(dist_sq)) else np.inf
 
     return (len(img_stars), -rms)
+
+
+def nearestPairs(platepar, jd, img_stars, catalog_stars, max_dist_px):
+    """ One-to-one pairs of image stars and the nearest catalog stars the platepar puts within the given distance
+        on the image (the closest pair of a catalog star kept).
+
+    Arguments:
+        platepar: [Platepar] Platepar.
+        jd: [float] Julian date of the image.
+        img_stars: [ndarray] Image stars (x, y, intensity).
+        catalog_stars: [ndarray] Catalog stars (ra, dec, mag).
+        max_dist_px: [float] Largest distance (px).
+
+    Return:
+        (img_stars, catalog_stars): [tuple of ndarrays] The paired stars.
+    """
+
+    img_stars, catalog_stars = np.asarray(img_stars), np.asarray(catalog_stars)
+    x, y, _ = getCatalogStarsImagePositions(catalog_stars[:, :3], jd, platepar)
+    inside = np.where(np.isfinite(x) & np.isfinite(y))[0]
+    finite_img = np.where(np.all(np.isfinite(img_stars[:, :2]), axis=1))[0]
+    if (len(inside) == 0) or (len(finite_img) == 0):
+        return img_stars[:0], catalog_stars[:0]
+
+    # The nearest catalog star of every image star, closest pairs first, each catalog star once
+    dist, nearest = cKDTree(np.column_stack([x[inside], y[inside]])).query(img_stars[finite_img, :2], k=1)
+    keep_img, keep_cat, seen = [], [], set()
+    for k in np.argsort(dist):
+        if dist[k] > max_dist_px:
+            break
+        cat_i = inside[nearest[k]]
+        if cat_i in seen:
+            continue
+        seen.add(cat_i)
+        keep_img.append(finite_img[k])
+        keep_cat.append(cat_i)
+
+    return img_stars[keep_img], catalog_stars[keep_cat]
 
 
 def ransacResultGood(platepar, jd, img_stars, pairs):
@@ -1171,6 +1247,32 @@ class Platepar(object):
         # res = scipy.optimize.minimize(_calcSkyResidualsAstro, p0, args=(self, jd, \
         #     catalog_stars, img_stars), method='Nelder-Mead')
 
+        # Polish the fit by least squares on the distances of the stars: SLSQP steps the parameters by 1e-8 for its
+        #   derivatives, which is below the rounding of the projection near a pole, while here the offsets (and
+        #   the scale, as an offset in px, see PointingOffsets) are stepped by OFFSET_JACOBIAN_STEP_PX. The
+        #   polished fit is kept if it leaves a smaller sum of the squared distances
+        offsets = list(res.x[:3]) + ([] if fixed_scale else [pointing.fromScale(res.x[3])])
+        pp_polish = copy.copy(self)
+        img_stars = np.asarray(img_stars)
+
+        def _starDistances(offsets):
+            """ The distances of the catalog stars from the image stars along x and y (px) with the offsets. """
+
+            pointing.apply(pp_polish, offsets)
+            catalog_x, catalog_y, _ = getCatalogStarsImagePositions(catalog_stars, jd, pp_polish)
+            distances = np.concatenate([catalog_x - img_stars[:, 0], catalog_y - img_stars[:, 1]])
+            distances[~np.isfinite(distances)] = np.hypot(self.X_res, self.Y_res)/np.sqrt(2)
+
+            return distances
+
+        try:
+            polish = scipy.optimize.least_squares(_starDistances, offsets, jac=offsetsJacobian(_starDistances))
+        except (ValueError, np.linalg.LinAlgError):
+            polish = None
+        if (polish is not None) and (2*polish.cost < np.sum(_starDistances(offsets)**2)):
+            pointing.apply(self, polish.x)
+            res.x = np.array(list(polish.x[:3]) + ([] if fixed_scale else [self.F_scale]))
+
         # Update fitted astrometric parameters
         pointing.apply(self, res.x[:3])
         if not fixed_scale:
@@ -1426,12 +1528,37 @@ class Platepar(object):
         nn_fit = _inliers(pp_work)
         if nn_fit is None:
             return False, False, res.fun, 0.0, 0.0, pp_work
-        nn_distances, _ = nn_fit
+        nn_distances, nearest = nn_fit
         n_inliers, inlier_rmsd = _inlierStats(nn_distances)
+        cost = res.fun
+
+        # The NN cost is a sum over a changing set of nearest stars, which the simplex steps only coarsely, and the
+        #   distances of the image stars without a catalog star pull on it; so the pointing (and the scale) is
+        #   polished by robust least squares on the inliers and their nearest catalog stars, and kept while it
+        #   leaves more inliers or the same with a smaller RMS distance
+        if not legacy:
+            from RMS.Astrometry.CoarseAlignment import fitPairs
+            img_xy = np.column_stack([img_x, img_y])
+            for _ in range(3):
+                inlier_mask = nn_distances < inlier_threshold
+                if np.sum(inlier_mask) < 3:
+                    break
+                polished = fitPairs(pp_work, jd, img_xy[inlier_mask], catalog_stars[nearest[inlier_mask]],
+                                    fit_scale=not fixed_scale, loss_scale=1.0)
+                nn_polished = _inliers(polished)
+                if nn_polished is None:
+                    break
+                n_polished, rmsd_polished = _inlierStats(nn_polished[0])
+                if (n_polished < n_inliers) or ((n_polished == n_inliers) and (rmsd_polished >= inlier_rmsd)):
+                    break
+                pp_work = polished
+                nn_distances, nearest = nn_polished
+                n_inliers, inlier_rmsd = n_polished, rmsd_polished
+                cost = np.sqrt(np.mean(nn_distances**2))
 
         inlier_fraction = n_inliers/len(nn_distances)
 
-        return (inlier_fraction >= min_inlier_fraction), res.success, res.fun, inlier_fraction, inlier_rmsd, \
+        return (inlier_fraction >= min_inlier_fraction), res.success, cost, inlier_fraction, inlier_rmsd, \
             pp_work
 
     def fitAstrometry(
@@ -2578,6 +2705,27 @@ class Platepar(object):
                     self.fitAstrometry(jd, img_stars_clean, matched_catalog,
                                        first_platepar_fit=False, use_nn_cost=False, fixed_scale=fixed_scale,
                                        fit_by=fit_by)
+
+                    # Complete the pairs: the stars which the fitted platepar puts near a catalog star (within 3
+                    #   times the RMS of the pairs, at least a pixel) but which the RANSAC left out are added, and
+                    #   the platepar is fitted again on them if that does not raise the RMS by more than 10%
+                    for _ in range(2):
+                        rms_pairs = -ransacQuality(self, jd, (img_stars_clean, matched_catalog))[1]
+                        if not np.isfinite(rms_pairs):
+                            break
+                        img_more, cat_more = nearestPairs(self, jd, img_stars, catalog_stars,
+                                                          max(1.0, 3*rms_pairs))
+                        if len(img_more) <= len(img_stars_clean):
+                            break
+                        state_fit = copy.deepcopy(self.__dict__)
+                        print("    Final fit again on {} stars near their catalog stars".format(len(img_more)))
+                        self.fitAstrometry(jd, img_more, cat_more, first_platepar_fit=False, use_nn_cost=False,
+                                           fixed_scale=fixed_scale, fit_by=fit_by)
+                        if -ransacQuality(self, jd, (img_more, cat_more))[1] > 1.1*rms_pairs:
+                            self.__dict__.clear()
+                            self.__dict__.update(state_fit)
+                            break
+                        img_stars_clean, matched_catalog = img_more, cat_more
 
                     # Return the actual matched pairs from RANSAC
                     return (img_stars_clean, matched_catalog)

@@ -18,7 +18,7 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
-from RMS.Formats.Platepar import PointingOffsets
+from RMS.Formats.Platepar import PointingOffsets, offsetsJacobian
 
 
 # Largest shift of the pointing searched by default (deg on the sky) and largest roll (deg)
@@ -104,15 +104,20 @@ def _peak(dx, dy, max_shift, bin_px):
     return int(window[i, j]), centres[i], centres[j]
 
 
-def fitPairs(platepar, jd, img_xy, cat_stars):
-    """ Fit the shift and the roll of the pointing on pairs of image and catalog stars, by least squares with a
-        robust loss (a wrong pair pulls less than its share).
+def fitPairs(platepar, jd, img_xy, cat_stars, fit_scale=False, loss_scale=FINE_BIN_PX):
+    """ Fit the shift and the roll of the pointing (and the scale) on pairs of image and catalog stars, by least
+        squares with a robust loss (a wrong pair pulls less than its share).
 
     Arguments:
         platepar: [Platepar] Platepar with the starting pointing (not changed).
         jd: [float] Julian date of the image stars.
         img_xy: [ndarray] Image stars (x, y) of the pairs (px).
         cat_stars: [ndarray] Catalog stars (ra, dec, ...) of the pairs.
+
+    Keyword arguments:
+        fit_scale: [bool] Fit the scale too. False by default.
+        loss_scale: [float] Distance (px) beyond which a pair pulls less than in plain least squares.
+            FINE_BIN_PX by default.
 
     Return:
         [Platepar] A copy of the platepar with the fitted pointing.
@@ -129,13 +134,13 @@ def fitPairs(platepar, jd, img_xy, cat_stars):
         pointing.apply(fitted, offsets)
         x, y = raDecToXYPP(cat_stars[:, 0], cat_stars[:, 1], jd, fitted)
         res = np.concatenate([x - img_xy[:, 0], y - img_xy[:, 1]])
-        res[~np.isfinite(res)] = 2*FINE_BIN_PX
+        res[~np.isfinite(res)] = 2*loss_scale
 
         return res
 
-    # The offsets are in pixels, so a step of 1e-2 of the parameter is well resolved
-    fit = scipy.optimize.least_squares(_residuals, np.zeros(3), loss='soft_l1', f_scale=FINE_BIN_PX,
-                                       diff_step=1e-2)
+    # The derivatives step the offsets by a fixed fraction of a pixel (see Platepar.offsetsJacobian)
+    fit = scipy.optimize.least_squares(_residuals, np.zeros(4 if fit_scale else 3), loss='soft_l1',
+                                       f_scale=loss_scale, jac=offsetsJacobian(_residuals))
     pointing.apply(fitted, fit.x)
 
     return fitted

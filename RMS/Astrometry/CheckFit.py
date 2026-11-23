@@ -588,8 +588,9 @@ def autoCheckFit(config, platepar, calstars_data, _nn_refinement=False):
     """ Attempts to refine the astrometry fit with the given stars and and initial astrometry parameters.
 
     The pointing and the scale are searched as offsets (SearchOffsets), from the coarse alignment of the stars if
-    the initial platepar does not match them. If the check fails, it is run again with the search of earlier
-    versions (SearchRaDec) from the initial platepar, as a safety net, and its result is used.
+    the initial platepar does not match them, and polished by least squares on the matched stars. If the check
+    fails, it is run again with the search of earlier versions (SearchRaDec) from the initial platepar, as a safety
+    net, and its result is used.
 
     Arguments:
         config: [Config structure]
@@ -791,15 +792,39 @@ def _autoCheckFit(config, platepar, calstars_data, _nn_refinement, search_class)
 
     # Otherwise, bring the pointing onto the stars first if clearly more of them agree with the coarse alignment
     #   than with the platepar (with the search of the offsets)
+    coarse_aligned = False
     if (radius_list[0] != 1.5) and (search_class is SearchOffsets):
         aligned = coarseAlignStars(config, platepar, catalog_stars, star_dict)
-        if aligned is not None:
+        coarse_aligned = aligned is not None
+        if coarse_aligned:
             log.info("Coarse alignment of the pointing on the stars: RA {:.4f} -> {:.4f}, Dec {:.4f} -> {:.4f}, "
                      "rotation {:.4f} -> {:.4f} deg".format(platepar.RA_d, aligned.RA_d, platepar.dec_d,
                                                             aligned.dec_d, platepar.pos_angle_ref,
                                                             aligned.pos_angle_ref))
             platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref = aligned.RA_d, aligned.dec_d, \
                 aligned.pos_angle_ref
+
+
+
+    def _polished(platepar):
+        """ The platepar with the pointing and the scale polished by least squares on the stars matched within
+            the smallest radius (ApplyRecalibrate.refinePointingLSQ on all images), if that is good enough and
+            keeps the matched stars; otherwise the given platepar. Only with the search of the offsets. """
+
+        if search_class is not SearchOffsets:
+            return platepar
+
+        from RMS.Astrometry.ApplyRecalibrate import refinePointingLSQ
+
+        n_check, _, _, _ = matchStarsResiduals(config, platepar, catalog_stars, star_dict, min_radius,
+                                               ret_nmatch=True)
+        refined, _ = refinePointingLSQ(config, platepar, None, star_dict, catalog_stars, min_radius, min_radius,
+                                       n_check)
+        if (refined is not None) and checkFitGoodness(config, refined, catalog_stars, star_dict, min_radius):
+            refined.recordFit(pointing=True, fit_by='autoCheckFit')
+            return refined
+
+        return platepar
 
     ##########
 
@@ -837,6 +862,11 @@ def _autoCheckFit(config, platepar, calstars_data, _nn_refinement, search_class)
             if i == 0:
                 log.info("Initial platepar is good enough!")
 
+            # A pointing brought onto the stars by the coarse alignment is polished, as the alignment fits
+            #   neither the scale nor the pointing as precisely as the least squares
+            if coarse_aligned:
+                return _polished(platepar), True
+
             return platepar, True
 
 
@@ -873,9 +903,11 @@ def _autoCheckFit(config, platepar, calstars_data, _nn_refinement, search_class)
 
         # Check if the platepar is good enough and do not estimate further parameters
         if checkFitGoodness(config, platepar, catalog_stars, star_dict, min_radius, verbose=True):
-            return platepar, True
+            return _polished(platepar), True
 
 
+    # Polish the pointing and the scale by least squares on the matched stars of all images
+    platepar = _polished(platepar)
 
     # Match the stars and calculate the residuals
     n_matched, avg_dist, cost, matched_stars = matchStarsResiduals(config, platepar, catalog_stars, \
