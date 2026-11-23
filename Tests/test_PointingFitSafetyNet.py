@@ -16,6 +16,7 @@ import copy
 import random
 
 import numpy as np
+import scipy.optimize
 
 from RMS.Astrometry import ApplyRecalibrate, CheckFit
 from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
@@ -171,9 +172,9 @@ def test_search_of_earlier_versions():
 
 def test_check_falls_back_to_the_search_of_the_offsets(monkeypatch):
 
-    # The check with the search of RA, Dec and rotation of a platepar 1 deg off fails, so the check with the offsets
-    #   runs from the initial platepar (the coarse alignment finds a better pointing), with the same random draws of
-    #   the images, and its result is used
+    # The check with the search of RA, Dec and rotation of a platepar 1 deg off fails, so the check with the
+    #   offsets runs from the initial platepar (the coarse alignment finds a better pointing), with the same
+    #   random draws of the images, and its result is used
     pp = test_CheckFit.makePlatepar()
     config = test_CheckFit.makeConfig()
     catalog_stars, calstars_data = test_CheckFit.makeNight(pp, config)
@@ -207,9 +208,9 @@ def test_check_falls_back_to_the_search_of_the_offsets(monkeypatch):
 
 def test_check_with_the_offsets_needs_a_better_pointing(monkeypatch):
 
-    # The check with the search of RA, Dec and rotation of a platepar 2 px off fails: the coarse alignment finds no
-    #   better pointing, so the check with the offsets is not run and the failed check of earlier versions is handed
-    #   over
+    # The check with the search of RA, Dec and rotation of a platepar 2 px off fails: the coarse alignment finds
+    #   no better pointing, so the check with the offsets is not run and the failed check of earlier versions is
+    #   handed over
     pp = test_CheckFit.makePlatepar()
     config = test_CheckFit.makeConfig()
     catalog_stars, calstars_data = test_CheckFit.makeNight(pp, config)
@@ -251,6 +252,38 @@ def test_check_of_a_platepar_far_off_fails_cleanly(monkeypatch):
 
     start = _turned(pp, 90.0*pp.F_scale)
     result, fit_status = CheckFit.autoCheckFit(config, copy.deepcopy(start), calstars_data)
+
+    assert not fit_status
+    assert abs(result.F_scale/start.F_scale - 1) <= CheckFit.SEARCH_MAX_SCALE_CHANGE
+
+
+def test_check_does_not_use_a_fit_which_lost_the_scale(monkeypatch):
+
+    # A search of the check which converges with half the scale (as on a night far off, where no stars hold it) is
+    #   not used: the check (whose NN alignment fails too) fails and hands over a platepar with the scale it was
+    #   given
+    pp = test_CheckFit.makePlatepar()
+    config = test_CheckFit.makeConfig()
+    catalog_stars, calstars_data = test_CheckFit.makeNight(pp, config)
+    test_CheckFit.useCatalog(monkeypatch, catalog_stars)
+
+    minimize = scipy.optimize.minimize
+
+    def _minimize(fun, x0, args=(), **kwargs):
+        """ The search of the check converges with half the scale, the other fits run. """
+
+        if fun is not CheckFit._calcImageResidualsAstro:
+            return minimize(fun, x0, args=args, **kwargs)
+        x = np.array(x0, dtype=np.float64)
+        x[3] = 0.5*x[3] if isinstance(args[-1], CheckFit.SearchRaDec) else -0.5*args[-1].pointing.radius
+        return scipy.optimize.OptimizeResult(x=x, success=True, fun=0.0, message='')
+
+    monkeypatch.setattr(CheckFit.scipy.optimize, 'minimize', _minimize)
+    monkeypatch.setattr(CheckFit, 'alignPlatepar', lambda config, platepar, *args, **kwargs: (platepar, None))
+
+    start = test_CheckFit.offsetPlatepar(pp, offset_px=5.0)
+    result, fit_status = CheckFit._autoCheckFit(config, copy.deepcopy(start), calstars_data, False,
+                                                CheckFit.SearchRaDec)
 
     assert not fit_status
     assert abs(result.F_scale/start.F_scale - 1) <= CheckFit.SEARCH_MAX_SCALE_CHANGE
@@ -400,8 +433,9 @@ def test_good_ransac_needs_no_fallback(monkeypatch):
 
 def test_nn_fit_of_the_offsets_needs_a_better_pointing(monkeypatch):
 
-    # The NN fit of RA, Dec and position angle of a platepar 2 px off is not accepted: the coarse alignment finds no
-    #   better pointing, so the fit of the offsets is not run and the fit fails as before, with the platepar as it was
+    # The NN fit of RA, Dec and position angle of a platepar 2 px off is not accepted: the coarse alignment finds
+    #   no better pointing, so the fit of the offsets is not run and the fit fails as before, with the platepar as
+    #   it was
     pp = makePlatepar()
     catalog_stars, rows = makeImage(pp)
     img_stars = np.column_stack([rows[:, 1], rows[:, 0], rows[:, 2]])
@@ -452,7 +486,8 @@ def _recordRecalibrations(monkeypatch, aligned_differs):
 def test_failed_recalibration_is_not_repeated_from_the_same_platepar(monkeypatch):
 
     # On an FF which no recalibration matches, the retry from the original platepar is the recalibration just run
-    #   after the failed NN alignment (same platepar, same arguments), so it is not run again; the result is the same
+    #   after the failed NN alignment (same platepar, same arguments), so it is not run again; the result is the
+    #   same
     pp = makePlatepar()
     _, rows = makeImage(pp)
     ff_name = 'FF_XX0001_20251214_014211_000_0000000.fits'

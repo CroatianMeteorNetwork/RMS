@@ -841,7 +841,8 @@ def _autoCheckFit(config, platepar, calstars_data, _nn_refinement, search_class)
     # The check with the offsets runs after the check of earlier versions failed from the same platepar, so without
     #   the quick fit and without a better pointing from the coarse alignment it is not run (on a night far off it
     #   doubled the time of the check, which then fails as well)
-    if (radius_list[0] != 1.5) and (search_class is SearchOffsets) and (not coarse_aligned) and (not _nn_refinement):
+    if (radius_list[0] != 1.5) and (search_class is SearchOffsets) and (not coarse_aligned) \
+            and (not _nn_refinement):
         log.info("No coarse alignment of the pointing on the stars, the check with the offsets is not run")
         return None, False
 

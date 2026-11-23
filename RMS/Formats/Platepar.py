@@ -1323,10 +1323,10 @@ class Platepar(object):
 
         """
 
-        # The fit of RA, Dec and position angle of earlier versions first, so a fit which succeeded before gives the
-        #   same pointing. If it does not succeed, the fit of the offsets of the pointing, whose result is used only
-        #   if it is clearly good: enough inliers, and after its polish on them, a small RMS distance (a pointing
-        #   which only puts the stars near other catalog stars leaves a few pixels)
+        # The fit of RA, Dec and position angle of earlier versions first, so a fit which succeeded before gives
+        #   the same pointing. If it does not succeed, the fit of the offsets of the pointing, whose result is
+        #   used only if it is clearly good: enough inliers, and after its polish on them, a small RMS distance (a
+        #   pointing which only puts the stars near other catalog stars leaves a few pixels)
         result = self._fitPointingNNOnce(jd, img_stars, catalog_stars, fixed_scale, legacy=True)
         if not (result[0] and result[1]):
             result_offsets = self._fitPointingNNOnce(jd, img_stars, catalog_stars, fixed_scale, legacy=False)

@@ -112,8 +112,8 @@ def test_nearest_pairs_are_one_to_one():
 
 def test_ransac_pairs_are_completed():
 
-    # The RANSAC fit of a platepar off by 0.3 deg, with 5 hot pixels, ends with all 60 stars of the image in its
-    #   pairs and none of the hot pixels
+    # The RANSAC fit of the offsets of a platepar off by 0.3 deg, with 5 hot pixels, ends with all 60 stars of the
+    #   image in its pairs and none of the hot pixels
     pp = makePlatepar()
     catalog_stars, rows = makeImage(pp, n_stars=60)
     img_stars = np.column_stack([rows[:, 1], rows[:, 0], rows[:, 2]])
@@ -121,7 +121,7 @@ def test_ransac_pairs_are_completed():
     hot = np.column_stack([rng.uniform(0, pp.X_res, 5), rng.uniform(0, pp.Y_res, 5), np.ones(5)])
 
     fitted = _turned(pp, 0.3*pp.F_scale)
-    img_pairs, _ = fitted.fitAstrometry(pp.JD, np.vstack([img_stars, hot]), catalog_stars, use_nn_cost=True)
+    img_pairs, _ = fitted._fitAstrometry(pp.JD, np.vstack([img_stars, hot]), catalog_stars, use_nn_cost=True)
 
     assert len(img_pairs) == 60
     assert not any(np.any(np.all(img_pairs[:, :2] == star[:2], axis=1)) for star in hot)
@@ -191,8 +191,8 @@ def test_check_polishes_a_coarsely_aligned_platepar(monkeypatch):
 
 def test_check_is_polished(monkeypatch):
 
-    # The check with the offsets of a platepar 1 deg off and rolled by 3 deg ends within the noise of the stars from
-    #   the true platepar (the search alone ends within its tolerance, a third of dist_check_threshold)
+    # The check with the offsets of a platepar 1 deg off and rolled by 3 deg ends within the noise of the stars
+    #   from the true platepar (the search alone ends within its tolerance, a third of dist_check_threshold)
     pp = test_CheckFit.makePlatepar()
     config = test_CheckFit.makeConfig()
     catalog_stars, calstars_data = test_CheckFit.makeNight(pp, config)
