@@ -277,7 +277,7 @@ class Config:
         self.deinterlace_order = -2
 
         # Rolling shutter (deinterlace_order -1): the measured time in which the sensor reads all its rows (s), 0
-        #   for no correction (see RMS.Routines.RollingShutterCorrection)
+        #   for the whole frame period (see RMS.Routines.RollingShutterCorrection)
         self.rolling_shutter_readout = 0.0
 
         # Correction of the timestamps of the frames (s), added when the frames of a recording are read for

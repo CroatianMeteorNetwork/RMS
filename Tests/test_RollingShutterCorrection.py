@@ -12,17 +12,40 @@ import RMS.ConfigReader as cr
 from RMS.Routines import RollingShutterCorrection as rsc
 
 
-def test_no_correction_without_a_readout_time():
-    """ Without a measured readout time there is no correction: the readout time in frames is 0, and the time of a
-        point is the frame time on every row. """
+def test_whole_frame_without_a_readout_time():
+    """ Without a measured readout time the rows are read over the whole frame period, the original correction of
+        RMS: the readout time in frames is 1, and a point at the middle row is half a frame later. A readout time
+        of 0 written in the config file (as in the .config shipped since the option was added) does the same. """
 
     config = cr.Config()
     assert config.rolling_shutter_readout == 0
-    assert rsc.readoutFrames(config, 25.0) == 0
-    assert rsc.correctRollingShutterTemporal(10, 360, 720, readout_frames=rsc.readoutFrames(config, 25.0)) == 10
+    assert rsc.readoutFrames(config, 25.0) == 1
+    assert rsc.correctRollingShutterTemporal(10, 360, 720, readout_frames=rsc.readoutFrames(config, 25.0)) == 10.5
+    assert rsc.correctFrameTime(10, 360, 720, config) == 10.5
 
-    # The rows read over the whole frame (readout time 1/fps): the middle row half a frame later
+    # The same as the correction without a readout time
     assert rsc.correctRollingShutterTemporal(10, 360, 720) == 10.5
+
+    # A negative or missing readout time is taken as no measurement as well
+    config.rolling_shutter_readout = -1
+    assert rsc.readoutFrames(config, 25.0) == 1
+    del config.rolling_shutter_readout
+    assert rsc.readoutFrames(config, 25.0) == 1
+
+
+def test_default_config_file_corrects(tmp_path):
+    """ A config with the shipped default (rolling_shutter_readout: 0) and a rolling shutter corrects the times by
+        the whole frame period, as RMS did before the readout time was an option. """
+
+    path = os.path.join(str(tmp_path), '.config')
+    with open(path, 'w') as f:
+        f.write("[System]\nstationID: XX0001\n\n[Capture]\ndeinterlace_order: -1\nrolling_shutter_readout: 0\n")
+
+    config = cr.parse(path)
+
+    assert config.rolling_shutter_readout == 0
+    assert rsc.readoutFrames(config, 25.0) == 1
+    assert np.isclose(rsc.correctFrameTime(10, 540, 1080, config), 10.5)
 
 
 def test_readout_time_in_frames():
