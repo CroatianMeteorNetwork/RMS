@@ -77,6 +77,11 @@ RECENT_FILES = 50
 HISTORY_FILE_NAME = '.monitor_status_files.jsonl'
 HISTORY_HOURS = 24.0
 
+# The failed and the given up files are faults only while their last failure is at most this old (h), as the
+#   failed files of the last day (files_failed_last_24h). The record of the failed files is kept forever (the
+#   given up files are never processed again by themselves), so the older ones stay listed in the processing
+FAILED_FILES_FAULT_HOURS = 24.0
+
 # Smallest number of processed files of the last hour for its processing times to predict the queue (otherwise
 #   the files of the last day are used)
 PREDICTION_MIN_FILES = 3
@@ -122,6 +127,18 @@ def _percentiles(values):
 
     return {'n': int(len(values)), 'min': _round(values.min()), 'p10': _round(p10), 'p25': _round(p25),
             'median': _round(p50), 'p75': _round(p75), 'p90': _round(p90), 'max': _round(values.max())}
+
+
+def _failureTime(fail):
+    """ Time of the last failure of a failed file (UTC), None if the record has no usable time (see
+        MonitorProcessFrameInterface.loadFailedFiles). """
+
+    # The monitor records the unix time of every failure (see recordFailure). A record without it, or with a
+    #   time which is not a number, wasn't written by the monitor
+    try:
+        return UTCFromTimestamp.utcfromtimestamp(float(fail.get('last_fail_time')))
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
 
 
 def _cleanRecord(record):
@@ -623,7 +640,8 @@ class MonitorStatus(object):
         status['recording'] = _section('recording', lambda: self._recording(state, now, night_start, night_end),
                                        {'state': 'unknown', 'input_readable': state.get('input_readable')})
         status['processing'] = _section('processing', lambda: self._processing(state, now, files),
-                                        {'not_keeping_up': False, 'failed_files': [], 'given_up': []})
+                                        {'not_keeping_up': False, 'failed_files': [], 'given_up': [],
+                                         'failed_files_recent': [], 'given_up_recent': []})
 
         # The sky reads the conditions of the night (see _conditionRows)
         self.conditions_fresh = False
@@ -886,7 +904,7 @@ class MonitorStatus(object):
 
     def _processing(self, state, now, files):
         """ Whether the processing keeps up: the files being processed and waiting, the progress of the night, when
-            the waiting files will be done, the delay, and the processing times. """
+            the waiting files will be done, the delay, the processing times, and the failed files. """
 
         # Only the processed files of the last day count, also if no file was processed for a while
         self._pruneRecords(now)
@@ -1006,6 +1024,16 @@ class MonitorStatus(object):
                           if (info.get('count', 0) >= state.get('max_failures', 2))
                           or (info.get('kills', 0) >= state.get('max_kills', 5)))
 
+        # The ones whose last failure is recent, which are the faults. A record without a usable time is not
+        #   recent, as the monitor records the time with every failure, so it can't come from a recent one
+        recent_since = now - datetime.timedelta(hours=FAILED_FILES_FAULT_HOURS)
+        failed_recent = []
+        for uid, info in sorted(failed.items()):
+            fail_time = _failureTime(info)
+            if (fail_time is not None) and (fail_time >= recent_since):
+                failed_recent.append(uid)
+        given_up_recent = [uid for uid in given_up if uid in failed_recent]
+
         # Put the section together
         processing = {
             'progress': progress,
@@ -1027,6 +1055,9 @@ class MonitorStatus(object):
             'files_failed_last_24h': sum(1 for r in day_records if r.get('outcome') == 'failed'),
             'failed_files': sorted(failed),
             'given_up': given_up,
+            'failed_files_recent': failed_recent,
+            'given_up_recent': given_up_recent,
+            'failed_files_recent_hours': FAILED_FILES_FAULT_HOURS,
             'processing_time_min_last_24h': _percentiles([r.get('processing_min') for r in ok_records]),
             'processing_time_min_last_hour': _percentiles([r.get('processing_min') for r in hour_records]),
             'processing_to_file_length_ratio': _percentiles(ratios),
@@ -1465,13 +1496,17 @@ class MonitorStatus(object):
             _add('NOT_KEEPING_UP', 'warning', 'The oldest waiting file was recorded {:.0f} min ago, more than {:.0f} '
                  'file lengths ({:.0f} min)'.format(processing['delay_min'], BEHIND_FILE_LENGTHS,
                                                     BEHIND_FILE_LENGTHS*processing['file_length_min']))
-        if processing['given_up']:
-            _add('FILE_GIVEN_UP', 'error', '{:d} file(s) failed too often and are not processed: {:s}'.format(
-                len(processing['given_up']), ', '.join(processing['given_up'][:5])))
-        failing = sorted(set(processing['failed_files']) - set(processing['given_up']))
+
+        # The files which failed recently. The older failures stay listed in the processing, but are not faults
+        #   any more (a file given up weeks ago would otherwise keep the status at an error forever)
+        given_up = processing['given_up_recent']
+        if given_up:
+            _add('FILE_GIVEN_UP', 'error', '{:d} file(s) failed too often and are not processed (given up in the '
+                 'last {:.0f} h): {:s}'.format(len(given_up), FAILED_FILES_FAULT_HOURS, ', '.join(given_up[:5])))
+        failing = sorted(set(processing['failed_files_recent']) - set(given_up))
         if failing:
-            _add('FILE_FAILED', 'warning', '{:d} file(s) failed and will be processed again: {:s}'.format(
-                len(failing), ', '.join(failing[:5])))
+            _add('FILE_FAILED', 'warning', '{:d} file(s) failed in the last {:.0f} h and will be processed again: '
+                 '{:s}'.format(len(failing), FAILED_FILES_FAULT_HOURS, ', '.join(failing[:5])))
 
         # The calibration
         calibration = status['calibration']

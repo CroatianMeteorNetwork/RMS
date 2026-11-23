@@ -274,6 +274,19 @@ def test_calibration(tmp_path, now):
     assert [fault['code'] for fault in built['faults']] == ['CAMERA_MOVED']
 
 
+def _failTime(hours_ago):
+    """ Time of a failure (unix time, as the monitor records it) the given number of hours before NOW. """
+
+    return (NOW - datetime.timedelta(hours=hours_ago) - datetime.datetime(1970, 1, 1)).total_seconds()
+
+
+def _fileFaults(built):
+    """ The faults of the failed files in a status, as {code: message}. """
+
+    return {fault['code']: fault['message'] for fault in built['faults']
+            if fault['code'] in ('FILE_GIVEN_UP', 'FILE_FAILED')}
+
+
 def test_faults(tmp_path, now):
     """ The faults of the monitor, the failed files, the disk, the night report and the detector, with the time
         they were first seen.
@@ -295,8 +308,9 @@ def test_faults(tmp_path, now):
     # The latest night report failed in an essential step
     mnr.updateReportState(output_dir, NIGHT, reported_at='2025-12-25T12:00:00.000000', failed_steps=['archive'])
 
-    failed = {'f1': {'count': 1, 'kills': 0, 'last_fail_time': 0}, 'f2': {'count': 2, 'kills': 0,
-                                                                           'last_fail_time': 0}}
+    # A file failed once and one was given up, both in the last hour
+    failed = {'f1': {'count': 1, 'kills': 0, 'last_fail_time': _failTime(1)},
+              'f2': {'count': 2, 'kills': 0, 'last_fail_time': _failTime(1)}}
     built = status.build(_state(failed_files=failed, paused_for_space=True, stopped=True))
     codes = [fault['code'] for fault in built['faults']]
     assert set(codes) == {'MONITOR_STOPPED', 'DISK_LOW', 'FILE_GIVEN_UP', 'FILE_FAILED', 'REPORT_FAILED',
@@ -308,6 +322,140 @@ def test_faults(tmp_path, now):
     severities = [mst.SEVERITIES.index(fault['severity']) for fault in built['faults']]
     assert severities == sorted(severities, reverse=True)
     assert all(fault['since_utc'] == NOW.strftime(mnr.JSON_TIME_FORMAT) for fault in built['faults'])
+
+
+def test_old_failed_files_are_not_faults(tmp_path, now):
+    """ Files which failed or were given up a month ago are listed in the processing, but are not faults, so
+        they don't keep the status at an error.
+    """
+
+    status, config = _status(tmp_path)
+
+    # One file given up and one failed once, both 30 days ago
+    failed = {'old_given_up': {'count': 2, 'kills': 0, 'last_fail_time': _failTime(30*24)},
+              'old_failed': {'count': 1, 'kills': 0, 'last_fail_time': _failTime(30*24)}}
+    built = status.build(_state(failed_files=failed))
+
+    # Still listed as the history, but none is recent and none is a fault
+    processing = built['processing']
+    assert processing['failed_files'] == ['old_failed', 'old_given_up']
+    assert processing['given_up'] == ['old_given_up']
+    assert processing['failed_files_recent'] == [] and processing['given_up_recent'] == []
+    assert processing['failed_files_recent_hours'] == mst.FAILED_FILES_FAULT_HOURS
+    assert _fileFaults(built) == {}
+    assert built['overall'] == 'ok'
+
+
+def test_recent_given_up_file_is_an_error(tmp_path, now, monkeypatch):
+    """ A file given up in the last day is an error, as before, and stops being one a day after its last
+        failure (the time it was first seen is forgotten with it).
+    """
+
+    status, config = _status(tmp_path)
+
+    # Given up an hour ago (killed too often)
+    failed = {'recent_killed': {'count': 0, 'kills': 5, 'last_fail_time': _failTime(1)}}
+    built = status.build(_state(failed_files=failed))
+    assert built['processing']['given_up_recent'] == ['recent_killed']
+    assert list(_fileFaults(built)) == ['FILE_GIVEN_UP']
+    assert 'recent_killed' in _fileFaults(built)['FILE_GIVEN_UP']
+    assert built['overall'] == 'error'
+
+    # Two days later it is not a fault any more, but it is still listed as given up
+    later = NOW + datetime.timedelta(days=2)
+    monkeypatch.setattr(mst.RmsDateTime, 'utcnow', staticmethod(lambda: later))
+    built = status.build(_state(failed_files=failed))
+    assert built['processing']['given_up'] == ['recent_killed']
+    assert built['processing']['given_up_recent'] == []
+    assert _fileFaults(built) == {} and built['overall'] == 'ok'
+    assert 'FILE_GIVEN_UP' not in status.fault_since
+
+
+def test_recent_and_old_failed_files(tmp_path, now):
+    """ With old and recent failures, only the files whose last failure was in the last day are faults, and the
+        limit is the last failure (a file which failed long ago and again recently is recent).
+    """
+
+    status, config = _status(tmp_path)
+
+    # Given up and failed once, just inside and just outside of the last day, and a file which first failed a
+    #   month ago and was given up an hour ago
+    failed = {'given_up_old': {'count': 2, 'last_fail_time': _failTime(24.1)},
+              'given_up_new': {'count': 2, 'last_fail_time': _failTime(23.9)},
+              'given_up_again': {'count': 2, 'last_fail_time': _failTime(1)},
+              'failed_old': {'count': 1, 'last_fail_time': _failTime(24.1)},
+              'failed_new': {'count': 1, 'last_fail_time': _failTime(23.9)}}
+    built = status.build(_state(failed_files=failed))
+
+    # All are listed, only the recent ones are faults
+    processing = built['processing']
+    assert processing['failed_files'] == sorted(failed)
+    assert processing['given_up'] == ['given_up_again', 'given_up_new', 'given_up_old']
+    assert processing['given_up_recent'] == ['given_up_again', 'given_up_new']
+    assert processing['failed_files_recent'] == ['failed_new', 'given_up_again', 'given_up_new']
+
+    # The given up file is an error and the failed one a warning, with only the recent files in their messages
+    faults = _fileFaults(built)
+    assert set(faults) == {'FILE_GIVEN_UP', 'FILE_FAILED'}
+    assert faults['FILE_GIVEN_UP'].startswith('2 file(s)') and 'given_up_old' not in faults['FILE_GIVEN_UP']
+    assert faults['FILE_FAILED'].startswith('1 file(s)') and 'failed_new' in faults['FILE_FAILED']
+    assert built['overall'] == 'error'
+
+    # Only an old given up file and a recent failed one: a warning
+    failed = {'given_up_old': failed['given_up_old'], 'failed_new': failed['failed_new']}
+    built = status.build(_state(failed_files=failed))
+    assert set(_fileFaults(built)) == {'FILE_FAILED'} and built['overall'] == 'warning'
+
+
+def test_failed_files_without_time(tmp_path, now):
+    """ A failed file whose record has no usable time of the last failure can't be dated as recent: it is listed,
+        but is not a fault (the monitor records the time with every failure, so such a record is not from a
+        recent failure).
+    """
+
+    status, config = _status(tmp_path)
+
+    # Records without the time, and with a time which is not a number, given up and failed once
+    failed = {'no_time': {'count': 2}, 'none_time': {'count': 2, 'last_fail_time': None},
+              'text_time': {'count': 1, 'last_fail_time': 'yesterday'},
+              'nan_time': {'count': 2, 'last_fail_time': float('nan')}}
+    built = status.build(_state(failed_files=failed))
+
+    # They are listed, but none is recent and none is a fault
+    processing = built['processing']
+    assert processing['given_up'] == ['nan_time', 'no_time', 'none_time']
+    assert processing['failed_files_recent'] == [] and processing['given_up_recent'] == []
+    assert _fileFaults(built) == {} and built['overall'] == 'ok'
+
+
+def test_failure_recorded_by_the_monitor_is_recent(tmp_path):
+    """ The time which the monitor records with a failure is read as the time of the status: a file which was
+        just given up is an error, and not once its last failure is a month old.
+    """
+
+    status, config = _status(tmp_path)
+    output_dir = str(tmp_path/'output')
+
+    # The monitor gives up a file after it failed twice
+    failed_files, _ = mon.loadFailedFiles(output_dir)
+    for _ in range(mon.MAX_FAILURES):
+        mon.recordFailure(output_dir, failed_files, 'bad', 1, 300)
+    failed_files, given_up = mon.loadFailedFiles(output_dir)
+    assert given_up == {'bad'}
+
+    # The status now has it as an error
+    built = status.build(_state(failed_files=failed_files))
+    assert built['processing']['given_up_recent'] == ['bad']
+    assert 'FILE_GIVEN_UP' in _fileFaults(built)
+
+    # Its last failure a month ago: it is still given up by the monitor and listed, but not a fault
+    failed_files['bad']['last_fail_time'] -= 30*24*3600
+    mon.saveFailedFiles(output_dir, failed_files)
+    failed_files, given_up = mon.loadFailedFiles(output_dir)
+    assert given_up == {'bad'}
+    built = status.build(_state(failed_files=failed_files))
+    assert built['processing']['given_up'] == ['bad'] and built['processing']['given_up_recent'] == []
+    assert _fileFaults(built) == {}
 
 
 ### The status file ###
