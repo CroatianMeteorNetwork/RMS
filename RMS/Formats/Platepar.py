@@ -28,6 +28,7 @@ from __future__ import absolute_import, division, print_function
 import copy
 import datetime
 import json
+import math
 import os
 
 import matplotlib.pyplot as plt
@@ -46,6 +47,7 @@ from RMS.Misc import RmsDateTime, rmsCommit
 
 pyximport.install(setup_args={'include_dirs': [np.get_include()]})
 from RMS.Astrometry.CyFunctions import (
+    pyRefractionApparentToTrue,
     pyRefractionTrueToApparent,
     refractionScale,
 )
@@ -248,6 +250,325 @@ def normalizeRaDec(ra_d, dec_d, refraction=False):
     ra_d = ra_d%360.0
 
     return ra_d, dec_d, pos_angle_offset
+
+
+def pointingFrame(ra_d, dec_d, pos_angle_ref):
+    """ The axes of the camera for a pointing, as the projection uses them: the directions on the sky of the +x
+        and +y standard coordinates at the pointing (the image x and y directions at the centre of the field),
+        and the pointing itself.
+
+    Arguments:
+        ra_d: [float] Right ascension of the pointing (deg).
+        dec_d: [float] Declination of the pointing (deg).
+        pos_angle_ref: [float] Position angle, the rotation of the field from the celestial meridian at the
+            pointing (deg).
+
+    Return:
+        [ndarray] Rotation matrix (3x3) whose columns are the +x, +y and pointing directions, in the
+            equatorial axes of the right ascension and declination.
+    """
+
+    ra, dec, pos_angle = np.radians(ra_d), np.radians(dec_d), np.radians(pos_angle_ref)
+
+    # The north and east directions at the pointing, and the pointing
+    north = np.array([-np.sin(dec)*np.cos(ra), -np.sin(dec)*np.sin(ra), np.cos(dec)])
+    east = np.array([-np.sin(ra), np.cos(ra), 0.0])
+    axis = np.array([np.cos(dec)*np.cos(ra), np.cos(dec)*np.sin(ra), np.sin(dec)])
+
+    # The standard coordinates are turned by the position angle from them (as in CyFunctions.cameraAxes)
+    x_dir = np.sin(pos_angle)*north - np.cos(pos_angle)*east
+    y_dir = -np.cos(pos_angle)*north - np.sin(pos_angle)*east
+
+    return np.column_stack([x_dir, y_dir, axis])
+
+
+def frameToPointing(x_dir, axis):
+    """ The pointing of a camera from its axes, the inverse of pointingFrame.
+
+    Arguments:
+        x_dir: [list] The +x direction (unit vector in the equatorial axes, the first column of pointingFrame).
+        axis: [list] The pointing (unit vector, the last column of pointingFrame).
+
+    Return:
+        (ra_d, dec_d, pos_angle_ref): [tuple of floats] Right ascension in [0, 360), declination in [-90, 90] and
+            position angle in [0, 360) (deg).
+    """
+
+    # The pointing, with the declination from the distance to the pole, which is accurate near the poles too
+    ra = math.atan2(axis[1], axis[0])
+    dec = math.atan2(axis[2], math.hypot(axis[0], axis[1]))
+
+    # The position angle is the angle of the +x direction from the north and east directions at the pointing.
+    #   At a pole they follow the right ascension found above, so the field comes out the same
+    north = (-math.sin(dec)*math.cos(ra), -math.sin(dec)*math.sin(ra), math.cos(dec))
+    east = (-math.sin(ra), math.cos(ra))
+    pos_angle = math.atan2(x_dir[0]*north[0] + x_dir[1]*north[1] + x_dir[2]*north[2],
+                           -(x_dir[0]*east[0] + x_dir[1]*east[1]))
+
+    return math.degrees(ra)%360.0, math.degrees(dec), math.degrees(pos_angle)%360.0
+
+
+def offsetAxes(dx, dy, droll):
+    """ The axes of a camera turned by angles in its own axes: the optical axis is turned by dx towards
+        the +x direction and by dy towards the +y direction (along the great circle in the direction (dx, dy),
+        by the angle hypot(dx, dy)), and the camera is then rolled by droll about the new optical axis, which
+        turns the +x direction towards +y.
+
+    Arguments:
+        dx: [float] Turn of the optical axis towards +x (radians).
+        dy: [float] Turn of the optical axis towards +y (radians).
+        droll: [float] Roll about the new optical axis (radians).
+
+    Return:
+        (x_dir, axis): [tuple] The +x direction and the optical axis of the turned camera (unit vectors in the
+            axes of the camera before the turn, see offsetRotation).
+    """
+
+    tilt = math.hypot(dx, dy)
+
+    # sin(tilt)/tilt and (1 - cos(tilt))/tilt**2 = 2*sin(tilt/2)**2/tilt**2, which are 1 and 1/2 for no tilt
+    if tilt > 0:
+        sin_ratio = math.sin(tilt)/tilt
+        cos_ratio = 2*(math.sin(tilt/2)/tilt)**2
+    else:
+        sin_ratio, cos_ratio = 1.0, 0.5
+
+    # The +x and +y directions turned with the optical axis about the axis perpendicular to the direction of
+    #   the turn (Rodrigues' formula)
+    x_tilt = (1.0 - cos_ratio*dx*dx, -cos_ratio*dx*dy, -sin_ratio*dx)
+    y_tilt = (-cos_ratio*dx*dy, 1.0 - cos_ratio*dy*dy, -sin_ratio*dy)
+
+    # The roll turns the +x direction towards +y about the turned optical axis
+    cos_roll, sin_roll = math.cos(droll), math.sin(droll)
+    x_dir = tuple(cos_roll*x_comp + sin_roll*y_comp for x_comp, y_comp in zip(x_tilt, y_tilt))
+    axis = (sin_ratio*dx, sin_ratio*dy, math.cos(tilt))
+
+    return x_dir, axis
+
+
+def offsetRotation(dx, dy, droll):
+    """ The rotation of a camera by angles in its own axes (see offsetAxes).
+
+    Arguments:
+        dx: [float] Turn of the optical axis towards +x (radians).
+        dy: [float] Turn of the optical axis towards +y (radians).
+        droll: [float] Roll about the new optical axis (radians).
+
+    Return:
+        [ndarray] Rotation matrix (3x3) in the axes of the camera (+x, +y, optical axis): the axes of the turned
+            camera are frame.dot(rotation) for the axes of the camera before the turn (pointingFrame).
+    """
+
+    x_dir, axis = offsetAxes(dx, dy, droll)
+
+    # The +y direction completes the right-handed axes
+    return np.column_stack([x_dir, np.cross(axis, x_dir), axis])
+
+
+def rotationOffsets(rotation):
+    """ The angles of a rotation of a camera in its own axes, the inverse of offsetRotation. The turn of the
+        optical axis has to be less than 180 deg.
+
+    Arguments:
+        rotation: [ndarray] Rotation matrix (3x3) in the axes of the camera.
+
+    Return:
+        (dx, dy, droll): [tuple of floats] Turn of the optical axis towards +x and +y, and the roll about the new
+            optical axis (radians, the roll in (-pi, pi]).
+    """
+
+    # The turned optical axis is (sin(tilt)/tilt*dx, sin(tilt)/tilt*dy, cos(tilt)) in the axes of the camera
+    axis = rotation[:, 2]
+    tilt = np.arctan2(np.hypot(axis[0], axis[1]), axis[2])
+    sin_ratio = np.sinc(tilt/np.pi)
+    dx, dy = axis[0]/sin_ratio, axis[1]/sin_ratio
+
+    # What is left after the turn of the axis is the roll about it
+    roll_rotation = offsetRotation(dx, dy, 0.0).T.dot(rotation)
+    droll = np.arctan2(roll_rotation[1, 0], roll_rotation[0, 0])
+
+    return float(dx), float(dy), float(droll)
+
+
+class PointingOffsets(object):
+    """ The pointing of a platepar as small offsets from a reference pointing, for the fits of the pointing.
+
+    Stepping the right ascension, declination and position angle of the pointing is badly conditioned: a step
+    of the right ascension is cos(dec) of it on the sky, which shrinks to nothing at a celestial pole, where the
+    right ascension and the position angle turn the field the same way, and the direction in which a step moves
+    the field on the image depends on the position angle. The fits instead turn the camera in its own axes
+    about the reference pointing: the optical axis is moved along the image x and y directions, and the camera
+    is rolled about it (offsetAxes). A step then moves the field by the same amount in the same direction on the
+    image wherever the camera points, the poles and the zenith included.
+
+    The camera is turned as the projection sees it. With the refraction, the projection refracts the reference
+    pointing and measures the position angle from the meridian at the refracted pointing, so the refracted
+    pointing is turned and the result is taken back through the refraction, keeping the position angle (as
+    CyFunctions.pointingCorrection does). The right ascension and declination are those of the platepar (true
+    of date at its reference time), and the refraction is the same at every time, as the projection keeps the
+    hour angle of the pointing.
+
+    The offsets are given in pixels: dx and dy move the optical axis by dx/F_scale and dy/F_scale (deg) towards
+    the +x and +y directions of the image (the stars move the other way), and a roll of droll turns the field
+    so that the stars at a quarter of the image diagonal from the centre move by droll. The fits which step the
+    scale with the pointing in pixels use a fourth offset, dscale, which changes the scale so that those stars
+    move by dscale.
+    """
+
+    def __init__(self, platepar):
+        """ The offsets about the pointing of the given platepar.
+
+        Arguments:
+            platepar: [Platepar] Platepar with the reference pointing (RA_d, dec_d, pos_angle_ref), the
+                refraction setting, the place and reference time (lat, lon, elev, Ho) and the scale and size of
+                the image (F_scale, X_res, Y_res). It is not changed, and not kept.
+        """
+
+        # The reference pointing
+        self.ra_d, self.dec_d, self.pos_angle_ref = platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref
+
+        # The refraction of the pointing as the projection does it: the hour angle of the pointing is
+        #   lon + Ho - RA at any time, i.e. the local sidereal time is lon + Ho in the frame of RA_d
+        self.refraction = platepar.refraction
+        self.refraction_scale = refractionScale(platepar.elev)
+        lat, lst = math.radians(platepar.lat), math.radians(platepar.lon + platepar.Ho)
+
+        # Rotation from the equatorial axes to the east, north and up axes of the observer (as
+        #   CyFunctions.equatorialToHorizontal, after the frame rotation)
+        self.horizontal = (
+            (-math.sin(lst), math.cos(lst), 0.0),
+            (-math.sin(lat)*math.cos(lst), -math.sin(lat)*math.sin(lst), math.cos(lat)),
+            (math.cos(lat)*math.cos(lst), math.cos(lat)*math.sin(lst), math.sin(lat)))
+
+        # The units of the offsets: the angle of a pixel at the scale of the platepar, and of a pixel at a
+        #   quarter of the image diagonal from the centre for the roll (radians)
+        self.F_scale = abs(platepar.F_scale)
+        self.radius = math.hypot(platepar.X_res, platepar.Y_res)/4.0
+        self.shift_unit = math.radians(1.0/self.F_scale)
+        self.roll_unit = 1.0/self.radius
+
+        # The axes of the camera at the reference pointing, as the projection uses them
+        ra_app, dec_app = self._refract(self.ra_d, self.dec_d, True)
+        self.frame = pointingFrame(ra_app, dec_app, self.pos_angle_ref)
+        self.axes = tuple(tuple(float(v) for v in self.frame[:, i]) for i in range(3))
+
+    def _refract(self, ra_d, dec_d, true_to_apparent):
+        """ The pointing refracted as the projection refracts it, or taken back through the refraction.
+
+        Arguments:
+            ra_d: [float] Right ascension (deg).
+            dec_d: [float] Declination (deg).
+            true_to_apparent: [bool] Refract the true pointing (True) or take the refraction out (False).
+
+        Return:
+            (ra_d, dec_d): [tuple of floats] The pointing, unchanged without the refraction (deg).
+        """
+
+        if not self.refraction:
+            return ra_d, dec_d
+
+        # The pointing in the east, north and up axes, and its elevation and azimuth
+        ra, dec = math.radians(ra_d), math.radians(dec_d)
+        vec = (math.cos(dec)*math.cos(ra), math.cos(dec)*math.sin(ra), math.sin(dec))
+        e, n, u = [row[0]*vec[0] + row[1]*vec[1] + row[2]*vec[2] for row in self.horizontal]
+        elev = math.atan2(u, math.hypot(e, n))
+        azim = math.atan2(e, n)
+
+        # Refract the elevation (the exact inverse of the correction from apparent to true), or correct it
+        if true_to_apparent:
+            elev = pyRefractionTrueToApparent(elev, self.refraction_scale)
+        else:
+            elev = pyRefractionApparentToTrue(elev, self.refraction_scale)
+
+        # Back to the equatorial axes, and to the right ascension and declination
+        vec = (math.cos(elev)*math.sin(azim), math.cos(elev)*math.cos(azim), math.sin(elev))
+        x, y, z = [sum(self.horizontal[k][i]*vec[k] for k in range(3)) for i in range(3)]
+
+        return math.degrees(math.atan2(y, x))%360.0, math.degrees(math.atan2(z, math.hypot(x, y)))
+
+    def toPointing(self, offsets):
+        """ The pointing of the camera turned by the given offsets from the reference pointing.
+
+        Arguments:
+            offsets: [list] Offsets (dx, dy, droll) (px).
+
+        Return:
+            (ra_d, dec_d, pos_angle_ref): [tuple of floats] Right ascension in [0, 360), declination in
+                [-90, 90] and position angle in [0, 360) (deg).
+        """
+
+        # The +x direction and the optical axis of the turned camera, in its axes at the reference pointing
+        #   and then in the equatorial axes
+        x_cam, axis_cam = offsetAxes(offsets[0]*self.shift_unit, offsets[1]*self.shift_unit,
+                                     offsets[2]*self.roll_unit)
+        x_dir = [sum(x_cam[k]*self.axes[k][i] for k in range(3)) for i in range(3)]
+        axis = [sum(axis_cam[k]*self.axes[k][i] for k in range(3)) for i in range(3)]
+
+        # Its pointing, taken back through the refraction (the position angle is kept)
+        ra_d, dec_d, pos_angle_ref = frameToPointing(x_dir, axis)
+        ra_d, dec_d = self._refract(ra_d, dec_d, False)
+
+        return ra_d, dec_d, pos_angle_ref
+
+    def fromPointing(self, ra_d, dec_d, pos_angle_ref):
+        """ The offsets of the given pointing from the reference pointing, the inverse of toPointing. The
+            pointing has to be less than 180 deg from the reference.
+
+        Arguments:
+            ra_d: [float] Right ascension (deg).
+            dec_d: [float] Declination (deg).
+            pos_angle_ref: [float] Position angle (deg).
+
+        Return:
+            [ndarray] Offsets (dx, dy, droll) (px).
+        """
+
+        # The rotation from the axes of the reference camera to those of the given pointing
+        ra_app, dec_app = self._refract(ra_d, dec_d, True)
+        dx, dy, droll = rotationOffsets(self.frame.T.dot(pointingFrame(ra_app, dec_app, pos_angle_ref)))
+
+        return np.array([dx/self.shift_unit, dy/self.shift_unit, droll/self.roll_unit])
+
+    def toScale(self, dscale):
+        """ The scale changed by the given offset from the scale of the reference platepar.
+
+        Arguments:
+            dscale: [float] Offset of the scale (px).
+
+        Return:
+            [float] The scale (px/deg).
+        """
+
+        return self.F_scale*(1.0 + dscale/self.radius)
+
+    def fromScale(self, F_scale):
+        """ The offset of the given scale from the scale of the reference platepar, the inverse of toScale.
+
+        Arguments:
+            F_scale: [float] Scale (px/deg).
+
+        Return:
+            [float] Offset of the scale (px).
+        """
+
+        return (abs(F_scale)/self.F_scale - 1.0)*self.radius
+
+    def apply(self, platepar, offsets):
+        """ Set the pointing turned by the given offsets, and the scale changed by the fourth offset if there is
+            one, to a platepar.
+
+        Arguments:
+            platepar: [Platepar] Platepar whose RA_d, dec_d and pos_angle_ref (and F_scale) are set.
+            offsets: [list] Offsets (dx, dy, droll) or (dx, dy, droll, dscale) (px).
+
+        Return:
+            None
+        """
+
+        platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref = self.toPointing(offsets)
+
+        if len(offsets) > 3:
+            platepar.F_scale = self.toScale(offsets[3])
 
 
 def _lstsqFit(residual_func, x0, args):
