@@ -1,16 +1,25 @@
 """
 Tests of the star coverage gate of the recalibration on individual images (ApplyRecalibrate.recalibrateFF and
-ApplyRecalibrate.coverageMatchFraction).
+ApplyRecalibrate.coverageMatchFraction), and of its photometry: the photometric fit of every image, and the
+averaging of the photometric offsets in the neighbourhoods of the images with meteors
+(ApplyRecalibrate.averageNeighbourPhotometry).
 
 The gate rejects a recalibration which matched only a small fraction of the stars which could have been matched.
 Only the stars down to the catalog limit can be matched, so a camera which detects fainter stars must not have
 its fits rejected. The tests use a synthetic 1280x720 image with a 60 deg field: catalog stars at known image
 positions, detections of them, and detections of fainter stars with no catalog counterpart.
+
+The neighbourhood averaging must leave out the degenerate photometric fits (the initial guess 10.0 with a zero
+standard deviation) but give them the average, include the first image of the night, and give the same offsets
+whatever the order of the meteors.
 """
 
 import copy
+import datetime
+from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 import RMS.ConfigReader as cr
 from RMS.Astrometry import ApplyRecalibrate
@@ -289,3 +298,226 @@ def test_coverage_fraction_without_catalog_stars():
 
     assert n_possible == 0
     assert fraction == 0.0
+
+
+def test_zero_intensity_star_keeps_the_recalibrated_photometry():
+    """ One matched star with an intensity of 0 (an integer IntensSum of 0 in CALSTARS) must not turn the
+        photometric fit of the recalibration into its initial guess (mag_lev = 10.0 with a zero standard
+        deviation). """
+
+    # An image with 100 catalog stars detected and 20 fainter detections
+    pp, catalog_stars, rows = deepCameraImage(100, 20, seed=6)
+    config = makeConfig()
+
+    # The photometry of the image as it is
+    clean, _ = ApplyRecalibrate.recalibrateFF(config, startPlatepar(pp), JD_IMG, {JD_IMG: rows}, catalog_stars,
+                                              lim_mag=LIM_MAG, ignore_max_stars=True)
+    assert clean is not None
+
+    # The same image with one star of zero intensity
+    rows = rows.copy()
+    rows[0, 2] = 0
+    result, _ = ApplyRecalibrate.recalibrateFF(config, startPlatepar(pp), JD_IMG, {JD_IMG: rows}, catalog_stars,
+                                               lim_mag=LIM_MAG, ignore_max_stars=True)
+
+    # The offset of the other stars, with a real standard deviation
+    assert result is not None
+    assert abs(result.mag_lev - clean.mag_lev) < 0.05
+    assert result.mag_lev_stddev > 0
+
+
+def photometryFits(values):
+    """ Recalibrated platepars which only carry a photometric offset and its standard deviation.
+
+    Arguments:
+        values: [dict] FF name -> (mag_lev, mag_lev_stddev).
+
+    Return:
+        [dict] FF name -> object with the mag_lev and mag_lev_stddev attributes.
+    """
+
+    return {ff_name: SimpleNamespace(mag_lev=mag_lev, mag_lev_stddev=mag_lev_stddev)
+            for ff_name, (mag_lev, mag_lev_stddev) in values.items()}
+
+
+def overlappingNeighbourhoodNight():
+    """ A night of 8 images where the neighbourhoods of meteors two or one images apart overlap, with one
+        degenerate photometric fit (FF_3) between them.
+
+    Return:
+        (calstars_ffs, recalibrated): [tuple] FF names in the CALSTARS order, and the recalibrated platepars.
+    """
+
+    # FF_0 is not recalibrated, the fit of FF_3 is degenerate
+    calstars_ffs = ['FF_{:d}'.format(i) for i in range(8)]
+    recalibrated = photometryFits({
+        'FF_1': (11.0, 0.1),
+        'FF_2': (11.4, 0.1),
+        'FF_3': (10.0, 0.0),
+        'FF_4': (11.2, 0.1),
+        'FF_5': (10.6, 0.1),
+        'FF_6': (11.8, 0.1),
+        'FF_7': (11.1, 0.1),
+    })
+
+    return calstars_ffs, recalibrated
+
+
+def test_neighbourhood_average_of_usable_fits():
+    """ Guard (the same before and after the change): a meteor image with two usable neighbours gets the mean
+        offset of the three and the combined standard deviation, and so do the neighbours. """
+
+    # A meteor on FF_2, with usable fits of FF_1, FF_2 and FF_3
+    calstars_ffs = ['FF_0', 'FF_1', 'FF_2', 'FF_3']
+    recalibrated = photometryFits({'FF_1': (11.0, 0.1), 'FF_2': (11.3, 0.2), 'FF_3': (11.2, 0.1)})
+
+    ApplyRecalibrate.averageNeighbourPhotometry(recalibrated, ['FF_2'], calstars_ffs)
+
+    # The combined standard deviation of the three fits, assuming equal sample sizes
+    mean = np.mean([11.0, 11.3, 11.2])
+    stddev = np.sqrt(np.mean([0.1**2 + (11.0 - mean)**2, 0.2**2 + (11.3 - mean)**2, 0.1**2 + (11.2 - mean)**2]))
+
+    # All three images get the average
+    for ff_name in ['FF_1', 'FF_2', 'FF_3']:
+        assert recalibrated[ff_name].mag_lev == pytest.approx(mean)
+        assert recalibrated[ff_name].mag_lev_stddev == pytest.approx(stddev)
+
+
+def test_degenerate_fit_receives_the_neighbourhood_average():
+    """ An image with a degenerate photometric fit (mag_lev 10.0 from the initial guess, zero standard deviation)
+        must not contribute to the neighbourhood average, but must receive it. """
+
+    # A meteor on FF_2, whose fit is degenerate, between two usable fits
+    calstars_ffs = ['FF_0', 'FF_1', 'FF_2', 'FF_3']
+    recalibrated = photometryFits({'FF_1': (11.0, 0.1), 'FF_2': (10.0, 0.0), 'FF_3': (11.2, 0.1)})
+
+    ApplyRecalibrate.averageNeighbourPhotometry(recalibrated, ['FF_2'], calstars_ffs)
+
+    # The average only uses FF_1 and FF_3, and all three images receive it
+    for ff_name in ['FF_1', 'FF_2', 'FF_3']:
+        assert recalibrated[ff_name].mag_lev == pytest.approx(11.1)
+        assert recalibrated[ff_name].mag_lev_stddev > 0
+
+
+def test_first_image_is_in_its_own_neighbourhood():
+    """ A meteor on the first image of CALSTARS: the image itself belongs to its neighbourhood, contributes to the
+        average and receives it. """
+
+    # A meteor on FF_0, with usable fits of FF_0 and FF_1
+    calstars_ffs = ['FF_0', 'FF_1', 'FF_2', 'FF_3']
+    recalibrated = photometryFits({'FF_0': (11.0, 0.1), 'FF_1': (11.2, 0.1)})
+
+    ApplyRecalibrate.averageNeighbourPhotometry(recalibrated, ['FF_0'], calstars_ffs)
+
+    # Both images get the average of both
+    for ff_name in ['FF_0', 'FF_1']:
+        assert recalibrated[ff_name].mag_lev == pytest.approx(11.1)
+
+
+def test_neighbourhood_average_does_not_depend_on_the_order():
+    """ Overlapping neighbourhoods must give every image the same offset in any order of the meteors. With the
+        meteors two images apart, writing the averages back while iterating gave FF_3 an offset of 11.21 in one
+        order and of 11.185 in the other. """
+
+    # The same night, averaged with the meteors in both orders
+    calstars_ffs, recalibrated = overlappingNeighbourhoodNight()
+
+    forward = copy.deepcopy(recalibrated)
+    backward = copy.deepcopy(recalibrated)
+
+    ApplyRecalibrate.averageNeighbourPhotometry(forward, ['FF_3', 'FF_5'], calstars_ffs, neighbourhood_size=5)
+    ApplyRecalibrate.averageNeighbourPhotometry(backward, ['FF_5', 'FF_3'], calstars_ffs, neighbourhood_size=5)
+
+    # Every image gets the same offset in both orders
+    for ff_name in recalibrated:
+        assert forward[ff_name].mag_lev == pytest.approx(backward[ff_name].mag_lev)
+        assert forward[ff_name].mag_lev_stddev == pytest.approx(backward[ff_name].mag_lev_stddev)
+
+
+def test_neighbourhood_average_of_the_original_fits_only():
+    """ An offset which is itself an average, or a degenerate fit which received an average, must never count again
+        as an independent measurement. The neighbourhood of FF_3 (FF_1..FF_5) averages FF_1, FF_2, FF_4 and FF_5.
+        The neighbourhood of FF_4 (FF_2..FF_6) must average the original FF_2, FF_4, FF_5 and FF_6, and still leave
+        out FF_3. """
+
+    # Meteors on FF_3 and FF_4, with neighbourhoods of 5 images
+    calstars_ffs, recalibrated = overlappingNeighbourhoodNight()
+
+    ApplyRecalibrate.averageNeighbourPhotometry(recalibrated, ['FF_3', 'FF_4'], calstars_ffs, neighbourhood_size=5)
+
+    # Each meteor image carries the average of its own neighbourhood, of the original fits
+    assert recalibrated['FF_3'].mag_lev == pytest.approx(np.mean([11.0, 11.4, 11.2, 10.6]))
+    assert recalibrated['FF_4'].mag_lev == pytest.approx(np.mean([11.4, 11.2, 10.6, 11.8]))
+
+
+def ffName(i):
+    """ Name of the i-th FF file of a synthetic night, the files 10.24 s apart.
+
+    Arguments:
+        i: [int] Index of the FF file.
+
+    Return:
+        [str] FF file name.
+    """
+
+    # The time of the first frame of the file
+    dt = datetime.datetime(2023, 2, 28, 18, 0, 0) + datetime.timedelta(seconds=10.24*i)
+
+    return 'FF_XX0001_{:s}_{:03d}_{:07d}.fits'.format(dt.strftime('%Y%m%d_%H%M%S'), dt.microsecond//1000, 256*i)
+
+
+def test_meteor_on_the_first_image_with_a_degenerate_fit(tmp_path, monkeypatch):
+    """ Through the recalibration of a night: a meteor on the first image of CALSTARS, whose photometric fit is
+        degenerate (the initial guess 10.0 with a zero standard deviation), is measured with the offset of the
+        neighbouring image. The star matching is replaced by the photometric fits of the images. """
+
+    # A night of four images
+    config = makeConfig()
+    ff_names = [ffName(i) for i in range(4)]
+
+    # The photometric fits of the recalibration, the one of the first image is degenerate
+    fits = {ff_names[0]: (10.0, 0.0), ff_names[1]: (11.2, 0.1), ff_names[2]: (11.3, 0.1), ff_names[3]: (11.1, 0.1)}
+
+    # Every image is recalibrated, with its photometric fit
+    def recalibrate(platepar, ff_processing_list, *args, **kwargs):
+
+        recalibrated = {}
+        for ff_name in ff_processing_list:
+            recalibrated[ff_name] = copy.deepcopy(platepar)
+            recalibrated[ff_name].auto_recalibrated = True
+            recalibrated[ff_name].mag_lev, recalibrated[ff_name].mag_lev_stddev = fits[ff_name]
+
+        return recalibrated
+
+    # The photometric offset of the platepar which measures every meteor
+    applied = {}
+
+    # The measurement only records that offset
+    def apply(ff_name, fps, meteor_meas, platepar, add_calstatus=False):
+        applied[ff_name] = platepar.mag_lev
+        return meteor_meas
+
+    # One meteor on the first image
+    meteor_list = [[ff_names[0], 1, 0.0, 0.0, []]]
+
+    # The catalog, the FTPdetectinfo reading and writing, the star matching and the measurement are replaced
+    monkeypatch.setattr(ApplyRecalibrate.StarCatalog, 'readStarCatalog',
+                        lambda *args, **kwargs: (np.zeros((0, 3)), None, config.star_catalog_band_ratios))
+    monkeypatch.setattr(ApplyRecalibrate.FTPdetectinfo, 'readFTPdetectinfo',
+                        lambda *args, **kwargs: ('XX0001', config.fps, meteor_list))
+    monkeypatch.setattr(ApplyRecalibrate.FTPdetectinfo, 'writeFTPdetectinfo', lambda *args, **kwargs: None)
+    monkeypatch.setattr(ApplyRecalibrate, 'recalibratePlateparsForFF', recalibrate)
+    monkeypatch.setattr(ApplyRecalibrate, 'applyPlateparToCentroids', apply)
+
+    # The FTPdetectinfo file and CALSTARS with the four images
+    ftpdetectinfo_path = tmp_path/'FTPdetectinfo_XX0001_20230228_180000_000000.txt'
+    ftpdetectinfo_path.write_text('')
+    calstars_data = ([[ff_name, np.zeros((0, 8))] for ff_name in ff_names], 256)
+
+    # The recalibration of the night
+    ApplyRecalibrate.recalibrateIndividualFFsAndApplyAstrometry(str(tmp_path), str(ftpdetectinfo_path),
+                                                                calstars_data, config, makePlatepar(),
+                                                                generate_plot=False)
+
+    # The meteor is measured with the offset of the second image, the only usable fit of its neighbourhood
+    assert applied[ff_names[0]] == pytest.approx(11.2)
