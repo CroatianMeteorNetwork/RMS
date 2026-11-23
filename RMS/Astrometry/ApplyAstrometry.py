@@ -327,6 +327,35 @@ def limitingMagnitude(mags, snr_arr, snr_targets=(5, 10), exclude_mask=None):
 
 
 
+def usablePhotometryStars(px_intens_list, radius_list, catalog_mags):
+    """ Mark the stars which can be used in the photometric fit.
+
+        The fit is done on the logarithm of the intensity, so an intensity <= 0 cannot be fitted (e.g. an
+        integer IntensSum of 0 in CALSTARS). A single star with such an intensity, or with a non-finite
+        value, makes the cost of the fit infinite or NaN everywhere. The optimizer then returns the initial
+        guess (mag_lev = 10) as if it were a fit.
+
+    Arguments:
+        px_intens_list: [list] A list of sums of pixel intensities.
+        radius_list: [list] A list of radii from the focal plane centre (px).
+        catalog_mags: [list] A list of corresponding catalog magnitudes of stars.
+
+    Return:
+        [ndarray of bool] True for the stars with a finite, positive intensity and a finite radius and
+            catalog magnitude.
+    """
+
+    # Convert everything to numpy arrays
+    px_intens_arr = np.array(px_intens_list, dtype=np.float64)
+    radius_arr = np.array(radius_list, dtype=np.float64)
+    catalog_mags_arr = np.array(catalog_mags, dtype=np.float64)
+
+    # A star can be fitted if its intensity has a logarithm and all its values are finite
+    return np.isfinite(px_intens_arr) & (px_intens_arr > 0) & np.isfinite(radius_arr) \
+        & np.isfinite(catalog_mags_arr)
+
+
+
 def photometryFit(px_intens_list, radius_list, catalog_mags, fixed_vignetting=None, weights=None,
                   exclude_list=None):
     """ Fit the photometry on given data.
@@ -341,7 +370,8 @@ def photometryFit(px_intens_list, radius_list, catalog_mags, fixed_vignetting=No
             computed.
         weights: [list] Weights for the fit. None by default, in which case the weights will be equal to 1.
         exclude_list: [list] A mask for excluding certain data points from the fit. None by default, in which
-            case all data points will be used.
+            case all data points will be used. The data points which cannot be fitted (see
+            usablePhotometryStars) are always left out.
 
     Return:
         (photom_offset, fit_stddev, fit_resid):
@@ -349,7 +379,8 @@ def photometryFit(px_intens_list, radius_list, catalog_mags, fixed_vignetting=No
                 - photom_offset: [float] The photometric offset.
                 - vignetting_coeff: [float] Vignetting coefficient (rad/px).
             fit_stddev: [float] The standard deviation of the fit.
-            fit_resid: [float] Magnitude fit residuals.
+            fit_resid: [float] Magnitude fit residuals (not finite for the data points which could not be
+                fitted).
     """
 
     # If the weights are not given, set them to 1
@@ -372,11 +403,18 @@ def photometryFit(px_intens_list, radius_list, catalog_mags, fixed_vignetting=No
         exclude_list = np.array(exclude_list, dtype=np.int32)
 
 
-    # Filter the data points to exclude the ones which are marked for exclusion
-    px_intens_list_fit = np.array(px_intens_list)[exclude_list == 0]
-    radius_list_fit = np.array(radius_list)[exclude_list == 0]
-    catalog_mags_fit = np.array(catalog_mags)[exclude_list == 0]
-    weights_fit = np.array(weights)[exclude_list == 0]
+    # Select the data points used for the fit: skip the ones which are marked for exclusion and the ones
+    #   which cannot be fitted (an intensity <= 0, or a non-finite value)
+    px_intens_arr = np.array(px_intens_list, dtype=np.float64)
+    radius_arr = np.array(radius_list, dtype=np.float64)
+    catalog_mags_arr = np.array(catalog_mags, dtype=np.float64)
+    fit_mask = (exclude_list == 0) & usablePhotometryStars(px_intens_arr, radius_arr, catalog_mags_arr)
+
+    # Filter the data points
+    px_intens_list_fit = px_intens_arr[fit_mask]
+    radius_list_fit = radius_arr[fit_mask]
+    catalog_mags_fit = catalog_mags_arr[fit_mask]
+    weights_fit = np.array(weights)[fit_mask]
 
     # Fit a line to the star data, where only the intercept has to be estimated
     p0 = [10.0, 0.0]
@@ -391,20 +429,21 @@ def photometryFit(px_intens_list, radius_list, catalog_mags, fixed_vignetting=No
 
     photom_params = (photom_offset, vignetting_coeff)
 
-    # Calculate the fit residuals
-    fit_resids = np.array(catalog_mags) - photomLine((np.array(px_intens_list), np.array(radius_list)), \
-        *photom_params)
+    # Calculate the fit residuals (not finite for the data points which could not be fitted)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        fit_resids = catalog_mags_arr - photomLine((px_intens_arr, radius_arr), *photom_params)
     
-    # Compute the fit standard deviation excluding the excluded data points and including the weights
+    # Compute the fit standard deviation of the fitted data points, including the weights
     #fit_stddev = np.std(fit_resids[exclude_list == 0])
-    fit_stddev = np.sqrt(np.sum(weights_fit*(fit_resids[exclude_list == 0])**2)/np.sum(weights_fit))
+    fit_stddev = np.sqrt(np.sum(weights_fit*(fit_resids[fit_mask])**2)/np.sum(weights_fit))
 
     return photom_params, fit_stddev, fit_resids
 
 
 
 def photometryFitRobust(px_intens_list, radius_list, catalog_mags, fixed_vignetting=None):
-    """ Fit the photometry on given data robustly by rejecting 2 sigma residuals several times.
+    """ Fit the photometry on given data robustly by rejecting 2 sigma residuals several times. The stars
+        which cannot be fitted (see usablePhotometryStars) are left out first.
 
     Arguments:
         px_intens_list: [list] A list of sums of pixel intensities.
@@ -429,6 +468,13 @@ def photometryFitRobust(px_intens_list, radius_list, catalog_mags, fixed_vignett
     px_intens_list = np.array(px_intens_list)
     radius_list = np.array(radius_list)
     catalog_mags = np.array(catalog_mags)
+
+    # Leave out the stars which cannot be fitted (an intensity <= 0, or a non-finite value), so that they
+    #   are not counted as stars of the fit and are not among the returned stars
+    usable = usablePhotometryStars(px_intens_list, radius_list, catalog_mags)
+    px_intens_list = px_intens_list[usable]
+    radius_list = radius_list[usable]
+    catalog_mags = catalog_mags[usable]
 
 
     # Reject outliers and re-fit the photometry several times
