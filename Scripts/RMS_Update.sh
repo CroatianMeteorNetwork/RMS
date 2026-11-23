@@ -1478,6 +1478,10 @@ main() {
     # Perform cleanup operations before updating
     print_header "Cleaning Build Environment"
 
+    # Forget the commit of the previous build before anything installed is removed, so an update that fails or
+    #   is interrupted from here on (cleanup, dependencies, build) is not taken as built by the next one
+    rm -f "$BUILD_STAMP_FILE" 2>/dev/null || true
+
     # Remove any stale global or egg installs of RMS before we rebuild
     print_status "info" "Clearing old RMS installs from site-packages…"
     python -m pip uninstall -y RMS 2>/dev/null || true
@@ -1550,9 +1554,6 @@ PY
 
     print_header "Running Setup"
     print_status "info" "Building RMS (this may take a while)..."
-
-    # Forget the commit of the previous build, so a failed build is not taken as built
-    rm -f "$BUILD_STAMP_FILE" 2>/dev/null || true
 
     # Try build with multiple recovery attempts
     local build_attempts=0
