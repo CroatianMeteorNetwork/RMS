@@ -305,8 +305,13 @@ class BufferedCapture(Process):
             except Exception as e:
                 log.error("Error during termination: {}".format(e))
             
-            # Always join to reap zombie (returns instantly if already dead)
-            self.join()
+            # Reap the zombie (returns at once if it is already dead). Bounded: a capture process stuck in
+            #   uninterruptible (D-state) V4L2 or USB I/O survives even SIGKILL, and an unbounded join would
+            #   wedge the end-of-night stop on it, so the process is left behind instead
+            self.join(5)
+            if self.is_alive():
+                log.warning("Capture process {} still alive after SIGKILL (stuck in uninterruptible I/O?), "
+                    "leaving it without joining".format(self.pid))
             
             # Note: RTSP connections are cleaned up by releaseResources() in the child process
             
