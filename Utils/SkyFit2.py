@@ -124,6 +124,28 @@ def computeSolarSystemMagnitude(body_name, body, sun, time):
     return mag
 
 
+def setFigureWindowTitle(fig, title):
+    """ Set the window title of a matplotlib figure, whatever the matplotlib version and backend.
+
+    Arguments:
+        fig: [Figure] Matplotlib figure.
+        title: [str] Window title.
+    """
+
+    try:
+        # matplotlib >= 3.4 (a no-op on a non-interactive backend such as Agg)
+        fig.canvas.manager.set_window_title(title)
+
+    except AttributeError:
+
+        try:
+            # Older matplotlib
+            fig.canvas.set_window_title(title)
+
+        except AttributeError:
+            print("Warning: Could not set the window title of the {:s} plot.".format(title))
+
+
 def solarSystemBodiesRaDec(obs_time, lat, lon, elev):
     """ Directions and magnitudes of the Sun, the Moon and the planets seen from the station, in the frame of
         the star catalog, so that the plate projects them (as the overlay and as fit references) the way it
@@ -8161,14 +8183,7 @@ class PlateTool(QtWidgets.QMainWindow):
             ax_m = fig_p.add_subplot(gs[2, 1])
 
             # Set photometry window title
-            try:
-                fig_p.canvas.set_window_title('Photometry')
-
-            except AttributeError:
-                fig_p.canvas.manager.window.setWindowTitle('Photometry')
-            
-            except:
-                print("Warning: Could not set window title for photometry plot.")
+            setFigureWindowTitle(fig_p, 'Photometry')
 
             # Plot catalog magnitude vs. raw logsum of pixel intensities
             lsp_arr = np.log10(np.array(px_intens_list))
@@ -16268,17 +16283,7 @@ class PlateTool(QtWidgets.QMainWindow):
         fig_a = self.fig_astrometry
 
         # Set figure title
-        try:
-            fig_a.canvas.set_window_title("Astrometry fit")
-
-        except AttributeError:
-
-            fig_a.canvas.manager.window.setWindowTitle("Astrometry fit")
-
-        except:
-
-            # Handle FigureCanvasQTAgg error on some versions of Qt
-            print("Failed to set the window title!")
+        setFigureWindowTitle(fig_a, "Astrometry fit")
 
         # Plot azimuth vs azimuth error
         ax_azim.scatter(azim_list, 60*np.array(azim_residuals), s=2, c='k', zorder=3, picker=5)
