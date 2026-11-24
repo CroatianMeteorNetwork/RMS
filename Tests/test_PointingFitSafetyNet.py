@@ -496,6 +496,12 @@ def _recordRecalibrations(monkeypatch, aligned_differs):
         starts.append(platepar.jsonStr())
         return None, None
 
+    def _recalibrateEarlier(config, platepar, *args, **kwargs):
+        """ The failed first try, recorded. """
+
+        starts.append(platepar.jsonStr())
+        return None, None, 'other'
+
     def _align(config, platepar, *args, **kwargs):
         """ The NN alignment, which fails (or moves the platepar if asked). """
 
@@ -505,6 +511,8 @@ def _recordRecalibrations(monkeypatch, aligned_differs):
         return platepar, None
 
     monkeypatch.setattr(ApplyRecalibrate, 'recalibrateFF', _recalibrate)
+    monkeypatch.setattr(ApplyRecalibrate, '_recalibrateEarlier', _recalibrateEarlier)
+    monkeypatch.setattr(ApplyRecalibrate, 'rescueRecalibration', lambda *args, **kwargs: (None, None))
     monkeypatch.setattr(ApplyRecalibrate, 'alignPlatepar', _align)
 
     return starts
@@ -545,32 +553,44 @@ def test_failed_recalibration_is_retried_from_another_platepar(monkeypatch):
 
 def test_rescued_recalibration_does_not_seed_the_next_ff(monkeypatch):
 
-    # The recalibration of the first FF is a rescue by the search of the offsets, of the second one a success of
-    #   the search of earlier versions: the second FF starts from the platepar given to the first one, as before
+    # The first FF fails with every try of earlier versions and is rescued by the search of the offsets, the second
+    #   one is recalibrated by the search of earlier versions: the second FF starts from the platepar given to the
+    #   first one, as before
     pp = makePlatepar()
     _, rows = makeImage(pp)
     ff_names = ['FF_XX0001_20251214_014211_000_0000000.fits', 'FF_XX0001_20251214_014221_240_0000256.fits']
     starts = []
 
-    def _recalibrate(config, platepar, *args, **kwargs):
-        """ A successful recalibration, recorded: the first by the search of the offsets, moved by 0.1 deg. """
+    def _recalibrateEarlier(config, platepar, *args, **kwargs):
+        """ The first try, recorded: it fails on the first FF and succeeds on the second. """
 
         starts.append(platepar.RA_d)
-        result = copy.deepcopy(platepar)
         if len(starts) == 1:
-            result.RA_d += 0.1
-            result.recordFit(pointing=True, fit_by=ApplyRecalibrate.RECALIBRATE_OFFSETS_FIT_BY)
-        else:
-            result.recordFit(pointing=True, fit_by='recalibrateFF')
+            return None, None, 'distance'
+        result = copy.deepcopy(platepar)
+        result.recordFit(pointing=True, fit_by='recalibrateFF')
+        return result, 0.5, None
+
+    def _rescue(config, platepar, *args, **kwargs):
+        """ The rescue of the first FF, moved by 0.1 deg. """
+
+        result = copy.deepcopy(platepar)
+        result.RA_d += 0.1
+        result.recordFit(pointing=True, fit_by=ApplyRecalibrate.RECALIBRATE_OFFSETS_FIT_BY)
         return result, 0.5
 
-    monkeypatch.setattr(ApplyRecalibrate, 'recalibrateFF', _recalibrate)
+    monkeypatch.setattr(ApplyRecalibrate, '_recalibrateEarlier', _recalibrateEarlier)
+    monkeypatch.setattr(ApplyRecalibrate, 'recalibrateFF', lambda *args, **kwargs: (None, None))
+    monkeypatch.setattr(ApplyRecalibrate, 'rescueRecalibration', _rescue)
+    monkeypatch.setattr(ApplyRecalibrate, 'alignPlatepar',
+                        lambda config, platepar, *args, **kwargs: (platepar, None))
 
     platepars = ApplyRecalibrate.recalibratePlateparsForFF(pp, ff_names, {name: rows for name in ff_names},
                                                           np.zeros((10, 3)), makeConfig())
 
     assert starts == [pp.RA_d, pp.RA_d]
     assert platepars[ff_names[0]].RA_d == pp.RA_d + 0.1
+    assert platepars[ff_names[0]].auto_recalibrated
 
 
 def test_rescued_recalibration_matching_fewer_stars_than_the_previous_platepar_is_not_used(monkeypatch):
