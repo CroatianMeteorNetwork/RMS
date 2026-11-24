@@ -39,10 +39,10 @@ def _turned(pp, shift_px, roll_deg=0.0):
 
 ### Recalibration of an image ###
 
-def _recordSearches(monkeypatch, fail_earlier, inaccurate=True):
+def _recordSearches(monkeypatch, fail_earlier, failure='distance'):
     """ Record the searches run by recalibrateFF and whether the search of the offsets had to start from the coarse
-        alignment, with the search of earlier versions failing if asked (with the stars not within the distance
-        threshold, or for another reason).
+        alignment, with the search of earlier versions failing if asked, for the given reason ('distance',
+        'coverage', 'other').
 
     Return:
         [list] The search classes, and for the search of the offsets whether it required the alignment, in the
@@ -59,7 +59,7 @@ def _recordSearches(monkeypatch, fail_earlier, inaccurate=True):
         if kwargs['search_class'] is CheckFit.SearchOffsets:
             searches.append(kwargs.get('require_alignment', False))
         if fail_earlier and (kwargs['search_class'] is CheckFit.SearchRaDec):
-            return None, 0.5, inaccurate
+            return None, 0.5, failure
 
         return search(*args, **kwargs)
 
@@ -86,17 +86,33 @@ def test_recalibration_falls_back_to_the_search_of_the_offsets(monkeypatch):
 def test_recalibration_with_the_offsets_needs_a_better_pointing_after_other_failures(monkeypatch):
 
     # The recalibration with the search of RA, Dec and rotation of a platepar 0.2 px off fails for another reason
-    #   than the distance of the stars (no stars matched, too few, the coverage): the search of the offsets has to
-    #   start from a better pointing of the coarse alignment, finds none, and the failure of the search of earlier
-    #   versions (its match radius) is handed over
+    #   than the distance of the stars (no stars matched, too few): the search of the offsets has to start from a
+    #   better pointing of the coarse alignment, finds none, and the failure of the search of earlier versions (its
+    #   match radius) is handed over
     pp = makePlatepar()
     catalog_stars, rows = makeImage(pp)
-    searches = _recordSearches(monkeypatch, fail_earlier=True, inaccurate=False)
+    searches = _recordSearches(monkeypatch, fail_earlier=True, failure='other')
 
     result, min_match_radius = ApplyRecalibrate.recalibrateFF(makeConfig(), perturbed(pp), pp.JD, {pp.JD: rows},
                                                               catalog_stars)
 
     assert searches == [CheckFit.SearchRaDec, CheckFit.SearchOffsets, True]
+    assert result is None
+    assert min_match_radius == 0.5
+
+
+def test_recalibration_with_the_offsets_not_run_after_the_coverage_check(monkeypatch):
+
+    # The search of earlier versions matched the stars but too few of the possible ones (the coverage check): the
+    #   search of the offsets, which ends on the same stars, is not run, and the failure is handed over
+    pp = makePlatepar()
+    catalog_stars, rows = makeImage(pp)
+    searches = _recordSearches(monkeypatch, fail_earlier=True, failure='coverage')
+
+    result, min_match_radius = ApplyRecalibrate.recalibrateFF(makeConfig(), perturbed(pp), pp.JD, {pp.JD: rows},
+                                                              catalog_stars)
+
+    assert searches == [CheckFit.SearchRaDec]
     assert result is None
     assert min_match_radius == 0.5
 
@@ -113,9 +129,9 @@ def test_recalibration_with_the_offsets_matching_fewer_stars_is_not_used(monkeyp
         """ The searches: the one of earlier versions fails, the one of the offsets ends 1 px off. """
 
         if kwargs['search_class'] is CheckFit.SearchRaDec:
-            return None, 0.5, True
+            return None, 0.5, 'distance'
 
-        return _turned(pp, 1.0), 0.5, False
+        return _turned(pp, 1.0), 0.5, None
 
     monkeypatch.setattr(ApplyRecalibrate, '_recalibrateSearch', _search)
 

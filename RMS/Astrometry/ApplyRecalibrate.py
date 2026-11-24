@@ -442,21 +442,26 @@ def recalibrateFF(
     # The search of earlier versions first, so a recalibration which succeeded before is the same, and only if it
     #   fails the search of the offsets, from the coarse alignment of the stars, which reaches pointings further
     #   off and near the poles
-    result, min_match_radius, inaccurate = _recalibrateSearch(*args, search_class=CheckFit.SearchRaDec, **kwargs)
+    result, min_match_radius, failure = _recalibrateSearch(*args, search_class=CheckFit.SearchRaDec, **kwargs)
     if result is not None:
         CheckFit.SearchRaDec.normalize(result)
         return result, min_match_radius
 
     # If the search of earlier versions ended near the stars but not within the distance threshold, the search of
     #   the offsets runs from the same platepar (it ends elsewhere within its tolerance, and its least squares
-    #   refinement is polished). Otherwise (no stars matched, too few, or the coverage check) it runs only from a
-    #   better pointing of the coarse alignment: from the same platepar it rescued 5 of about 2700 such failures
-    #   on 15 real nights, and on a night far off it took more time than the failed searches of earlier versions.
-    #   Without a result, the failure of the search of earlier versions is handed over as it was
+    #   refinement is polished). If it matched the stars but too few of the possible ones (the coverage check),
+    #   it does not run: the search of the offsets ends on the same stars. Otherwise (no stars matched, too few)
+    #   it runs only from a better pointing of the coarse alignment. On 15 real nights, from the same platepar it
+    #   rescued 5 of about 2700 failures of these two kinds, and it took more time than the failed searches of
+    #   earlier versions. Without a result, the failure of the search of earlier versions is handed over as it was
+    if failure == 'coverage':
+        return result, min_match_radius
+
     log.info('Recalibration with the search of RA, Dec and rotation failed, running the search of the offsets '
              'of the pointing...')
     result_offsets, min_match_radius_offsets, _ = _recalibrateSearch(*args, search_class=CheckFit.SearchOffsets,
-                                                                     require_alignment=(not inaccurate), **kwargs)
+                                                                     require_alignment=(failure != 'distance'),
+                                                                     **kwargs)
 
     # The recalibration with the offsets is used only if it matches at least as many stars within half a pixel
     #   (scaled to the resolution) as the given platepar, which is used for the FF when the recalibration fails: a
@@ -500,9 +505,10 @@ def _recalibrateSearch(
             coarse alignment (not with the quick fit, nor if the alignment finds none). False by default.
 
     Return:
-        (result, min_match_radius, inaccurate): The result and the radius as recalibrateFF returns them, and
-            whether the recalibration failed because the matched stars were not within the distance threshold
-            (in the search or in the final goodness check).
+        (result, min_match_radius, failure): The result and the radius as recalibrateFF returns them, and why the
+            recalibration failed: 'distance' if the matched stars were not within the distance threshold (in the
+            search or in the final goodness check), 'coverage' if too few of the possible stars matched, 'other'
+            otherwise (no stars matched, too few), None if it succeeded.
     """
 
     working_platepar = copy.deepcopy(working_platepar)
@@ -629,10 +635,10 @@ def _recalibrateSearch(
 
     if require_alignment and (aligned is None):
         log.info('No coarse alignment of the pointing on the stars, the search of the offsets is not run')
-        return None, None, False
+        return None, None, 'other'
 
     # Go through all radii and match the stars
-    inaccurate = False
+    failure = 'other'
     min_match_radius = None
     matched_stars_good = None
     lsq_refined = False
@@ -724,7 +730,7 @@ def _recalibrateSearch(
                 log.info(
                     'Average star match does not satisfy the threshold: {:.2f} > {:.2f} px'.format(dist, config.dist_check_threshold)
                 )
-                inaccurate = True
+                failure = 'distance'
 
             else:
                 log.info(
@@ -796,7 +802,7 @@ def _recalibrateSearch(
         if matched_stars_good is None:
             log.info('Rejecting refined platepar, no successful fit iteration to take matched '
                      'stars from')
-            return None, min_match_radius, inaccurate
+            return None, min_match_radius, failure
 
         # Get a list of matched image and catalog stars, taken from the last successful fit
         #   iteration so that they are consistent with the platepar being saved
@@ -822,7 +828,7 @@ def _recalibrateSearch(
                      '({:d} detected stars used) matched within {:.2f} px (< {:.2f})'.format(
                          len(image_stars), n_possible, match_fraction, n_detected, min_match_radius,
                          min_match_fraction))
-            return None, min_match_radius, inaccurate
+            return None, min_match_radius, 'coverage'
 
         ### PHOTOMETRY FIT ###
 
@@ -897,9 +903,9 @@ def _recalibrateSearch(
             config.dist_check_threshold
         ))
         result = None
-        inaccurate = True
+        failure = 'distance'
 
-    return result, min_match_radius, inaccurate
+    return result, min_match_radius, (None if result is not None else failure)
 
 
 def recalibratePlateparsForFF(
