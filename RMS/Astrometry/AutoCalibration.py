@@ -45,7 +45,7 @@ from RMS.Astrometry.ApplyAstrometry import (extinctionCorrectionTrueToApparent, 
                                             xyToRaDecPP)
 from RMS.Astrometry.Conversions import jd2Date
 from RMS.Astrometry.CyFunctions import subsetCatalog
-from RMS.Formats.Platepar import getCatalogStarsImagePositions
+from RMS.Formats.Platepar import getCatalogStarsImagePositions, PointingOffsets
 from RMS.Logger import getLogger
 
 
@@ -1055,21 +1055,19 @@ def sectionDifference(platepar_a, platepar_b, jd, fwhm):
     _, ra, dec, _ = xyToRaDecPP([jd2Date(jd)]*len(gx), gx, gy, [1]*len(gx), platepar_a,
                                 extinction_correction=False)
 
-    # Fit the pointing of the second platepar
+    # Fit the pointing of the second platepar, as offsets of the pointing and the scale from its own, which are
+    #   in pixels (see PointingOffsets): steps of about a pixel in all of them, wherever the camera points
     platepar = copy.deepcopy(platepar_b)
-    p0 = np.array([platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref, platepar.F_scale])
+    pointing = PointingOffsets(platepar)
 
-    def _residuals(params):
-        """ Differences between the grid and the sky positions mapped back with the given pointing (px). """
+    def _residuals(offsets):
+        """ Differences between the grid and the sky positions mapped back with the given offsets (px). """
 
-        platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref, platepar.F_scale = params
+        pointing.apply(platepar, offsets)
         x2, y2 = raDecToXYPP(ra, dec, jd, platepar)
         return np.concatenate([x2 - gx, y2 - gy])
 
-    # Steps of about a pixel for the angles and the scale
-    pixel_deg = 1.0/platepar.F_scale
-    fit = scipy.optimize.least_squares(_residuals, p0, x_scale=[pixel_deg, pixel_deg, pixel_deg,
-                                                                0.001*platepar.F_scale])
+    fit = scipy.optimize.least_squares(_residuals, np.zeros(4))
     residuals = _residuals(fit.x)
     diff = np.hypot(residuals[:len(gx)], residuals[len(gx):])/fwhm
 

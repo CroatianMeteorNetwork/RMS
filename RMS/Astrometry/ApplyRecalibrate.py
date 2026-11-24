@@ -46,10 +46,18 @@ from RMS.Misc import RmsDateTime
 #   A size of e.g. 3 means that an FF before, the FF with the detection, an an FF after will be taken
 RECALIBRATE_NEIGHBOURHOOD_SIZE = 3
 
+# Label of the fit record of a recalibration with the search of the offsets of the pointing (the rescue of a failed
+#   recalibration with the search of earlier versions)
+RECALIBRATE_OFFSETS_FIT_BY = 'recalibrateFF' + Platepar.OFFSETS_FIT_BY_SUFFIX
+
 # Least squares refinement of the pointing: at most this many rounds of matching and fitting, and the largest
 #   change of the star positions (px) at which the refinement has converged
 LSQ_REFINE_MAX_ROUNDS = 5
 LSQ_REFINE_CONVERGED_PX = 0.01
+
+# Least squares refinement of the pointing: the first round fits the stars matched within this many times the fit
+#   radius, so that the stars near the edge of the fit radius do not tie the result to the starting pointing
+LSQ_REFINE_WIDE_FACTOR = 3.0
 
 # Least squares refinement of the pointing: the number of matched stars which the refined pointing may lose
 #   (move out of the match radius) and still be used, as a fraction of the matched stars, and the least number
@@ -188,7 +196,7 @@ def coverageMatchFraction(n_matched, n_detected, catalog_stars, jd, platepar, n_
 
 
 def refinePointingLSQ(config, platepar, jd, star_dict_ff, catalog_stars, fit_radius, check_radius, n_check,
-                      lim_mag=None):
+                      lim_mag=None, polish=False):
     """ Refine the pointing (reference RA, Dec, position angle and scale) of a recalibrated platepar by least
         squares on the matched stars.
 
@@ -199,12 +207,14 @@ def refinePointingLSQ(config, platepar, jd, star_dict_ff, catalog_stars, fit_rad
         with the refined pointing and the fit is repeated until the pointing no longer changes, so the choice of
         the stars doesn't tie the result to the starting pointing.
 
+        The calibration check (CheckFit.autoCheckFit) uses it on the stars of several images, with jd None.
+
     Arguments:
         config: [Config instance]
         platepar: [Platepar instance] Recalibrated platepar.
-        jd: [float] Julian date of the stars.
-        star_dict_ff: [dict] A dictionary with one entry, where the key is 'jd' and the value is the list of
-            star coordinates.
+        jd: [float] Julian date of the stars, or None for the stars of all images in star_dict_ff.
+        star_dict_ff: [dict] A dictionary where the keys are the Julian dates of the images and the values the
+            lists of star coordinates (one entry for the recalibration of an image).
         catalog_stars: [ndarray] Catalog stars (ra, dec, mag).
         fit_radius: [float] Radius (px) within which the stars are matched for the fit.
         check_radius: [float] Radius (px) of the matched stars which are used after the recalibration (the
@@ -213,6 +223,9 @@ def refinePointingLSQ(config, platepar, jd, star_dict_ff, catalog_stars, fit_rad
 
     Keyword arguments:
         lim_mag: [float] Override the limiting magnitude from config. None by default.
+        polish: [bool] Fit the first round on the stars within LSQ_REFINE_WIDE_FACTOR times the fit radius, and let
+            the stars at the edge of a fit radius smaller than the check radius come and go (see below), as the
+            searches of the offsets of the pointing do. False by default, which refines as earlier versions did.
 
     Return:
         (platepar, matched_stars): [tuple] The refined platepar and its matched stars within check_radius, or
@@ -223,82 +236,112 @@ def refinePointingLSQ(config, platepar, jd, star_dict_ff, catalog_stars, fit_rad
 
     # The stars matched with the given platepar, the pairs which the refinement must fit better. Too few stars
     #   can't constrain the four parameters
+    def _matchedPairs(matched):
+        """ The matched image and catalog stars of the image (or of all images, jd None), with the Julian date of
+            every pair, or None if the image has no matched stars. """
+
+        if jd is not None:
+            if jd not in matched:
+                return None
+            img, cat, _ = matched[jd]
+            return img, cat, np.full(len(img), jd)
+
+        if not matched:
+            return None
+        jds = sorted(matched)
+        return (np.concatenate([matched[j][0] for j in jds]), np.concatenate([matched[j][1] for j in jds]),
+                np.concatenate([np.full(len(matched[j][0]), j) for j in jds]))
+
     n_start, _, _, matched = CheckFit.matchStarsResiduals(config, platepar, catalog_stars, star_dict_ff,
                                                           fit_radius, ret_nmatch=True, lim_mag=lim_mag)
-    if (n_start < config.min_matched_stars) or (jd not in matched):
+    pairs = _matchedPairs(matched)
+    if (n_start < config.min_matched_stars) or (pairs is None):
         log.debug('Least squares refinement of the pointing not used: {:d} stars within {:.2f} px'.format(
             n_start, fit_radius))
         return None, None
 
-    img_start, cat_start, _ = matched[jd]
+    img_start, cat_start, jd_start = pairs
 
 
-    def _positions(pp, cat_stars):
-        """ Image positions (x, y) of catalog stars with the platepar. """
+    def _positions(pp, cat_stars, pair_jds):
+        """ Image positions (x, y) of catalog stars with the platepar, each at the time of its image. """
 
-        return raDecToXYPP(cat_stars[:, 0], cat_stars[:, 1], jd, pp)
+        x, y = np.zeros(len(cat_stars)), np.zeros(len(cat_stars))
+        for pair_jd in np.unique(pair_jds):
+            sel = pair_jds == pair_jd
+            x[sel], y[sel] = raDecToXYPP(cat_stars[sel, 0], cat_stars[sel, 1], pair_jd, pp)
+
+        return x, y
 
 
     # Scale of the robust loss (px): distances well below it count as squares, larger ones about linearly
     f_scale = fit_radius/2.0
 
 
-    def _robustCost(pp, img_stars, cat_stars):
+    def _robustCost(pp, img_stars, cat_stars, pair_jds):
         """ The loss which the fit minimizes (soft L1 of the distances of the image stars from their catalog
             stars), to compare two pointings on the same pairs. """
 
-        x_cat, y_cat = _positions(pp, cat_stars)
+        x_cat, y_cat = _positions(pp, cat_stars, pair_jds)
         z = ((img_stars[:, 1] - x_cat)**2 + (img_stars[:, 0] - y_cat)**2)/f_scale**2
 
         return np.sum(2*(np.sqrt(1 + z) - 1))
 
 
     # The fitted parameters, on a copy of the platepar (the given one is kept if the refinement isn't used)
-    keys = ('RA_d', 'dec_d', 'pos_angle_ref', 'F_scale')
     refined = copy.deepcopy(platepar)
 
-    # The parameters are fitted in steps which move the stars by about one pixel (the rotation and the scale at
-    #   a quarter of the image diagonal), so the fit is equally well conditioned in all of them
-    r_typ = np.hypot(platepar.X_res, platepar.Y_res)/4.0
-    steps = np.array([1.0/(platepar.F_scale*max(np.cos(np.radians(platepar.dec_d)), 0.1)),
-                      1.0/platepar.F_scale, np.degrees(1.0/r_typ), platepar.F_scale/r_typ])
-
-    # Fit the pointing on the matched pairs, match the stars again with it and repeat until it converges
-    img_stars, cat_stars = img_start, cat_start
+    # Fit the pointing on the matched pairs, match the stars again with it and repeat until it converges. The
+    #   first round fits the stars within a wider radius (the robust loss keeps the wrong pairs among them from
+    #   pulling much), so that the rounds within the fit radius start near the optimum whichever pointing within
+    #   the radius the search stopped at
+    img_stars, cat_stars, pair_jds = img_start, cat_start, jd_start
+    if polish:
+        n_wide, _, _, matched_wide = CheckFit.matchStarsResiduals(config, platepar, catalog_stars, star_dict_ff,
+                                                                  LSQ_REFINE_WIDE_FACTOR*fit_radius,
+                                                                  ret_nmatch=True, lim_mag=lim_mag)
+        pairs_wide = _matchedPairs(matched_wide)
+        if (pairs_wide is not None) and (n_wide >= n_start):
+            img_stars, cat_stars, pair_jds = pairs_wide
     for _ in range(LSQ_REFINE_MAX_ROUNDS):
 
-        # The pointing at the start of the round, and where it puts the stars
-        p0 = np.array([getattr(refined, k) for k in keys])
-        x_before, y_before = _positions(refined, cat_stars)
+        # The pointing and the scale are fitted as offsets (px) from those at the start of the round (see
+        #   Platepar.PointingOffsets), which move the stars by about one pixel each (the rotation and the scale
+        #   at a quarter of the image diagonal) wherever the camera points, so the fit is equally well
+        #   conditioned in all of them
+        pointing = Platepar.PointingOffsets(refined)
+
+        # Where the pointing at the start of the round puts the stars
+        x_before, y_before = _positions(refined, cat_stars, pair_jds)
 
         def _residuals(q):
-            """ Distances of the image stars from their catalog stars (px) with the pointing p0 + q*steps. """
+            """ Distances of the image stars from their catalog stars (px) with the offsets q. """
 
-            for k, v in zip(keys, p0 + q*steps):
-                setattr(refined, k, v)
-            x_cat, y_cat = _positions(refined, cat_stars)
+            pointing.apply(refined, q)
+            x_cat, y_cat = _positions(refined, cat_stars, pair_jds)
 
             return np.concatenate([img_stars[:, 1] - x_cat, img_stars[:, 0] - y_cat])
 
         # The fit has a robust loss, so a wrong pair pulls the pointing less than its share of the stars
-        fit = scipy.optimize.least_squares(_residuals, np.zeros(len(keys)), loss='soft_l1',
-                                           f_scale=f_scale, diff_step=1e-2)
-        for k, v in zip(keys, p0 + fit.x*steps):
-            setattr(refined, k, v)
+        #   (the derivatives step the offsets by a fixed fraction of a pixel, see Platepar.offsetsJacobian)
+        fit = scipy.optimize.least_squares(_residuals, np.zeros(4), loss='soft_l1', f_scale=f_scale,
+                                           jac=Platepar.offsetsJacobian(_residuals))
+        pointing.apply(refined, fit.x)
 
         # Converged when the stars no longer move
-        x_after, y_after = _positions(refined, cat_stars)
+        x_after, y_after = _positions(refined, cat_stars, pair_jds)
         if np.max(np.hypot(x_after - x_before, y_after - y_before)) < LSQ_REFINE_CONVERGED_PX:
             break
 
         # Match the stars again with the refined pointing
         n_round, _, _, matched = CheckFit.matchStarsResiduals(config, refined, catalog_stars, star_dict_ff,
                                                               fit_radius, ret_nmatch=True, lim_mag=lim_mag)
-        if (n_round < config.min_matched_stars) or (jd not in matched):
+        pairs = _matchedPairs(matched)
+        if (n_round < config.min_matched_stars) or (pairs is None):
             log.debug('Least squares refinement of the pointing not used: {:d} stars within {:.2f} px after a '
                       'round'.format(n_round, fit_radius))
             return None, None
-        img_stars, cat_stars, _ = matched[jd]
+        img_stars, cat_stars, pair_jds = pairs
 
     # The number of the matched stars which the refined pointing may lose. A star near the edge of the match
     #   radius can move out of it when the pointing gets better, as the radius is about as large as the
@@ -314,9 +357,17 @@ def refinePointingLSQ(config, platepar, jd, star_dict_ff, catalog_stars, fit_rad
                                                   ret_nmatch=True, lim_mag=lim_mag)
     n_refined, _, _, matched_check = CheckFit.matchStarsResiduals(config, refined, catalog_stars, star_dict_ff,
                                                                   check_radius, ret_nmatch=True, lim_mag=lim_mag)
-    cost_start, cost_refined = _robustCost(platepar, img_start, cat_start), _robustCost(refined, img_start, cat_start)
-    if ((n_start - n_fit) > max_lost_fit) or ((n_check - n_refined) > max_lost_check) \
-            or (jd not in matched_check) or (cost_refined > cost_start):
+    cost_start = _robustCost(platepar, img_start, cat_start, jd_start)
+    cost_refined = _robustCost(refined, img_start, cat_start, jd_start)
+
+    # With a fit radius smaller than the check radius (the recalibration fits within half a pixel), the stars at
+    #   the edge of the fit radius come and go with their noise wherever the search stopped: losing more of them
+    #   is no sign of a wrong fit if the refined pointing keeps every star within the check radius
+    lost_fit_ok = ((n_start - n_fit) <= max_lost_fit) \
+        or (polish and (check_radius > fit_radius) and (n_refined >= n_check))
+
+    if (not lost_fit_ok) or ((n_check - n_refined) > max_lost_check) \
+            or (_matchedPairs(matched_check) is None) or (cost_refined > cost_start):
 
         log.info('Least squares refinement of the pointing not used: stars within {:.2f} px {:d} (before {:d}), '
                  'within {:.2f} px {:d} (before {:d}), loss on the first pairs {:.3f} (before {:.3f})'.format(
@@ -349,6 +400,8 @@ def recalibrateFF(
     ignore_distance_threshold=False,
     ignore_max_stars=False,
     min_match_fraction=None,
+    reference_platepar=None,
+    rescue=True,
 ):
     """Given the platepar and a list of stars on one image, try to recalibrate the platepar to achieve
         the best match by brute force star matching.
@@ -372,10 +425,161 @@ def recalibrateFF(
             coverageMatchFraction) that the fit must match to be accepted. None by default, which uses
             config.recalibration_min_match_fraction. Set to 0 to disable the coverage gate (e.g. for
             interactive use).
+        reference_platepar: [Platepar instance] The platepar used for the image if the recalibration fails, which
+            a recalibration with the search of the offsets has to match at least as well (see closeStarsFewer).
+            None by default, which uses working_platepar.
+        rescue: [bool] Run the search of the offsets if the search of earlier versions fails (rescueRecalibration).
+            True by default.
+
+    The pointing and the scale are first searched as earlier versions did (CheckFit.SearchRaDec), so a
+    recalibration which succeeded before gives the same platepar at the same cost. If it fails, the recalibration
+    is run again with the search of the offsets of the pointing (CheckFit.SearchOffsets), from the coarse alignment
+    of the stars, which reaches pointings further off and near the poles, and its result is used.
 
     Return:
         result: [?] A Platepar instance if refinement is successful, None if it failed.
         min_match_radius: [float] Minimum radius that successfully matched the stars (pixels).
+    """
+
+    args = (config, working_platepar, jd, star_dict_ff, catalog_stars)
+    kwargs = dict(max_match_radius=max_match_radius, force_platepar_save=force_platepar_save, lim_mag=lim_mag,
+                  ignore_distance_threshold=ignore_distance_threshold, ignore_max_stars=ignore_max_stars,
+                  min_match_fraction=min_match_fraction)
+
+    # The search of earlier versions first, so a recalibration which succeeded before is the same, and only if it
+    #   fails the search of the offsets, which reaches pointings further off and near the poles
+    result, min_match_radius, failure = _recalibrateEarlier(*args, **kwargs)
+    if (result is not None) or (not rescue):
+        return result, min_match_radius
+
+    result_offsets, min_match_radius_offsets = rescueRecalibration(*args, failure=failure,
+                                                                   reference_platepar=reference_platepar, **kwargs)
+    if result_offsets is not None:
+        return result_offsets, min_match_radius_offsets
+
+    return result, min_match_radius
+
+
+def _recalibrateEarlier(config, working_platepar, jd, star_dict_ff, catalog_stars, **kwargs):
+    """ The recalibration of recalibrateFF with the search of earlier versions (CheckFit.SearchRaDec), its result
+        reflected back onto the sphere if the search stepped the declination past a pole.
+
+    Return:
+        (result, min_match_radius, failure): See _recalibrateSearch.
+    """
+
+    result, min_match_radius, failure = _recalibrateSearch(config, working_platepar, jd, star_dict_ff,
+                                                           catalog_stars, search_class=CheckFit.SearchRaDec,
+                                                           **kwargs)
+    if result is not None:
+        CheckFit.SearchRaDec.normalize(result)
+
+    return result, min_match_radius, failure
+
+
+def rescueRecalibration(config, working_platepar, jd, star_dict_ff, catalog_stars, failure='other',
+                        reference_platepar=None, **kwargs):
+    """ The rescue of a recalibration which failed with the search of earlier versions: the search of the offsets
+        of the pointing (CheckFit.SearchOffsets) from the same platepar. Its result is recorded as
+        RECALIBRATE_OFFSETS_FIT_BY.
+
+    Arguments:
+        config, working_platepar, jd, star_dict_ff, catalog_stars: See recalibrateFF.
+
+    Keyword arguments:
+        failure: [str] Why the search of earlier versions failed (see _recalibrateSearch). 'other' by default.
+        reference_platepar: [Platepar instance] See recalibrateFF.
+        kwargs: The other keyword arguments of recalibrateFF.
+
+    Return:
+        (result, min_match_radius): The rescued platepar and its match radius, or (None, None).
+    """
+
+    # If the search of earlier versions ended near the stars but not within the distance threshold, the search of
+    #   the offsets runs from the same platepar (it ends elsewhere within its tolerance, and its least squares
+    #   refinement is polished). If it matched the stars but too few of the possible ones (the coverage check),
+    #   it does not run: the search of the offsets ends on the same stars. Otherwise (no stars matched, too few)
+    #   it runs only from a better pointing of the coarse alignment. On 15 real nights, from the same platepar it
+    #   rescued 5 of about 2700 failures of these two kinds, and it took more time than the failed searches of
+    #   earlier versions
+    if failure == 'coverage':
+        return None, None
+
+    log.info('Recalibration with the search of RA, Dec and rotation failed, running the search of the offsets '
+             'of the pointing...')
+    result, min_match_radius, _ = _recalibrateSearch(config, working_platepar, jd, star_dict_ff, catalog_stars,
+                                                     search_class=CheckFit.SearchOffsets,
+                                                     require_alignment=(failure != 'distance'), **kwargs)
+
+    # The recalibration with the offsets is used only if it matches at least as many stars within half a pixel
+    #   (scaled to the resolution) as the reference platepar, which is used for the FF when the recalibration
+    #   fails: a recalibration which the checks accepted with fewer such stars was worse on real FFs than the
+    #   platepar before
+    if (result is None) or closeStarsFewer(config, result, reference_platepar or working_platepar, catalog_stars,
+                                           star_dict_ff, lim_mag=kwargs.get('lim_mag')):
+        return None, None
+
+    return result, min_match_radius
+
+
+def closeStarsFewer(config, platepar, reference_platepar, catalog_stars, star_dict_ff, lim_mag=None):
+    """ Whether a platepar matches fewer image stars within half a pixel (scaled to the resolution) than a
+        reference platepar, the test of a rescue by the fits of the offsets of the pointing.
+
+    Arguments:
+        config: [Config instance]
+        platepar: [Platepar instance] The rescued platepar.
+        reference_platepar: [Platepar instance] The platepar used for the FF if the rescue is not.
+        catalog_stars: [ndarray] Catalog stars (ra, dec, mag).
+        star_dict_ff: [dict] Julian date of the image and its stars.
+
+    Keyword arguments:
+        lim_mag: [float] Override the limiting magnitude from config. None by default.
+
+    Return:
+        [bool] True if the platepar matches fewer such stars.
+    """
+
+    radius = 0.5*max(1.0, np.hypot(config.width, config.height)/np.hypot(1280, 720))
+    n_platepar, _, _, _ = CheckFit.matchStarsResiduals(config, platepar, catalog_stars, star_dict_ff, radius,
+                                                       ret_nmatch=True, lim_mag=lim_mag)
+    n_reference, _, _, _ = CheckFit.matchStarsResiduals(config, reference_platepar, catalog_stars, star_dict_ff,
+                                                        radius, ret_nmatch=True, lim_mag=lim_mag)
+    if n_platepar < n_reference:
+        log.info('The rescue by the offsets matches {:d} stars within {:.2f} px, the reference platepar {:d}: it '
+                 'is not used'.format(n_platepar, radius, n_reference))
+        return True
+
+    return False
+
+
+def _recalibrateSearch(
+    config,
+    working_platepar,
+    jd,
+    star_dict_ff,
+    catalog_stars,
+    max_match_radius=None,
+    force_platepar_save=False,
+    lim_mag=None,
+    ignore_distance_threshold=False,
+    ignore_max_stars=False,
+    min_match_fraction=None,
+    search_class=None,
+    require_alignment=False,
+):
+    """ The recalibration of recalibrateFF with the given search (see recalibrateFF for the other arguments).
+
+    Keyword arguments:
+        search_class: [class] CheckFit.SearchOffsets or CheckFit.SearchRaDec.
+        require_alignment: [bool] With CheckFit.SearchOffsets, run the search only from a better pointing of the
+            coarse alignment (not with the quick fit, nor if the alignment finds none). False by default.
+
+    Return:
+        (result, min_match_radius, failure): The result and the radius as recalibrateFF returns them, and why the
+            recalibration failed: 'distance' if the matched stars were not within the distance threshold (in the
+            search or in the final goodness check), 'coverage' if too few of the possible stars matched, 'other'
+            otherwise (no stars matched, too few), None if it succeeded.
     """
 
     working_platepar = copy.deepcopy(working_platepar)
@@ -438,7 +642,7 @@ def recalibrateFF(
 
     # Calculate the function tolerance, so the desired precision can be reached (the number is calculated
     # in the same regard as the cost function)
-    fatol, xatol_ang = CheckFit.computeMinimizationTolerances(config, working_platepar, len(star_dict_ff))
+    fatol, _ = CheckFit.computeMinimizationTolerances(config, working_platepar, len(star_dict_ff))
 
     ### If the initial match is good enough, do only quick recalibration ###
 
@@ -485,7 +689,27 @@ def recalibrateFF(
     log.info('Pre-filtered catalog to {:d} stars within {:.1f} deg FOV radius'.format(
         len(catalog_stars), fov_radius))
 
+    # Without the quick fit, bring the pointing onto the stars first if clearly more of them agree with the coarse
+    #   alignment than with the platepar (with the search of the offsets). If the search has to start from it and
+    #   there is none, it is not run
+    aligned = None
+    if (radius_list[0] != 1.5) and (search_class is CheckFit.SearchOffsets):
+        aligned = CheckFit.coarseAlignStars(config, working_platepar, catalog_stars, star_dict_ff,
+                                            lim_mag=effective_lim_mag)
+        if aligned is not None:
+            log.info('Coarse alignment of the pointing on the stars: RA {:.4f} -> {:.4f}, Dec {:.4f} -> {:.4f}, '
+                     'rotation {:.4f} -> {:.4f} deg'.format(working_platepar.RA_d, aligned.RA_d,
+                                                            working_platepar.dec_d, aligned.dec_d,
+                                                            working_platepar.pos_angle_ref, aligned.pos_angle_ref))
+            working_platepar.RA_d, working_platepar.dec_d, working_platepar.pos_angle_ref = aligned.RA_d, \
+                aligned.dec_d, aligned.pos_angle_ref
+
+    if require_alignment and (aligned is None):
+        log.info('No coarse alignment of the pointing on the stars, the search of the offsets is not run')
+        return None, None, 'other'
+
     # Go through all radii and match the stars
+    failure = 'other'
     min_match_radius = None
     matched_stars_good = None
     lsq_refined = False
@@ -529,37 +753,29 @@ def recalibrateFF(
 
         ### Recalibrate the platepar just on these stars, use the default platepar for initial params ###
 
-        # Init initial parameters
-        p0 = [
-            working_platepar.RA_d,
-            working_platepar.dec_d,
-            working_platepar.pos_angle_ref,
-            working_platepar.F_scale,
-        ]
+        # Init initial parameters: with SearchOffsets no offset from the pointing and the scale of the platepar
+        #   (px, see Platepar.PointingOffsets), which move the stars by the same amount in the same direction on
+        #   the image wherever the camera points
+        search = search_class(config, working_platepar)
 
         # Compute the minimization tolerance
-        fatol, xatol_ang = CheckFit.computeMinimizationTolerances(config, working_platepar, len(star_dict_ff))
+        fatol, _ = CheckFit.computeMinimizationTolerances(config, working_platepar, len(star_dict_ff))
 
-        simplex = CheckFit.buildNelderMeadSimplex(p0, working_platepar.dec_d, mode="floor")
+        simplex = CheckFit.buildNelderMeadSimplex(search.p0, search.steps)
 
         res = scipy.optimize.minimize(
             CheckFit._calcImageResidualsAstro,
-            p0,
-            args=(config, working_platepar, catalog_stars, star_dict_ff, match_radius),
+            search.p0,
+            args=(config, working_platepar, catalog_stars, star_dict_ff, match_radius, search),
             method='Nelder-Mead',
-            options={'fatol': fatol, 'xatol': xatol_ang, 'initial_simplex': simplex},
+            options={'fatol': fatol, 'xatol': search.xatol, 'initial_simplex': simplex},
         )
 
         ###
 
         # Compute matched stars
         temp_platepar = copy.deepcopy(working_platepar)
-
-        ra_ref, dec_ref, pos_angle_ref, F_scale_ref = res.x
-        temp_platepar.RA_d = ra_ref
-        temp_platepar.dec_d = dec_ref
-        temp_platepar.pos_angle_ref = pos_angle_ref
-        temp_platepar.F_scale = F_scale_ref
+        search.apply(temp_platepar, res.x)
 
         n_matched, dist, cost, matched_stars = CheckFit.matchStarsResiduals(
             config,
@@ -585,6 +801,7 @@ def recalibrateFF(
                 log.info(
                     'Average star match does not satisfy the threshold: {:.2f} > {:.2f} px'.format(dist, config.dist_check_threshold)
                 )
+                failure = 'distance'
 
             else:
                 log.info(
@@ -628,9 +845,12 @@ def recalibrateFF(
     if config.recalibration_lsq_refine and (matched_stars_good is not None) and (max_match_radius is None) \
             and (not force_platepar_save):
 
-        refined, matched_refined = refinePointingLSQ(config, working_platepar, jd, star_dict_ff, catalog_stars,
-                                                     scaling_factor*min_radius, min_match_radius,
-                                                     len(matched_stars_good[jd][0]), lim_mag=lim_mag)
+        refine_args = (config, working_platepar, jd, star_dict_ff, catalog_stars, scaling_factor*min_radius,
+                       min_match_radius, len(matched_stars_good[jd][0]))
+        if search_class is CheckFit.SearchOffsets:
+            refined, matched_refined = refinePointingLSQ(*refine_args, lim_mag=lim_mag, polish=True)
+        else:
+            refined, matched_refined = refinePointingLSQ(*refine_args, lim_mag=lim_mag)
 
         # The least squares fit can lower the distances while raising their median, which the goodness check below
         #   uses, so the refined pointing is used only if it is good enough on its own. Otherwise the result of the
@@ -653,7 +873,7 @@ def recalibrateFF(
         if matched_stars_good is None:
             log.info('Rejecting refined platepar, no successful fit iteration to take matched '
                      'stars from')
-            return None, min_match_radius
+            return None, min_match_radius, failure
 
         # Get a list of matched image and catalog stars, taken from the last successful fit
         #   iteration so that they are consistent with the platepar being saved
@@ -679,7 +899,7 @@ def recalibrateFF(
                      '({:d} detected stars used) matched within {:.2f} px (< {:.2f})'.format(
                          len(image_stars), n_possible, match_fraction, n_detected, min_match_radius,
                          min_match_fraction))
-            return None, min_match_radius
+            return None, min_match_radius, 'coverage'
 
         ### PHOTOMETRY FIT ###
 
@@ -742,7 +962,8 @@ def recalibrateFF(
 
         # Record the pointing fit: the search, refined by least squares if it was
         working_platepar.recordFit(pointing=True,
-                                   fit_by=('recalibrateFF+LSQ' if lsq_refined else 'recalibrateFF'))
+                                   fit_by=(RECALIBRATE_OFFSETS_FIT_BY if search_class is CheckFit.SearchOffsets
+                                           else 'recalibrateFF') + ('+LSQ' if lsq_refined else ''))
 
         # Store the platepar to the list of recalibrated platepars
         result = working_platepar
@@ -753,8 +974,9 @@ def recalibrateFF(
             config.dist_check_threshold
         ))
         result = None
+        failure = 'distance'
 
-    return result, min_match_radius
+    return result, min_match_radius, (None if result is not None else failure)
 
 
 def recalibratePlateparsForFF(
@@ -819,14 +1041,21 @@ def recalibratePlateparsForFF(
         star_dict_ff = {jd: calstars[ff_name]}
 
         result = None
+        tried_after_nn = None
 
         # Skip recalibration if less than a minimum number of stars were detected
         if (len(calstars[ff_name]) >= config.ff_min_stars) and (
             len(calstars[ff_name]) >= config.min_matched_stars
         ):
 
+            # The tries of earlier versions below run with the searches of earlier versions only, as before, so an
+            #   FF which they recalibrate gives the same platepar and leaves the same state for the next FFs. The
+            #   rescue by the fits of the offsets of the pointing runs only after all of them failed (see below)
+            start_platepar = copy.deepcopy(working_platepar)
+            nn_rescue = None
+
             # Recalibrate the platepar using star matching
-            result, min_match_radius = recalibrateFF(
+            result, min_match_radius, failure = _recalibrateEarlier(
                 config,
                 working_platepar,
                 jd,
@@ -848,11 +1077,17 @@ def recalibratePlateparsForFF(
                     config, prev_platepar, calstars_time, calstars_data, show_plot=False
                 )
 
+                # A pointing which only the NN fit of the offsets found is kept for the rescue below, and the tries
+                #   go on from the previous platepar, as when the NN alignment fails
+                if Platepar.isOffsetsRescue(test_platepar):
+                    nn_rescue, test_platepar = test_platepar, prev_platepar
+
                 # Try to recalibrate after NN alignment
                 result, _ = recalibrateFF(
                     config, test_platepar, jd, star_dict_ff, catalog_stars, lim_mag=lim_mag,
-                    ignore_distance_threshold=True
+                    ignore_distance_threshold=True, rescue=False
                 )
+                tried_after_nn = test_platepar.jsonStr()
 
                 # If the NN alignment failed, align the previous platepar using the smallest radius that
                 # matched and force save the the platepar
@@ -871,7 +1106,8 @@ def recalibratePlateparsForFF(
                         max_match_radius=min_match_radius,
                         force_platepar_save=True,
                         lim_mag=lim_mag,
-                        ignore_distance_threshold=True
+                        ignore_distance_threshold=True,
+                        rescue=False
                     )
 
                     if result is not None:
@@ -885,8 +1121,13 @@ def recalibratePlateparsForFF(
                 working_platepar = result
 
 
-            # If the working platepar keeps failing, try using the original platepar before any NN alignment
-            if result is None:
+            # If the working platepar keeps failing, try using the original platepar before any NN alignment. The
+            #   recalibration gives the same result for the same platepar, so it is not run again if the original
+            #   platepar is the one just tried after the NN alignment (as on a night when no FF is recalibrated)
+            if (result is None) and (tried_after_nn is not None) and (orig_platepar.jsonStr() == tried_after_nn):
+                log.info('Recalibration failed, the original platepar was the one just tried')
+
+            elif result is None:
                 log.info('Recalibration failed, trying to use the original platepar...')
                 result, _ = recalibrateFF(
                     config,
@@ -895,12 +1136,33 @@ def recalibratePlateparsForFF(
                     star_dict_ff,
                     catalog_stars,
                     lim_mag=lim_mag,
-                    ignore_distance_threshold=True
+                    ignore_distance_threshold=True,
+                    rescue=False
                 )
 
                 # If the recalibration succeeded, use the result
                 if result is not None:
                     working_platepar = result
+
+            # If every try failed, the rescue: the search of the offsets from the platepar of the first try, then
+            #   the recalibration from the pointing which only the NN fit of the offsets found. A rescue is used
+            #   for the FF only if it matches at least as many stars within half a pixel as the previous platepar,
+            #   which the FF gets otherwise, and it does not seed the next FF (see below)
+            if result is None:
+                result, _ = rescueRecalibration(config, start_platepar, jd, star_dict_ff, catalog_stars,
+                                                failure=failure, reference_platepar=prev_platepar, lim_mag=lim_mag,
+                                                ignore_distance_threshold=ignore_distance_threshold,
+                                                ignore_max_stars=ignore_max_stars)
+            if (result is None) and (nn_rescue is not None):
+                result, _ = recalibrateFF(config, nn_rescue, jd, star_dict_ff, catalog_stars, lim_mag=lim_mag,
+                                          ignore_distance_threshold=True, rescue=False)
+                if result is not None:
+                    result.recordFit(pointing=True, fit_by=RECALIBRATE_OFFSETS_FIT_BY)
+                    if closeStarsFewer(config, result, prev_platepar, catalog_stars, star_dict_ff,
+                                       lim_mag=lim_mag):
+                        result = None
+            if result is not None:
+                working_platepar = result
 
         # Store the platepar if the fit succeeded
         if result is not None:
@@ -915,7 +1177,12 @@ def recalibratePlateparsForFF(
             working_platepar.auto_recalibrated = True
 
             recalibrated_platepars[ff_name] = working_platepar
-            prev_platepar = working_platepar
+
+            # The next FF starts from this platepar, unless it is the rescue of a recalibration which failed with
+            #   the searches of earlier versions: then it starts from the previous platepar as before, so the FFs
+            #   which the searches of earlier versions recalibrate give the same platepars as before
+            if not Platepar.isOffsetsRescue(working_platepar):
+                prev_platepar = working_platepar
 
         else:
 
