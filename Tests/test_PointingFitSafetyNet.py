@@ -571,3 +571,53 @@ def test_rescued_recalibration_does_not_seed_the_next_ff(monkeypatch):
 
     assert starts == [pp.RA_d, pp.RA_d]
     assert platepars[ff_names[0]].RA_d == pp.RA_d + 0.1
+
+
+def test_rescued_recalibration_matching_fewer_stars_than_the_previous_platepar_is_not_used(monkeypatch):
+
+    # The search of earlier versions fails on the FF and the search of the offsets ends 1 px off, with fewer stars
+    #   within half a pixel than the previous platepar: no try uses it, and the FF keeps the previous platepar
+    pp = makePlatepar()
+    ff_name = 'FF_XX0001_20251214_014211_000_0000000.fits'
+    config = makeConfig()
+    jd = ApplyRecalibrate.date2JD(*ApplyRecalibrate.FFfile.getMiddleTimeFF(ff_name, config.fps,
+                                                                           ret_milliseconds=True, ff_frames=256))
+    truth = copy.deepcopy(pp)
+    truth.JD = jd
+    catalog_stars, rows = makeImage(truth)
+
+    def _search(*args, **kwargs):
+        """ The searches: the one of earlier versions fails on the distance, the one of the offsets ends 1 px off.
+        """
+
+        if kwargs['search_class'] is CheckFit.SearchRaDec:
+            return None, 0.5, 'distance'
+
+        result = _turned(truth, 1.0)
+        result.recordFit(pointing=True, fit_by=ApplyRecalibrate.RECALIBRATE_OFFSETS_FIT_BY)
+        return result, 0.5, None
+
+    monkeypatch.setattr(ApplyRecalibrate, '_recalibrateSearch', _search)
+    monkeypatch.setattr(ApplyRecalibrate, 'alignPlatepar',
+                        lambda config, platepar, *args, **kwargs: (platepar, None))
+
+    platepars = ApplyRecalibrate.recalibratePlateparsForFF(truth, [ff_name], {ff_name: rows}, catalog_stars,
+                                                          config)
+
+    assert not platepars[ff_name].auto_recalibrated
+    assert platepars[ff_name].RA_d == truth.RA_d
+
+
+def test_nn_rescue_is_recorded(monkeypatch):
+
+    # The NN fit of the offsets which rescues a failed NN fit of earlier versions is recorded as such
+    pp = makePlatepar()
+    catalog_stars, rows = makeImage(pp)
+    img_stars = np.column_stack([rows[:, 1], rows[:, 0], rows[:, 2]])
+    _recordNNFits(monkeypatch, fail_earlier=True)
+
+    fitted = _turned(pp, 5.0)
+    fitted.fitPointingNN(pp.JD, img_stars, catalog_stars)
+
+    assert PlateparModule.isOffsetsRescue(fitted)
+    assert not PlateparModule.isOffsetsRescue(pp)

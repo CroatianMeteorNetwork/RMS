@@ -609,6 +609,27 @@ def offsetsJacobian(residuals, step=OFFSET_JACOBIAN_STEP_PX):
     return _jacobian
 
 
+# Suffix of the label in the fit record of a fit of the offsets of the pointing which rescued a failed fit of
+#   earlier versions (e.g. 'fitPointingNN offsets')
+OFFSETS_FIT_BY_SUFFIX = ' offsets'
+
+
+def isOffsetsRescue(platepar):
+    """ Whether the pointing of the platepar was last fitted by a fit of the offsets which rescued a failed fit of
+        earlier versions (its fit record, see OFFSETS_FIT_BY_SUFFIX).
+
+    Arguments:
+        platepar: [Platepar] Platepar.
+
+    Return:
+        [bool] True for such a rescue.
+    """
+
+    entry = normalFitRecord(getattr(platepar, 'fit_record', None))['pointing'] or {}
+
+    return entry.get('by', '').split('+')[0].endswith(OFFSETS_FIT_BY_SUFFIX)
+
+
 # The NN fit of the offsets of the pointing (Platepar.fitPointingNN) is used only if its inliers (the image stars
 #   within 5 px of a catalog star) are at most this RMS distance (px) from their catalog stars after its polish
 NN_OFFSETS_MAX_RMSD_PX = 1.0
@@ -1332,6 +1353,7 @@ class Platepar(object):
             result_offsets = self._fitPointingNNOnce(jd, img_stars, catalog_stars, fixed_scale, legacy=False)
             if result_offsets[0] and result_offsets[1] and (result_offsets[4] <= NN_OFFSETS_MAX_RMSD_PX):
                 result = result_offsets
+                fit_by = fit_by + OFFSETS_FIT_BY_SUFFIX
         accepted, success, cost, inlier_fraction, inlier_rmsd, pp_fit = result
 
         if not accepted:
