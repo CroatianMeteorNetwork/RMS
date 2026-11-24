@@ -1642,16 +1642,17 @@ class Platepar(object):
                 iteration_callback=iteration_callback, fit_by=fit_by)
             # The RANSAC fit of earlier versions (RA, Dec and position angle from the given pointing) runs first,
             #   so a fit which succeeded before gives the same plate. If its result is not clearly good, the RANSAC
-            #   fit of the offsets of the pointing (from the coarse alignment of the stars) runs as well, from the
-            #   platepar as it was given, and its result is kept if it has more matched pairs (or as many with
-            #   smaller residuals)
+            #   fit of the offsets of the pointing runs as well from the platepar as it was given, but only from a
+            #   better pointing of the coarse alignment (from the same pointing it did not find the stars on real
+            #   sections, and it doubled the time of the sections which fail), and its result is kept if it has
+            #   more matched pairs (or as many with smaller residuals)
             result = self._fitAstrometry(jd, img_stars, catalog_stars, legacy=use_nn_cost, **fit_args)
             if use_nn_cost and (not ransacResultGood(self, jd, img_stars, result)):
                 print("    RANSAC result not clearly good, running the RANSAC fit of the offsets of the pointing")
                 result_prev, state_fit = result, copy.deepcopy(self.__dict__)
                 self.__dict__.clear()
                 self.__dict__.update(copy.deepcopy(state_prev))
-                result = self._fitAstrometry(jd, img_stars, catalog_stars, **fit_args)
+                result = self._fitAstrometry(jd, img_stars, catalog_stars, require_alignment=True, **fit_args)
 
                 # The result of earlier versions is kept unless the other one is better
                 if ransacQuality(self, jd, result) <= ransacQuality(state_fit, jd, result_prev):
@@ -1676,10 +1677,11 @@ class Platepar(object):
 
     def _fitAstrometry(self, jd, img_stars, catalog_stars, first_platepar_fit=False, fit_only_pointing=False,
         fixed_scale=False, use_nn_cost=False, final_catalog_stars=None, iteration_callback=None,
-        fit_by='fitAstrometry', legacy=False):
+        fit_by='fitAstrometry', legacy=False, require_alignment=False):
         """ The fit of fitAstrometry, which has the description and the arguments. With legacy, the RANSAC fit
             (use_nn_cost) fits RA, Dec and position angle from the given pointing, as earlier versions did, instead
-            of the offsets of the pointing from its coarse alignment.
+            of the offsets of the pointing from its coarse alignment. With require_alignment, the RANSAC fit of the
+            offsets is not run (None is returned) if the coarse alignment finds no better pointing.
 
         Return:
             See fitAstrometry.
@@ -2337,6 +2339,10 @@ class Platepar(object):
                                 self.RA_d, aligned.RA_d, self.dec_d, aligned.dec_d))
                             self.RA_d, self.dec_d, self.pos_angle_ref = aligned.RA_d, aligned.dec_d, \
                                 aligned.pos_angle_ref
+                        elif require_alignment:
+                            print("    -> No coarse alignment, the RANSAC fit of the offsets is not run")
+                            self.aberration = aberration_prev
+                            return None
 
                     # The parameters at the start of the stage, with the pointing of the platepar
                     p0_current = ransacStart()

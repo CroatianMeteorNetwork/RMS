@@ -371,8 +371,9 @@ def test_nn_fit_of_earlier_versions_needs_no_fallback(monkeypatch):
 
 def test_ransac_falls_back_and_keeps_the_better_result(monkeypatch):
 
-    # The RANSAC fit of earlier versions returns no pairs, so the RANSAC fit of the offsets runs from the platepar
-    #   as it was given, and its pairs are used
+    # The RANSAC fit of earlier versions of a platepar 0.5 deg off returns no pairs, so the RANSAC fit of the
+    #   offsets runs from the platepar as it was given (the coarse alignment finds a better pointing), and its
+    #   pairs are used
     pp = makePlatepar()
     catalog_stars, rows = makeImage(pp, n_stars=60)
     img_stars = np.column_stack([rows[:, 1], rows[:, 0], rows[:, 2]])
@@ -394,7 +395,7 @@ def test_ransac_falls_back_and_keeps_the_better_result(monkeypatch):
 
     monkeypatch.setattr(PlateparModule.Platepar, '_fitAstrometry', _fit)
 
-    start = perturbed(pp)
+    start = _turned(pp, 0.5*pp.F_scale, roll_deg=2.0)
     fitted = copy.deepcopy(start)
     pairs = fitted.fitAstrometry(pp.JD, img_stars, catalog_stars, use_nn_cost=True)
 
@@ -402,6 +403,16 @@ def test_ransac_falls_back_and_keeps_the_better_result(monkeypatch):
     assert calls[1][1] == start.RA_d
     assert (pairs is not None) and (len(pairs[0]) >= 58)
     assert displacement(pp, fitted, catalog_stars) < 0.1
+
+    # From a platepar 0.2 px off the coarse alignment finds no better pointing, so the RANSAC fit of the offsets is
+    #   not run and the result of earlier versions (no pairs, the platepar as it was given) is handed over
+    calls[:] = []
+    start = perturbed(pp)
+    fitted = copy.deepcopy(start)
+    pairs = fitted.fitAstrometry(pp.JD, img_stars, catalog_stars, use_nn_cost=True)
+
+    assert [call[0] for call in calls] == [True, False]
+    assert pairs is None
 
 
 def test_good_ransac_needs_no_fallback(monkeypatch):
@@ -518,8 +529,8 @@ def test_failed_recalibration_is_retried_from_another_platepar(monkeypatch):
 
 def test_rescued_recalibration_does_not_seed_the_next_ff(monkeypatch):
 
-    # The recalibration of the first FF is a rescue by the search of the offsets, of the second one a success of the
-    #   search of earlier versions: the second FF starts from the platepar given to the first one, as before
+    # The recalibration of the first FF is a rescue by the search of the offsets, of the second one a success of
+    #   the search of earlier versions: the second FF starts from the platepar given to the first one, as before
     pp = makePlatepar()
     _, rows = makeImage(pp)
     ff_names = ['FF_XX0001_20251214_014211_000_0000000.fits', 'FF_XX0001_20251214_014221_240_0000256.fits']
