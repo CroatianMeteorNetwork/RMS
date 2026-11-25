@@ -2066,7 +2066,7 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
             elif ftype == "Mask":
                 try:
                     dest = os.path.join(target_dir, "mask.bmp")
-                    mask_img = pt.generateMaskImage()
+                    mask_img = pt.generateMaskImage(mode='detection')
                     cv2.imwrite(dest, mask_img)
                     pt.mask_source_path = dest
                     if hasattr(pt, 'tab') and hasattr(pt.tab, 'mask'):
@@ -2663,6 +2663,12 @@ class PlateTool(QtWidgets.QMainWindow):
         self.mask_current_polygon = []  # Points being drawn
         self.mask_polygons = []  # List of completed polygons
         self.mask_dragging_vertex = None  # (polygon_idx, vertex_idx) or ('current', vertex_idx)
+
+        # The mask tab edits two independent masks: 'detection' (mask.bmp) and 'occluder' (directions
+        #   a physical plate in front of the lens should block). The mask_* attributes always hold the
+        #   one being edited, the other one is kept in mask_stashed.
+        self.mask_edit_mode = 'detection'
+        self.mask_stashed = {}
 
         # Brush mask state
         self.mask_brush_mode = False
@@ -3576,6 +3582,13 @@ class PlateTool(QtWidgets.QMainWindow):
         self.img_frame.addItem(self.mask_overlay)
         self.mask_overlay.hide()
 
+        # Faint overlay of the mask that is not being edited (detection mask vs. light occluder mask)
+        self.mask_overlay_other = pg.ImageItem(lut=self._maskOverlayLUT('occluder', alpha=45))
+        self.mask_overlay_other.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_SourceOver)
+        self.mask_overlay_other.setZValue(7)
+        self.img_frame.addItem(self.mask_overlay_other)
+        self.mask_overlay_other.hide()
+
         # Current polygon being drawn (yellow dashed line)
         self.mask_current_line = pg.PlotCurveItem(
             pen=pg.mkPen((255, 255, 0), width=2, style=QtCore.Qt.PenStyle.DashLine))
@@ -3680,12 +3693,15 @@ class PlateTool(QtWidgets.QMainWindow):
         # Mask widget signals
         self.tab.mask.sigDrawModeToggled.connect(self.toggleMaskDrawMode)
         self.tab.mask.sigClearPolygons.connect(self.clearMaskPolygons)
-        self.tab.mask.sigSaveMask.connect(lambda: self.showCalibrationFilesDialog(save_ftype="Mask"))
+        self.tab.mask.sigSaveMask.connect(self.saveActiveMask)
         self.tab.mask.sigLoadMask.connect(self.loadMaskDialog)
         self.tab.mask.sigShowOverlayToggled.connect(self.toggleMaskOverlay)
         self.tab.mask.sigUseFlatToggled.connect(self.toggleMaskFlatBackground)
         self.tab.mask.sigUnsavedChanged.connect(self.updateFileManagerButton)
         self.tab.mask.sigInvertMask.connect(self.invertMaskPolygons)
+        self.tab.mask.sigExportOccluderDXF.connect(self.exportOccluderDXF)
+        self.tab.mask.sigMaskModeChanged.connect(self.setMaskEditMode)
+        self.tab.mask.sigCopyDetectionMask.connect(self.copyDetectionMaskToOccluder)
         self.tab.mask.sigBrushModeToggled.connect(self.toggleMaskBrushMode)
         self.tab.mask.sigClearBrushStrokes.connect(self.clearBrushStrokes)
         self.tab.mask.sigBrushSizeChanged.connect(self.setBrushSize)
@@ -4268,7 +4284,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 unsaved = True
             elif self.isConfigModified():
                 unsaved = True
-            elif hasattr(self, 'tab') and hasattr(self.tab, 'mask') and self.tab.mask.unsaved:
+            elif hasattr(self, 'tab') and hasattr(self.tab, 'mask') and self._maskUnsaved('detection'):
                 unsaved = True
 
         if unsaved:
@@ -7243,16 +7259,169 @@ class PlateTool(QtWidgets.QMainWindow):
         self.mask_brush_stroke_history = []
         self.tab.mask.setUndoEnabled(False)
 
+        # Both masks are reset, the detection mask is the one edited by default
+        self.mask_stashed = {}
+        self.mask_edit_mode = 'detection'
+        self.mask_source_path = None
+        self.tab.mask.setMaskMode('detection')
+        self.mask_overlay.setLookupTable(self._maskOverlayLUT('detection'))
+
         mask_path = os.path.join(self.dir_path, "mask.bmp")
         if os.path.exists(mask_path):
             self.loadMaskFromFile(mask_path)
         else:
             # No mask for this station - clear any leftover overlay/outlines from the previous one
+            self.tab.mask.setUnsaved(False)
             self.updateMaskDisplay()
+
+        # Load the light occluder mask of this station, if there is one
+        for occluder_dir in (self.dir_path, self.config.config_file_path):
+            occluder_path = os.path.join(occluder_dir, "occluder_mask.bmp")
+            if os.path.isfile(occluder_path):
+                self.setMaskEditMode('occluder')
+                self.loadMaskFromFile(occluder_path)
+                self.setMaskEditMode('detection')
+                break
+
+        self._updateOtherMaskOverlay()
+        self._updateMaskStatus()
 
         # Sync the detection mask to the loaded-or-cleared state so it doesn't leak across stations
         if self.img.data is not None:
-            self.mask = MaskStructure(self.generateMaskImage())
+            self.mask = MaskStructure(self.generateMaskImage(mode='detection'))
+
+    def _maskOverlayLUT(self, mode, alpha=80):
+        """Lookup table (clear, masked) for a mask overlay in the colour of the given mask mode."""
+        color = (255, 0, 0) if mode == 'detection' else (0, 150, 255)
+        return np.array([[0, 0, 0, 0], list(color) + [alpha]], dtype=np.ubyte)
+
+    def _otherMaskMode(self):
+        return 'occluder' if self.mask_edit_mode == 'detection' else 'detection'
+
+    def _maskUnsaved(self, mode):
+        """True if the mask of the given mode has unsaved changes."""
+        if mode == self.mask_edit_mode:
+            return self.tab.mask.unsaved
+        return self.mask_stashed.get(mode, {}).get('unsaved', False)
+
+    def _maskState(self, mode):
+        """Polygons and brush paint layer of the mask of the given mode."""
+        if mode == self.mask_edit_mode:
+            return self.mask_polygons, self.mask_paint_layer
+        state = self.mask_stashed.get(mode, {})
+        return state.get('polygons', []), state.get('paint_layer', None)
+
+    def setMaskEditMode(self, mode):
+        """Switch the mask tab between editing the detection mask and the light occluder mask.
+
+        Each mask has its own polygons, brush strokes, source file and unsaved flag. The state of
+        the mask that is not being edited is stashed and shown as a faint overlay.
+
+        Arguments:
+            mode: [str] 'detection' or 'occluder'.
+        """
+
+        if mode == self.mask_edit_mode:
+            self.tab.mask.setMaskMode(mode)
+            return
+
+        # Finish any drawing in progress
+        if self.mask_draw_mode:
+            self.tab.mask.setDrawMode(False)
+            self.toggleMaskDrawMode()
+        if self.mask_brush_mode:
+            self._exitBrushMode()
+
+        self.mask_stashed[self.mask_edit_mode] = {
+            'polygons': self.mask_polygons,
+            'paint_layer': self.mask_paint_layer,
+            'source_path': self.mask_source_path,
+            'unsaved': self.tab.mask.unsaved}
+
+        state = self.mask_stashed.pop(mode, {})
+        self.mask_polygons = state.get('polygons', [])
+        self.mask_paint_layer = state.get('paint_layer', None)
+        self.mask_source_path = state.get('source_path', None)
+        self.mask_current_polygon = []
+        self.mask_brush_stroke_history = []
+        self.mask_edit_mode = mode
+
+        self.tab.mask.setMaskMode(mode)
+        self.tab.mask.setUndoEnabled(False)
+        self.tab.mask.setUnsaved(state.get('unsaved', False))
+
+        self.mask_overlay.setLookupTable(self._maskOverlayLUT(mode))
+        self.updateMaskDisplay()
+        self._updateOtherMaskOverlay()
+        self._updateMaskStatus()
+        self.updateFileManagerButton()
+
+    def _updateOtherMaskOverlay(self):
+        """Draw the mask that is not being edited as a faint overlay in its own colour."""
+
+        other = self._otherMaskMode()
+        polygons, paint_layer = self._maskState(other)
+        has_data = (len(polygons) > 0) or ((paint_layer is not None) and np.any(paint_layer != 0))
+
+        if (not has_data) or (self.img.data is None) or (not self.tab.mask.show_overlay.isChecked()):
+            self.mask_overlay_other.hide()
+            return
+
+        masked = (self._renderMask(polygons, paint_layer) == 0).astype(np.uint8)
+        self.mask_overlay_other.setLookupTable(self._maskOverlayLUT(other, alpha=45))
+        self.mask_overlay_other.setImage(masked.T)
+        self.mask_overlay_other.show()
+
+    def copyDetectionMaskToOccluder(self):
+        """Replace the occluder mask with a copy of the detection mask."""
+
+        if self.mask_edit_mode != 'occluder':
+            return
+
+        polygons, paint_layer = self._maskState('detection')
+        self.mask_polygons = copy.deepcopy(polygons)
+        self.mask_paint_layer = None if paint_layer is None else paint_layer.copy()
+        self.mask_current_polygon = []
+        self.mask_brush_stroke_history = []
+        self.tab.mask.setUndoEnabled(False)
+        self.tab.mask.setUnsaved(True)
+        self.updateMaskDisplay()
+        self._updateMaskStatus()
+
+    def saveActiveMask(self):
+        """Save the mask that is being edited: mask.bmp through the File Manager, the occluder mask
+        through its own file dialog."""
+
+        if self.mask_edit_mode == 'occluder':
+            self.saveOccluderMask()
+        else:
+            self.showCalibrationFilesDialog(save_ftype="Mask")
+
+    def saveOccluderMask(self):
+        """Save the light occluder mask as a BMP file (0 = direction to block)."""
+
+        if self.mask_edit_mode != 'occluder':
+            return
+
+        default_path = self.mask_source_path
+        if not default_path:
+            default_path = os.path.join(self.config.config_file_path, "occluder_mask.bmp")
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Save Occluder Mask", default_path, "BMP Files (*.bmp);;All Files (*)")
+
+        if not file_path:
+            return
+
+        if not os.path.splitext(file_path)[1]:
+            file_path += ".bmp"
+
+        cv2.imwrite(file_path, self.generateMaskImage())
+        print("Occluder mask saved to: {:s}".format(file_path))
+
+        self.mask_source_path = file_path
+        self.tab.mask.setUnsaved(False)
+        self._updateMaskStatus()
 
     def toggleMaskDrawMode(self):
         """Toggle mask polygon drawing mode."""
@@ -7645,6 +7814,57 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.updateMaskDisplay()
                     self._updateMaskStatus()
 
+    def findMaskPolygonAt(self, x, y):
+        """Index of the completed polygon that contains the given point (the smallest one if they
+        overlap), None if there is none."""
+
+        best_idx, best_area = None, None
+        for i, polygon in enumerate(self.mask_polygons):
+            pts = np.array(polygon, dtype=np.float32)
+            if cv2.pointPolygonTest(pts, (float(x), float(y)), False) >= 0:
+                area = cv2.contourArea(pts)
+                if (best_area is None) or (area < best_area):
+                    best_idx, best_area = i, area
+
+        return best_idx
+
+    def deleteMaskPolygon(self, poly_idx):
+        """Delete one completed polygon.
+
+        A mask loaded from a file keeps the pixels its simplified polygons do not reproduce in the
+        brush paint layer. Those belonging to the deleted polygon are removed with it, otherwise a thin
+        speckled outline of the polygon would stay masked.
+        """
+
+        if (poly_idx is None) or (poly_idx >= len(self.mask_polygons)):
+            return
+
+        polygon = self.mask_polygons.pop(poly_idx)
+
+        if self.mask_paint_layer is not None:
+            pts = np.array(polygon, dtype=np.int32)
+
+            # The polygons are simplified to within 0.2% of their perimeter when a mask is loaded
+            margin = int(np.ceil(0.002*cv2.arcLength(pts, True))) + 2
+
+            footprint = np.zeros(self.mask_paint_layer.shape, dtype=np.uint8)
+            cv2.fillPoly(footprint, [pts], 1)
+            footprint = cv2.dilate(footprint, np.ones((2*margin + 1, 2*margin + 1), dtype=np.uint8))
+
+            # Keep the footprints of the remaining polygons untouched
+            others = np.zeros_like(footprint)
+            for other in self.mask_polygons:
+                cv2.fillPoly(others, [np.array(other, dtype=np.int32)], 1)
+            footprint[others == 1] = 0
+
+            self.mask_paint_layer[footprint == 1] = 0
+            self.mask_brush_stroke_history = []
+            self.tab.mask.setUndoEnabled(False)
+
+        self.tab.mask.setUnsaved(True)
+        self.updateMaskDisplay()
+        self._updateMaskStatus()
+
     def moveMaskVertex(self, vertex_ref, new_x, new_y):
         """Move a vertex to new position with edge snapping."""
         # Apply edge snapping
@@ -7706,7 +7926,7 @@ class PlateTool(QtWidgets.QMainWindow):
             line = pg.PlotCurveItem(
                 x=pts_closed[:, 0] + 0.5,
                 y=pts_closed[:, 1] + 0.5,
-                pen=pg.mkPen((255, 0, 0, 200), width=2))
+                pen=pg.mkPen(tuple(self._maskOverlayLUT(self.mask_edit_mode, alpha=200)[1]), width=2))
             line.setZValue(12)
             self.img_frame.addItem(line)
             self.mask_polygon_items.append(line)
@@ -7779,6 +7999,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def toggleMaskOverlay(self, visible):
         """Toggle mask overlay visibility (includes outlines and vertices)."""
+        self._updateOtherMaskOverlay()
         if visible:
             self.updateMaskOverlayImage()
             # Show polygon outlines
@@ -7962,7 +8183,7 @@ class PlateTool(QtWidgets.QMainWindow):
         else:
             self.img_frame.panning_enabled = True
 
-    def generateMaskImage(self):
+    def generateMaskImage(self, mode=None):
         """Generate the mask.bmp array from polygons and the brush paint layer.
 
         Output convention (matches RMS mask format):
@@ -7971,7 +8192,21 @@ class PlateTool(QtWidgets.QMainWindow):
 
         The paint layer is composited on top of the polygon fill so that
         brush-erased pixels (value=2) can punch holes through solid polygons.
+
+        Keyword arguments:
+            mode: [str] 'detection' or 'occluder'. None (default) for the mask that is being edited.
         """
+
+        if mode is None:
+            mode = self.mask_edit_mode
+
+        polygons, paint_layer = self._maskState(mode)
+
+        return self._renderMask(polygons, paint_layer)
+
+    def _renderMask(self, polygons, paint_layer):
+        """Render polygons and a brush paint layer into a mask image (255 = unmasked, 0 = masked)."""
+
         # shape[0]=X (width), shape[1]=Y (height) — codebase convention
         img_width = self.img.data.shape[0]
         img_height = self.img.data.shape[1]
@@ -7980,15 +8215,14 @@ class PlateTool(QtWidgets.QMainWindow):
         mask = np.full((img_height, img_width), 255, dtype=np.uint8)
 
         # Burn in polygons (masked regions = 0)
-        for polygon in self.mask_polygons:
+        for polygon in polygons:
             pts = np.array(polygon, dtype=np.int32)
             cv2.fillPoly(mask, [pts], 0)
 
         # Composite brush paint layer on top:
         #   paint pixels (1) → masked (0)
         #   erase pixels  (2) → unmasked (255), overrides polygon fill
-        if self.mask_paint_layer is not None:
-            paint_layer = self.mask_paint_layer
+        if paint_layer is not None:
 
             # Resample if the paint layer was saved at a different resolution than the current image
             #   (nearest-neighbour preserves the 0/1/2 labels), so a stale mask doesn't crash here.
@@ -8003,6 +8237,12 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def saveMask(self):
         """Save mask to file and update self.mask for star detection."""
+
+        # The occluder mask is not the detection mask and has its own save
+        if self.mask_edit_mode == 'occluder':
+            self.saveOccluderMask()
+            return
+
         default_path = os.path.join(self.config.config_file_path, "mask.bmp")
         file_path, _ = QFileDialog.getSaveFileName(
             self, "Save Mask", default_path, "BMP Files (*.bmp);;All Files (*)")
@@ -8020,6 +8260,69 @@ class PlateTool(QtWidgets.QMainWindow):
             self.tab.mask.setUnsaved(False)
             self._updateMaskStatus()
             self.updateFileManagerButton()
+
+    def exportOccluderDXF(self, distance, pupil):
+        """Export the outline of a physical light occluder for the occluder mask as a DXF file.
+
+        The masked directions are mapped through the platepar to a plane at the given distance in
+        front of the lens. The station code, the pointing azimuth and altitude of the platepar and the
+        distance go in the file name, as the plate is only valid for one pointing of the camera.
+
+        Arguments:
+            distance: [float] Distance of the occluder plane from the lens (mm).
+            pupil: [float] Entrance pupil diameter of the lens (mm).
+        """
+
+        if self.platepar is None:
+            qmessagebox(title="Export Occluder DXF", message="A platepar is required to export the "
+                "occluder outline.", message_type="warning")
+            return
+
+        mask_img = self.generateMaskImage(mode='occluder')
+
+        if not np.any(mask_img == 0):
+            qmessagebox(title="Export Occluder DXF", message="The occluder mask is empty. Draw the "
+                "regions to block first.", message_type="warning")
+            return
+
+        file_name = "occluder_{:s}_az{:03d}_alt{:02d}_{:.0f}mm.dxf".format(
+            str(self.platepar.station_code), int(round(self.platepar.az_centre))%360,
+            int(round(self.platepar.alt_centre)), distance)
+
+        # Save next to the occluder mask file if there is one, in the station directory otherwise
+        if self.mask_edit_mode == 'occluder':
+            occluder_mask_path = self.mask_source_path
+        else:
+            occluder_mask_path = self.mask_stashed.get('occluder', {}).get('source_path')
+
+        if occluder_mask_path:
+            default_dir = os.path.dirname(occluder_mask_path)
+        else:
+            default_dir = self.config.config_file_path
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Export Occluder DXF", os.path.join(default_dir, file_name),
+            "DXF Files (*.dxf);;All Files (*)")
+
+        if not file_path:
+            return
+
+        if not file_path.lower().endswith(".dxf"):
+            file_path += ".dxf"
+
+        try:
+            from Utils.OccluderDXF import exportOccluderDXF
+            summary = exportOccluderDXF(file_path, mask_img, self.platepar, distance=distance, pupil=pupil)
+
+        except Exception as e:
+            qmessagebox(title="Export Occluder DXF", message="The occluder export failed:\n{:s}".format(
+                str(e)), message_type="error")
+            return
+
+        print("Occluder DXF saved to: {:s}".format(file_path))
+        qmessagebox(title="Export Occluder DXF", message="Saved: {:s}\n\nPointing: azimuth {:.1f} deg, "
+            "altitude {:.1f} deg\nEntrance pupil: {:.2f} mm\n{:s}".format(file_path,
+            self.platepar.az_centre%360, self.platepar.alt_centre, pupil, summary), message_type="info")
 
     def loadMaskDialog(self):
         """Open dialog to load a mask file."""
@@ -8096,9 +8399,11 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.mask.setUndoEnabled(False)
         self.updateMaskDisplay()
 
-        # Rebuild the MaskStructure used by star detection from the raw pixel data
-        self.mask = MaskStructure(mask_img)
-        print("Mask updated for star detection")
+        # Rebuild the MaskStructure used by star detection from the raw pixel data (the light occluder
+        #   mask is not used for detection)
+        if self.mask_edit_mode == 'detection':
+            self.mask = MaskStructure(mask_img)
+            print("Mask updated for star detection")
 
         self.tab.mask.setUnsaved(False)
         self._updateMaskStatus()
@@ -10535,6 +10840,9 @@ class PlateTool(QtWidgets.QMainWindow):
             if not hasattr(self.platepar, "measurement_apparent_to_true_refraction"):
                 self.platepar.measurement_apparent_to_true_refraction = False
 
+            if not hasattr(self.platepar, "aberration"):
+                self.platepar.aberration = False
+
 
             # Update platepar distortion indices
             self.platepar.setDistortionType(self.platepar.distortion_type, reset_params=False)
@@ -11380,6 +11688,20 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.addMaskPoint(click_x, click_y)
                     return
             elif event.button() == QtCore.Qt.MouseButton.RightButton:
+
+                # SHIFT + right click on a vertex or inside a polygon deletes the whole polygon
+                if (modifiers & QtCore.Qt.KeyboardModifier.ShiftModifier) \
+                    and (self.tab.currentIndex() == self.tab.tabIndexOf(self.tab.mask)):
+
+                    if (vertex_hit is not None) and (vertex_hit[0] != 'current'):
+                        poly_idx = vertex_hit[0]
+                    else:
+                        poly_idx = self.findMaskPolygonAt(click_x, click_y)
+
+                    if poly_idx is not None:
+                        self.deleteMaskPolygon(poly_idx)
+                        return
+
                 if vertex_hit is not None:
                     self.deleteMaskVertex(vertex_hit)
                     return
@@ -16269,6 +16591,11 @@ class PlateTool(QtWidgets.QMainWindow):
 
     def showCalibrationFilesDialog(self, save_ftype=None):
         """Open the File Manager dialog, optionally auto-triggering Save for a file type."""
+
+        # The File Manager handles mask.bmp, make sure the detection mask is the one being edited
+        if self.mask_edit_mode != 'detection':
+            self.setMaskEditMode('detection')
+
         dlg = CalibrationFilesDialog(self, parent=self)
         if save_ftype and isinstance(save_ftype, str):
             # Show the dialog and immediately trigger the save flow for the given type

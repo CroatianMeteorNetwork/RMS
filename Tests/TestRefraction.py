@@ -236,6 +236,8 @@ def test_star_fit_at_altitude_leaves_no_bias():
     # A platepar with the right pointing and rotation, pinned with no refraction anywhere
     pp = Platepar()
     pp.read(TEMPLATE)
+    # The template carries no aberration flag; these plates are used with it modelled
+    pp.aberration = True
     pp.X_res, pp.Y_res, pp.F_scale, pp.lat, pp.lon, pp.elev = x_res, y_res, f_scale, lat, lon, 0.0
     pp.resetDistortionParameters()
     pp.x_poly_fwd[0] = pp.x_poly_fwd[1] = pp.x_poly_rev[0] = pp.x_poly_rev[1] = 0.0
@@ -379,6 +381,8 @@ def test_ground_references_are_fitted_without_refraction(references):
     #   the one of this camera and the comparison below only sees the effect of the ground references
     pp = Platepar()
     pp.read(TEMPLATE)
+    # The template carries no aberration flag; these plates are used with it modelled
+    pp.aberration = True
     pp.X_res, pp.Y_res, pp.F_scale = x_res, y_res, f_scale
     pp.lat, pp.lon, pp.elev = lat, lon, elev_station
     pp.resetDistortionParameters()
@@ -452,6 +456,8 @@ def test_plate_coordinates_are_a_no_op_without_refraction():
 
     pp = Platepar()
     pp.read(TEMPLATE)
+    # The template carries no aberration flag; these plates are used with it modelled
+    pp.aberration = True
     pp.lat, pp.lon, pp.elev = 31.69, -110.9, 2610.0
     pp.refraction = False
 
@@ -469,6 +475,8 @@ def test_a_full_refraction_fraction_is_a_no_op():
 
     pp = Platepar()
     pp.read(TEMPLATE)
+    # The template carries no aberration flag; these plates are used with it modelled
+    pp.aberration = True
     pp.lat, pp.lon, pp.elev = 31.69, -110.9, 2610.0
     pp.refraction = True
 
@@ -504,6 +512,8 @@ def test_ground_projection_uses_the_apparent_pointing():
 
     pp = Platepar()
     pp.read(TEMPLATE)
+    # The template carries no aberration flag; these plates are used with it modelled
+    pp.aberration = True
     pp.X_res, pp.Y_res, pp.F_scale = x_res, y_res, f_scale
     pp.lat, pp.lon, pp.elev = lat, lon, elev_station
     pp.resetDistortionParameters()

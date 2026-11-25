@@ -140,6 +140,11 @@ def recalibrateFF(
 
     working_platepar = copy.deepcopy(working_platepar)
 
+    # The recalibration models the aberration. A plate that had absorbed it instead has to be refitted
+    #   at least once before it can be accepted, however well it matches the stars already
+    aberration_refit = not working_platepar.aberration
+    working_platepar.aberration = True
+
     # Resolve the coverage gate threshold from the config unless explicitly given
     if min_match_fraction is None:
         min_match_fraction = config.recalibration_min_match_fraction
@@ -253,7 +258,7 @@ def recalibrateFF(
                 break
 
         # If the platepar is good and the radius is below a pixel, don't recalibrate anymore
-        if (match_radius < 1.0) and CheckFit.checkFitGoodness(
+        if (match_radius < 1.0) and (not aberration_refit) and CheckFit.checkFitGoodness(
             config, working_platepar, catalog_stars, star_dict_ff, match_radius, verbose=True
         ):
             log.info('The fit is good enough!')
@@ -352,6 +357,7 @@ def recalibrateFF(
 
             # Keep track of the minimum match radius
             min_match_radius = match_radius
+            aberration_refit = False
 
             # Keep the matched stars from this successful iteration - a later iteration that fails
             #   overwrites matched_stars with matches of a platepar that was never accepted, and

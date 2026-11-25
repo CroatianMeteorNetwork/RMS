@@ -106,6 +106,8 @@ def test_ground_projection_round_trips(target_height):
 
     pp = Platepar()
     pp.read(TEMPLATE)
+    # The template carries no aberration flag; these plates are used with it modelled
+    pp.aberration = True
     pp.lat, pp.lon, pp.elev = LAT, LON, ALT
     pp.JD = 2460000.5
     pp.refraction = True

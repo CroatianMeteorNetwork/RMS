@@ -34,6 +34,8 @@ class TestReferencePointingEpoch(unittest.TestCase):
 
             pp = Platepar()
             pp.read(TEMPLATE)
+            # The template carries no aberration flag; these plates are used with it modelled
+            pp.aberration = True
             pp.lat, pp.lon, pp.elev = 45.0, 15.0, 300.0
             pp.refraction = refraction
             pp.alt_centre, pp.az_centre, pp.pos_angle_ref = 45.0, 200.0, 20.0

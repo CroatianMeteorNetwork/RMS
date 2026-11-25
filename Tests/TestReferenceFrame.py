@@ -43,6 +43,8 @@ def _templatePlatepar(refraction):
 
     pp = Platepar()
     pp.read(TEMPLATE)
+    # The template carries no aberration flag; these plates are used with it modelled
+    pp.aberration = True
     pp.lat, pp.lon, pp.elev = LAT, LON, ELEV
     pp.resetDistortionParameters()
     pp.x_poly_fwd[0] = pp.x_poly_fwd[1] = pp.x_poly_rev[0] = pp.x_poly_rev[1] = 0.0
