@@ -4312,11 +4312,20 @@ class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
     sigClearBrushStrokes = QtCore.pyqtSignal()
     sigBrushSizeChanged = QtCore.pyqtSignal(int)
     sigUndoBrushStroke = QtCore.pyqtSignal()
+    sigMaskModeChanged = QtCore.pyqtSignal(str)
+    sigExportOccluderDXF = QtCore.pyqtSignal(float, float)
+    sigCopyDetectionMask = QtCore.pyqtSignal()
+
+    # The tab edits two independent masks: the detection mask (mask.bmp, pixels RMS ignores) and the
+    #   light occluder mask (directions a physical plate in front of the lens should block)
+    MASK_MODE_NAMES = {'detection': 'Detection mask', 'occluder': 'Occluder mask'}
+    MASK_MODE_COLORS = {'detection': '#D32F2F', 'occluder': '#0096FF'}
 
     def __init__(self, gui):
         QtWidgets.QWidget.__init__(self)
         self.gui = gui
         self.unsaved = False
+        self.mask_mode = 'detection'
 
         layout = QtWidgets.QVBoxLayout()
         layout.setContentsMargins(*self.scaledMargins(1, 0.5))
@@ -4331,6 +4340,30 @@ class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
         title = QtWidgets.QLabel('Mask Editor')
         title.setStyleSheet("font-weight: bold; font-size: 11pt;")
         layout.addWidget(title)
+
+        # ── Which mask is edited ──────────────────────────────────────────────
+        # Each mask has its own polygons, brush strokes, file and colour. The one
+        # that is not being edited stays visible as a faint overlay.
+
+        which_layout = QtWidgets.QHBoxLayout()
+        which_layout.setSpacing(self.scaledSpacing(0.25))
+
+        self.detection_mode_button = QtWidgets.QPushButton('Detection mask')
+        self.detection_mode_button.setCheckable(True)
+        self.detection_mode_button.setChecked(True)
+        self.detection_mode_button.setToolTip('Edit mask.bmp: the pixels RMS ignores (red)')
+        self.detection_mode_button.clicked.connect(lambda: self._onMaskModeClicked('detection'))
+        which_layout.addWidget(self.detection_mode_button)
+
+        self.occluder_mode_button = QtWidgets.QPushButton('Light occluder')
+        self.occluder_mode_button.setCheckable(True)
+        self.occluder_mode_button.setToolTip(
+            'Edit the light occluder mask: the directions a physical plate\n'
+            'in front of the lens should block, e.g. street lights (blue)')
+        self.occluder_mode_button.clicked.connect(lambda: self._onMaskModeClicked('occluder'))
+        which_layout.addWidget(self.occluder_mode_button)
+
+        layout.addLayout(which_layout)
 
         # Status sits at the top so the save state is always visible
         self.status_label = QtWidgets.QLabel('No mask')
@@ -4440,6 +4473,78 @@ class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
 
         layout.addSpacing(self.scaledSpacing(0.6))
 
+        # ── Physical light occluder ───────────────────────────────────────────
+        # Only shown while the occluder mask is edited. Exports the outline of a
+        # plate that blocks the masked directions at a plane in front of the lens,
+        # as a DXF file in mm.
+
+        self.occluder_panel = QtWidgets.QWidget()
+        occluder_layout = QtWidgets.QVBoxLayout()
+        occluder_layout.setContentsMargins(0, 0, 0, 0)
+        occluder_layout.setSpacing(self.scaledSpacing(0.5))
+        self.occluder_panel.setLayout(occluder_layout)
+
+        self.copy_detection_button = QtWidgets.QPushButton('Copy from Detection Mask')
+        self.copy_detection_button.setToolTip('Replace the occluder mask with a copy of the detection mask')
+        self.copy_detection_button.clicked.connect(self.onCopyDetectionMask)
+        occluder_layout.addWidget(self.copy_detection_button)
+
+        occluder_title = QtWidgets.QLabel('Occluder plate (DXF)')
+        occluder_title.setStyleSheet("font-weight: bold;")
+        occluder_layout.addWidget(occluder_title)
+
+        occluder_form = QtWidgets.QFormLayout()
+        occluder_form.setSpacing(self.scaledSpacing(0.25))
+
+        self.lens_focal_length = QtWidgets.QDoubleSpinBox()
+        self.lens_focal_length.setRange(0.5, 500)
+        self.lens_focal_length.setDecimals(2)
+        self.lens_focal_length.setSingleStep(0.5)
+        self.lens_focal_length.setValue(4.0)
+        self.lens_focal_length.setSuffix(' mm')
+        self.lens_focal_length.valueChanged.connect(self._updatePupilLabel)
+        occluder_form.addRow('Lens focal length:', self.lens_focal_length)
+
+        self.lens_f_number = QtWidgets.QDoubleSpinBox()
+        self.lens_f_number.setRange(0.5, 32)
+        self.lens_f_number.setDecimals(2)
+        self.lens_f_number.setSingleStep(0.1)
+        self.lens_f_number.setValue(0.95)
+        self.lens_f_number.setPrefix('f/')
+        self.lens_f_number.valueChanged.connect(self._updatePupilLabel)
+        occluder_form.addRow('Lens aperture:', self.lens_f_number)
+
+        self.pupil_label = QtWidgets.QLabel()
+        self.pupil_label.setToolTip('Entrance pupil diameter = focal length / f-number.\n'
+            'The beam of every pixel is this wide at the lens.')
+        occluder_form.addRow('Entrance pupil:', self.pupil_label)
+
+        self.occluder_distance = QtWidgets.QDoubleSpinBox()
+        self.occluder_distance.setRange(10, 2000)
+        self.occluder_distance.setDecimals(0)
+        self.occluder_distance.setSingleStep(10)
+        self.occluder_distance.setValue(150)
+        self.occluder_distance.setSuffix(' mm')
+        self.occluder_distance.setToolTip('Distance of the occluder plane in front of the lens')
+        occluder_form.addRow('Distance from lens:', self.occluder_distance)
+
+        occluder_layout.addLayout(occluder_form)
+        self._updatePupilLabel()
+
+        self.export_occluder_button = QtWidgets.QPushButton('Export Occluder DXF...')
+        self.export_occluder_button.setToolTip(
+            'Save the outline of a physical plate that blocks the occluder mask\n'
+            'directions at the given distance, as a DXF file in mm. The station,\n'
+            'pointing azimuth and altitude and the distance go in the file name.')
+        self.export_occluder_button.clicked.connect(
+            lambda: self.sigExportOccluderDXF.emit(self.occluder_distance.value(), self.pupilDiameter()))
+        occluder_layout.addWidget(self.export_occluder_button)
+
+        layout.addWidget(self.occluder_panel)
+        self.occluder_panel.hide()
+
+        layout.addSpacing(self.scaledSpacing(0.6))
+
         # ── Display options ───────────────────────────────────────────────────
 
         self.show_overlay = QtWidgets.QCheckBox('Show Mask Overlay')
@@ -4454,6 +4559,49 @@ class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
         self.flat_available = False
 
         layout.addStretch()
+
+        self.setMaskMode('detection')
+
+    def _onMaskModeClicked(self, mode):
+        """Handle a click on one of the two mask mode buttons."""
+        if mode == self.mask_mode:
+            # Clicking the active mode's button would uncheck it, keep it checked
+            self.setMaskMode(mode)
+            return
+        self.sigMaskModeChanged.emit(mode)
+
+    def setMaskMode(self, mode):
+        """Show which mask is being edited (called by the GUI once the mask state is swapped)."""
+        self.mask_mode = mode
+        for button, button_mode in ((self.detection_mode_button, 'detection'),
+                                    (self.occluder_mode_button, 'occluder')):
+            active = (button_mode == mode)
+            button.setChecked(active)
+            if active:
+                button.setStyleSheet("background-color: {:s}; color: white; font-weight: bold;".format(
+                    self.MASK_MODE_COLORS[button_mode]))
+            else:
+                button.setStyleSheet("")
+        self.occluder_panel.setVisible(mode == 'occluder')
+        self.save_button.setText('Save Mask...' if mode == 'detection' else 'Save Occluder Mask...')
+        self.save_button.setToolTip('Open File Manager to save mask' if mode == 'detection'
+            else 'Save the occluder mask as a BMP file')
+
+    def pupilDiameter(self):
+        """Entrance pupil diameter in mm from the lens focal length and f-number."""
+        return self.lens_focal_length.value()/self.lens_f_number.value()
+
+    def _updatePupilLabel(self, *args):
+        self.pupil_label.setText('{:.2f} mm'.format(self.pupilDiameter()))
+
+    def onCopyDetectionMask(self):
+        """Confirm and replace the occluder mask with a copy of the detection mask."""
+        reply = QtWidgets.QMessageBox.question(self, 'Copy from Detection Mask',
+            'Replace the occluder mask with a copy of the detection mask?',
+            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+            QtWidgets.QMessageBox.StandardButton.No)
+        if reply == QtWidgets.QMessageBox.StandardButton.Yes:
+            self.sigCopyDetectionMask.emit()
 
     def _setBrushSectionEnabled(self, enabled):
         """Grey out brush size controls when not in brush mode."""
@@ -4482,7 +4630,9 @@ class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
                 '<b>Edit existing polygons:</b><br>'
                 '&bull; Drag vertices to move<br>'
                 '&bull; Right-click vertex to delete<br>'
-                '&bull; Ctrl+click edge to add vertex<br><br>'
+                '&bull; Ctrl+click edge to add vertex<br>'
+                '&bull; Shift+right-click inside a<br>'
+                '&nbsp;&nbsp;polygon to delete it<br><br>'
                 'Vertices near image border<br>'
                 'will snap to the edge.')
 
@@ -4493,7 +4643,9 @@ class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
                 '<b>Draw Polygon</b> — click to place<br>'
                 'vertices, then close to fill a region.<br><br>'
                 '<b>Paint Brush</b> — freehand paint<br>'
-                '(left-click) or erase (right-click).')
+                '(left-click) or erase (right-click).<br><br>'
+                '<b>Delete one polygon</b> — Shift+right-click<br>'
+                'inside it.')
 
     def onDrawToggled(self):
         """Handle draw button toggle."""
@@ -4584,18 +4736,19 @@ class MaskWidget(QtWidgets.QWidget, ScaledSizeHelper):
             self.status_label.setStyleSheet("color: orange; font-size: 9pt;")
         else:
             has_data = polygon_count > 0 or has_brush_strokes
+            name = self.MASK_MODE_NAMES[self.mask_mode]
 
             if self.unsaved and has_data:
-                self.status_label.setText('Mask modified (unsaved)')
+                self.status_label.setText(name + ' modified (unsaved)')
                 self.status_label.setStyleSheet("color: orange; font-size: 9pt;")
             elif self.unsaved:
-                self.status_label.setText('Mask cleared (unsaved)')
+                self.status_label.setText(name + ' cleared (unsaved)')
                 self.status_label.setStyleSheet("color: orange; font-size: 9pt;")
             elif has_data:
-                self.status_label.setText('Mask saved')
+                self.status_label.setText(name + ' saved')
                 self.status_label.setStyleSheet("color: green; font-size: 9pt;")
             else:
-                self.status_label.setText('No mask')
+                self.status_label.setText('No ' + name.lower())
                 self.status_label.setStyleSheet("color: gray; font-size: 9pt;")
 
     def setUndoEnabled(self, enabled):
