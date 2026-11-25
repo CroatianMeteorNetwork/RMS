@@ -79,6 +79,7 @@ def applyAstrometryECSV(dir_path, ecsv_file, platepar_file, platepar=None, time_
     data.meta['cx'] = platepar.X_res                               # Horizontal camera resolution in pixels
     data.meta['cy'] = platepar.Y_res                               # Vertical camera resolution in pixels
     data.meta['astrometry_number_stars'] = len(platepar.star_list) # The number of stars identified and used in the astrometric calibration
+    data.meta['astrometry_aberration'] = bool(getattr(platepar, 'aberration', False)) # Whether annual aberration was modelled in the astrometric calibration
     data.meta['mag_label'] = 'mag'                                       # The label of the Magnitude column in the Point Observation data
     data.meta['no_frags'] = 1                                            # The number of meteoroid fragments described in this data
     data.meta['obs_az'] = azim                                           # The azimuth of the centre of the field of view in decimal degrees. North = 0, increasing to the East
