@@ -71,6 +71,7 @@ def writeECSV(dir_path, file_name, station_id, platepar, picks, mag_band_string=
         'image_file': image_file,                      # The name of the original image or video
         'isodate_start_obs': isodate_start_obs,        # The date and time of the start of the observation
         'astrometry_number_stars': n_stars,            # Number of stars used in the astrometric calibration
+        'astrometry_aberration': bool(getattr(platepar, 'aberration', False)),  # Whether annual aberration was modelled in the astrometric calibration
         'mag_label': 'mag_data',                       # The label of the Magnitude column
         'no_frags': 1,                                 # The number of meteoroid fragments
         'obs_az': azim_centre,                         # Azimuth of the FOV centre (deg, North=0, E positive)
