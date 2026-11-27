@@ -2008,8 +2008,10 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                 path = os.path.join(path, "mask.bmp")
             if os.path.isfile(path):
                 try:
-                    pt.loadMaskFromFile(path)
-                    result = "Mask loaded from: " + path
+                    if pt.loadMaskFromFile(path):
+                        result = "Mask loaded from: " + path
+                    else:
+                        result = "Mask load failed: could not read " + path
                 except Exception as e:
                     result = "Mask load failed: " + repr(e)
             else:
@@ -6858,16 +6860,14 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.mask.setUndoEnabled(False)
 
         mask_path = os.path.join(self.dir_path, "mask.bmp")
-        if os.path.exists(mask_path):
-            self.loadMaskFromFile(mask_path)
-
-        # No mask.bmp in the data directory, but a mask of the image size was given at startup - edit that one
-        elif self.maskFitsImage(startup_mask):
-            self.loadMaskImage(np.array(startup_mask.img, dtype=np.uint8))
-
-        else:
-            # No mask for this station - clear any leftover overlay/outlines from the previous one
-            self.updateMaskDisplay()
+        mask_loaded = os.path.exists(mask_path) and self.loadMaskFromFile(mask_path)
+        if not mask_loaded:
+            # No valid mask.bmp in the data directory, but a mask of the image size was given at startup
+            if self.maskFitsImage(startup_mask):
+                self.loadMaskImage(np.array(startup_mask.img, dtype=np.uint8))
+            else:
+                # No mask for this station - clear any leftover overlay/outlines from the previous one
+                self.updateMaskDisplay()
 
         # Sync the detection mask to the loaded-or-cleared state so it doesn't leak across stations
         if self.img.data is not None:
@@ -6929,6 +6929,18 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.mask.setBrushMode(False)
         self.updatePanningEnabled()
 
+    def isMaskTabCurrent(self):
+        """ Check whether the Mask tab is the currently open tab.
+
+        Return:
+            [bool] True if the Mask tab exists and is open.
+        """
+
+        if not (hasattr(self, 'tab') and hasattr(self.tab, 'mask')):
+            return False
+
+        return self.tab.currentIndex() == self.tab.indexOf(self.tab.mask)
+
     def updatePanningEnabled(self):
         """ Enable or disable panning the image frame with a mouse drag.
 
@@ -6943,9 +6955,8 @@ class PlateTool(QtWidgets.QMainWindow):
         block_panning = False
 
         # Block panning while the mask tab is open, as drags are used for polygon and brush editing
-        if hasattr(self, 'tab') and hasattr(self.tab, 'mask'):
-            if self.tab.currentIndex() == self.tab.indexOf(self.tab.mask):
-                block_panning = True
+        if self.isMaskTabCurrent():
+            block_panning = True
 
         # Block panning while the mask brush is active
         if getattr(self, 'mask_brush_mode', False):
@@ -7653,19 +7664,26 @@ class PlateTool(QtWidgets.QMainWindow):
 
         Arguments:
             mask_path: [str] Path to the mask image (0 = masked, 255 = unmasked).
+
+        Return:
+            [bool] True if the mask was read and loaded, False if the file is missing or unreadable (the
+                current mask is then kept).
         """
         if not os.path.exists(mask_path):
             print(f"Mask file not found: {mask_path}")
-            return
-
-        self.mask_source_path = mask_path
+            return False
 
         mask_img = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
         if mask_img is None:
             print(f"Failed to load mask: {mask_path}")
-            return
+            return False
+
+        # Only a mask that was actually read becomes the source of the loaded mask
+        self.mask_source_path = mask_path
 
         self.loadMaskImage(mask_img)
+
+        return True
 
 
     def maskFitsImage(self, mask):
@@ -7731,9 +7749,10 @@ class PlateTool(QtWidgets.QMainWindow):
         # Pixels unmasked in file but inside a polygon → erase (value=2)
         paint_layer[(mask_img == 255) & (polygon_mask == 0)] = 2
 
+        # The undo history belongs to the previous mask, so it is always cleared on load
+        self.mask_brush_stroke_history = []
         if np.any(paint_layer != 0):
             self.mask_paint_layer = paint_layer
-            self.mask_brush_stroke_history = []
             print(f"Loaded {len(self.mask_polygons)} polygon(s) + raster residuals from mask")
         else:
             self.mask_paint_layer = None
@@ -10971,6 +10990,11 @@ class PlateTool(QtWidgets.QMainWindow):
         self.press_button = event.button()
         self.press_modifiers = modifiers
 
+        # The mask is only edited on the Mask tab; elsewhere a click near a mask vertex is meant for
+        #   another action (e.g. a right click to unpair a star near the horizon)
+        if not self.isMaskTabCurrent():
+            return
+
         # Handle brush painting
         if self.mask_brush_mode:
             pos = event.scenePos()
@@ -11042,8 +11066,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Handle brush undo - Ctrl+Z when on mask tab
         if event.key() == QtCore.Qt.Key.Key_Z and (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier):
-            mask_tab_index = self.tab.indexOf(self.tab.mask)
-            if self.tab.currentIndex() == mask_tab_index and self.mask_brush_stroke_history:
+            if self.isMaskTabCurrent() and self.mask_brush_stroke_history:
                 self.undoBrushStroke()
                 return
 
