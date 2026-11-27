@@ -110,13 +110,15 @@ def testStashForcedCentreRoundTripRestoresFittedCentre():
     # Minimal stand-in holding the platepar and stash without instantiating a Qt widget
     class _StubManager(object):
         _isEmptyCoeff = staticmethod(PlateparParameterManager._isEmptyCoeff)
+        resetCoeffStash = PlateparParameterManager.resetCoeffStash
+        _checkCoeffStashOwner = PlateparParameterManager._checkCoeffStashOwner
         _stashCurrentCoeffs = PlateparParameterManager._stashCurrentCoeffs
         _restoreCoeffsFromStash = PlateparParameterManager._restoreCoeffsFromStash
         _remapCoeffsWithStash = PlateparParameterManager._remapCoeffsWithStash
 
     pm = _StubManager()
     pm.gui = SimpleNamespace(platepar=pp)
-    pm._coeff_stash = {'x_fwd': {}, 'x_rev': {}, 'y_fwd': {}, 'y_rev': {}}
+    pm.resetCoeffStash()
 
     pm._remapCoeffsWithStash('force_distortion_centre', True)
     pm._remapCoeffsWithStash('force_distortion_centre', False)
