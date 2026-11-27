@@ -25,10 +25,14 @@ class TestSatellitePositions(unittest.TestCase):
         
         # Test 1: Daily cache mode - should create date-stamped files
         def createDummyTle(url, filepath):
-            """Side effect for mock to actually create a file"""
+            """Side effect for mock to actually create a valid TLE file"""
             os.makedirs(os.path.dirname(filepath), exist_ok=True)
             with open(filepath, 'w') as f:
-                f.write("DUMMY TLE DATA\n")
+                f.write(
+                    "ISS (ZARYA)\n"
+                    "1 25544U 98067A   19343.69339541  .00001764  00000-0  38792-4 0  9991\n"
+                    "2 25544  51.6439 201.2643 0007417 356.5673 139.3661 15.50083952202315\n"
+                )
         
         with patch('urllib.request.urlretrieve', side_effect=createDummyTle) as mock_download:
             with patch('RMS.Routines.SatellitePositions.loadRobustTLEs') as mock_load:
@@ -86,18 +90,24 @@ class TestSatellitePositions(unittest.TestCase):
             
         cache_file = "active.txt"
         
+        dummy_tle = (
+            "ISS (ZARYA)\n"
+            "1 25544U 98067A   19343.69339541  .00001764  00000-0  38792-4 0  9991\n"
+            "2 25544  51.6439 201.2643 0007417 356.5673 139.3661 15.50083952202315\n"
+        )
+
         # Create two dummy cached files with timestamps
         # File 1: 2020-01-01 (Old)
         date_str_1 = "20200101"
         file_1 = os.path.join(self.test_dir, f"TLE_{date_str_1}_000000_{cache_file}")
         with open(file_1, 'w') as f:
-            f.write("DUMMY OLD TLE\n")
+            f.write(dummy_tle)
             
         # File 2: 2023-01-01 (Newer)
         date_str_2 = "20230101"
         file_2 = os.path.join(self.test_dir, f"TLE_{date_str_2}_000000_{cache_file}")
         with open(file_2, 'w') as f:
-            f.write("DUMMY NEW TLE\n")
+            f.write(dummy_tle)
             
         # Mock loadRobustTLEs to avoid parsing error
         with patch('RMS.Routines.SatellitePositions.loadRobustTLEs') as mock_load:

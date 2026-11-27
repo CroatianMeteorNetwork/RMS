@@ -24,7 +24,65 @@ import glob
 import tempfile
 
 
-def findClosestTLEFile(directory_path, target_time):
+def listTLECacheFiles(cache_dir, cache_file_name):
+    """ List the daily TLE cache files of one TLE group, i.e. files named exactly
+        TLE_YYYYMMDD_HHMMSS_<cache_file_name>.
+
+        A glob like TLE_*_active.txt would also match other groups whose name ends in "_active.txt"
+        (e.g. TLE_20260101_000000_gp_active.txt), so the full name is matched instead.
+
+    Arguments:
+        cache_dir: [str] Directory with the TLE cache files.
+        cache_file_name: [str] Base name of the TLE group (e.g. "active.txt").
+
+    Return:
+        [list] (time stamp string YYYYMMDD_HHMMSS, file path) tuples, in no particular order.
+    """
+
+    if not os.path.isdir(cache_dir):
+        return []
+
+    name_pattern = re.compile(r"TLE_(\d{8}_\d{6})_" + re.escape(cache_file_name))
+
+    cache_files = []
+    for file_name in os.listdir(cache_dir):
+        match = name_pattern.fullmatch(file_name)
+        if match is not None:
+            file_path = os.path.join(cache_dir, file_name)
+            if os.path.isfile(file_path):
+                cache_files.append((match.group(1), file_path))
+
+    return cache_files
+
+
+def isValidTLEFile(file_path):
+    """ Check that a file contains at least one TLE (a line 1 directly followed by its line 2).
+
+        Used to reject a download which is not TLE data, e.g. an error or rate-limit page.
+
+    Arguments:
+        file_path: [str] Path to the file.
+
+    Return:
+        [bool] True if at least one TLE line pair was found.
+    """
+
+    try:
+        prev_line = ''
+        with open(file_path, 'r', errors='replace') as f:
+            for raw_line in f:
+                line = raw_line.rstrip()
+                if prev_line.startswith('1 ') and line.startswith('2 ') \
+                        and (len(prev_line) >= 60) and (len(line) >= 60):
+                    return True
+                prev_line = line
+    except (IOError, OSError):
+        return False
+
+    return False
+
+
+def findClosestTLEFile(directory_path, target_time, cache_file_name=None):
     """
     Scans the given directory for TLE files with the format TLE_YYYYMMDD_HHMMSS_...
     and finds the one closest to the target_time.
@@ -32,6 +90,10 @@ def findClosestTLEFile(directory_path, target_time):
     Arguments:
         directory_path: [str] Path to the directory containing TLE files.
         target_time: [datetime] The time for which we want the closest TLEs.
+
+    Keyword arguments:
+        cache_file_name: [str] Base name of the TLE group (e.g. "active.txt"). If given, only files of
+            that group (TLE_YYYYMMDD_HHMMSS_<cache_file_name>) are considered. None by default.
         
     Returns:
         [str] Path to the closest TLE file, or None if no suitable file found or "current time" is closer (indicating download is preferred).
@@ -42,7 +104,14 @@ def findClosestTLEFile(directory_path, target_time):
 
     print(f"Scanning TLE directory: {directory_path}")
 
-    files = glob.glob(os.path.join(directory_path, "TLE_*.txt"))
+    # Only consider the files of the requested TLE group, if given
+    if cache_file_name is not None:
+        files = [file_path for _, file_path in listTLECacheFiles(directory_path, cache_file_name)]
+    else:
+        files = glob.glob(os.path.join(directory_path, "TLE_*.txt"))
+
+    # Skip empty or corrupt files (e.g. left by an interrupted download or rate-limit response)
+    files = [file_path for file_path in files if os.path.isfile(file_path) and isValidTLEFile(file_path)]
     
     best_file = None
     min_diff = None
@@ -87,6 +156,61 @@ def findClosestTLEFile(directory_path, target_time):
     else:
         print("No matching TLE files found in directory.")
         return None
+
+
+def findNewestTLECacheFile(cache_dir, cache_file_name):
+    """ Find the newest daily TLE cache file (TLE_YYYYMMDD_HHMMSS_<cache_file_name>) of the given group.
+
+    Arguments:
+        cache_dir: [str] Directory with the TLE cache files.
+        cache_file_name: [str] Base name of the TLE group (e.g. "active.txt").
+
+    Return:
+        [str] Path to the newest non-empty cache file, or None if there is none.
+    """
+
+    candidates = [
+        (time_stamp, file_path)
+        for time_stamp, file_path in listTLECacheFiles(cache_dir, cache_file_name)
+        if isValidTLEFile(file_path)
+    ]
+    if not candidates:
+        return None
+
+    # The YYYYMMDD_HHMMSS time stamp sorts chronologically
+    return max(candidates)[1]
+
+
+def removeStaleTLEDownloads(cache_dir, cache_file_name, min_age_sec=600.0):
+    """ Remove stale partial (.part) downloads of one TLE group left in the cache directory.
+
+    Arguments:
+        cache_dir: [str] Directory with the TLE cache files.
+        cache_file_name: [str] Base name of the TLE group (e.g. "active.txt").
+
+    Keyword arguments:
+        min_age_sec: [float] Only remove .part files older than this age in seconds, so active
+            concurrent downloads in a shared cache directory are not disturbed. 600.0 by default.
+
+    Return:
+        None
+    """
+
+    if not os.path.isdir(cache_dir):
+        return
+
+    # Partial downloads of both the daily and the legacy cache file names (with optional PID suffix)
+    name_pattern = re.compile(r"(TLE_\d{8}_\d{6}_)?" + re.escape(cache_file_name) + r"(?:\.\d+)?\.part")
+    now = time.time()
+
+    for file_name in os.listdir(cache_dir):
+        if name_pattern.fullmatch(file_name):
+            part_path = os.path.join(cache_dir, file_name)
+            try:
+                if (now - os.path.getmtime(part_path)) >= min_age_sec:
+                    os.remove(part_path)
+            except OSError:
+                continue
 
 
 def loadRobustTLEs(file_path):
@@ -206,13 +330,10 @@ def loadTLEs(cache_dir, cache_file_name="active.txt",
 
     # If time of interest is provided, try to find the closest file in cache
     if time_of_interest is not None and use_daily_cache and os.path.exists(cache_dir):
-        
-        # Use existing function to find the closest file
-        # We need to handle the case where findClosestTLEFile returns None (meaning "now" is closer or no files)
-        # But findClosestTLEFile logic assumes we might want to download if "now" is closer.
-        # Let's reuse its logic but prioritize the file if it exists.
-        
-        found_file = findClosestTLEFile(cache_dir, time_of_interest)
+
+        # Prefer the cached TLE file closest to the time of interest, if any (None means no cached file is
+        #   closer than a fresh download, in which case the default download logic below is used)
+        found_file = findClosestTLEFile(cache_dir, time_of_interest, cache_file_name=cache_file_name)
         
         if found_file:
              cache_path = found_file
@@ -241,14 +362,14 @@ def loadTLEs(cache_dir, cache_file_name="active.txt",
         # Generate cache file path with optional daily naming
         if use_daily_cache:
             # Create date-stamped filename: TLE_YYYYMMDD_HHMMSS_<original_name>
-            now = datetime.datetime.utcnow()
+            now = datetime.datetime.now(datetime.timezone.utc)
             date_str = now.strftime("%Y%m%d")
             
-            # Check if today's cache already exists
-            existing_files = []
-            if os.path.exists(cache_dir):
-                pattern = f"TLE_{date_str}_*_{cache_file_name}"
-                existing_files = glob.glob(os.path.join(cache_dir, pattern))
+            # Check if today's valid cache already exists for this exact TLE group
+            existing_files = [
+                file_path for time_stamp, file_path in listTLECacheFiles(cache_dir, cache_file_name)
+                if time_stamp.startswith(date_str + "_") and isValidTLEFile(file_path)
+            ]
                 
             # Use the most recent file from today if it exists and is fresh
             cache_path = None
@@ -276,7 +397,7 @@ def loadTLEs(cache_dir, cache_file_name="active.txt",
             cache_path = os.path.join(cache_dir, cache_file_name)
             
             download = True
-            if os.path.exists(cache_path):
+            if os.path.isfile(cache_path) and isValidTLEFile(cache_path):
                 # Check file age
                 file_age_hours = (time.time() - os.path.getmtime(cache_path))/3600.0
                 if file_age_hours < max_age_hours:
@@ -285,18 +406,51 @@ def loadTLEs(cache_dir, cache_file_name="active.txt",
     
     if download:
         print(f"Downloading TLEs from {url}...")
+
+        # Download to a PID-unique temporary file first and only move it into place once complete,
+        #   so interrupted or concurrent downloads never leave or clobber a cache file
+        tmp_path = "{:s}.{:d}.part".format(cache_path, os.getpid())
+
+        # Remove stale partial downloads of this TLE group left by earlier runs (e.g. a hard kill)
+        removeStaleTLEDownloads(cache_dir, cache_file_name)
+
         try:
             # Download the TLE file
             os.makedirs(cache_dir, exist_ok=True)
-            urllib.request.urlretrieve(url, cache_path)
+            urllib.request.urlretrieve(url, tmp_path)
+
+            # The response must contain TLE data - an empty file or e.g. an error or rate-limit page must
+            #   not be cached as TLEs
+            if not isValidTLEFile(tmp_path):
+                raise IOError("the downloaded file contains no TLEs")
+
+            os.replace(tmp_path, cache_path)
             print(f"Downloaded TLEs to {cache_path}")
             
         except Exception as e:
             print(f"Failed to download TLEs: {e}")
-            if os.path.exists(cache_path):
-                print("Falling back to existing (old) cache.")
-            else:
+
+            # Fall back to the existing valid cache file (legacy mode), or to the newest valid daily cache
+            #   file of the same TLE group, so cached data can still be used offline
+            fallback_path = None
+            if os.path.isfile(cache_path) and isValidTLEFile(cache_path):
+                fallback_path = cache_path
+            elif use_daily_cache:
+                fallback_path = findNewestTLECacheFile(cache_dir, cache_file_name)
+
+            if fallback_path is None:
                 return []
+
+            print(f"Falling back to existing (old) cache {fallback_path}.")
+            cache_path = fallback_path
+
+        # Never leave the partial download behind, also on an interrupt
+        finally:
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError as rm_err:
+                    print(f"Warning: could not remove partial TLE download {tmp_path}: {rm_err}")
 
     # Load satellites from file
     try:
@@ -562,7 +716,7 @@ if __name__ == "__main__":
                  print("Invalid time format. Use YYYYMMDD_HHMMSS or ISO format.")
                  exit(1)
     else:
-        t_start = datetime.datetime.utcnow()
+        t_start = datetime.datetime.now(datetime.timezone.utc)
 
     # Ensure UTC
     if t_start.tzinfo is None:
