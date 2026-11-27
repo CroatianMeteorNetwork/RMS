@@ -27,7 +27,8 @@ from RMS.Formats.Showers import FluxShowers, loadRadiantShowers
 from Utils.Flux import calculatePopulationIndex, calculateMassIndex, computeFlux, detectClouds, fluxParser, \
     calculateFixedBins, calculateZHR, massVerniani, loadShower
 from RMS.Routines.SolarLongitude import unwrapSol
-from RMS.Misc import formatScientific, roundToSignificantDigits, SegmentedScale, mkdirP
+from RMS.Misc import formatScientific, roundToSignificantDigits, SegmentedScale, mkdirP, \
+    setMultiprocessingStartMethod
 from RMS.QueuedPool import QueuedPool
 
 # Map FileNotFoundError to IOError in Python 2 as it does not exist
@@ -1023,39 +1024,46 @@ def computeBatchFluxParallel(file_data, shower_code, mass_index, ref_ht, bin_dat
 
         print('Starting pool...')
 
-        # Start the detection
-        workpool.startPool()
+        pool_closed = False
+        try:
+            # Start the detection
+            workpool.startPool()
 
-        print('Adding jobs...')
+            print('Adding jobs...')
 
-        # Add jobs for the pool
-        for file_entry in file_data:
-            workpool.addJob([file_entry, metadata_dir], wait_time=0)
+            # Add jobs for the pool
+            for file_entry in file_data:
+                workpool.addJob([file_entry, metadata_dir], wait_time=0)
 
 
-        print('Waiting for the batch flux computation to finish...')
+            print('Waiting for the batch flux computation to finish...')
 
-        # Wait for the detector to finish and close it
-        workpool.closePool()
+            # Wait for the detector to finish and close it
+            workpool.closePool()
+            pool_closed = True
 
-        total_all_fixed_bin_information = []
-        total_single_fixed_bin_information = []
-        total_single_station_flux = []
-        total_summary_population_index = []
+            total_all_fixed_bin_information = []
+            total_single_fixed_bin_information = []
+            total_single_station_flux = []
+            total_summary_population_index = []
 
-        # Get extraction results
-        for result in workpool.getResults():
+            # Get extraction results
+            for result in workpool.getResults():
 
-            if result is None:
-                continue
+                if result is None:
+                    continue
 
-            all_fixed_bin_information, single_fixed_bin_information, single_station_flux, \
-                summary_population_index = result
+                all_fixed_bin_information, single_fixed_bin_information, single_station_flux, \
+                    summary_population_index = result
 
-            total_all_fixed_bin_information += all_fixed_bin_information
-            total_single_fixed_bin_information += single_fixed_bin_information
-            total_single_station_flux += single_station_flux
-            total_summary_population_index += summary_population_index
+                total_all_fixed_bin_information += all_fixed_bin_information
+                total_single_fixed_bin_information += single_fixed_bin_information
+                total_single_station_flux += single_station_flux
+                total_summary_population_index += summary_population_index
+        finally:
+            if (not pool_closed) and (workpool.pool is not None):
+                workpool._shutdownPool()
+            workpool.shutdownManager()
 
 
     return total_all_fixed_bin_information, total_single_fixed_bin_information, total_single_station_flux, \
@@ -1821,6 +1829,10 @@ def saveBatchFluxCSV(fbr, dir_path, output_filename):
 
 
 if __name__ == "__main__":
+
+    # Pin the multiprocessing start method for consistent behavior across Python versions
+    # (3.6-3.14). Must be done before any Process/Pool is created.
+    setMultiprocessingStartMethod()
 
     import argparse
 

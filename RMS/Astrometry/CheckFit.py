@@ -20,32 +20,203 @@ import RMS.ConfigReader as cr
 import scipy.optimize
 from RMS.Astrometry.ApplyAstrometry import (getFOVSelectionRadius, raDecToXYPP,
                                             rotationWrtHorizon, xyToRaDecPP)
-from RMS.Astrometry.Conversions import date2JD, jd2Date, raDec2AltAz
-from RMS.Astrometry.FFTalign import alignPlatepar
+from RMS.Astrometry.Conversions import date2JD, jd2Date
+from RMS.Astrometry.NNalign import alignPlatepar
 from RMS.Formats import CALSTARS, FFfile, Platepar, StarCatalog
 from RMS.Math import angularSeparation
 from RMS.Logger import LoggingManager, getLogger
 
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
-from RMS.Astrometry.CyFunctions import matchStars, subsetCatalog
+from RMS.Astrometry.CyFunctions import subsetCatalog
+from RMS.Astrometry.MatchStars import matchStars
 
 
 # Get the logger from the main module
 log = getLogger("rmslogger")
 
 
+def buildNelderMeadSimplex(p0, steps):
+    """ Build the initial simplex of a Nelder-Mead fit: the starting parameters, and the starting parameters with
+        each one changed by its step in turn. Scipy's default simplex changes each parameter by 5% of its value,
+        which for the pointing gives steps that depend on where the camera points, not on how far it may be off.
+
+    Arguments:
+        p0: [list] Starting parameters.
+        steps: [list] Step of each parameter.
+
+    Return:
+        simplex: [ndarray] (N+1) x N array for the initial_simplex option.
+    """
+
+    p0 = np.array(p0, dtype=float)
+
+    return np.vstack([p0, p0 + np.diag(np.array(steps, dtype=float))])
+
+
+
+
 def computeMinimizationTolerances(config, platepar, star_dict_len):
-    """ Compute tolerances for minimization. """
+    """ Compute tolerances for minimization. The parameters of the fit are the offsets of the pointing and the
+        scale in pixels (see Platepar.PointingOffsets).
+    """
 
     # Calculate the function tolerance, so the desired precision can be reached (the number is calculated
     # in the same regard as the cost function)
     fatol = (config.dist_check_threshold**2)/np.sqrt(star_dict_len*config.min_matched_stars + 1)
 
-    # Parameter estimation tolerance for angular values
-    fov_w = platepar.X_res/platepar.F_scale
-    xatol_ang = config.dist_check_threshold*fov_w/platepar.X_res
+    # Parameter estimation tolerance (px): a third of the distance threshold, so that the fitted pointing moves
+    #   the stars by well less than the threshold from where the best fit puts them
+    xatol = config.dist_check_threshold/3.0
 
-    return fatol, xatol_ang
+    return fatol, xatol
+
+
+def searchSimplexSteps(pointing):
+    """ The steps of the first simplex of the search of the pointing and the scale on matched stars
+        (_calcImageResidualsAstro, in autoCheckFit and ApplyRecalibrate.recalibrateFF), in the offsets of
+        Platepar.PointingOffsets (px): the pointing is moved by 2 deg on the sky along x and along y and rolled by
+        2 deg, and the scale is changed by 5%. The search shrinks the simplex from there to the size of the basin
+        of the matched stars, wherever the camera points.
+
+    Arguments:
+        pointing: [Platepar.PointingOffsets] The offsets of the fit.
+
+    Return:
+        [list] Steps of the offsets (dx, dy, droll, dscale) (px).
+    """
+
+    return [np.radians(2.0)/pointing.shift_unit]*2 + [np.radians(2.0)/pointing.roll_unit, 0.05*pointing.radius]
+
+
+class SearchOffsets(object):
+    """ The parameters of the search of the pointing and the scale on matched stars (autoCheckFit,
+        ApplyRecalibrate.recalibrateFF): the offsets (dx, dy, droll, dscale) of Platepar.PointingOffsets (px),
+        from the first simplex of searchSimplexSteps, with the tolerance of computeMinimizationTolerances.
+    """
+
+    def __init__(self, config, platepar):
+        """ The parameters about the pointing and the scale of the platepar.
+
+        Arguments:
+            config: [Config] Configuration.
+            platepar: [Platepar] Platepar the search starts from.
+        """
+
+        self.pointing = Platepar.PointingOffsets(platepar)
+        self.p0 = [0.0, 0.0, 0.0, 0.0]
+        self.steps = searchSimplexSteps(self.pointing)
+        self.xatol = computeMinimizationTolerances(config, platepar, 1)[1]
+
+    def apply(self, platepar, params):
+        """ Set the pointing and the scale of the parameters to a platepar.
+
+        Arguments:
+            platepar: [Platepar] Platepar which is updated in place.
+            params: [list] Parameters of the search.
+
+        Return:
+            None
+        """
+
+        self.pointing.apply(platepar, params)
+
+
+class SearchRaDec(object):
+    """ The parameters of the search of the pointing and the scale of earlier versions, kept as a safety net: the
+        right ascension, declination, position angle and scale as they are, from a simplex of 5% of each value (at
+        least 0.5 deg on the sky), with the tolerance dist_check_threshold converted to degrees for all of them.
+    """
+
+    def __init__(self, config, platepar):
+        """ The parameters at the pointing and the scale of the platepar.
+
+        Arguments:
+            config: [Config] Configuration.
+            platepar: [Platepar] Platepar the search starts from.
+        """
+
+        self.p0 = [platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref, platepar.F_scale]
+
+        # Scipy's 5% default, with the minimum angular step enforced (0.5 deg on the sky)
+        cos_dec = max(np.cos(np.radians(platepar.dec_d)), 0.1)
+        self.steps = [abs(v)*0.05 if v != 0 else 0.00025 for v in self.p0]
+        self.steps[0] = max(self.steps[0], 0.5/cos_dec)
+        self.steps[1] = max(self.steps[1], 0.5)
+        self.steps[2] = max(self.steps[2], 0.5)
+
+        # The distance threshold as an angle
+        fov_w = platepar.X_res/platepar.F_scale
+        self.xatol = config.dist_check_threshold*fov_w/platepar.X_res
+
+    def apply(self, platepar, params):
+        """ Set the pointing and the scale of the parameters to a platepar.
+
+        Arguments:
+            platepar: [Platepar] Platepar which is updated in place.
+            params: [list] Parameters of the search.
+
+        Return:
+            None
+        """
+
+        platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref, platepar.F_scale = params
+
+    @staticmethod
+    def normalize(platepar):
+        """ Reflect a pointing whose declination the search stepped past a pole back onto the sphere, the position
+            angle turned with it (Platepar.normalizeRaDec); earlier versions stored the declination as it was.
+
+        Arguments:
+            platepar: [Platepar] Platepar which is updated in place.
+
+        Return:
+            None
+        """
+
+        if not (-90.0 <= platepar.dec_d <= 90.0):
+            platepar.RA_d, platepar.dec_d, pos_angle_offset = Platepar.normalizeRaDec(
+                platepar.RA_d, platepar.dec_d, refraction=platepar.refraction)
+            platepar.pos_angle_ref = (platepar.pos_angle_ref + pos_angle_offset)%360
+
+
+# A fit of the search may change the scale by at most this fraction; a larger change is no camera of the platepar
+#   but a fit that found no stars to hold it (it is then not used)
+SEARCH_MAX_SCALE_CHANGE = 0.1
+
+
+def coarseAlignStars(config, platepar, catalog_stars, star_dict, lim_mag=None):
+    """ The coarse alignment of the platepar (CoarseAlignment.alignIfBetter) on the image with the most stars of
+        the star dictionary, if clearly more stars agree with it than with the platepar.
+
+    Arguments:
+        config: [Config] Configuration.
+        platepar: [Platepar] Platepar (not changed).
+        catalog_stars: [ndarray] Catalog stars (ra, dec, mag).
+        star_dict: [dict] Julian dates of the images and their stars (y, x, ...).
+
+    Keyword arguments:
+        lim_mag: [float] Limiting magnitude of the catalog stars. config.catalog_mag_limit by default.
+
+    Return:
+        [Platepar] A copy of the platepar with the aligned pointing, or None.
+    """
+
+    from RMS.Astrometry.CoarseAlignment import alignIfBetter
+
+    if lim_mag is None:
+        lim_mag = config.catalog_mag_limit
+
+    # The image with the most stars
+    jd = max(star_dict, key=lambda key: len(star_dict[key]))
+    stars = np.array(star_dict[jd], dtype=np.float64)
+    if (stars.ndim != 2) or (len(stars) < 3):
+        return None
+
+    catalog_stars = np.asarray(catalog_stars)
+    catalog_stars = catalog_stars[catalog_stars[:, 2] <= lim_mag]
+
+    return alignIfBetter(platepar, jd, stars[:, 1], stars[:, 0], catalog_stars,
+                         img_intensity=(stars[:, 2] if stars.shape[1] > 2 else None))
 
 
 
@@ -346,12 +517,13 @@ def checkFitGoodness(config, platepar, catalog_stars, star_dict, match_radius, v
 
 
 
-def _calcImageResidualsAstro(params, config, platepar, catalog_stars, star_dict, match_radius):
+def _calcImageResidualsAstro(params, config, platepar, catalog_stars, star_dict, match_radius, pointing=None):
     """ Calculates the differences between the stars on the image and catalog stars in image coordinates with 
         the given astrometrical solution. 
 
     Arguments:
-        params: [list] Fit parameters - reference RA, Dec, position angle, and scale.
+        params: [list] Fit parameters - the offsets (dx, dy, droll, dscale) of the pointing and the scale from
+            those of the platepar (px, see Platepar.PointingOffsets).
         config: [Config]
         platepar: [Platepar]
         catalog_stars: [list] List of (ra, dec, mag) entries (angles in degrees).
@@ -359,26 +531,34 @@ def _calcImageResidualsAstro(params, config, platepar, catalog_stars, star_dict,
             stars on the image.
         match_radius: [float] Star match radius (px).
 
+    Keyword arguments:
+        pointing: [Platepar.PointingOffsets] The offsets about the platepar, made once for a fit. None by
+            default, in which case they are made from the platepar.
+
     Return:
         [float] The average pixel residual (difference between image and catalog positions) normalized
             by the square root of the total number of matched stars.
     """
 
+    # The offsets are about the pointing and the scale of the platepar
+    if pointing is None:
+        pointing = Platepar.PointingOffsets(platepar)
 
-    # Make a copy of the platepar
-    pp = copy.deepcopy(platepar)
+    # Set the fitting parameters on the platepar for this evaluation, remembering its own (no deep copy is
+    #   needed, matchStarsResiduals only reads from the platepar)
+    params_prev = (platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref, platepar.F_scale)
+    pointing.apply(platepar, params)
 
-    # Extract fitting parameters
-    ra_ref, dec_ref, pos_angle_ref, F_scale = params
+    try:
 
-    # Set the fitting parameters to the platepar clone
-    pp.RA_d = ra_ref
-    pp.dec_d = dec_ref
-    pp.pos_angle_ref = pos_angle_ref
-    pp.F_scale = F_scale
+        # Match stars and calculate image residuals
+        return matchStarsResiduals(config, platepar, catalog_stars, star_dict, match_radius, verbose=False)
 
-    # Match stars and calculate image residuals
-    return matchStarsResiduals(config, pp, catalog_stars, star_dict, match_radius, verbose=False)
+    finally:
+
+        # Put the parameters of the platepar back, so a fit leaves the platepar as it was given whether it
+        #   succeeds or not (the caller applies the result of a successful fit)
+        platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref, platepar.F_scale = params_prev
 
 
 
@@ -427,58 +607,106 @@ def starListToDict(config, calstars_data, max_ffs=None):
 
 
 
-def autoCheckFit(config, platepar, calstars_data, _fft_refinement=False):
+def autoCheckFit(config, platepar, calstars_data, _nn_refinement=False):
     """ Attempts to refine the astrometry fit with the given stars and and initial astrometry parameters.
+
+    The pointing and the scale are first searched as earlier versions did (SearchRaDec), so a check which succeeded
+    before gives the same platepar at the same cost. If the check fails, it is run again from the initial platepar
+    with the search of the offsets of the pointing (SearchOffsets), from the coarse alignment of the stars if the
+    platepar does not match them and polished by least squares on the matched stars, and its result is used.
+
     Arguments:
         config: [Config structure]
         platepar: [Platepar structure] Initial astrometry parameters.
-        calstars_list: [tuple] (list, int) 
+        calstars_list: [tuple] (list, int)
         - A list containing stars extracted from FF files.
         - An integer representing the number of frames in an FF file.
     Keyword arguments:
-        _fft_refinement: [bool] Internal flag indicating that autoCF is running the second time recursively
-            after FFT platepar adjustment.
+        _nn_refinement: [bool] Internal flag indicating that autoCF is running the second time recursively
+            after NN platepar adjustment.
 
     Return:
         (platepar, fit_status):
-            platepar: [Platepar structure] Estimated/refined platepar.
+            platepar: [Platepar structure] Estimated/refined platepar. If the fit was not successful, the
+                platepar of the last successful step (the NN alignment or a fit of the pointing), or the
+                given one if no step succeeded.
             fit_status: [bool] True if fit was successful, False if not.
     """
 
+    # The check with the search of earlier versions first, which changes the given platepar, so a check which
+    #   succeeded before gives the same platepar at the same cost; the random draws of the images it uses are kept
+    #   for the check with the offsets
+    platepar_start = copy.deepcopy(platepar)
+    random_state = random.getstate()
+    platepar, fit_status = _autoCheckFit(config, platepar, calstars_data, _nn_refinement, SearchRaDec)
+    if fit_status:
+        SearchRaDec.normalize(platepar)
+        return platepar, fit_status
 
-    def _handleFailure(config, platepar, calstars_data, catalog_stars, _fft_refinement):
-        """ Run FFT alignment before giving up on ACF. """
+    # If it fails, the check with the offsets of the pointing on the same images, from the initial platepar
+    log.info('')
+    log.info('The check with the search of RA, Dec and rotation failed, running the search of the offsets of the '
+             'pointing...')
+    random.setstate(random_state)
+    platepar_offsets, fit_status_offsets = _autoCheckFit(config, platepar_start, calstars_data, _nn_refinement,
+                                                         SearchOffsets)
 
-        if not _fft_refinement:
+    # The failed check of earlier versions is handed over if the check with the offsets did not run
+    if platepar_offsets is None:
+        return platepar, fit_status
+
+    return platepar_offsets, fit_status_offsets
+
+
+def _autoCheckFit(config, platepar, calstars_data, _nn_refinement, search_class):
+    """ The check of autoCheckFit with the given search.
+
+    Arguments:
+        config: [Config structure]
+        platepar: [Platepar structure] Initial astrometry parameters (changed).
+        calstars_data: [tuple] See autoCheckFit.
+        _nn_refinement: [bool] See autoCheckFit.
+        search_class: [class] SearchOffsets or SearchRaDec.
+
+    Return:
+        (platepar, fit_status): See autoCheckFit; (None, False) if the check with the offsets is not run (no better
+            pointing from the coarse alignment).
+    """
+
+
+    def _handleFailure(config, platepar, calstars_data, catalog_stars, _nn_refinement):
+        """ Run NN alignment before giving up on ACF. """
+
+        if not _nn_refinement:
 
             log.info("")
             log.info("-------------------------------------------------------------------------------")
-            log.info('The initial platepar is bad, trying to refine it using FFT phase correlation...')
+            log.info('The initial platepar is bad, trying to refine it using NN alignment...')
             log.info("")
 
             calstars_list, ff_frames = calstars_data
 
-            # Prepare data for FFT image registration
+            # Prepare data for NN alignment
 
             calstars_dict = {ff_file: star_data for ff_file, star_data in calstars_list}
 
             # Extract star list from CALSTARS file from FF file with most stars
             max_len_ff = max(calstars_dict, key=lambda k: len(calstars_dict[k]))
 
-            # Take only X, Y (change order so X is first)
-            calstars_coords = np.array(calstars_dict[max_len_ff])[:, :2]
-            calstars_coords[:, [0, 1]] = calstars_coords[:, [1, 0]]
+            # Pass full CALSTARS data (y, x, intensity, ...) - alignPlatepar will extract what it needs
+            # and use intensities to infer appropriate catalog limiting magnitude
+            calstars_coords = np.array(calstars_dict[max_len_ff])
 
             # Get the time of the FF file
-            calstars_time = FFfile.getMiddleTimeFF(max_len_ff, config.fps, ret_milliseconds=True, 
+            calstars_time = FFfile.getMiddleTimeFF(max_len_ff, config.fps, ret_milliseconds=True,
                                                    ff_frames=ff_frames)
 
 
-            # Try aligning the platepar using FFT image registration
-            platepar_refined = alignPlatepar(config, platepar, calstars_time, calstars_coords)
+            # Try aligning the platepar using NN alignment
+            platepar_refined, _ = alignPlatepar(config, platepar, calstars_time, calstars_coords)
 
 
-            ### If there are still not enough stars matched, try FFT again ###
+            ### If there are still not enough stars matched, try NN again ###
             min_radius = 10
 
             # Prepare star dictionary to check the match
@@ -495,24 +723,24 @@ def autoCheckFit(config, platepar, calstars_data, _fft_refinement=False):
             if n_matched < config.min_matched_stars:
                 log.info('')
                 log.info("-------------------------------------------------------------------------------")
-                log.info('Doing a second FFT pass as the number of matched stars was too small...')
+                log.info('Doing a second NN pass as the number of matched stars was too small...')
                 log.info('')
-                platepar_refined = alignPlatepar(config, platepar_refined, calstars_time, calstars_coords)
+                platepar_refined, _ = alignPlatepar(config, platepar_refined, calstars_time, calstars_coords)
                 log.info('')
 
             ### ###
 
 
             # Redo autoCF
-            return autoCheckFit(config, platepar_refined, calstars_data, _fft_refinement=True)
+            return _autoCheckFit(config, platepar_refined, calstars_data, True, search_class)
 
         else:
             log.info('Auto Check Fit failed completely, please redo the plate manually!')
             return platepar, False
 
 
-    if _fft_refinement:
-        log.info('Second ACF run with an updated platepar via FFT phase correlation...')
+    if _nn_refinement:
+        log.info('Second ACF run with an updated platepar via NN alignment...')
 
     # Extract the star data and the number of frames in the FF files
     calstars_list, ff_frames = calstars_data
@@ -570,9 +798,14 @@ def autoCheckFit(config, platepar, calstars_data, _fft_refinement=False):
     radius_list = [10, 5, 3, 1.5, min_radius]
 
 
+    # The refinement models the aberration. A plate that had absorbed it instead has to be refitted at
+    #   least once before it can be accepted, however well it matches the stars already
+    aberration_refit = not platepar.aberration
+    platepar.aberration = True
+
     # Calculate the function tolerance, so the desired precision can be reached (the number is calculated
     # in the same regard as the cost function)
-    fatol, xatol_ang = computeMinimizationTolerances(config, platepar, len(star_dict))
+    fatol, _ = computeMinimizationTolerances(config, platepar, len(star_dict))
 
 
     ### If the initial match is good enough, do only quick recalibration ###
@@ -590,6 +823,52 @@ def autoCheckFit(config, platepar, calstars_data, _fft_refinement=False):
 
             # Use a reduced set of initial radius values
             radius_list = [1.5, min_radius]
+
+    # Otherwise, bring the pointing onto the stars first if clearly more of them agree with the coarse alignment
+    #   than with the platepar (with the search of the offsets)
+    coarse_aligned = False
+    if (radius_list[0] != 1.5) and (search_class is SearchOffsets):
+        aligned = coarseAlignStars(config, platepar, catalog_stars, star_dict)
+        coarse_aligned = aligned is not None
+        if coarse_aligned:
+            log.info("Coarse alignment of the pointing on the stars: RA {:.4f} -> {:.4f}, Dec {:.4f} -> {:.4f}, "
+                     "rotation {:.4f} -> {:.4f} deg".format(platepar.RA_d, aligned.RA_d, platepar.dec_d,
+                                                            aligned.dec_d, platepar.pos_angle_ref,
+                                                            aligned.pos_angle_ref))
+            platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref = aligned.RA_d, aligned.dec_d, \
+                aligned.pos_angle_ref
+
+    # The check with the offsets runs after the check of earlier versions failed from the same platepar, so without
+    #   the quick fit and without a better pointing from the coarse alignment it is not run (on a night far off it
+    #   doubled the time of the check, which then fails as well)
+    if (radius_list[0] != 1.5) and (search_class is SearchOffsets) and (not coarse_aligned) \
+            and (not _nn_refinement):
+        log.info("No coarse alignment of the pointing on the stars, the check with the offsets is not run")
+        return None, False
+
+    # The scale the fits start from, which they may change by at most SEARCH_MAX_SCALE_CHANGE
+    scale_start = abs(platepar.F_scale)
+
+
+    def _polished(platepar):
+        """ The platepar with the pointing and the scale polished by least squares on the stars matched within
+            the smallest radius (ApplyRecalibrate.refinePointingLSQ on all images), if that is good enough and
+            keeps the matched stars; otherwise the given platepar. Only with the search of the offsets. """
+
+        if search_class is not SearchOffsets:
+            return platepar
+
+        from RMS.Astrometry.ApplyRecalibrate import refinePointingLSQ
+
+        n_check, _, _, _ = matchStarsResiduals(config, platepar, catalog_stars, star_dict, min_radius,
+                                               ret_nmatch=True)
+        refined, _ = refinePointingLSQ(config, platepar, None, star_dict, catalog_stars, min_radius, min_radius,
+                                       n_check, polish=True)
+        if (refined is not None) and checkFitGoodness(config, refined, catalog_stars, star_dict, min_radius):
+            refined.recordFit(pointing=True, fit_by='autoCheckFit')
+            return refined
+
+        return platepar
 
     ##########
 
@@ -614,53 +893,79 @@ def autoCheckFit(config, platepar, calstars_data, _fft_refinement=False):
         if n_matched < config.calstars_files_N:
             log.info("The total number of initially matched stars is too small! Please manually redo the plate or make sure there are enough calibration stars.")
 
-            # Try to refine the platepar with FFT phase correlation and redo the ACF
-            return _handleFailure(config, platepar, calstars_data, catalog_stars, _fft_refinement)
+            # Try to refine the platepar with NN alignment and redo the ACF
+            platepar.aberration = not aberration_refit
+            return _handleFailure(config, platepar, calstars_data, catalog_stars, _nn_refinement)
 
 
         # Check if the platepar is good enough and do not estimate further parameters
-        if checkFitGoodness(config, platepar, catalog_stars, star_dict, min_radius, verbose=True):
+        if (not aberration_refit) and checkFitGoodness(config, platepar, catalog_stars, star_dict, \
+            min_radius, verbose=True):
 
             # Print out notice only if the platepar is good right away
             if i == 0:
                 log.info("Initial platepar is good enough!")
 
+            # A pointing brought onto the stars by the coarse alignment is polished, as the alignment fits
+            #   neither the scale nor the pointing as precisely as the least squares
+            if coarse_aligned:
+                return _polished(platepar), True
+
             return platepar, True
 
 
-        # Initial parameters for the astrometric fit
-        p0 = [platepar.RA_d, platepar.dec_d, platepar.pos_angle_ref, platepar.F_scale]
+        # Initial parameters for the astrometric fit: with SearchOffsets no offset from the pointing and the scale
+        #   of the platepar (px, see Platepar.PointingOffsets), which move the stars by the same amount in the same
+        #   direction on the image wherever the camera points
+        search = search_class(config, platepar)
+        simplex = buildNelderMeadSimplex(search.p0, search.steps)
 
         # Fit the astrometric parameters
-        res = scipy.optimize.minimize(_calcImageResidualsAstro, p0, args=(config, platepar, catalog_stars, \
-            star_dict, match_radius), method='Nelder-Mead', \
-            options={'fatol': fatol, 'xatol': xatol_ang})
+        res = scipy.optimize.minimize(_calcImageResidualsAstro, search.p0, args=(config, platepar, catalog_stars, \
+            star_dict, match_radius, search), method='Nelder-Mead', \
+            options={'fatol': fatol, 'xatol': search.xatol, 'initial_simplex': simplex})
 
         log.info(res)
 
-        # If the fit was not successful, stop further fitting
-        if not res.success:
+        # The fitted pointing, which has to keep the scale and enough matched stars: a search that finds no stars
+        #   (on a platepar far off) can still converge, anywhere
+        fitted = copy.deepcopy(platepar)
+        search.apply(fitted, res.x)
+        n_fitted = 0
+        scale_kept = abs(abs(fitted.F_scale)/scale_start - 1) <= SEARCH_MAX_SCALE_CHANGE
+        if res.success and scale_kept:
+            n_fitted, _, _, _ = matchStarsResiduals(config, fitted, catalog_stars, star_dict, match_radius,
+                                                    ret_nmatch=True)
 
-            # Try to refine the platepar with FFT phase correlation and redo the ACF
-            return _handleFailure(config, platepar, calstars_data, catalog_stars, _fft_refinement)
+        # If the fit was not successful, stop further fitting
+        if (not res.success) or (not scale_kept) or (n_fitted < config.min_matched_stars):
+
+            if res.success:
+                log.info("The fit changed the scale by {:.1f}% or matched only {:d} stars, it is not used".format(
+                    100*(abs(fitted.F_scale)/scale_start - 1), n_fitted))
+
+            # Try to refine the platepar with NN alignment and redo the ACF
+            platepar.aberration = not aberration_refit
+            return _handleFailure(config, platepar, calstars_data, catalog_stars, _nn_refinement)
 
 
         else:
             # If the fit was successful, use the new parameters from now on
-            ra_ref, dec_ref, pos_angle_ref, F_scale = res.x
+            search.apply(platepar, res.x)
+            aberration_refit = False
 
-            platepar.RA_d = ra_ref
-            platepar.dec_d = dec_ref
-            platepar.pos_angle_ref = pos_angle_ref
-            platepar.F_scale = F_scale
+            # Record the pointing fit
+            platepar.recordFit(pointing=True, fit_by='autoCheckFit')
 
 
 
         # Check if the platepar is good enough and do not estimate further parameters
         if checkFitGoodness(config, platepar, catalog_stars, star_dict, min_radius, verbose=True):
-            return platepar, True
+            return _polished(platepar), True
 
 
+    # Polish the pointing and the scale by least squares on the matched stars of all images
+    platepar = _polished(platepar)
 
     # Match the stars and calculate the residuals
     n_matched, avg_dist, cost, matched_stars = matchStarsResiduals(config, platepar, catalog_stars, \
@@ -674,9 +979,8 @@ def autoCheckFit(config, platepar, calstars_data, _fft_refinement=False):
     # Mark the platepar to indicate that it was automatically refined with CheckFit
     platepar.auto_check_fit_refined = True
 
-    # Recompute alt/az of the FOV centre
-    platepar.az_centre, platepar.alt_centre = raDec2AltAz(platepar.RA_d, platepar.dec_d, platepar.JD, \
-        platepar.lat, platepar.lon)
+    # Recompute alt/az of the FOV centre, refracted for the station height as the kernels do
+    platepar.az_centre, platepar.alt_centre = platepar.computeRefAltAz()
 
     # Recompute the rotation wrt horizon
     platepar.rotation_from_horiz = rotationWrtHorizon(platepar)

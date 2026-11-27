@@ -19,6 +19,7 @@ import signal
 import socket
 import tempfile
 import time
+import multiprocessing
 
 # tkinter import that works on both Python 2 and 3
 if sys.version_info[0] < 3:
@@ -38,7 +39,7 @@ from matplotlib import scale as mscale
 from matplotlib import transforms as mtransforms
 from matplotlib.ticker import FixedLocator
 
-from RMS.Logger import getLogger
+from RMS.Logger import getLogger, flushChildLogging
 
 # Map FileNotFoundError to IOError in Python 2 as it does not exist
 if sys.version_info[0] < 3:
@@ -46,6 +47,378 @@ if sys.version_info[0] < 3:
 
 # Get the logger from the main module
 log = getLogger("rmslogger")
+
+
+def frameBufferShape(config):
+    """ Return the shape of the shared frame buffer used for FF compression: (256, H, W).
+
+    The width/height are padded by one pixel in the rare case the buffer size is an exact
+    multiple of 512 KiB, to avoid a CPU-cache aliasing performance issue.
+
+    This is the single source of truth for the buffer shape, used both by the parent (which
+    allocates the multiprocessing.Array) and by the child processes (which rebuild a numpy
+    view over that shared memory in their own run()). Under the 'forkserver'/'spawn' start
+    methods a numpy view cannot be passed between processes (it pickles by value and becomes
+    a private copy), so each process must build its own view from the shared mp.Array base.
+
+    Arguments:
+        config: [Config] Configuration object (uses width and height).
+
+    Return:
+        [tuple] (256, height [+1], width [+1])
+    """
+    array_pad = 0
+    if (256*config.width*config.height) % (512*1024) == 0:
+        array_pad = 1
+
+    return (256, config.height + array_pad, config.width + array_pad)
+
+
+def setMultiprocessingStartMethod(preferred=None):
+    """ Pin the multiprocessing start method for consistent behavior across Python versions.
+
+    RMS uses multiprocessing throughout the capture pipeline. Historically it relied on the
+    platform default, which on Linux was 'fork' up to Python 3.13 and becomes 'forkserver'
+    in Python 3.14. By default this function pins each platform's existing default rather
+    than forcing a change: 'fork' children share the parent's memory copy-on-write, while a
+    'forkserver'/'spawn' worker re-imports the whole RMS stack, costing tens of MB of
+    private RSS and seconds of import time per worker on small stations (RPi). Linux
+    stations on Python <= 3.13 therefore stay on 'fork'; 'forkserver' is only selected on
+    Python 3.14+, where it is the upstream default anyway. Pinning explicitly keeps
+    behavior deterministic and silences the Python 3.12/3.13 DeprecationWarning about
+    relying on the implicit 'fork' default.
+
+    Call this once, early, from an entry point's __main__ block, before any Process or Pool
+    is created. It is safe to call more than once.
+
+    Keyword arguments:
+        preferred: [str] Start method to use, overriding the platform-default selection.
+            None by default (keep the platform default for this Python version).
+
+    Return:
+        [str] The start method now in effect.
+    """
+    import multiprocessing as mp
+
+    available = mp.get_all_start_methods()
+
+    if preferred is None:
+        # Keep the long-soaked platform defaults: fork on Linux through 3.13, forkserver on
+        # Linux from 3.14 (the new upstream default), spawn on Windows/macOS (fork has never
+        # been safe on macOS since 3.8 due to the Objective-C runtime).
+        if sys.platform.startswith("linux") and "fork" in available \
+                and sys.version_info < (3, 14):
+            preferred = "fork"
+        elif sys.platform.startswith("linux") and "forkserver" in available:
+            preferred = "forkserver"
+        else:
+            preferred = "spawn"
+
+    if preferred in available:
+        method = preferred
+    elif "spawn" in available:
+        method = "spawn"
+    else:
+        method = available[0]
+
+    try:
+        mp.set_start_method(method, force=True)
+    except RuntimeError:
+        # Context already fixed by an earlier call; keep the existing one
+        pass
+
+    return mp.get_start_method()
+
+
+def stableDoubleRead(shared_val, attempts=3):
+    """ Read a lock-free c_double written by another process, tolerating torn reads.
+
+    On 32-bit platforms a double store/load is two word accesses, so a read racing the
+    writer can pair a new high word with an old low word - for an epoch-magnitude
+    timestamp that yields a value wrong by up to ~1024 s that still passes a `> 0` gate.
+    Two consecutive equal reads cannot both be torn by the same in-flight store.
+
+    Arguments:
+        shared_val: [multiprocessing.Value] A c_double created with lock=False.
+
+    Return:
+        [float] The stable value (falls back to the last read if never stable).
+    """
+
+    v2 = shared_val.value
+    for _ in range(attempts):
+        v1 = shared_val.value
+        v2 = shared_val.value
+        if v1 == v2:
+            return v1
+    return v2
+
+
+class BoundedLock(object):
+    """ A multiprocessing.Lock wrapper whose acquisition is BOUNDED.
+
+    For locks shared with processes that can be OOM-killed or terminated: a kill while the
+    lock is held orphans it forever, and a plain `with lock:` then wedges every process that
+    touches it. Acquisition times out (5 s first time, 0.5 s once broken), warns once, and
+    proceeds without the lock - stale/racy data beats a permanent wedge for the counters and
+    timestamps this protects. Usable as a context manager, releasing only if acquired.
+    """
+
+    def __init__(self, name='lock', timeout=5.0):
+        self._lock = multiprocessing.Lock()
+        self._name = name
+        self._timeout = timeout
+        self._broken = False        # per-process memo of an orphaned lock
+        self._acquired_here = False
+
+    def __enter__(self):
+        timeout = 0.5 if self._broken else self._timeout
+        self._acquired_here = self._lock.acquire(timeout=timeout)
+        if not self._acquired_here and not self._broken:
+            self._broken = True
+            print('BoundedLock({:s}): not acquired after {:.1f} s - a process likely died '
+                  'holding it. Proceeding without the lock.'.format(self._name, timeout),
+                  file=sys.__stderr__)
+        if self._acquired_here:
+            self._broken = False
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self._acquired_here:
+            self._lock.release()
+            self._acquired_here = False
+        return False
+
+
+class AtomicFlag(object):
+    """ Lock-free substitute for multiprocessing.Event, for flags that are set and polled
+        across processes.
+
+        multiprocessing.Event guards its state with a shared semaphore - if any process
+        sharing the event dies while holding it (e.g. killed by the OOM killer, or by one of
+        our own terminate()/SIGKILL escalations), every later set()/is_set() blocks forever.
+        This wedged Compressor.stop() in production. A plain shared byte cannot deadlock.
+
+        wait() is provided for drop-in compatibility, implemented as a poll-sleep loop.
+    """
+
+    def __init__(self):
+        self._flag = multiprocessing.Value('b', 0, lock=False)
+
+    def set(self):
+        self._flag.value = 1
+
+    def clear(self):
+        self._flag.value = 0
+
+    def is_set(self):
+        return bool(self._flag.value)
+
+    def wait(self, timeout=None, poll_interval=1.0):
+        """ Block until the flag is set or the timeout (in seconds) expires.
+
+        NOTE: unlike multiprocessing.Event.wait, wake-up after set() is polled, so it can
+        lag by up to poll_interval - fine for the shutdown flags this replaces, but a
+        surprise for latency-sensitive uses.
+
+        Return:
+            [bool] True if the flag is set, False if the timeout expired.
+        """
+
+        # monotonic: an NTP clock step (routine at Pi boot) must not stretch or
+        # truncate the timeout
+        t_beg = time.monotonic()
+
+        while not self.is_set():
+
+            if (timeout is not None) and ((time.monotonic() - t_beg) >= timeout):
+                break
+
+            if timeout is not None:
+                time_left = timeout - (time.monotonic() - t_beg)
+                time.sleep(max(0.0, min(poll_interval, time_left)))
+            else:
+                time.sleep(poll_interval)
+
+        return self.is_set()
+
+
+def setParentDeathSignal(sig=9):
+    """Ask the kernel to deliver *sig* to this process when its parent dies.
+
+    NOTE: per prctl(2), PR_SET_PDEATHSIG fires when the parent *thread* that created this
+    process terminates - not when the whole parent process exits. Only call this from
+    children spawned by the parent's main thread (RawFrameSaver is spawned from
+    BufferedCapture.run(); BufferedCapture, Compressor, UploadManager and EventMonitor from
+    the main thread of StartCapture); a child spawned from a short-lived helper thread would
+    be killed as soon as that thread exits.
+
+    NOTE: under the multiprocessing 'forkserver' start method (Python 3.14's new default
+    on Linux) the OS parent is the fork-server, not the logical parent, so this fires on
+    the wrong death. Callers that must survive forkserver should ALSO use an explicit
+    parent-PID liveness check (see RawFrameSaver and startParentWatch). This remains a
+    fast, exact fast-path under 'fork' (3.6-3.13 default) and 'spawn'.
+
+    Prevents a worker forked by another worker from being orphaned and living forever when
+    its parent is force-killed. Without this, a BufferedCapture that the watchdog SIGKILLs
+    leaves its RawFrameSaver child reparented to init, still looping on a shared exit Event
+    that will never be set - so it never exits and keeps its inherited ~450 MB frame buffer.
+    Repeated across watchdog restarts, that orphans hundreds of processes and OOMs the box.
+
+    Linux-only (prctl PR_SET_PDEATHSIG); no-op elsewhere. Call as early as possible in a
+    child's run(). Also handles the race where the parent already died before the call -
+    best-effort only: it checks getppid() == 1, which misses orphans reparented to a
+    subreaper (systemd user sessions, containers) instead of init. Callers needing a hard
+    guarantee there should use a parent-PID liveness check as well.
+
+    Arguments:
+        sig: [int] Signal to receive on parent death. Default 9 (SIGKILL; numeric because
+            signal.SIGKILL does not exist on Windows).
+
+    Return:
+        [bool] True if the death signal was armed, False if it is not available here.
+    """
+    try:
+        import ctypes
+        import ctypes.util
+
+        # Resolve the C library by name: musl systems (e.g. Alpine) have no "libc.so.6"
+        libc_name = ctypes.util.find_library("c") or "libc.so.6"
+        libc = ctypes.CDLL(libc_name, use_errno=True)
+
+        if libc.prctl(1, int(sig), 0, 0, 0) != 0:  # 1 == PR_SET_PDEATHSIG
+            log.debug("setParentDeathSignal: prctl failed (errno %d), orphan protection "
+                      "unavailable", ctypes.get_errno())
+            return False
+
+        # If the parent already exited before we armed the signal we were reparented to
+        # init (ppid == 1): exit now rather than linger as an orphan.
+        if os.getppid() == 1:
+            os._exit(0)
+
+        return True
+
+    except Exception as e:
+        # Non-Linux or no usable prctl: protection is simply unavailable. Log at debug
+        # so a station silently losing this guard is at least visible.
+        log.debug("setParentDeathSignal: unavailable (%s)", e)
+
+        return False
+
+
+def _processExists(pid):
+    """ Tell whether a process with the given PID exists.
+
+    POSIX only: on Windows signal 0 is CTRL_C_EVENT, so os.kill(pid, 0) is not a probe there.
+
+    Arguments:
+        pid: [int] Process ID.
+
+    Return:
+        [bool] False only if no process has this PID.
+    """
+
+    # Only ESRCH means that the process is gone, EPERM comes from a live process of another user
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+
+    return True
+
+
+def exitIfParentGone(parent_pid, name):
+    """ Exit this child process at once if its logical parent process is gone.
+
+    The death signal (setParentDeathSignal) only comes for a parent which dies after it was armed, and its
+    getppid() == 1 check misses a parent which died before that when the orphan goes to a subreaper, or
+    when the OS parent is the fork server. This check of the PID recorded in the child's __init__ (which
+    runs in the parent) covers that window. Call it at the top of run(), right after
+    setParentDeathSignal() and initChildProcess(). POSIX only, a no-op elsewhere.
+
+    Arguments:
+        parent_pid: [int] PID of the logical parent, or None to skip the check.
+        name: [str] Name of the child process for the log message.
+    """
+
+    # The probe needs POSIX and a recorded parent
+    if (os.name != 'posix') or (parent_pid is None):
+        return
+
+    # Nobody is left to stop this child, so exit now, after pushing the log record out
+    if not _processExists(parent_pid):
+        log.warning("{:s}: parent process {:d} is gone, exiting".format(name, parent_pid))
+        flushChildLogging(timeout=1.0)
+        os._exit(0)
+
+
+def startParentWatch(parent_pid, name, exit_flag, death_signal=False, grace=15.0, interval=1.0):
+    """ Stop this child process when its logical parent is gone and the death signal does not see it.
+
+    The death signal (setParentDeathSignal) comes when the OS parent dies. Under the 'fork' start method
+    that is the logical parent, but under 'forkserver' (the default on Linux from Python 3.14) it is the
+    fork server, which keeps running while any of its children runs. When StartCapture is killed, its
+    capture, compression and upload processes would then keep running next to the ones of the restarted
+    instance. In that case, and where the death signal is not available, a daemon thread probes the parent
+    every interval seconds (this also works while the child's main thread is blocked in I/O or a long
+    wait). Once the parent is gone, the thread sets the child's exit flag, so the child stops through its
+    normal exit path, and exits the child after the grace period if it is still running then.
+
+    Under 'fork' with the death signal armed, no thread is started: the signal is enough, and a thread
+    would make the processes this child forks (the raw frame saver, the extractor) start from a
+    multi-threaded process.
+
+    POSIX only (os.kill(pid, 0) is not a probe on Windows), a no-op elsewhere.
+
+    Arguments:
+        parent_pid: [int] PID of the logical parent recorded in the child's __init__, or None to not watch.
+        name: [str] Name of the child process for the log messages.
+        exit_flag: [AtomicFlag] The child's exit flag, set when the parent is gone.
+
+    Keyword arguments:
+        death_signal: [bool] True if setParentDeathSignal() armed the death signal in this process. False by
+            default.
+        grace: [float] Seconds the child has to leave through its normal exit path before it is exited. 15 by
+            default.
+        interval: [float] Seconds between two probes of the parent. 1 by default.
+
+    Return:
+        [Thread] The watching thread, None if none was started.
+    """
+
+    # The probe needs POSIX and a recorded parent
+    if (os.name != 'posix') or (parent_pid is None):
+        return None
+
+    # The death signal already covers a logical parent which is also the OS parent
+    if death_signal and (os.getppid() == parent_pid):
+        return None
+
+    def _watch():
+        """ Probe the parent until it is gone, then stop this process. """
+
+        # Wait for the parent to disappear
+        while _processExists(parent_pid):
+            time.sleep(interval)
+
+        # Ask the child to stop through its normal exit path
+        log.warning("{:s}: parent process {:d} is gone, stopping".format(name, parent_pid))
+        exit_flag.set()
+
+        # Exit if the normal exit path did not finish in time (e.g. blocked in device I/O)
+        time.sleep(grace)
+        log.warning("{:s}: still running {:.0f} s after its parent was gone, exiting".format(name, grace))
+        flushChildLogging(timeout=1.0)
+        os._exit(0)
+
+    # Watch from a daemon thread, which the process exit leaves behind
+    watcher = threading.Thread(target=_watch, name='rms-parent-watch')
+    watcher.daemon = True
+    watcher.start()
+
+    return watcher
 
 
 def interruptibleWait(seconds):
@@ -93,7 +466,7 @@ def interruptibleWait(seconds):
         raise
 
 
-def runWithTimeout(func, args=(), kwargs=None, timeout=60):
+def runWithTimeout(func, args=(), kwargs=None, timeout=60, on_late_completion=None):
     """
     Run a function with a hard timeout using threading.
 
@@ -102,6 +475,10 @@ def runWithTimeout(func, args=(), kwargs=None, timeout=60):
         args: Positional arguments to pass to the function.
         kwargs: Keyword arguments to pass to the function.
         timeout: Maximum time in seconds to wait for the function to complete.
+        on_late_completion: Optional callable invoked in the daemon thread if the
+            function completes after the caller has already timed out. Use this to
+            clean up resources (e.g., closing a connection) that the function opened
+            after the caller gave up.
 
     Return:
         A tuple of (success, result, exception):
@@ -112,17 +489,21 @@ def runWithTimeout(func, args=(), kwargs=None, timeout=60):
     Note:
         This function uses a daemon thread that continues running even after the timeout
         expires. The timeout only allows the calling thread to proceed; it does not stop
-        the underlying operation. This may result in resource leaks (open sockets, file
-        descriptors) if the operation eventually completes or hangs indefinitely. Callers
-        are responsible for cleaning up any resources (e.g., closing connections) when a
-        timeout occurs.
+        the underlying operation. Pass on_late_completion to clean up any resources
+        the function may open after the caller has already timed out.
     """
     if kwargs is None:
         kwargs = {}
 
+    # Results are shared with the worker thread through mutable containers. The lock makes "the
+    # function completed" and "the caller gave up" mutually exclusive decisions: without it the
+    # worker could finish between the caller's check and the caller setting timed_out, so neither
+    # side ran on_late_completion while the caller reported a timeout (leaking e.g. an SSH client)
     result = [None]
     exception = [None]
+    timed_out = [False]
     completed = threading.Event()
+    state_lock = threading.Lock()
 
     def target():
         try:
@@ -130,7 +511,19 @@ def runWithTimeout(func, args=(), kwargs=None, timeout=60):
         except Exception as e:
             exception[0] = e
         finally:
-            completed.set()
+
+            # Mark the completion and read the caller's decision in one step
+            with state_lock:
+                completed.set()
+                late = timed_out[0]
+
+            # The caller has already given up - run the late cleanup here
+            if late and (on_late_completion is not None):
+                log.debug("runWithTimeout: function completed after caller timed out; running late cleanup")
+                try:
+                    on_late_completion()
+                except Exception as e:
+                    log.debug("runWithTimeout: on_late_completion failed: %s", e)
 
     thread = threading.Thread(target=target)
     thread.daemon = True
@@ -139,12 +532,18 @@ def runWithTimeout(func, args=(), kwargs=None, timeout=60):
     # Wait for completion or timeout
     completed.wait(timeout)
 
-    if completed.is_set():
+    # Decide under the lock, so a function finishing right now either counts as completed or sees
+    # the timeout flag and runs its late cleanup
+    with state_lock:
+
         # Function completed (possibly with exception)
-        return (True, result[0], exception[0])
-    else:
-        # Timed out
-        return (False, None, None)
+        if completed.is_set():
+            return (True, result[0], exception[0])
+
+        # Timed out - flag the thread so on_late_completion fires if it finishes later
+        timed_out[0] = True
+
+    return (False, None, None)
 
 
 ### Safe git invocation ###
@@ -396,18 +795,52 @@ def gitUrlHostAndPort(url):
     return host, 443
 
 
+def gitProxyConfigured():
+    """ Check if git connects to remotes through a proxy, set either in the environment or in the global
+        git configuration (http.proxy, https.proxy or a per-URL http.<url>.proxy).
+
+        A direct connection check of the remote host says nothing in that case, as the host may only be
+        reachable through the proxy.
+
+    Return:
+        [bool] True if a proxy is configured.
+    """
+
+    # The proxy variables which git (libcurl) uses for the http(s) transports
+    for name in ("https_proxy", "HTTPS_PROXY", "http_proxy", "HTTP_PROXY", "all_proxy", "ALL_PROXY"):
+        if os.environ.get(name, "").strip():
+            return True
+
+    # A proxy set in the git configuration. Git exits with 1 when no key matches
+    try:
+        returncode, stdout, _ = runGitCommand(["config", "--get-regexp", r"^https?\..*proxy$"],
+                                              timeout=GIT_LOCAL_TIMEOUT)
+
+    except Exception as e:
+        log.debug("Could not read the git proxy configuration: " + repr(e))
+        return False
+
+    return (returncode == 0) and (len(stdout.strip()) > 0)
+
+
 def hostReachable(host, port=443, timeout=GIT_REACHABILITY_TIMEOUT):
     """ Check that a TCP connection to the given host and port can be established.
 
         This is a cheap pre-check which fails fast on a DNS failure, a dead link or a blackholed
         route, so that a slow network operation is not even attempted.
 
+        The whole attempt, including the name lookup, runs under a hard deadline. The socket timeout
+        alone is not enough, as create_connection() resolves the host with a blocking getaddrinfo()
+        before that timeout applies, so a stalled DNS resolver during an outage would hold the
+        caller here for as long as the resolver library waits (minutes with long resolver timeouts
+        or several name servers), or for good if the lookup itself hangs.
+
     Arguments:
         host: [str] Host name or IP address.
 
     Keyword arguments:
         port: [int] TCP port. 443 by default.
-        timeout: [float] Connection timeout in seconds.
+        timeout: [float] Deadline for the name lookup and the connection together, in seconds.
 
     Return:
         [bool] True if the connection succeeded.
@@ -417,28 +850,47 @@ def hostReachable(host, port=443, timeout=GIT_REACHABILITY_TIMEOUT):
     if host is None:
         return False
 
-    sock = None
+    # The socket is kept in a list so that the late cleanup below can reach it
+    sock_holder = [None]
 
-    try:
 
-        # Open a connection and drop it straight away, only reachability matters here
-        sock = socket.create_connection((host, port), timeout=timeout)
-        return True
+    def _closeSocket():
+        """ Release the socket, if one was opened. """
 
-    except Exception as e:
+        if sock_holder[0] is not None:
+            try:
+                sock_holder[0].close()
 
-        # A refused connection, a DNS failure and a timeout are all treated the same way
-        log.debug("Host {:s}:{:d} is not reachable: {:s}".format(str(host), int(port), repr(e)))
+            # Nothing more can be done with a socket which cannot be closed
+            except Exception as e:
+                log.debug("Could not close the socket to {:s}: {:s}".format(str(host), repr(e)))
+
+
+    def _connect():
+        """ Open a connection and keep the socket, only reachability matters here. """
+
+        sock_holder[0] = socket.create_connection((host, port), timeout=timeout)
+
+
+    # Run the lookup and the connection in a daemon thread with a hard deadline. A connection which
+    # comes through after the deadline is closed by the late cleanup.
+    completed, _, exception = runWithTimeout(_connect, timeout=timeout, on_late_completion=_closeSocket)
+
+    # The DNS lookup or the connection did not finish in time
+    if not completed:
+        log.debug("Host {:s}:{:d} is not reachable: no answer within {:.1f} s".format(str(host), int(port),
+            float(timeout)))
         return False
 
-    finally:
+    # Always release the socket, even when the connection failed halfway through
+    _closeSocket()
 
-        # Always release the socket, even when the connection failed halfway through
-        if sock is not None:
-            try:
-                sock.close()
-            except Exception:
-                pass
+    # A refused connection, a DNS failure and a socket timeout are all treated the same way
+    if exception is not None:
+        log.debug("Host {:s}:{:d} is not reachable: {:s}".format(str(host), int(port), repr(exception)))
+        return False
+
+    return True
 
 
 def killProcessGroup(proc):
@@ -567,6 +1019,79 @@ def runGitCommand(args, cwd=None, timeout=GIT_NETWORK_TIMEOUT, network=False):
                 file_handle.close()
             except Exception:
                 pass
+
+
+# Timeout of the local git commands which read the commit of the code (s)
+GIT_LOCAL_TIMEOUT = 10.0
+
+# The tracked files whose changes make the code differ from its commit (the configuration, the mask and the
+#   camera settings are tracked as well and are edited on every station)
+GIT_CODE_PATHSPECS = ['*.py', '*.pyx', '*.pxd', '*.pyxbld', '*.c', '*.cpp', '*.h']
+
+# The commit of the RMS code of this process, read once (see rmsCommit)
+_RMS_COMMIT = None
+
+
+def gitCommit(dir_path, timeout=GIT_LOCAL_TIMEOUT):
+    """ The commit checked out in a git working tree, never failing.
+
+    Arguments:
+        dir_path: [str] Root directory of the working tree.
+
+    Keyword arguments:
+        timeout: [float] Timeout of each git command (s). GIT_LOCAL_TIMEOUT by default.
+
+    Return:
+        [str] The short hash of the commit, with '+' appended if a tracked code file (GIT_CODE_PATHSPECS)
+            differs from it or if that could not be checked. 'unknown' if the directory is not the root of a
+            git working tree (e.g. an installed copy inside another repository) or git could not be run.
+    """
+
+    try:
+
+        # The root of the working tree and the commit, both in one call
+        code, out, _ = runGitCommand(['-C', dir_path, 'rev-parse', '--show-toplevel', '--short', 'HEAD'],
+                                     timeout=timeout)
+        lines = [line.strip() for line in out.strip().splitlines()]
+        if (code != 0) or (len(lines) != 2) or (not lines[1]):
+            return 'unknown'
+
+        # The directory has to be the root itself, not a directory inside some other repository
+        top_level, commit = lines
+        if os.path.normcase(os.path.realpath(top_level)) != os.path.normcase(os.path.realpath(dir_path)):
+            return 'unknown'
+
+        # Changes of the tracked code, staged or not (exit code 1), or a check which did not work
+        code, _, _ = runGitCommand(['-C', dir_path, 'diff', '--quiet', 'HEAD', '--'] + GIT_CODE_PATHSPECS,
+                                   timeout=timeout)
+        if code != 0:
+            commit += '+'
+
+        return commit
+
+    except Exception:
+
+        # No git, a timeout or anything else: the commit is not known
+        return 'unknown'
+
+
+def rmsCommit():
+    """ The commit of the RMS code of this process (see gitCommit), read once and kept.
+
+    Return:
+        [str] Short hash of the commit, with '+' if the code has changes, or 'unknown'.
+    """
+
+    global _RMS_COMMIT
+
+    # Read only the first time, the code of a running process does not change
+    if _RMS_COMMIT is None:
+        try:
+            _RMS_COMMIT = gitCommit(getRmsRootDir())
+        except Exception:
+            _RMS_COMMIT = 'unknown'
+
+    return _RMS_COMMIT
 
 
 ### ###

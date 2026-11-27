@@ -21,11 +21,15 @@ import numpy as np
 from astropy.io import fits
 
 from RMS.Astrometry.Conversions import unixTime2Date, datetime2UnixTime
+from RMS.Misc import UTCFromTimestamp
 from RMS.Formats.FFfile import read as readFF
 from RMS.Formats.FFfile import reconstructFrame as reconstructFrameFF
 from RMS.Formats.FFfile import validFFName, filenameToDatetime
 from RMS.Formats.FFfile import getMiddleTimeFF, selectFFFrames
 from RMS.Formats.FRbin import read as readFR, validFRName
+from RMS.Formats.FrameTimes import FrameTimeTable, loadFrameTimes, findFrameTimesFile, frameTimesPaths, \
+    isCaptureTimesSource, parseTimelapseName, readCaptureTimes, alignCaptureTimes, readVideoTimestamps, \
+    snapCaptureTimes
 from RMS.Formats.Vid import readFrame as readVidFrame
 from RMS.Formats.Vid import VidStruct
 from RMS.GeoidHeightEGM96 import wgs84toMSLHeight
@@ -47,21 +51,26 @@ def messagebox(title, message):
     
     # First, try Qt. This is the most specific and desired case.
     try:
-        # We must import QApplication to check for an instance
-        from PyQt5.QtWidgets import QApplication, QMessageBox
-        
-        # Check if a QApplication instance already exists
-        if QApplication.instance():
-            # If it exists, we can safely create and show a message box
-            msg_box = QMessageBox()
-            msg_box.setWindowTitle(title)
-            msg_box.setText(message)
-            msg_box.exec_()
-            return # Success, so we exit the function
-    except ImportError:
-        # This means PyQt5 (or your chosen binding) is not installed.
-        # We'll just pass and try the next option.
-        pass
+        # Go through the pyqtgraph proxy so the binding matches the one the GUI already loaded.
+        # Importing raw PyQt5 here would either miss the running QApplication or pull a second
+        # Qt binding into the process.
+        from pyqtgraph.Qt import QtWidgets
+
+    except Exception:
+        # This means no Qt binding (or pyqtgraph) is installed. pyqtgraph raises a plain
+        # Exception rather than an ImportError when it cannot find a binding, so catch broadly
+        # here. We'll just fall through and try the next option.
+        QtWidgets = None
+
+    # Check if a QApplication instance already exists
+    if (QtWidgets is not None) and QtWidgets.QApplication.instance():
+
+        # If it exists, we can safely create and show a message box
+        msg_box = QtWidgets.QMessageBox()
+        msg_box.setWindowTitle(title)
+        msg_box.setText(message)
+        msg_box.exec()
+        return # Success, so we exit the function
 
     # Second, check for a display and try Tkinter as a fallback
     if os.environ.get('DISPLAY'):
@@ -133,7 +142,31 @@ def computeFramesToRead(read_nframes, total_frames, chunk_frames, first_frame):
     return int(frames_to_read)
 
 
+def validFFImageName(file_name):
+    """ Check if the given file is an FF file which the FF image handle can open.
+
+    Besides the FF formats which validFFName recognizes by the extension, this accepts the names of PNG
+    pseudo-FF files (FF*.png), e.g. the in-memory placeholders which SkyFit2 adds with addMemoryFF for frames
+    without an image. The PNG format is only accepted here, where it is asked for explicitly, so the directory
+    scans of RMS never take a PNG image for an FF file.
+
+    Arguments:
+        file_name: [str] Name of the file.
+
+    Return:
+        [bool] True if the file is an FF file (FITS, bin or PNG).
+    """
+
+    return validFFName(file_name) or validFFName(file_name, fmt='png')
+
+
 class InputType(object):
+
+    # The times of the frames from a file with the time of every frame (FrameTimes.FrameTimeTable, see
+    #   setFrameTimes), None when the input times its frames in its own way
+    frame_time_table = None
+    frame_times_source = None
+
     def __init__(self):
         """ Template class for all input types. """
 
@@ -192,10 +225,197 @@ class InputType(object):
     def currentFrameTime(self, frame_no=None, dt_obj=False):
         pass
 
+    def frameTimeOffset(self):
+        """ The correction added to the timestamps of the frames when they are read (s), frame_time_offset of the
+            config, 0 without a config. It is applied where an input gets its times (the time of its beginning, or
+            the timestamps of its frames), so the names of the frames and the times of everything measured on
+            them follow.
+
+        Return:
+            [float] The correction (s).
+        """
+
+        return float(getattr(getattr(self, 'config', None), 'frame_time_offset', 0.0))
+
+    def offsetDatetime(self, dt):
+        """ A time of the input (datetime) corrected by frame_time_offset, None stays None. """
+
+        if (dt is None) or (self.frameTimeOffset() == 0):
+            return dt
+
+        return dt + datetime.timedelta(seconds=self.frameTimeOffset())
+
+    def offsetUnixTime(self, ts, tu):
+        """ A time of the input as Unix seconds and microseconds, corrected by frame_time_offset (in integer
+            microseconds, so the times stay exact).
+
+        Arguments:
+            ts: [int] Unix time, seconds.
+            tu: [int] Microseconds.
+
+        Return:
+            (ts, tu): [tuple of int] The corrected time.
+        """
+
+        total = int(ts)*1000000 + int(tu) + int(round(self.frameTimeOffset()*1e6))
+
+        return total//1000000, total%1000000
+
+    def setFrameTimes(self, frame_times, source=None):
+        """ Time the frames of the input from a file with the time of every frame (a JSON file, see
+            RMS.Formats.FrameTimes) or from given times. A file which cannot be used is ignored with a warning, and
+            the frames are timed as without it.
+
+        Arguments:
+            frame_times: [str or dict] Path to the JSON file, or the times of the frames as
+                {frame index: datetime}.
+
+        Keyword arguments:
+            source: [str] Where the given times come from, for the messages. None by default.
+
+        Return:
+            [bool] True if the frames are timed from the file.
+        """
+
+        # A description of the source for the messages
+        if source is None:
+            source = "the given frame times" if isinstance(frame_times, dict) else str(frame_times)
+
+        # Read the times
+        try:
+            if not isinstance(frame_times, dict):
+                frame_times = loadFrameTimes(frame_times)
+
+            table = FrameTimeTable(frame_times)
+
+        except (IOError, OSError, ValueError) as e:
+            log.warning("The frame times from {:s} cannot be used ({:s}), the frames are timed without them"\
+                .format(source, str(e)))
+            return False
+
+        self.frame_time_table = table
+        self.frame_times_source = source
+
+        return True
+
+    def tableFrameTime(self, frame_no):
+        """ The time of a frame from the frame times (corrected by frame_time_offset), see setFrameTimes.
+
+        Arguments:
+            frame_no: [float] Frame index.
+
+        Return:
+            [datetime] The time of the frame.
+        """
+
+        return self.offsetDatetime(self.frame_time_table.time(frame_no))
+
+    def chunkFrameCount(self, first_frame):
+        """ The number of frames of the chunk which begins at the given frame (the chunk size, fewer at the end of
+            the input), as loadChunk reads them.
+
+        Arguments:
+            first_frame: [int] The first frame of the chunk.
+
+        Return:
+            [int] The number of frames.
+        """
+
+        return computeFramesToRead(None, self.total_frames, self.chunk_frames, first_frame)
+
+    def tableChunkTime(self, first_frame, n_frames, beginning=False):
+        """ The time of a chunk of frames from the frame times (corrected by frame_time_offset): the mean time of
+            its frames, or the time of its first frame.
+
+        Arguments:
+            first_frame: [int] The first frame of the chunk.
+            n_frames: [int] The number of frames of the chunk.
+
+        Keyword arguments:
+            beginning: [bool] The time of the first frame instead of the mean time. False by default.
+
+        Return:
+            [datetime] The time of the chunk.
+        """
+
+        t_first = self.tableFrameTime(first_frame)
+        if beginning or (n_frames <= 1):
+            return t_first
+
+        # The mean time of the frames of the chunk
+        secs = [(self.tableFrameTime(first_frame + i) - t_first).total_seconds() for i in range(int(n_frames))]
+
+        return t_first + datetime.timedelta(seconds=float(np.mean(secs)))
+
+    def logFrameTimes(self, n_frames=None):
+        """ Log where the times of the frames come from, how many frames have times and the gaps between the
+            frames (once, when the input is opened).
+
+        Keyword arguments:
+            n_frames: [int] The number of frames of the input. self.total_frames by default.
+        """
+
+        if self.frame_time_table is None:
+            return
+
+        if n_frames is None:
+            n_frames = self.total_frames
+
+        table = self.frame_time_table
+
+        # The frames of the input without times, and the times of frames the input does not have
+        missing = table.missing(n_frames)
+        extra = [i for i in table.frame_times if i >= n_frames]
+
+        if missing:
+            log.warning("{:d} of the {:d} frames have no time in {:s} (first: {:d}), they are timed between the "
+                        "nearest frames with times".format(len(missing), n_frames, self.frame_times_source,
+                                                            missing[0]))
+
+        if extra:
+            log.warning("{:s} has the times of {:d} frames beyond the {:d} frames of the input"\
+                .format(self.frame_times_source, len(extra), n_frames))
+
+        # The gaps between the frames (missing frames)
+        gaps = table.gaps()
+        gaps_str = ", ".join("{:.1f} s before frame {:d}".format(step, fr) for fr, step in gaps[:5])
+        if len(gaps) > 5:
+            gaps_str += ", ..."
+
+        msg = "Frames timed from {:s}: {:d} of {:d} frames, beginning {:s}, median spacing {:.3f} s, {:d} gaps{:s}"\
+            .format(self.frame_times_source, n_frames - len(missing), n_frames,
+                    str(self.tableFrameTime(0)), table.spacing, len(gaps), (": " + gaps_str) if gaps else "")
+        log.info(msg)
+        print(msg)
+
+    def getTargetDtype(self, first_frame_data=None):
+        """ Determine the target dtype based on the target bit depth of the input images and the 
+            processing configuration.
+            
+        If binning with 'sum' method is used, the target dtype is forced to uint16 to prevent overflow.
+        Otherwise, it depends on the input data's bit depth.
+        """
+        
+        # Check if bit depth should be at least uint16 to handle potential overflow from sum binning
+        if hasattr(self, 'config'):
+            if self.config.detection_binning_factor > 1 and \
+                self.config.detection_binning_method == 'sum':
+                return np.uint16
+
+        # Check the bit depth of input data
+        if first_frame_data is not None:
+            if first_frame_data.dtype == np.uint8:
+                return np.uint8
+            else:
+                return np.uint16
+
+        # Standard default is uint16 for robustness
+        return np.uint16
+
 
 
 class InputTypeFRFF(InputType):
-    def __init__(self, dir_path, config, single_ff=False, use_fr_files=False):
+    def __init__(self, dir_path, config, single_ff=False, use_fr_files=False, frame_times=None):
         """ Input file type handle for FF files.
 
         Arguments:
@@ -208,6 +428,9 @@ class InputTypeFRFF(InputType):
             detection: [bool] Indicates that the input is used for detection. False by default. Has no effect
                 for FF files.
             use_fr_files: [bool] Include FR files together with FF files. False by default, only used in SkyFit.
+            frame_times: [str, list or ndarray] FT files of the capture (or the capture times read from them, see
+                RMS.Formats.FrameTimes): the frames of an FF file are then the captured frames from the one at
+                the time in its name on. None by default (the frames are timed from the name and the frame rate).
 
         """
 
@@ -215,6 +438,13 @@ class InputTypeFRFF(InputType):
 
         self.dir_path = dir_path
         self.config = config
+
+        # The time of an FF file is its name, which the results of its detections refer to (e.g. the FTPdetectinfo
+        #   files), so it can't be corrected when the file is read: the timestamps of FF files are corrected when
+        #   they are recorded (camera_latency)
+        if self.frameTimeOffset() != 0:
+            log.warning('frame_time_offset ({:.4f} s) is not applied to FF files, whose times are their names: '
+                        'use camera_latency in the capture'.format(self.frameTimeOffset()))
 
         self.use_fr_files = use_fr_files
 
@@ -283,6 +513,9 @@ class InputTypeFRFF(InputType):
         # Cahcne for whole FF files
         self.cache = {}
 
+        # FF structures which only exist in memory, by file name (see addMemoryFF)
+        self.memory_ffs = {}
+
         # Cache for individual frames
         self.cache_frames = {}
 
@@ -290,6 +523,94 @@ class InputTypeFRFF(InputType):
         self.loadChunk()
 
         self.fps = self.config.fps
+
+        # The capture times of the frames from the FT files (Unix seconds), and the times of the frames of every FF
+        #   file matched to them (see frame_time_table)
+        self.capture_times = None
+        self.ff_frame_tables = {}
+        if frame_times is not None:
+            self.setCaptureTimes(frame_times)
+
+    def setCaptureTimes(self, frame_times):
+        """ Time the frames of the FF files from the capture times in FT files: the frames of an FF file are the
+            captured frames from the one at the time in its name on. FF files without matching capture times are
+            timed from their name and the frame rate.
+
+        Arguments:
+            frame_times: [str, list or ndarray] FT files, folders or archives, or the capture times read from them.
+
+        Return:
+            [bool] True if the frames of at least one FF file are timed from the capture times.
+        """
+
+        # Only the capture times of FT files time the frames of FF files
+        if not isCaptureTimesSource(frame_times):
+            log.warning("The frames of FF files are timed only from FT files, {:s} is not used"\
+                .format(str(frame_times)))
+            return False
+
+        # Read the capture times
+        try:
+            if isinstance(frame_times, np.ndarray):
+                capture_times = frame_times
+                self.frame_times_source = "the FT files"
+            else:
+                capture_times = readCaptureTimes(frame_times)
+                self.frame_times_source = str(frame_times)
+
+        except (IOError, OSError, ValueError) as e:
+            log.warning("The FT files {:s} cannot be used ({:s}), the frames are timed from the names of the FF "
+                        "files".format(str(frame_times), str(e)))
+            return False
+
+        self.capture_times = capture_times
+        self.ff_frame_tables = {}
+
+        # The FF files with matching capture times
+        n_timed = sum(self.ffFrameTable(name) is not None for name in self.ff_list)
+
+        msg = "Frames of {:d} of the {:d} FF files timed from {:s}".format(n_timed, len(self.ff_list),
+                                                                           self.frame_times_source)
+        log.info(msg)
+        print(msg)
+
+        return n_timed > 0
+
+    def ffFrameTable(self, ff_name):
+        """ The times of the frames of an FF file from the capture times (FrameTimes.FrameTimeTable), None
+            without capture times at the time in its name.
+
+        Arguments:
+            ff_name: [str] Name of the FF (or FR) file.
+        """
+
+        capture_times = getattr(self, 'capture_times', None)
+        if capture_times is None:
+            return None
+
+        # Match the capture times to the frames once per file
+        if ff_name not in self.ff_frame_tables:
+            try:
+                frame_times = alignCaptureTimes(capture_times, filenameToDatetime(ff_name), self.total_frames)
+                self.ff_frame_tables[ff_name] = FrameTimeTable(frame_times)
+
+            except (ValueError, IndexError):
+                self.ff_frame_tables[ff_name] = None
+
+        return self.ff_frame_tables[ff_name]
+
+    @property
+    def frame_time_table(self):
+        """ The times of the frames of the current FF file from the capture times, None without them. """
+
+        return self.ffFrameTable(self.name())
+
+    def tableFrameTime(self, frame_no):
+        """ The time of a frame of the current FF file from the capture times. frame_time_offset is not applied, as
+            to the names of the FF files (see __init__).
+        """
+
+        return self.frame_time_table.time(frame_no)
 
     @property
     def current_line(self):
@@ -326,6 +647,54 @@ class InputTypeFRFF(InputType):
     def beginning_datetime(self):
         return filenameToDatetime(self.name())
 
+    def addMemoryFF(self, file_name, ff):
+        """ Add an FF structure which only exists in memory (e.g. a placeholder for a frame without an image)
+            to the end of the file list, so nothing has to be written to the data directory.
+
+        Arguments:
+            file_name: [str] FF file name the frame is known by (the time is taken from it).
+            ff: [FFStruct] The FF structure.
+
+        Return:
+            index: [int] Index of the file in the file list.
+        """
+
+        # Handles unpickled from the state files of earlier versions do not have the attribute
+        if not hasattr(self, 'memory_ffs'):
+            self.memory_ffs = {}
+
+        # Store the structure, and drop a cached copy of an earlier structure with the same name
+        self.memory_ffs[file_name] = ff
+        self.cache.pop(file_name, None)
+
+        # Extend the per-file lists along with the file list
+        if file_name not in self.ff_list:
+            self.ff_list.append(file_name)
+            self.current_frame_list.append(None)
+            self.line_list.append(0)
+            self.line_number.append(1)
+            self.total_fr_chunks = len(self.ff_list)
+
+        return self.ff_list.index(file_name)
+
+    def _readFF(self, file_name):
+        """ Read an FF file of the file list, from memory if it was added with addMemoryFF.
+
+        Arguments:
+            file_name: [str] FF file name.
+
+        Return:
+            ff: [FFStruct] The FF structure, None if it could not be read.
+        """
+
+        # A shallow copy is returned, as some readers replace the image arrays of the returned structure
+        memory_ffs = getattr(self, 'memory_ffs', {})
+        if file_name in memory_ffs:
+            return copy.copy(memory_ffs[file_name])
+
+        # Read the file from disk
+        return readFF(self.dir_path, file_name)
+
     def nextChunk(self):
         """ Go to the next FF file. """
 
@@ -356,10 +725,10 @@ class InputTypeFRFF(InputType):
             if file_name in self.cache:
                 ff = self.cache[file_name]
 
-            elif validFFName(file_name):
+            elif validFFImageName(file_name):
                 
-                # Load the FF file from disk
-                ff = readFF(self.dir_path, file_name)
+                # Load the FF file from disk (or from memory, see addMemoryFF)
+                ff = self._readFF(file_name)
 
                 # Put the FF into separate cache
                 self.cache[file_name] = ff
@@ -376,19 +745,19 @@ class InputTypeFRFF(InputType):
             # when calling loadChunk on an image never called before, set the current frame to the start
             # if it's an FR file, otherwise set it to 0
             if self.current_frame is None:
-                if validFFName(file_name):
+                if validFFImageName(file_name):
                     self.current_frame = 0
                 else:
                     self.current_frame = ff.t[self.current_line][0]
 
 
         # If it contains at least one FF file
-        elif any([validFFName(ff_file) for ff_file in self.ff_list]):
+        elif any([validFFImageName(ff_file) for ff_file in self.ff_list]):
 
             if first_frame == -1:
                 first_frame = 0
 
-            total_ff_frames = len([x for x in self.ff_list if validFFName(x)])*256
+            total_ff_frames = len([x for x in self.ff_list if validFFImageName(x)])*256
             frames_to_read = computeFramesToRead(read_nframes, total_ff_frames, 256, first_frame)
             ffs_to_read = self.ff_list[first_frame//256:(first_frame + frames_to_read)//256 + 1]
 
@@ -401,7 +770,7 @@ class InputTypeFRFF(InputType):
                 max_frame = (first_frame + frames_to_read)%256
 
                 # Read the FF file
-                ff = readFF(self.dir_path, file_name)
+                ff = self._readFF(file_name)
 
                 # Select the frames
                 ff.maxpixel = selectFFFrames(ff.maxpixel, ff, min_frame, max_frame)
@@ -410,7 +779,11 @@ class InputTypeFRFF(InputType):
             else:
 
                 # Init an empty FF structure
-                ff = FFMimickInterface(self.nrows, self.ncols, np.uint8)
+                # For multiple FFs, determine the dtype from the first reconstructed FF
+                ref_ff = self._readFF(ffs_to_read[0])
+                target_dtype = self.getTargetDtype(ref_ff.maxpixel)
+                
+                ff = FFMimickInterface(self.nrows, self.ncols, target_dtype)
 
                 # Store maxpixel selections, avepixels, stdpixels
                 maxpixel_list = []
@@ -430,7 +803,7 @@ class InputTypeFRFF(InputType):
                         max_frame = (first_frame + frames_to_read)%256
 
                     # Read the FF file
-                    ff_temp = readFF(self.dir_path, file_name)
+                    ff_temp = self._readFF(file_name)
 
                     # Reconstruct the maxpixel in the given frame range
                     maxpixel = selectFFFrames(ff_temp.maxpixel, ff_temp, min_frame, max_frame)
@@ -591,6 +964,17 @@ class InputTypeFRFF(InputType):
                 time of the chunk.
         """
 
+        # With the capture times of the frames, the time of the first frame or of the middle of the file (at half
+        #   of its frames, as getMiddleTimeFF)
+        if self.frame_time_table is not None:
+
+            dt = self.tableFrameTime(0 if beginning else self.total_frames/2)
+
+            if dt_obj:
+                return dt
+            else:
+                return dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, dt.microsecond/1000
+
         # Get the datetime of the beginning of the FF file
         if beginning:
 
@@ -655,10 +1039,10 @@ class InputTypeFRFF(InputType):
         if file_name in self.cache:
             ff_frame = self.cache[file_name]
 
-        elif validFFName(file_name):
+        elif validFFImageName(file_name):
 
-            # Load the FF file from disk
-            ff_frame = readFF(self.dir_path, file_name)
+            # Load the FF file from disk (or from memory, see addMemoryFF)
+            ff_frame = self._readFF(file_name)
 
             # Put the FF into separate cache
             self.cache[file_name] = ff_frame
@@ -675,14 +1059,14 @@ class InputTypeFRFF(InputType):
 
 
         if self.current_frame is None:
-            if validFFName(file_name):
+            if validFFImageName(file_name):
                 self.current_frame = 0
             else:
                 self.current_frame = ff_frame.t[self.current_line][0]
 
 
         # Get frame from file
-        if validFFName(file_name):
+        if validFFImageName(file_name):
             
             # Reconstruct the frame from an FF file
             frame = reconstructFrameFF(ff_frame, self.current_frame%self.total_frames, \
@@ -744,8 +1128,14 @@ class InputTypeFRFF(InputType):
         if frame_no is None:
             frame_no = self.current_frame
 
-        # Compute the datetime of the current frame
-        dt = self.beginning_datetime + datetime.timedelta(seconds=frame_no/self.fps)
+        # The time of the frame from the capture times, or from the name of the file and the frame rate
+        if self.frame_time_table is not None:
+            dt = self.tableFrameTime(frame_no)
+
+        else:
+
+            # Compute the datetime of the current frame
+            dt = self.beginning_datetime + datetime.timedelta(seconds=frame_no/self.fps)
 
         if dt_obj:
             return dt
@@ -756,7 +1146,7 @@ class InputTypeFRFF(InputType):
 
 class InputTypeVideo(InputType):
     def __init__(self, dir_path, config, beginning_time=None, detection=False, preload_video=False, 
-                 flipud=False, chunk_frames=None):
+                 flipud=False, chunk_frames=None, frame_times=None):
         """ Input file type handle for video files.
         
         Arguments:
@@ -771,6 +1161,10 @@ class InputTypeVideo(InputType):
                 Only use for small videos due to memory constraints.
             flipud: [bool] If True, the video frames will be flipped upside down. False by default.
             chunk_frames: [int] Number of frames to be used for averaging and maxpixels. 256 by default.
+            frame_times: [str, list, ndarray or dict] The time of every frame (see RMS.Formats.FrameTimes): a
+                JSON file, FT files of the capture (or the capture times read from them) for a video of the
+                capture, or {frame index: datetime}. None by default, then the frametimes file next to a timelapse
+                is used.
         """
 
         self.input_type = 'video'
@@ -802,6 +1196,22 @@ class InputTypeVideo(InputType):
         # Remove the file extension
         file_name_noext = ".".join(self.file_name.split('.')[:-1])
 
+        # A timelapse of the saved frames has the time of its first frame (whole seconds) in its name, and the
+        #   times of its frames in the frametimes file next to it
+        timelapse_name = parseTimelapseName(self.file_name)
+        json_path = findFrameTimesFile(self.file_path)
+        self.timelapse = (timelapse_name is not None) or (json_path is not None)
+
+        # The times of the frames: the given file, or the frametimes file next to a timelapse. FT files time the
+        #   frames of a video of the capture, not of a timelapse (its frames are seconds apart)
+        if frame_times is None:
+            frame_times = json_path
+
+        elif self.timelapse and isCaptureTimesSource(frame_times):
+            log.warning("FT files time the frames of the videos of the capture, not of a timelapse: they are not "
+                        "used for {:s}".format(self.file_name))
+            frame_times = json_path
+
         if beginning_time is None:
 
             time_formats_to_try = ["%Y%m%d_%H%M%S.%f", "%Y%m%d_%H%M%S", "%Y%m%d-%H%M%S.%f", "%Y%m%d-%H%M%S"]
@@ -822,12 +1232,17 @@ class InputTypeVideo(InputType):
                     fn_timestamp = fn_data[1] + '_' + fn_data[2] + '_' + fn_data[3]
                     self.beginning_datetime = datetime.datetime.strptime(fn_timestamp, "%Y%m%d_%H%M%S_%f")
 
-                except ValueError:
+                # Not the name of a video of the capture either
+                except (ValueError, IndexError):
+                    self.beginning_datetime = None
 
-                    messagebox(title="Input error", \
-                    message="The time of the beginning cannot be read from the file name! Either change the name of the file to be in the YYYYMMDD_hhmmss format, or specify the beginning time using command line options.")
+            # A timelapse begins at the time of its first frame in its name
+            if (self.beginning_datetime is None) and (timelapse_name is not None):
+                self.beginning_datetime = timelapse_name[1]
 
-                    sys.exit()
+            # Without a beginning, the frames can only be timed from a file of frame times
+            if (self.beginning_datetime is None) and (frame_times is None):
+                self.exitWithoutBeginning()
 
         else:
             self.beginning_datetime = beginning_time
@@ -870,6 +1285,41 @@ class InputTypeVideo(InputType):
         print('FPS from video:', self.fps)
         print('Total frames:', self.total_frames)
 
+        # Time the frames from the file of frame times, or from their timestamps snapped to the FT files of the
+        #   capture
+        if frame_times is not None:
+            if isCaptureTimesSource(frame_times):
+                self.setCaptureTimes(frame_times)
+            else:
+                self.setFrameTimes(frame_times)
+
+        # A timelapse without the times of its frames (see below)
+        self.timelapse_without_times = False
+
+        if self.frame_time_table is not None:
+
+            # The beginning is the time of the first frame, and the frame rate the median rate of the frames
+            self.beginning_datetime = self.frameTimesBeginning(beginning_time)
+            self.fps = 1.0/self.frame_time_table.spacing
+
+        # Without a beginning, the frames cannot be timed
+        elif self.beginning_datetime is None:
+            self.exitWithoutBeginning()
+
+        # A timelapse without the times of its frames: the frames are spaced by the interval of the saved frames
+        #   (the frame rate of the video is its playback rate), which is wrong after the frames which were not
+        #   saved (see timelapseWithoutTimesMessage)
+        elif self.timelapse:
+            self.fps = 1.0/self.config.frame_save_aligned_interval
+            self.timelapse_without_times = True
+            log.warning(self.timelapseWithoutTimesMessage())
+
+        # The timestamps of the frames corrected by frame_time_offset (the frames are timed from the beginning)
+        self.beginning_datetime = self.offsetDatetime(self.beginning_datetime)
+
+        # Log where the times of the frames come from
+        self.logFrameTimes()
+
         # Compute the number of frame chunks
         self.total_fr_chunks = self.total_frames//self.chunk_frames
         if self.total_fr_chunks == 0:
@@ -897,6 +1347,95 @@ class InputTypeVideo(InputType):
 
         # Load the initial chunk
         self.loadChunk()
+
+    def setCaptureTimes(self, frame_times):
+        """ Time the frames of a video of the capture from their own timestamps (the time in the name of the video
+            plus the presentation time of the frame), snapped to the capture times of the FT files within half a
+            frame. The FT files hold the frames the capture processed, which can be fewer than the frames saved in
+            the video, so the frames are not matched by their order. A frame without an FT entry keeps its own time.
+
+        Arguments:
+            frame_times: [str, list or ndarray] FT files, folders or archives, or the capture times read from them.
+
+        Return:
+            [bool] True if the frames are timed from their timestamps.
+        """
+
+        # The time of the first frame from the name of the video (without frame_time_offset)
+        if self.beginning_datetime is None:
+            log.warning("The FT files are not used for {:s}: the time of its first frame is not known"\
+                .format(self.file_name))
+            return False
+
+        # The capture times, and the times of the frames from their timestamps
+        try:
+            capture_times = frame_times if isinstance(frame_times, np.ndarray) else readCaptureTimes(frame_times)
+            frame_secs = datetime2UnixTime(self.beginning_datetime) + readVideoTimestamps(self.file_path)
+
+        except (IOError, OSError, ValueError) as e:
+            log.warning("The FT files are not used for {:s} ({:s}), the frames are timed from the beginning and "
+                        "the frame rate".format(self.file_name, str(e)))
+            return False
+
+        # Snap the frames to the capture times
+        snapped, matched = snapCaptureTimes(frame_secs, capture_times)
+        if not np.any(matched):
+            log.warning("No frame of {:s} has a capture time in the FT files, the frames are timed from their "
+                        "timestamps".format(self.file_name))
+
+        # The number of frames is the number of timestamps (the number from the video file is an estimate)
+        self.total_frames = len(snapped)
+
+        source = "the timestamps of the frames snapped to the FT files ({:d} of {:d} frames snapped, median "\
+            "shift {:.4f} s)".format(int(np.sum(matched)), len(snapped),
+                                     float(np.median((snapped - frame_secs)[matched])) if np.any(matched) else 0.0)
+
+        return self.setFrameTimes({k: UTCFromTimestamp.utcfromtimestamp(float(t)) for k, t in enumerate(snapped)},
+                                  source=source)
+
+    def exitWithoutBeginning(self):
+        """ Tell the user that the time of the beginning cannot be read, and exit. """
+
+        messagebox(title="Input error", \
+        message="The time of the beginning cannot be read from the file name! Either change the name of the file to be in the YYYYMMDD_hhmmss format, or specify the beginning time using command line options.")
+
+        sys.exit()
+
+    def frameTimesBeginning(self, beginning_time=None):
+        """ The beginning of a video with frame times: the time of its first frame (without frame_time_offset).
+            A beginning time given by the user is not used, the frames are timed from the frame times.
+
+        Keyword arguments:
+            beginning_time: [datetime] The beginning time given by the user. None by default.
+
+        Return:
+            [datetime] The time of the first frame.
+        """
+
+        beginning = self.frame_time_table.time(0)
+
+        # Tell the user that the given beginning time is not used when it is not the time of the first frame
+        if (beginning_time is not None) and (abs((beginning_time - beginning).total_seconds()) > 0.5):
+            log.warning("The given beginning time {:s} is not used: the frames of {:s} are timed from {:s}, which "
+                        "begins at {:s}".format(str(beginning_time), self.file_name, self.frame_times_source,
+                                                str(beginning)))
+
+        return beginning
+
+    def timelapseWithoutTimesMessage(self):
+        """ The warning for a timelapse without the times of its frames, which is timed every
+            frame_save_aligned_interval from the time in its name.
+        """
+
+        return ("The timelapse {:s} has no usable frame times file next to it ({:s}). Its frames are timed every "
+                "{:.1f} s from {:s}, the time in its name.\n\n"
+                "Frames which were not saved (e.g. when the capture was interrupted) are missing from the video, "
+                "and every frame after them is then timed too early, by a multiple of {:.1f} s. The time printed "
+                "on each frame is the real time of the frame and can be used to check.\n\n"
+                "To time every frame correctly, keep the *_frametimes.json file next to the video, or give it "
+                "with --frametimes.").format(self.file_name, os.path.basename(frameTimesPaths(self.file_path)[0]),
+                                             self.config.frame_save_aligned_interval, str(self.beginning_datetime),
+                                             self.config.frame_save_aligned_interval)
 
     def nextChunk(self):
         """ Go to the next frame chunk. """
@@ -958,8 +1497,11 @@ class InputTypeVideo(InputType):
             frame, self.current_fr_chunk_size = self.cache[cache_id]
             return frame
 
+        # Determine target dtype (assume uint16 if not yet initialized, then update)
+        target_dtype = self.getTargetDtype()
+
         # Init making the FF structure
-        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, np.uint8)
+        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, target_dtype)
 
         # If there are no frames to read, return an empty array
         if frames_to_read == 0 or frames_to_read == -1:
@@ -968,6 +1510,7 @@ class InputTypeVideo(InputType):
 
         print('Frames to read: ' + str(frames_to_read), end='')
 
+        # Load the chunk of frames
         # Load the chunk of frames
         for i in range(frames_to_read):
 
@@ -985,6 +1528,10 @@ class InputTypeVideo(InputType):
 
             # Add frame for FF processing
             ff_struct_fake.addFrame(frame.astype(np.uint16))
+
+            # Update the target dtype of the FF struct based on the first frame if needed
+            if i == 0:
+                ff_struct_fake.dtype = self.getTargetDtype(frame)
 
         
         # Print the total number of read frames in the same line
@@ -1032,16 +1579,23 @@ class InputTypeVideo(InputType):
                 time of the chunk.
         """
 
-        if beginning:
-            middle_frame = 0
+        # With the times of the frames, the mean time of the frames of the chunk (or the time of its first frame)
+        if self.frame_time_table is not None:
+            first_frame = self.current_frame_chunk*self.chunk_frames
+            dt = self.tableChunkTime(first_frame, self.chunkFrameCount(first_frame), beginning=beginning)
+
         else:
-            middle_frame = self.current_fr_chunk_size/2
 
-        # Compute number of seconds since the beginning of the video file to the mean time of the frame chunk
-        seconds_since_beginning = (self.current_frame_chunk*self.chunk_frames + middle_frame)/self.fps
+            if beginning:
+                middle_frame = 0
+            else:
+                middle_frame = self.current_fr_chunk_size/2
 
-        # Compute the absolute time
-        dt = self.beginning_datetime + datetime.timedelta(seconds=seconds_since_beginning)
+            # Compute number of seconds since the beginning of the video file to the mean time of the frame chunk
+            seconds_since_beginning = (self.current_frame_chunk*self.chunk_frames + middle_frame)/self.fps
+
+            # Compute the absolute time
+            dt = self.beginning_datetime + datetime.timedelta(seconds=seconds_since_beginning)
 
         if dt_obj:
             return dt
@@ -1093,8 +1647,14 @@ class InputTypeVideo(InputType):
         if frame_no is None:
             frame_no = self.current_frame
 
-        # Compute the datetime of the current frame
-        dt = self.beginning_datetime + datetime.timedelta(seconds=frame_no/self.fps)
+        # The time of the frame from the times of the frames, or from the beginning and the frame rate
+        if self.frame_time_table is not None:
+            dt = self.tableFrameTime(frame_no)
+
+        else:
+
+            # Compute the datetime of the current frame
+            dt = self.beginning_datetime + datetime.timedelta(seconds=frame_no/self.fps)
 
         if dt_obj:
             return dt
@@ -1129,6 +1689,20 @@ class InputTypeVideo(InputType):
 
 
 class InputTypeUWOVid(InputType):
+    def readNextFrame(self):
+        """ Read the next frame of the vid file into self.vid, with its timestamp corrected by frame_time_offset
+            (every time of the input comes from the timestamps of its frames).
+
+        Return:
+            [ndarray] The frame, as from Vid.readFrame.
+        """
+
+        frame = readVidFrame(self.vid, self.vid_file)
+        self.vid.ts, self.vid.tu = self.offsetUnixTime(self.vid.ts, self.vid.tu)
+
+        return frame
+
+
     def __init__(self, file_path, config, detection=False, chunk_frames=128, flipud=False):
         """ Input file type handle for UWO .vid files.
         
@@ -1174,7 +1748,7 @@ class InputTypeUWOVid(InputType):
         self.vid_file = open(self.vid_path, 'rb', buffering=65536)
 
         # Read one video frame and rewind to beginning
-        readVidFrame(self.vid, self.vid_file)
+        self.readNextFrame()
         self.vidinfo = copy.deepcopy(self.vid)
         self.vid_file.seek(0)
 
@@ -1271,8 +1845,11 @@ class InputTypeUWOVid(InputType):
         # Set the vid file pointer to the right byte
         self.vid_file.seek(first_frame*self.vidinfo.seqlen)
 
+        # Determine target dtype (assume uint16 if not yet initialized, then update)
+        target_dtype = self.getTargetDtype()
+
         # Init making the FF structure
-        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, np.uint16)
+        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, target_dtype)
 
         self.frame_chunk_unix_times = []
 
@@ -1280,7 +1857,7 @@ class InputTypeUWOVid(InputType):
         for i in range(frames_to_read):
 
             try:
-                frame = readVidFrame(self.vid, self.vid_file)
+                frame = self.readNextFrame()
             except:
                 frame = None
 
@@ -1305,7 +1882,11 @@ class InputTypeUWOVid(InputType):
                 frame = np.flipud(frame)
 
             # Add frame for FF processing (the frame should already be uint16)
-            ff_struct_fake.addFrame(frame)
+            ff_struct_fake.addFrame(frame.astype(np.uint16))
+
+            # Update the target dtype of the FF struct based on the first frame if needed
+            if i == 0:
+                ff_struct_fake.dtype = self.getTargetDtype(frame)
 
             unix_time_lst = (self.vid.ts, self.vid.tu)
             if unix_time_lst not in self.utime_frame_dict:
@@ -1376,7 +1957,7 @@ class InputTypeUWOVid(InputType):
         self.vid_file.seek(self.current_frame*self.vidinfo.seqlen)
 
         # Load a frame
-        frame = readVidFrame(self.vid, self.vid_file)
+        frame = self.readNextFrame()
 
         # Bin the frame
         if self.detection and (self.config.detection_binning_factor > 1):
@@ -1431,7 +2012,7 @@ class InputTypeUWOVid(InputType):
                 self.vid_file.seek(frame_no*self.vidinfo.seqlen)
 
                 # Read the vid file metadata
-                readVidFrame(self.vid, self.vid_file)
+                self.readNextFrame()
 
                 # Store the current time to the dictionary
                 unix_time_lst = (self.vid.ts, self.vid.tu)
@@ -1452,9 +2033,9 @@ class InputTypeUWOVid(InputType):
 
 
     
-class InputTypeImages(object):
+class InputTypeImages(InputType):
     def __init__(self, dir_path, config, beginning_time=None, fps=None, detection=False, flipud=False,
-                 chunk_frames=64):
+                 chunk_frames=64, frame_times=None):
         """ Input file type handle for a folder with images.
 
         Arguments:
@@ -1468,6 +2049,8 @@ class InputTypeImages(object):
                 control whether the binning is applied or not.
             flipud: [bool] If True, the video frames will be flipped upside down. False by default.
             chunk_frames: [int] Number of frames to be used for averaging and maxpixels. 64 by default.
+            frame_times: [str or dict] The time of every image in the order of their names (see
+                RMS.Formats.FrameTimes): a JSON file, or {frame index: datetime}. None by default.
 
         """
 
@@ -1560,6 +2143,9 @@ class InputTypeImages(object):
 
 
 
+        # Whether the time of the beginning is the time of the first frame from its header (see below)
+        beginning_from_frames = False
+
         ### Try to detect if the given images are UWO-style PNGs ###
 
         self.uwo_png_mode = False
@@ -1577,6 +2163,7 @@ class InputTypeImages(object):
             # Get the beginning time
             self.loadFrame(fr_no=0)
             beginning_time = self.dt_frame_time
+            beginning_from_frames = True
 
             print('UWO PNG mode')
 
@@ -1624,6 +2211,7 @@ class InputTypeImages(object):
 
             # Set the begin time if in the FRIPON mode
             beginning_time = self.dt_frame_time
+            beginning_from_frames = True
 
             # Load info for CABERNET
             if self.cabernet_status:
@@ -1658,7 +2246,7 @@ class InputTypeImages(object):
 
 
             # Load info for FRIPON all-sky cameras
-            else:
+            elif ("PROGRAM" in self.fripon_header) and (self.fripon_header["PROGRAM"].strip() == "FreeTure"):
 
                 # Set station parameters if in the FRIPON mode
                 self.config.stationID = self.fripon_header["TELESCOP"].strip()
@@ -1676,6 +2264,10 @@ class InputTypeImages(object):
 
                 # Set magnitude limit
                 self.config.catalog_mag_limit = 3.5
+
+            # Non-FreeTrue fit file
+            else:
+                pass
 
 
 
@@ -1699,12 +2291,35 @@ class InputTypeImages(object):
                                                                      "%Y%m%d_%H%M%S.%f")
 
             except:
-                messagebox(title='Input error',
-                message='The time of the beginning cannot be read from the file name! Either change the name of the file to be in the YYYYMMDD_hhmmss format, or specify the beginning time using command line options.')
-                sys.exit()
+
+                # With a file of frame times, the beginning is the time of the first image (see below)
+                if frame_times is None:
+                    messagebox(title='Input error',
+                    message='The time of the beginning cannot be read from the file name! Either change the name of the file to be in the YYYYMMDD_hhmmss format, or specify the beginning time using command line options.')
+                    sys.exit()
+
+                self.beginning_datetime = None
 
         else:
             self.beginning_datetime = beginning_time
+
+        # The times of the images from a file of frame times (not in the single image mode, whose frames are not
+        #   images), the beginning is then the time of the first image
+        if (frame_times is not None) and (self.total_frames > 1):
+            if self.setFrameTimes(frame_times):
+                self.beginning_datetime = self.frame_time_table.time(0)
+                beginning_from_frames = False
+
+        # Without a beginning, the images cannot be timed
+        if self.beginning_datetime is None:
+            messagebox(title='Input error',
+            message='The time of the beginning cannot be read from the file name! Either change the name of the file to be in the YYYYMMDD_hhmmss format, or specify the beginning time using command line options.')
+            sys.exit()
+
+        # The time of the beginning corrected by frame_time_offset, unless it is the time of the first frame read
+        #   from its header, which was corrected when the frame was read
+        if not beginning_from_frames:
+            self.beginning_datetime = self.offsetDatetime(self.beginning_datetime)
 
 
 
@@ -1777,6 +2392,10 @@ class InputTypeImages(object):
         ### ###
 
 
+        # With the times of the images, the frame rate is the median rate of the images
+        if self.frame_time_table is not None:
+            self.fps = 1.0/self.frame_time_table.spacing
+
         if self.single_image_mode:
 
             # Correct the time so that the given time starts on frame 100
@@ -1787,6 +2406,9 @@ class InputTypeImages(object):
 
 
         print('Total frames:', self.total_frames)
+
+        # Log where the times of the images come from
+        self.logFrameTimes()
 
 
     def nextChunk(self):
@@ -1856,7 +2478,9 @@ class InputTypeImages(object):
             return frame
 
         # Init making the FF structure
-        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, self.img_dtype)
+        # Update the FF struct's target dtype based on the first frame's bit depth
+        target_dtype = self.getTargetDtype()
+        ff_struct_fake = FFMimickInterface(self.nrows, self.ncols, target_dtype)
 
         self.frame_dt_list = []
 
@@ -1875,6 +2499,10 @@ class InputTypeImages(object):
 
             # Add frame for FF processing
             ff_struct_fake.addFrame(frame.astype(np.uint16))
+
+            # Update the target dtype of the FF struct based on the first frame if needed
+            if i == 0:
+                ff_struct_fake.dtype = self.getTargetDtype(frame)
 
             # Add the datetime of the frame to list of the UWO png is used
             if self.uwo_png_mode or self.fripon_mode:
@@ -1937,6 +2565,140 @@ class InputTypeImages(object):
 
         else:
             self.current_img_file = self.img_list[self.current_frame]
+
+
+    def _printFitsHeaderOnce(self, header, mode_label):
+        """ Print the FITS header of the first image loaded from this directory.
+
+            Loading every frame of a FITS image sequence used to dump the full header each time, which
+            flooded the console when stepping through images in SkyFit2. The header is the same for all
+            images of a sequence, so it is shown once per input directory.
+
+        Arguments:
+            header: [astropy Header] Header of the FITS file being loaded.
+            mode_label: [str] Short label of the FITS flavour detected (e.g. "FRIPON mode").
+        """
+
+        # Only the first image of the sequence is reported
+        if getattr(self, "_fits_header_printed", False):
+            return
+
+        self._fits_header_printed = True
+
+        print(mode_label)
+
+        # Print the header, one card per line
+        print("\nFITS Header:")
+        print("\n" + "="*80)
+        for key, value in header.items():
+            print(f"{key}: {value}")
+        print("="*80 + "\n")
+
+
+    @staticmethod
+    def _computeFloatFitsMapping(frame):
+        """ Compute (offset, scale) for a float FITS image, or None if it has no finite nonzero range.
+
+        Arguments:
+            frame: [ndarray] Floating point image.
+
+        Return:
+            [tuple or None] (offset, scale) when the image has finite levels, else None.
+        """
+
+        finite_mask = np.isfinite(frame)
+        if not np.any(finite_mask):
+            return None
+
+        finite_vals = frame[finite_mask]
+        offset = float(np.min(finite_vals))
+        value_range = float(np.max(finite_vals)) - offset
+        if (not np.isfinite(value_range)) or (value_range <= 0):
+            return None
+
+        if (value_range <= 1) or (value_range > 65535):
+            scale = 65535.0/value_range
+        else:
+            scale = 1.0
+
+        if not np.isfinite(scale):
+            return None
+
+        return (offset, scale)
+
+
+    def _findFloatFitsMapping(self, current_img_file=None):
+        """ Look ahead through the directory's .fits files for the first float frame with finite levels.
+
+        Keyword arguments:
+            current_img_file: [str] File already inspected, skipped during the scan.
+
+        Return:
+            [tuple or None] (offset, scale) from the first non-constant float frame, or None.
+        """
+
+        for fname in getattr(self, "img_list", []):
+            if (fname == current_img_file) or (not fname.lower().endswith('.fits')):
+                continue
+            try:
+                with open(os.path.join(self.dir_path, fname), 'rb') as f:
+                    with fits.open(f) as fits_file:
+                        data = fits_file[0].data
+                        if (data is not None) and np.issubdtype(data.dtype, np.floating):
+                            mapping = self._computeFloatFitsMapping(data)
+                            if mapping is not None:
+                                return mapping
+            except Exception:
+                continue
+
+        return None
+
+
+    def _floatFitsToUint16(self, frame, current_img_file=None):
+        """ Convert a floating point FITS image to uint16 with a mapping fixed for the sequence.
+
+            The offset and scale are taken from the first float image of this directory with a
+            finite, nonzero range, and reused for every later one: a per-image offset (the old
+            frame - min(frame)) made the levels jump from image to image. The minimum is moved to 0
+            (NaN-safe). The values are rescaled only when their range does not fit uint16 as it is:
+            a range <= 1 (normalised [0, 1] images would otherwise collapse to 0 and 1) or > 65535.
+            If the first loaded image is constant or all-NaN, the remaining .fits files in the
+            directory are scanned to establish the sequence mapping up front so initial frames
+            and chunk statistics stay consistent with reloaded frames. NaN pixels become 0.
+
+        Arguments:
+            frame: [ndarray] Floating point image.
+
+        Keyword arguments:
+            current_img_file: [str] File name of the frame currently being loaded.
+
+        Return:
+            [ndarray] uint16 image.
+        """
+
+        mapping = getattr(self, "_float_fits_mapping", None)
+
+        # Fix the mapping on the first float image of the sequence which has finite levels
+        if mapping is None:
+            mapping = self._computeFloatFitsMapping(frame)
+            if (mapping is None) and (not getattr(self, "_float_fits_mapping_scanned", False)):
+                self._float_fits_mapping_scanned = True
+                mapping = self._findFloatFitsMapping(current_img_file=current_img_file)
+
+            if mapping is not None:
+                self._float_fits_mapping = mapping
+            else:
+                finite_mask = np.isfinite(frame)
+                offset = float(np.min(frame[finite_mask])) if np.any(finite_mask) else 0.0
+                mapping = (offset if np.isfinite(offset) else 0.0, 1.0)
+
+        offset, scale = mapping
+
+        # Apply the mapping, zero NaN pixels and clip non-finite/out-of-range values to uint16
+        frame = (frame.astype(np.float64) - offset)*scale
+        frame = np.where(np.isnan(frame), 0.0, frame)
+        frame = np.clip(frame, 0.0, 65535.0)
+        return frame.astype(np.uint16)
 
 
     def loadFrame(self, avepixel=None, fr_no=None):
@@ -2004,6 +2766,7 @@ class InputTypeImages(object):
                     self.dt_frame_time = datetime.datetime.strptime(timestamp_stripped, "%Y-%m-%dT%H:%M:%S.%f")
                 except ValueError:
                     self.dt_frame_time = datetime.datetime.strptime(timestamp_stripped, "%Y-%m-%dT%H:%M:%S")
+                self.dt_frame_time = self.offsetDatetime(self.dt_frame_time)
 
                 # If CABERNET is used, set a fixed FPS
                 if "COMMENT" in head:
@@ -2022,6 +2785,8 @@ class InputTypeImages(object):
                 # Indicate that a FRIPON fit file is read
                 self.fripon_mode = True
 
+                self._printFitsHeaderOnce(fits_file[0].header, "FRIPON mode")
+
 
         # Loads a non-FRIPON FITS image
         elif current_img_file.lower().endswith('.fits'):
@@ -2032,6 +2797,14 @@ class InputTypeImages(object):
                 # Open the image data
                 fits_file = fits.open(f)
                 frame = fits_file[0].data
+
+                # Show the FITS header of the first image loaded from this directory, so the
+                # calibration format is visible without flooding the output on every frame
+                self._printFitsHeaderOnce(fits_file[0].header, "FITS mode")
+
+                # If the fits image type is floating point, convert it to uint16
+                if np.issubdtype(frame.dtype, np.floating):
+                    frame = self._floatFitsToUint16(frame, current_img_file=current_img_file)
 
                 # # Flip image vertically
                 # frame = np.flipud(frame)
@@ -2083,7 +2856,7 @@ class InputTypeImages(object):
                     tu = frame[0][12] + (frame[0][13] << 16)
 
 
-            frame_dt = unixTime2Date(ts, tu, dt_obj=True)
+            frame_dt = unixTime2Date(*self.offsetUnixTime(ts, tu), dt_obj=True)
 
             self.dt_frame_time = frame_dt
 
@@ -2138,7 +2911,12 @@ class InputTypeImages(object):
                 time of the chunk.
         """
 
-        if self.uwo_png_mode or self.fripon_mode:
+        # With the times of the images, the mean time of the images of the chunk (or the time of its first image)
+        if self.frame_time_table is not None:
+            first_frame = self.current_frame_chunk*self.chunk_frames
+            dt = self.tableChunkTime(first_frame, self.chunkFrameCount(first_frame), beginning=beginning)
+
+        elif self.uwo_png_mode or self.fripon_mode:
 
             # Convert datetimes to Unix times
             unix_times = [datetime2UnixTime(dt) for dt in self.frame_dt_list]
@@ -2185,8 +2963,12 @@ class InputTypeImages(object):
         if frame_no is None:
             frame_no = self.current_frame
 
+        # The time of the image from the times of the images
+        if self.frame_time_table is not None:
+            dt = self.tableFrameTime(frame_no)
+
         # If the UWO png or FRIPON fit is used, return the time read from the file
-        if (self.uwo_png_mode or self.fripon_mode) and (not self.cabernet_status):
+        elif (self.uwo_png_mode or self.fripon_mode) and (not self.cabernet_status):
 
             # If the frame number is not given, return the time of the current frame
             if frame_no is None:
@@ -2227,7 +3009,8 @@ class InputTypeImages(object):
         """ Return the type of the UWO PNG image. """
 
         # Read in the magick number as a uint32
-        magicknum = np.frombuffer(img[0], dtype=np.uint32)[0]
+        # Use first 4 bytes of raw image data to handle any width pixels
+        magicknum = np.frombuffer(img.tobytes()[:4], dtype=np.uint32)[0]
 
         # Define the magick numbers for different UWO PNGs
         uwo_magick_num_list = [UWO_MAGICK_CAMO, UWO_MAGICK_EMCCD, UWO_MAGICK_ASGARD]
@@ -2250,7 +3033,7 @@ class InputTypeImages(object):
 
 
 class InputTypeDFN(InputType):
-    def __init__(self, file_path, config, beginning_time=None, fps=None):
+    def __init__(self, file_path, config, beginning_time=None, fps=None, frame_times=None):
         """ Input file type handle for a folder with images.
 
         Arguments:
@@ -2263,6 +3046,8 @@ class InputTypeDFN(InputType):
                 config file.
             detection: [bool] Indicates that the input is used for detection. False by default. This will
                 control whether the binning is applied or not.
+            frame_times: [str or dict] The times of the frames of the image (the frames of the picks, from 100
+                on), see RMS.Formats.FrameTimes: a JSON file or {frame index: datetime}. None by default.
 
         """
         self.input_type = 'dfn'
@@ -2308,6 +3093,9 @@ class InputTypeDFN(InputType):
                     message="Can't parse given DFN file name!")
                 sys.exit()
 
+        # The time of the beginning corrected by frame_time_offset
+        self.beginning_datetime = self.offsetDatetime(self.beginning_datetime)
+
         print('Using folder:', self.dir_path)
 
 
@@ -2332,7 +3120,8 @@ class InputTypeDFN(InputType):
             self.ncols = temp
             img = np.rot90(img)
 
-        self.ff = FFMimickInterface(self.nrows, self.ncols, self.img_dtype)
+        target_dtype = self.getTargetDtype(img)
+        self.ff = FFMimickInterface(self.nrows, self.ncols, target_dtype)
         self.ff.addFrame(img.astype(np.uint16))
         self.ff.finish()
 
@@ -2344,6 +3133,14 @@ class InputTypeDFN(InputType):
         else:
             self.fps = fps
             print('Using FPS:', self.fps)
+
+        # The times of the frames from a file of frame times
+        if frame_times is not None:
+            if self.setFrameTimes(frame_times):
+                msg = "Frames timed from {:s}: {:d} frames with times".format(self.frame_times_source,
+                                                                           len(self.frame_time_table.frame_times))
+                log.info(msg)
+                print(msg)
 
 
     def loadImage(self):
@@ -2411,8 +3208,14 @@ class InputTypeDFN(InputType):
         if frame_no is None:
             frame_no = self.current_frame
 
-        # Compute the datetime of the current frame
-        dt = self.beginning_datetime + datetime.timedelta(seconds=frame_no/self.fps)
+        # The time of the frame from the times of the frames
+        if self.frame_time_table is not None:
+            dt = self.tableFrameTime(frame_no)
+
+        else:
+
+            # Compute the datetime of the current frame
+            dt = self.beginning_datetime + datetime.timedelta(seconds=frame_no/self.fps)
 
         if dt_obj:
             return dt
@@ -2422,7 +3225,7 @@ class InputTypeDFN(InputType):
 
 
 def detectInputType(input_path, config, beginning_time=None, fps=None, skip_ff_dir=False, detection=False,
-    use_fr_files=False, preload_video=False, flipud=False, chunk_frames=None):
+    use_fr_files=False, preload_video=False, flipud=False, chunk_frames=None, frame_times=None):
     """ Given the folder of a file, detect the input format.
 
     Arguments:
@@ -2444,6 +3247,9 @@ def detectInputType(input_path, config, beginning_time=None, fps=None, skip_ff_d
         flipud: [bool] Flip the image vertically. False by default.
         chunk_frames: [int] Number of frames to read in a chunk. None by default, in which case the defaults
             will be used specified for each input type.
+        frame_times: [str, list, ndarray or dict] The time of every frame (see RMS.Formats.FrameTimes): a JSON
+            file or {frame index: datetime} (videos, image folders, DFN images), or FT files of the capture or the
+            capture times read from them (FF files, videos of the capture). None by default.
 
     """
     
@@ -2453,19 +3259,19 @@ def detectInputType(input_path, config, beginning_time=None, fps=None, skip_ff_d
         # Detect input type if a directory is given
         img_handle = detectInputTypeFolder(input_path, config, beginning_time=beginning_time, fps=fps,
             skip_ff_dir=skip_ff_dir, detection=detection, use_fr_files=use_fr_files, flipud=flipud,
-            chunk_frames=chunk_frames)
+            chunk_frames=chunk_frames, frame_times=frame_times)
         
     else:
         # Detect input type if a path to a file is given
         img_handle = detectInputTypeFile(input_path, config, beginning_time=beginning_time, fps=fps,
             detection=detection, preload_video=preload_video, flipud=flipud,
-            chunk_frames=chunk_frames)
+            chunk_frames=chunk_frames, frame_times=frame_times)
 
     return img_handle
 
 
 def detectInputTypeFolder(input_dir, config, beginning_time=None, fps=None, skip_ff_dir=False, \
-    detection=False, use_fr_files=False, flipud=False, chunk_frames=None):
+    detection=False, use_fr_files=False, flipud=False, chunk_frames=None, frame_times=None):
     """ Given the folder of a file, detect the input format.
 
     Arguments:
@@ -2485,6 +3291,9 @@ def detectInputTypeFolder(input_dir, config, beginning_time=None, fps=None, skip
         flipud: [bool] Flip the image vertically. False by default.
         chunk_frames: [int] Number of frames to read in a chunk. None by default, in which case the defaults
             will be used specified for each input type.
+        frame_times: [str, list, ndarray or dict] The time of every frame (see RMS.Formats.FrameTimes): a JSON
+            file or {frame index: datetime} (image folders), or FT files of the capture or the capture times read
+            from them (FF files). None by default.
 
     """
 
@@ -2520,14 +3329,15 @@ def detectInputTypeFolder(input_dir, config, beginning_time=None, fps=None, skip
 
         else:
             # Init the image handle for FF files in a directory
-            img_handle = InputTypeFRFF(input_dir, config, use_fr_files=use_fr_files)
+            img_handle = InputTypeFRFF(input_dir, config, use_fr_files=use_fr_files, frame_times=frame_times)
             img_handle.ncols = config.width
             img_handle.nrows = config.height
 
     elif any([any(file.lower().endswith(x) for x in img_types) for file in os.listdir(input_dir)]) and \
             config.width != 4912 and config.width != 7360:
         img_handle = InputTypeImages(input_dir, config, beginning_time=beginning_time, fps=fps,
-                                     detection=detection, flipud=flipud, chunk_frames=chunk_frames)
+                                     detection=detection, flipud=flipud, chunk_frames=chunk_frames,
+                                     frame_times=frame_times)
 
     return img_handle
 
@@ -2553,7 +3363,7 @@ def checkIfVideoFile(file_name):
 
 
 def detectInputTypeFile(input_file, config, beginning_time=None, fps=None, detection=False, 
-                        preload_video=False, flipud=False, chunk_frames=None):
+                        preload_video=False, flipud=False, chunk_frames=None, frame_times=None):
     """ Given a file, detect the input format.
 
     Arguments:
@@ -2571,6 +3381,9 @@ def detectInputTypeFile(input_file, config, beginning_time=None, fps=None, detec
         flipud: [bool] Flip the image vertically. False by default.
         chunk_frames: [int] Number of frames to read in a chunk. None by default, in which case the defaults
             will be used specified for each input type.
+        frame_times: [str, list, ndarray or dict] The time of every frame (see RMS.Formats.FrameTimes): a JSON
+            file or {frame index: datetime} (videos, DFN images), or FT files of the capture or the capture times
+            read from them (FF files, videos of the capture). None by default.
 
     """
 
@@ -2581,7 +3394,7 @@ def detectInputTypeFile(input_file, config, beginning_time=None, fps=None, detec
     if validFFName(file_name) or validFRName(file_name):
 
         # Init the image handle for FF a single FF file
-        img_handle = InputTypeFRFF(input_file, config, single_ff=True)
+        img_handle = InputTypeFRFF(input_file, config, single_ff=True, frame_times=frame_times)
         img_handle.ncols = config.width
         img_handle.nrows = config.height
 
@@ -2591,7 +3404,7 @@ def detectInputTypeFile(input_file, config, beginning_time=None, fps=None, detec
         # Init the image hadle for video files
         img_handle = InputTypeVideo(input_file, config, beginning_time=beginning_time,
                                     detection=detection, preload_video=preload_video, flipud=flipud,
-                                    chunk_frames=chunk_frames)
+                                    chunk_frames=chunk_frames, frame_times=frame_times)
 
     # Check if the given files is the UWO .vid format
     elif file_name.endswith('.vid'):
@@ -2601,7 +3414,8 @@ def detectInputTypeFile(input_file, config, beginning_time=None, fps=None, detec
                                      chunk_frames=chunk_frames)
 
     elif config.width == 4912 or config.width == 7360:
-        img_handle = InputTypeDFN(input_file, config, beginning_time=beginning_time, fps=fps)
+        img_handle = InputTypeDFN(input_file, config, beginning_time=beginning_time, fps=fps,
+                                  frame_times=frame_times)
 
     else:
         messagebox(title="Input format error",

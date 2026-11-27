@@ -40,31 +40,35 @@ if "install" in sys.argv and "--old-and-unmanageable" not in sys.argv:
     sys.exit(0)
 # -----------------------------------------------------------------------------    
 
-# C/C++ extension
-kht_module = Extension(
-    "kht_module",
-    sources=[
-        "Native/Hough/kht.cpp",
-        "Native/Hough/buffer_2d.cpp",
-        "Native/Hough/eigen.cpp",
-        "Native/Hough/linking.cpp",
-        "Native/Hough/peak_detection.cpp",
-        "Native/Hough/subdivision.cpp",
-        "Native/Hough/voting.cpp",
-    ],
-    include_dirs=["Native/Hough/"],
-    extra_compile_args=["-O3", "-Wall"],
-)
+# Kernel-based Hough Transform: a thin Cython wrapper (RMS/Routines/Kht.pyx) compiled
+# together with the KHT C++ sources. Building it as a regular Cython extension means it
+# is imported (and ABI-matched to the interpreter) like every other native module,
+# instead of being located by a file-system walk and loaded via ctypes.
+kht_sources = ["RMS/Routines/Kht.pyx"] + [
+    "Native/Hough/{:s}.cpp".format(name) for name in
+    ("kht", "buffer_2d", "eigen", "linking", "peak_detection", "subdivision", "voting")
+]
+
+# Platform-specific compile arguments from the [Build] section of .config, shared with
+# the .pyxbld pyximport fallback recipes. RMS.CompileArgs is standard-library only, so
+# it is safe to import before the RMS dependencies are installed. The repository root
+# must be put on sys.path explicitly: pip's PEP 517 build hooks exec this file from
+# another directory, so the local RMS package is not importable by default.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from RMS.CompileArgs import getExtraCompileArgs
+compile_args = getExtraCompileArgs()
 
 # Cython extensions
 cython_modules = [
-    Extension("RMS.Astrometry.CyFunctions", ["RMS/Astrometry/CyFunctions.pyx"], include_dirs=numpy_includes),
-    Extension("RMS.Routines.BinImageCy", ["RMS/Routines/BinImageCy.pyx"], include_dirs=numpy_includes),
-    Extension("RMS.Routines.DynamicFTPCompressionCy", ["RMS/Routines/DynamicFTPCompressionCy.pyx"], include_dirs=numpy_includes),
-    Extension("RMS.Routines.Grouping3Dcy", ["RMS/Routines/Grouping3Dcy.pyx"], include_dirs=numpy_includes),
-    Extension("RMS.Routines.MorphCy", ["RMS/Routines/MorphCy.pyx"], include_dirs=numpy_includes),
-    Extension("RMS.CompressionCy", ["RMS/CompressionCy.pyx"], include_dirs=numpy_includes),
-    Extension("Utils.SaturationTools", ["Utils/SaturationTools.pyx"], include_dirs=numpy_includes),
+    Extension("RMS.Routines.Kht", kht_sources, include_dirs=["Native/Hough/"],
+        language="c++", extra_compile_args=compile_args),
+    Extension("RMS.Astrometry.CyFunctions", ["RMS/Astrometry/CyFunctions.pyx"], include_dirs=numpy_includes, extra_compile_args=compile_args),
+    Extension("RMS.Routines.BinImageCy", ["RMS/Routines/BinImageCy.pyx"], include_dirs=numpy_includes, extra_compile_args=compile_args),
+    Extension("RMS.Routines.DynamicFTPCompressionCy", ["RMS/Routines/DynamicFTPCompressionCy.pyx"], include_dirs=numpy_includes, extra_compile_args=compile_args),
+    Extension("RMS.Routines.Grouping3Dcy", ["RMS/Routines/Grouping3Dcy.pyx"], include_dirs=numpy_includes, extra_compile_args=compile_args),
+    Extension("RMS.Routines.MorphCy", ["RMS/Routines/MorphCy.pyx"], include_dirs=numpy_includes, extra_compile_args=compile_args),
+    Extension("RMS.CompressionCy", ["RMS/CompressionCy.pyx"], include_dirs=numpy_includes, extra_compile_args=compile_args),
+    Extension("Utils.SaturationTools", ["Utils/SaturationTools.pyx"], include_dirs=numpy_includes, extra_compile_args=compile_args),
 ]
 
 # Runtime requirements
@@ -92,7 +96,7 @@ setup(
         ("share", share_files),
         ("share/platepar_templates", plate_files),
     ],
-    ext_modules=[kht_module] + cythonize(cython_modules),
+    ext_modules=cythonize(cython_modules),
     include_dirs=numpy_includes,
     include_package_data=True,
 )

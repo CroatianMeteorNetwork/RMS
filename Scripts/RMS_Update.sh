@@ -33,6 +33,9 @@ BACKUP_MASK="$RMSBACKUPDIR/mask.bmp"    # Mutable - can change to alt locations
 BACKUP_CAMERA_SETTINGS="$RMSBACKUPDIR/camera_settings.json"  # Mutable - can change to alt locations
 readonly SYSTEM_PACKAGES="$RMSSOURCEDIR/system_packages.txt"
 readonly BACKUP_STATE_FILE=$RMSBACKUPDIR/backup_state
+# The commit from which the compiled (Cython) modules were last built, written after a successful build. It
+#   lives outside the repository, so no git operation removes it
+readonly BUILD_STAMP_FILE=$RMSBACKUPDIR/build_sha
 readonly LOCKFILE="/tmp/rms_update.$(printf '%s' "$RMSSOURCEDIR" | sha1sum | cut -c1-8).lock"
 readonly MIN_SPACE_MB=200  # Minimum required space in MB
 readonly RETRY_LIMIT=3  # Retries for critical file operations
@@ -148,7 +151,11 @@ usage() {
     print_status "info" "  --switch <branch>  Interactively switch or switch to a specific branch"
     print_status "info" "  --force            Force update even if repository is up-to-date"
     print_status "info" "  --help             Show usage info"
-    exit 1
+    print_status "info" ""
+    print_status "info" "Environment:"
+    print_status "info" "  RMS_BRANCH=<branch>  Switch to <branch> (same as --switch <branch>,"
+    print_status "info" "                       ignored when --switch is given)"
+    exit "${1:-1}"
 }
 
 parse_args() {
@@ -170,7 +177,7 @@ parse_args() {
                 shift 1
                 ;;
             --help|-h)
-                usage
+                usage 0
                 ;;
             *)
                 print_status "error" "Unknown argument: $1"
@@ -413,7 +420,7 @@ switch_branch_interactive() {
             fi
             return
         else
-            ((attempts++))
+            attempts=$((attempts + 1))
             if (( attempts < max_attempts )); then
                 print_status "error" "Invalid selection. Please try again (attempt $attempts/$max_attempts)."
                 interactive_sleep 1
@@ -1195,10 +1202,18 @@ main() {
             # Check for modified tracked files (excluding allowed config/template/mask files)
             MODIFIED_FILES=$(git diff --name-only | grep -v -E '^(\.config|camera_settings\.json|\.configTemplate|camera_settings_template\.json|mask\.bmp)$' || true)
             
-            if [[ "$REMOTE_SHA" == "$LOCAL_SHA" && -z "$MODIFIED_FILES" ]]; then
+            # The commit the compiled modules were built from. A branch changed with git directly (e.g.
+            #   'git checkout prerelease') is already at the remote commit, but its modules are still those of
+            #   the old branch, and RMS then fails to import them
+            BUILT_SHA=$(cat "$BUILD_STAMP_FILE" 2>/dev/null || true)
+
+            if [[ "$REMOTE_SHA" == "$LOCAL_SHA" && -z "$MODIFIED_FILES" && "$BUILT_SHA" == "$LOCAL_SHA" ]]; then
                 print_status "success" "Nothing new on $RMS_BRANCH and no tracked file modifications - exiting."
                 print_status "info" "Use './Scripts/RMS_Update.sh --force' to force rebuild and reinstall."
                 exit 0
+            elif [[ "$REMOTE_SHA" == "$LOCAL_SHA" && -z "$MODIFIED_FILES" ]]; then
+                print_status "info" "Repository up to date, but the compiled modules were not built from $LOCAL_SHA"
+                print_status "info" "Proceeding with update to rebuild them"
             elif [[ "$REMOTE_SHA" == "$LOCAL_SHA" && -n "$MODIFIED_FILES" ]]; then
                 print_status "info" "Repository up to date but tracked files modified:"
                 echo "$MODIFIED_FILES" | sed 's/^/  /'
@@ -1463,6 +1478,10 @@ main() {
     # Perform cleanup operations before updating
     print_header "Cleaning Build Environment"
 
+    # Forget the commit of the previous build before anything installed is removed, so an update that fails or
+    #   is interrupted from here on (cleanup, dependencies, build) is not taken as built by the next one
+    rm -f "$BUILD_STAMP_FILE" 2>/dev/null || true
+
     # Remove any stale global or egg installs of RMS before we rebuild
     print_status "info" "Clearing old RMS installs from site-packages…"
     python -m pip uninstall -y RMS 2>/dev/null || true
@@ -1535,7 +1554,7 @@ PY
 
     print_header "Running Setup"
     print_status "info" "Building RMS (this may take a while)..."
-    
+
     # Try build with multiple recovery attempts
     local build_attempts=0
     local max_build_attempts=2
@@ -1546,7 +1565,7 @@ PY
             build_success=true
             break
         else
-            ((build_attempts++))
+            build_attempts=$((build_attempts + 1))
             if (( build_attempts < max_build_attempts )); then
                 print_status "warning" "Build failed (attempt $build_attempts/$max_build_attempts). Cleaning and retrying..."
                 # Clean build artifacts and try again
@@ -1576,7 +1595,12 @@ PY
     fi
     
     print_status "success" "Build completed successfully"
-    
+
+    # Record the commit the compiled modules were built from, for the early check of the next update
+    if ! { mkdir -p "$RMSBACKUPDIR" && git rev-parse HEAD > "$BUILD_STAMP_FILE"; } 2>/dev/null; then
+        print_status "warning" "Could not record the built commit in $BUILD_STAMP_FILE"
+    fi
+
     # Print the update report
     print_update_report
     print_status "success" "Update process completed successfully!"

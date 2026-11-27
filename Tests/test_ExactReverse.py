@@ -1,0 +1,559 @@
+""" Tests that raDecToXYPP with exact_reverse is the exact inverse of xyToRaDecPP.
+
+For every distortion type and every combination of its flags (equal aspect, asymmetry, forced centre and, for the
+radial models, decentering), a platepar with a few pixels of distortion takes a grid of image points to the sky and
+back. Without refraction the round trip has to close to 1e-9 px. With refraction it can only close if the
+sky -> image refraction is the exact inverse of the image -> sky one; where it is not, that test is skipped.
+
+Also tested: a sky point the forward distortion cannot reach comes back as NaN (also where a folded sheet of
+the mapping has a solution inside the frame), such a point does not throw the pointing fit off, the centre of
+the projection has an image, fitAstrometry with the option returns the platepar that generated noise-free
+stars, through its forward mapping, and a fit of the pointing alone goes through the platepar's own mapping.
+
+Run with pytest:
+    python -m pytest Tests/test_ExactReverse.py -v
+"""
+
+from __future__ import print_function, division, absolute_import
+
+import copy
+import itertools
+import json
+
+import numpy as np
+import pytest
+from scipy.spatial import Delaunay
+
+import RMS.Astrometry.ApplyAstrometry as astrometry
+from RMS.Astrometry.Conversions import JD2HourAngle, JD2LST
+from RMS.Astrometry.CyFunctions import pyRefractionApparentToTrue, pyRefractionTrueToApparent
+from RMS.Formats.Platepar import Platepar
+
+
+JD = 2461070.9
+TOLERANCE_PX = 1e-9
+
+# A few pixels of distortion in each term, all on the rising branch of the radial models over the whole frame
+RADIAL_K = {
+    "odd": [-0.08, 0.01, -0.002, 0.0004],
+    "all": [-0.02, -0.06, 0.008, -0.001],
+}
+POLY_X = [0.5, 1e-3, 5e-4, 2e-6, 1e-6, -1e-6, 1e-9, 2e-9, -1e-9, 1e-9, -1e-5, 2e-6, -1e-11, 1e-17]
+POLY_Y = [-0.3, 4e-4, -1e-3, 1e-6, -2e-6, 1e-6, -1e-9, 1e-9, 2e-9, -1e-9, -1e-5, -2e-6, -1e-11, 1e-17]
+
+
+def _platepar(dist_type, equal_aspect=True, asymmetry_corr=False, force_centre=False, decentering=False,
+    refraction=True):
+    """ A 1280x720 camera with an 82 deg wide field 60 deg above the horizon and the given distortion. """
+
+    pp = Platepar()
+    pp.lat, pp.lon, pp.elev = 45.0, 15.0, 300.0
+    pp.X_res, pp.Y_res = 1280, 720
+    pp.JD = JD
+    pp.Ho = JD2HourAngle(JD)
+    pp.RA_d = JD2LST(JD, pp.lon)[0]
+    pp.dec_d = pp.lat - 30.0
+    pp.pos_angle_ref = 30.0
+    pp.F_scale = 15.6
+    pp.refraction = refraction
+
+    # The annual aberration is off: its inverse in the star path closes to ~1 mas, and the round trips here test
+    #   the distortion (and the refraction) to 1e-9 px
+    pp.aberration = False
+
+    # The flags first: setDistortionType sizes the arrays from them
+    pp.equal_aspect = equal_aspect
+    pp.asymmetry_corr = asymmetry_corr
+    pp.force_distortion_centre = force_centre
+    pp.decentering_corr = decentering
+    pp.setDistortionType(dist_type, reset_params=True)
+
+    if dist_type.startswith("poly"):
+        pp.x_poly_fwd = np.array(POLY_X[:pp.poly_length])
+        pp.y_poly_fwd = np.array(POLY_Y[:pp.poly_length])
+
+    else:
+        coeffs = []
+        if not force_centre:
+            coeffs += [0.01, -0.008]
+        if not equal_aspect:
+            coeffs += [0.004]
+        if asymmetry_corr:
+            coeffs += [0.01, 0.3]
+        coeffs += RADIAL_K["odd" if dist_type.endswith("odd") else "all"][:pp.radialTermCount(dist_type)]
+        if decentering:
+            coeffs += [0.002, -0.001, 0.0005, -0.0003]
+        assert len(coeffs) == pp.poly_length
+        pp.x_poly_fwd = np.array(coeffs)
+
+    # The reverse polynomial is not used with exact_reverse; a copy of the forward one stands in for it
+    pp.x_poly_rev = np.array(pp.x_poly_fwd)
+    pp.y_poly_rev = np.array(pp.y_poly_fwd)
+    pp.exact_reverse = True
+
+    return pp
+
+
+def _roundTrip(pp):
+    """ Largest distance (px) of a grid of image points from where sky -> image puts them back. """
+
+    gx, gy = (v.ravel() for v in np.meshgrid(np.linspace(20, pp.X_res - 20, 25),
+        np.linspace(20, pp.Y_res - 20, 15)))
+    gx, gy = np.append(gx, pp.X_res/2.0), np.append(gy, pp.Y_res/2.0)
+
+    _, ra, dec, _ = astrometry.xyToRaDecPP(np.full(gx.size, JD), gx, gy, np.ones(gx.size), pp,
+        extinction_correction=False, jd_time=True)
+    x, y = astrometry.raDecToXYPP(np.array(ra), np.array(dec), JD, pp)
+
+    return np.max(np.hypot(np.array(x) - gx, np.array(y) - gy))
+
+
+def _cases():
+    """ Every distortion type with every combination of the flags it takes. """
+
+    for dist_type in Platepar().distortion_type_list:
+        if dist_type.startswith("poly"):
+            yield dist_type, True, False, False, False
+        else:
+            for flags in itertools.product([True, False], repeat=4):
+                yield (dist_type,) + flags
+
+
+def _refractionInverts():
+    """ Whether the sky -> image refraction is the exact inverse of the image -> sky one. """
+
+    elev = np.radians(np.array([2.0, 10.0, 30.0, 60.0]))
+    back = np.array([pyRefractionApparentToTrue(pyRefractionTrueToApparent(e)) for e in elev])
+
+    return np.max(np.abs(back - elev)) < 1e-12
+
+
+@pytest.mark.parametrize("dist_type,equal_aspect,asymmetry_corr,force_centre,decentering", list(_cases()))
+def test_the_round_trip_closes_without_refraction(dist_type, equal_aspect, asymmetry_corr, force_centre,
+    decentering):
+
+    pp = _platepar(dist_type, equal_aspect, asymmetry_corr, force_centre, decentering, refraction=False)
+
+    assert _roundTrip(pp) < TOLERANCE_PX
+
+
+@pytest.mark.parametrize("dist_type,equal_aspect,asymmetry_corr,force_centre,decentering", list(_cases()))
+def test_the_round_trip_closes_with_refraction(dist_type, equal_aspect, asymmetry_corr, force_centre,
+    decentering):
+
+    if not _refractionInverts():
+        pytest.skip("refractionTrueToApparent is not the inverse of refractionApparentToTrue")
+
+    pp = _platepar(dist_type, equal_aspect, asymmetry_corr, force_centre, decentering, refraction=True)
+
+    assert _roundTrip(pp) < TOLERANCE_PX
+
+
+def test_the_option_is_off_by_default():
+
+    assert Platepar().exact_reverse is False
+
+
+def test_the_option_is_saved_and_older_platepars_load_it_off(tmp_path):
+    """ The option is saved with the platepar, and a platepar written before it existed loads with it off. """
+
+    # Saved and read back on
+    path = str(tmp_path/"platepar.cal")
+    _platepar("radial5-odd").write(path)
+    loaded = Platepar()
+    loaded.read(path)
+    assert loaded.exact_reverse is True
+
+    # The same file without the option, as written before it existed
+    with open(path) as f:
+        platepar_dict = json.load(f)
+    del platepar_dict["exact_reverse"]
+    with open(path, "w") as f:
+        json.dump(platepar_dict, f)
+
+    loaded = Platepar()
+    loaded.read(path)
+    assert loaded.exact_reverse is False
+
+
+@pytest.mark.parametrize("decentering", [False, True])
+def test_a_point_beyond_the_reach_of_the_distortion_is_nan(decentering):
+    """ A strong barrel distortion folds back past the frame: sky beyond its first maximum has no image, also
+        with decentering (where the model, folded twice, would put it on the far side of the frame). """
+
+    # The radial coefficient, before the decentering ones
+    pp = _platepar("radial3-odd", decentering=decentering, refraction=False)
+    pp.x_poly_fwd[-5 if decentering else -1] = -0.3
+
+    # Far outside the field, and the field centre for comparison
+    _, ra, dec, _ = astrometry.xyToRaDecPP(np.full(1, JD), np.array([pp.X_res/2.0]), np.array([pp.Y_res/2.0]),
+        np.ones(1), pp, extinction_correction=False, jd_time=True)
+    x, y = astrometry.raDecToXYPP(np.array([ra[0], ra[0]]), np.array([dec[0], dec[0] - 55.0]), JD, pp)
+
+    assert np.isfinite(x[0]) and np.isfinite(y[0])
+    assert np.isnan(x[1]) and np.isnan(y[1])
+
+
+@pytest.mark.parametrize("decentering", [False, True])
+def test_a_point_past_the_first_fold_has_no_image(decentering):
+    """ A barrel distortion strong enough to fold inside the frame (radial3-odd, k1 = -2, the distortion
+        centre in the middle of the frame: the corrected radius peaks at 0.27 half widths, 0.41 half widths
+        from the centre) takes the image point 0.958 half widths left of the centre, past the fold, to the
+        corrected point 0.8 half widths right of it. That sky point is beyond the reach of the distortion and
+        has no image, although the folded sheet has a solution inside the frame with the orientation of the
+        image. Also with decentering (its coefficients zero), where Newton's method finds that solution, which
+        is then dropped as a fold lies between it and the distortion centre. A point before the fold comes
+        back to its pixel. """
+
+    # No offset of the distortion centre, k1 = -2, and no decentering
+    pp = _platepar("radial3-odd", decentering=decentering, refraction=False)
+    pp.x_poly_fwd[:] = 0.0
+    pp.x_poly_fwd[2] = -2.0
+    pp.x_poly_rev = np.array(pp.x_poly_fwd)
+
+    # Image points on the horizontal line through the centre, in half widths from it: past the fold and
+    #   before it
+    gx = pp.X_res/2.0*(1 + np.array([-0.9579033, 0.3]))
+    gy = np.full(2, pp.Y_res/2.0)
+    _, ra, dec, _ = astrometry.xyToRaDecPP(np.full(2, JD), gx, gy, np.ones(2), pp,
+        extinction_correction=False, jd_time=True)
+    x, y = astrometry.raDecToXYPP(np.array(ra), np.array(dec), JD, pp)
+
+    assert np.isnan(x[0]) and np.isnan(y[0])
+    assert np.hypot(x[1] - gx[1], y[1] - gy[1]) < 1e-6
+
+
+def test_a_polynomial_point_past_the_first_fold_has_no_image():
+    """ The same fold made by a polynomial (poly3+radial, the third order terms x**3, x*y**2 in X and x**2*y,
+        y**3 in Y at -2/640**2, all else zero: the corrected radius peaks at 0.27 half widths, 0.41 half widths
+        from the centre). The image point 0.958 half widths left of the centre goes to the corrected point 0.8
+        half widths right of it, beyond the reach of the distortion: Newton's method finds that folded solution
+        inside the frame with the orientation of the image, and it is dropped. A point before the fold comes back
+        to its pixel. """
+
+    pp = _platepar("poly3+radial", refraction=False)
+    pp.x_poly_fwd[:] = 0.0
+    pp.y_poly_fwd[:] = 0.0
+    pp.x_poly_fwd[6] = pp.x_poly_fwd[8] = -2.0/640**2
+    pp.y_poly_fwd[7] = pp.y_poly_fwd[9] = -2.0/640**2
+    pp.x_poly_rev = np.array(pp.x_poly_fwd)
+    pp.y_poly_rev = np.array(pp.y_poly_fwd)
+
+    # Image points on the horizontal line through the centre, in half widths from it: past the fold and before it
+    gx = pp.X_res/2.0*(1 + np.array([-0.95790328, 0.3, -0.3]))
+    gy = np.full(3, pp.Y_res/2.0)
+    _, ra, dec, _ = astrometry.xyToRaDecPP(np.full(3, JD), gx, gy, np.ones(3), pp, extinction_correction=False,
+        jd_time=True)
+    x, y = astrometry.raDecToXYPP(np.array(ra), np.array(dec), JD, pp)
+
+    assert np.isnan(x[0]) and np.isnan(y[0])
+    assert np.max(np.hypot(x[1:] - gx[1:], y[1:] - gy[1:])) < 1e-6
+
+
+def test_a_polynomial_shear_is_not_a_fold():
+    """ A polynomial that shears the image without folding it (poly3+radial with only the x**2 term in Y at 0.12,
+        (X, Y) = (x, y + 0.12*x**2): the Jacobian determinant is 1 everywhere) takes the image point 300 px below
+        and 50 px right of the centre to the corrected point 50 px right of it. Newton's method moves far from
+        the inverse of the linear part to find it, and the point comes back to its pixel: the distance from the
+        corrected origin shrinks along the way, but the orientation of the mapping never changes. """
+
+    pp = _platepar("poly3+radial", refraction=False)
+    pp.x_poly_fwd[:] = 0.0
+    pp.y_poly_fwd[:] = 0.0
+    pp.y_poly_fwd[3] = 0.12
+    pp.x_poly_rev = np.array(pp.x_poly_fwd)
+    pp.y_poly_rev = np.array(pp.y_poly_fwd)
+
+    gx = np.array([pp.X_res/2.0 + 50.0])
+    gy = np.array([pp.Y_res/2.0 - 300.0])
+    _, ra, dec, _ = astrometry.xyToRaDecPP(np.full(1, JD), gx, gy, np.ones(1), pp, extinction_correction=False,
+        jd_time=True)
+    x, y = astrometry.raDecToXYPP(np.array(ra), np.array(dec), JD, pp)
+
+    assert np.hypot(x[0] - gx[0], y[0] - gy[0]) < 1e-6
+
+
+def test_decentering_that_lowers_the_maximum_leaves_no_image_past_the_fold():
+    """ The same fold with a decentering term (p1 = -0.02), which on the right of the centre lowers the maximum of
+        the corrected radius below that of the radial part alone. Image points on the far sheet, 0.826 to 0.830
+        half widths left of the centre, map to corrected points on the right near that maximum. Those below it
+        have an image before the fold; those above it, between the two maxima, have none, although the inverse
+        of the radial part gives them a seed on its rising branch, from which Newton's method can end on the
+        far sheet, inside the frame. The maximum is taken from the forward mapping along the ray. """
+
+    from RMS.Math import angularSeparation
+
+    # No offset of the distortion centre, k1 = -2, and only the first decentering coefficient
+    pp = _platepar("radial3-odd", decentering=True, refraction=False)
+    pp.x_poly_fwd[:] = 0.0
+    pp.x_poly_fwd[2] = -2.0
+    pp.x_poly_fwd[3] = -0.02
+    pp.x_poly_rev = np.array(pp.x_poly_fwd)
+
+    def _sky(u):
+        # Sky points of image points on the horizontal line through the centre (u in half widths from it)
+        _, ra, dec, _ = astrometry.xyToRaDecPP(np.full(len(u), JD), pp.X_res/2.0*(1 + u),
+            np.full(len(u), pp.Y_res/2.0), np.ones(len(u)), pp, extinction_correction=False, jd_time=True)
+        return np.array(ra), np.array(dec)
+
+    # The distance from the sky point of the distortion centre, which grows with the corrected radius
+    ra_c, dec_c = _sky(np.zeros(1))
+
+    def _sep(ra, dec):
+        return angularSeparation(np.radians(ra_c[0]), np.radians(dec_c[0]), np.radians(ra), np.radians(dec))
+
+    # The fold on the right: the largest distance reached before it, and where
+    t = np.linspace(0.0, 0.5, 50001)
+    sep_t = _sep(*_sky(t))
+    r_fold, sep_max = t[np.argmax(sep_t)], np.max(sep_t)
+
+    # The far-sheet points mapped back
+    u = np.linspace(-0.830, -0.826, 4001)
+    ra, dec = _sky(u)
+    sep = _sep(ra, dec)
+    x, y = astrometry.raDecToXYPP(ra, dec, JD, pp)
+    ux = (x - pp.X_res/2.0)/(pp.X_res/2.0)
+
+    # Both kinds are present, the sky points within reach come back before the fold, and the others have no image
+    reach = sep < sep_max
+    assert 0 < np.count_nonzero(reach) < len(u)
+    assert np.all(np.isfinite(ux[reach]))
+    assert np.all((ux[reach] > 0) & (ux[reach] <= r_fold))
+    assert np.all(np.isnan(ux[~reach]))
+
+
+def test_decentering_keeps_points_beyond_the_radial_maximum_that_have_an_image():
+    """ The decentering can carry the mapping past the maximum of its radial part alone while the whole mapping
+        still rises (near the edge of the frame): such points have an image and come back to it. """
+
+    # A strong barrel distortion with a decentering term and no other decentering, the distortion centre in the
+    #   middle of the frame
+    pp = _platepar("radial3-odd", force_centre=True, decentering=True, refraction=False)
+    pp.x_poly_fwd[-5] = -0.3
+    pp.x_poly_fwd[-4:] = [0.005, 0.0, 0.0, 0.0]
+
+    # An image point near the right edge, whose corrected radius is beyond the maximum of the radial part alone
+    gx, gy = np.array([pp.X_res/2.0*(1 + 0.99)]), np.array([pp.Y_res/2.0])
+    _, ra, dec, _ = astrometry.xyToRaDecPP(np.full(1, JD), gx, gy, np.ones(1), pp, extinction_correction=False,
+        jd_time=True)
+    x, y = astrometry.raDecToXYPP(ra, dec, JD, pp)
+
+    assert np.isfinite(x[0]) and np.isfinite(y[0])
+    assert np.hypot(x[0] - gx[0], y[0] - gy[0]) < 1e-6
+
+
+def test_an_asymmetry_larger_than_one_over_negligible_radial_terms_inverts():
+    """ A fit can leave the asymmetry free over almost zero radial terms (one radial7-odd platepar in the field
+        has a1 = -10.86, a2 = 0.2857, k = 3.2e-5, -6.3e-8, -2.0e-10): the scale factor of the radial function is
+        then negative in many directions, while the mapping itself stays close to the identity. Every point of
+        the frame comes back to its pixel. """
+
+    pp = _platepar("radial7-odd", asymmetry_corr=True, refraction=False)
+    # The coefficients after the distortion centre: a1, a2, then the three radial terms
+    pp.x_poly_fwd[-5:] = [-10.86, 0.2857, 3.2e-5, -6.3e-8, -2.0e-10]
+    pp.x_poly_rev = np.array(pp.x_poly_fwd)
+
+    assert _roundTrip(pp) < 1e-6
+
+
+def test_the_centre_of_the_projection_has_an_image():
+    """ A sky point at the centre of the projection has no direction from it (0/0), but still an image: the
+        point the forward distortion takes to that centre. Several pointings, as rounding puts the point
+        exactly on the centre for only some of them. """
+
+    for exact_reverse in (True, False):
+        for dec_offset in np.linspace(-80.0, 30.0, 12):
+            pp = _platepar("radial3-odd", force_centre=True, refraction=False)
+            pp.dec_d = pp.lat + dec_offset
+            pp.exact_reverse = exact_reverse
+
+            # The forced distortion centre, half a pixel off the image centre, is the image of the centre of
+            #   the projection
+            x_c, y_c = pp.X_res/2.0 + 0.5, pp.Y_res/2.0 + 0.5
+            _, ra, dec, _ = astrometry.xyToRaDecPP(np.full(1, JD), np.array([x_c]), np.array([y_c]),
+                np.ones(1), pp, extinction_correction=False, jd_time=True)
+            x, y = astrometry.raDecToXYPP(np.array(ra), np.array(dec), JD, pp)
+
+            assert np.hypot(x[0] - x_c, y[0] - y_c) < 1e-4
+
+
+def test_a_star_without_image_does_not_throw_off_the_pointing_fit():
+    """ A catalog star beyond the reach of the distortion has no image (NaN). Paired with an image star, it must
+        not make the pointing fit NaN: the other stars still give the pointing. """
+
+    true_pp = _platepar("radial3-odd", refraction=False)
+    true_pp.x_poly_fwd[-1] = -0.3
+
+    gx, gy = (v.ravel() for v in np.meshgrid(np.linspace(200, true_pp.X_res - 200, 6),
+        np.linspace(150, true_pp.Y_res - 150, 4)))
+    _, ra, dec, _ = astrometry.xyToRaDecPP(np.full(gx.size, JD), gx, gy, np.ones(gx.size), true_pp,
+        extinction_correction=False, jd_time=True)
+
+    # One more pair, whose catalog star is far outside the field, beyond the reach of the distortion
+    img_stars = np.column_stack([np.append(gx, true_pp.X_res/2.0), np.append(gy, true_pp.Y_res/2.0),
+        np.ones(gx.size + 1)])
+    catalog_stars = np.column_stack([np.append(ra, ra[0]), np.append(dec, dec[0] - 55.0), np.ones(gx.size + 1)])
+
+    pp = copy.deepcopy(true_pp)
+    pp.RA_d += 0.3
+    pp.dec_d -= 0.2
+    pp.pos_angle_ref += 0.5
+    pp.fitPointing(JD, img_stars, catalog_stars, fixed_scale=True)
+
+    assert abs(pp.RA_d - true_pp.RA_d) < 1e-4
+    assert abs(pp.dec_d - true_pp.dec_d) < 1e-4
+    assert abs(pp.pos_angle_ref - true_pp.pos_angle_ref) < 1e-4
+
+
+def test_a_star_without_image_does_not_stop_the_full_fit():
+    """ The same unreachable pair in a full fit of a radial model (pointing and distortion): the refinement of
+        the pointing on the image residuals gets a finite residual for it, as the pointing fit does, so the fit
+        completes with a finite platepar (least squares refuses NaN residuals: "Residuals are not finite in the
+        initial point"). The pair is 55 deg off on the sky, where the distortion is fitted, so only that the fit
+        completes is tested here. """
+
+    true_pp = _platepar("radial3-odd", refraction=False)
+    true_pp.x_poly_fwd[-1] = -0.3
+
+    gx, gy = (v.ravel() for v in np.meshgrid(np.linspace(200, true_pp.X_res - 200, 6),
+        np.linspace(150, true_pp.Y_res - 150, 4)))
+    _, ra, dec, _ = astrometry.xyToRaDecPP(np.full(gx.size, JD), gx, gy, np.ones(gx.size), true_pp,
+        extinction_correction=False, jd_time=True)
+
+    img_stars = np.column_stack([np.append(gx, true_pp.X_res/2.0), np.append(gy, true_pp.Y_res/2.0),
+        np.ones(gx.size + 1)])
+    catalog_stars = np.column_stack([np.append(ra, ra[0]), np.append(dec, dec[0] - 55.0), np.ones(gx.size + 1)])
+
+    pp = copy.deepcopy(true_pp)
+    pp.RA_d += 0.03
+    pp.dec_d -= 0.02
+    pp.pos_angle_ref += 0.05
+    pp.fitAstrometry(JD, img_stars, catalog_stars)
+
+    assert np.isfinite([pp.RA_d, pp.dec_d, pp.pos_angle_ref, pp.F_scale]).all()
+    assert np.isfinite(pp.x_poly_fwd).all() and np.isfinite(pp.x_poly_rev).all()
+
+
+@pytest.mark.parametrize("dist_type", ["radial5-odd", "radial7-odd", "poly3+radial3"])
+def test_fitting_returns_the_forward_mapping_that_made_the_stars(dist_type):
+    """ Noise-free stars made through the forward mapping, refitted with exact_reverse from a perturbed platepar.
+
+    Compared where the stars constrain the fit, inside their convex hull, the fit stops within 0.01 px of the
+    truth (below 0.001 px for radial5-odd and radial7-odd with scipy 1.16, 0.004-0.006 px with scipy 1.14, and
+    0.010 px for poly3+radial3 with both). The pointing and the distortion centre, or the linear terms of the
+    polynomial, trade off along a nearly flat valley, so where the fit stops depends on the scipy version, and
+    beyond the stars, at the corners of the frame, poly3+radial3 is off by 0.03 to 0.09 px. Far below any
+    centroiding noise.
+    """
+
+    true_pp = _platepar(dist_type, refraction=False)
+
+    rng = np.random.default_rng(1)
+    img_x = rng.uniform(40, true_pp.X_res - 40, 60)
+    img_y = rng.uniform(40, true_pp.Y_res - 40, 60)
+    _, ra, dec, _ = astrometry.xyToRaDecPP(np.full(img_x.size, JD), img_x, img_y, np.ones(img_x.size), true_pp,
+        extinction_correction=False, jd_time=True)
+    img_stars = np.column_stack([img_x, img_y, np.ones(img_x.size)])
+    catalog_stars = np.column_stack([np.array(ra), np.array(dec), np.ones(img_x.size)])
+
+    pp = copy.deepcopy(true_pp)
+    pp.RA_d += 0.05
+    pp.dec_d -= 0.03
+    pp.pos_angle_ref += 0.1
+    pp.x_poly_fwd = pp.x_poly_fwd*0.9
+    pp.y_poly_fwd = pp.y_poly_fwd*0.9
+    pp.fitAstrometry(JD, img_stars, catalog_stars)
+
+    # Compared through the forward mapping, on the points of a grid over the frame inside the stars
+    gx, gy = (v.ravel() for v in np.meshgrid(np.linspace(40, pp.X_res - 40, 12), np.linspace(40, pp.Y_res - 40, 8)))
+    inside = Delaunay(np.column_stack([img_x, img_y])).find_simplex(np.column_stack([gx, gy])) >= 0
+    gx, gy = gx[inside], gy[inside]
+    _, ra_true, dec_true, _ = astrometry.xyToRaDecPP(np.full(gx.size, JD), gx, gy, np.ones(gx.size), true_pp,
+        extinction_correction=False, jd_time=True)
+    x, y = astrometry.raDecToXYPP(np.array(ra_true), np.array(dec_true), JD, pp)
+
+    assert np.max(np.hypot(np.array(x) - gx, np.array(y) - gy)) < 0.05
+
+
+@pytest.mark.parametrize("dist_type", ["poly3+radial", "poly3+radial3", "poly3+radial5"])
+def test_the_reverse_polynomial_follows_the_final_pointing(dist_type):
+    """ A polynomial fitted with exact_reverse refines its pointing through the exact inverse after the reverse
+        polynomial was fitted; the reverse polynomial is then refitted to the final pointing, so a reader that
+        does not know the option (or SkyFit2 with the option unticked) puts the stars on their pixels: within
+        0.02 px (0.005-0.008 px measured; 0.046 px for poly3+radial5 with the reverse polynomial left at the
+        first pointing). """
+
+    true_pp = _platepar(dist_type, refraction=False)
+
+    rng = np.random.default_rng(1)
+    img_x = rng.uniform(40, true_pp.X_res - 40, 60)
+    img_y = rng.uniform(40, true_pp.Y_res - 40, 60)
+    _, ra, dec, _ = astrometry.xyToRaDecPP(np.full(img_x.size, JD), img_x, img_y, np.ones(img_x.size), true_pp,
+        extinction_correction=False, jd_time=True)
+    img_stars = np.column_stack([img_x, img_y, np.ones(img_x.size)])
+    catalog_stars = np.column_stack([np.array(ra), np.array(dec), np.ones(img_x.size)])
+
+    pp = copy.deepcopy(true_pp)
+    pp.RA_d += 0.05
+    pp.dec_d -= 0.03
+    pp.pos_angle_ref += 0.1
+    pp.x_poly_fwd = pp.x_poly_fwd*0.9
+    pp.y_poly_fwd = pp.y_poly_fwd*0.9
+    pp.fitAstrometry(JD, img_stars, catalog_stars)
+    assert pp.exact_reverse
+
+    # The catalog stars through the reverse polynomial, as without the option
+    rev = copy.deepcopy(pp)
+    rev.exact_reverse = False
+    x, y = astrometry.raDecToXYPP(catalog_stars[:, 0], catalog_stars[:, 1], JD, rev)
+
+    assert np.max(np.hypot(np.array(x) - img_x, np.array(y) - img_y)) < 0.02
+
+
+@pytest.mark.parametrize("exact_reverse", [False, True])
+def test_a_fit_of_the_pointing_alone_keeps_the_option(exact_reverse):
+    """ A fit of the pointing alone (fit_only_pointing, fitPointing, or too few stars to fit the distortion)
+        keeps the option and the distortion of the platepar, and fits the pointing through the platepar's own
+        mapping from the sky to the image. """
+
+    # A reverse distortion far from the inverse of the forward one, so that the mapping the pointing is fitted
+    #   through matters
+    true_pp = _platepar("poly3+radial", refraction=False)
+    true_pp.x_poly_rev = 0.5*true_pp.x_poly_fwd
+    true_pp.y_poly_rev = 0.5*true_pp.y_poly_fwd
+    true_pp.exact_reverse = exact_reverse
+
+    # A fit models the annual aberration (it turns the flag on), so the stars are made with it
+    true_pp.aberration = True
+
+    # Fewer stars than the distortion needs, where the platepar puts them
+    gx, gy = (v.ravel() for v in np.meshgrid(np.linspace(150, true_pp.X_res - 150, 4),
+        np.linspace(100, true_pp.Y_res - 100, 3)))
+    assert gx.size < true_pp.poly_length + 1
+    _, ra, dec, _ = astrometry.xyToRaDecPP(np.full(gx.size, JD), gx, gy, np.ones(gx.size), true_pp,
+        extinction_correction=False, jd_time=True)
+    ra, dec = np.array(ra), np.array(dec)
+    x, y = astrometry.raDecToXYPP(ra, dec, JD, true_pp)
+    img_stars = np.column_stack([x, y, np.ones(gx.size)])
+    catalog_stars = np.column_stack([ra, dec, np.ones(gx.size)])
+
+    fits = [
+        lambda pp: pp.fitAstrometry(JD, img_stars, catalog_stars, fit_only_pointing=True),
+        lambda pp: pp.fitPointing(JD, img_stars, catalog_stars),
+        lambda pp: pp.fitAstrometry(JD, img_stars, catalog_stars),
+    ]
+    for fit in fits:
+
+        # From a perturbed pointing
+        pp = copy.deepcopy(true_pp)
+        pp.RA_d += 0.3
+        pp.dec_d -= 0.2
+        pp.pos_angle_ref += 0.5
+        fit(pp)
+
+        assert pp.exact_reverse is exact_reverse
+        for name in ("x_poly_fwd", "y_poly_fwd", "x_poly_rev", "y_poly_rev"):
+            assert np.array_equal(getattr(pp, name), getattr(true_pp, name))
+        assert abs(pp.RA_d - true_pp.RA_d) < 1e-4
+        assert abs(pp.dec_d - true_pp.dec_d) < 1e-4
+        assert abs(pp.pos_angle_ref - true_pp.pos_angle_ref) < 1e-4

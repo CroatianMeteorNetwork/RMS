@@ -11,6 +11,30 @@ import numpy as np
 from RMS.Formats.FTStruct import FTStruct
 
 
+# One entry of an FT file: the frame counter and the Unix time of the frame, packed as write() writes them
+FT_ENTRY_DTYPE = np.dtype([('frame', np.uint32), ('time', np.float64)])
+
+
+def readBuffer(data):
+    """ Read the contents of an FT*.bin file (e.g. a member of an archive read without extracting it).
+
+    Arguments:
+        data: [bytes] Contents of the file.
+
+    Return:
+        (frame_numbers, timestamps): [tuple of ndarray] The frame counters and the Unix times of the frames.
+    """
+
+    # The number of frames, then the entries
+    n_frames = int(np.frombuffer(data, dtype=np.uint32, count=1)[0])
+    if len(data) < 4 + n_frames*FT_ENTRY_DTYPE.itemsize:
+        raise ValueError("The FT file is shorter than its {:d} frames".format(n_frames))
+
+    entries = np.frombuffer(data, dtype=FT_ENTRY_DTYPE, count=n_frames, offset=4)
+
+    return entries['frame'].astype(np.int64), entries['time'].astype(np.float64)
+
+
 def read(directory, filename):
     """ Read FT*.bin file from the specified directory.
 
@@ -25,16 +49,10 @@ def read(directory, filename):
     filepath = os.path.join(directory, filename)
 
     with open(filepath, "rb") as ft_file:
-        ft = FTStruct()
-        
-        # Read number of frames
-        n_frames = int(np.fromfile(ft_file, dtype=np.uint32, count=1))
+        frame_numbers, timestamps = readBuffer(ft_file.read())
 
-        # Read timestamps
-        for _ in range(n_frames):
-            frame_number = int(np.fromfile(ft_file, dtype=np.uint32, count=1))
-            timestamp = float(np.fromfile(ft_file, dtype=np.float64, count=1))
-            ft.timestamps.append((frame_number, timestamp))
+    ft = FTStruct()
+    ft.timestamps = list(zip(frame_numbers.tolist(), timestamps.tolist()))
 
     return ft
 

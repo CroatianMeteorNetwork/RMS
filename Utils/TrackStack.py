@@ -23,6 +23,7 @@ from RMS.Routines.MaskImage import loadMask, MaskStructure
 import multiprocessing as mp
 import ctypes
 from RMS.QueuedPool import QueuedPool
+from RMS.Misc import setMultiprocessingStartMethod
 import time
 import datetime
 
@@ -273,14 +274,21 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
                                                                                    pp_ref, img_size, jd_middle, pp_stack, config,
                                                                                    avg_stack_sum_shared, avg_stack_count_shared, max_deaveraged_shared,
                                                                                    background_compensation, finished_count, num_ffs))
-    thead_pool.startPool()
-    # add jobs
-    for i, ff_name in enumerate(enumlist):
-        if shouldInclude(showers, ff_name, associations):
-            num_plotted += 1
-            thead_pool.addJob([ff_name])
-    printProgress(0, num_plotted)
-    thead_pool.closePool()
+    pool_closed = False
+    try:
+        thead_pool.startPool()
+        # add jobs
+        for i, ff_name in enumerate(enumlist):
+            if shouldInclude(showers, ff_name, associations):
+                num_plotted += 1
+                thead_pool.addJob([ff_name])
+        printProgress(0, num_plotted)
+        thead_pool.closePool()
+        pool_closed = True
+    finally:
+        if (not pool_closed) and (thead_pool.pool is not None):
+            thead_pool._shutdownPool()
+        thead_pool.shutdownManager()
 
     # End if the number of plotted FFs is zero
     if num_plotted == 0:
@@ -486,6 +494,11 @@ def getArray(size, shared_arr):
 
 
 if __name__ == "__main__":
+
+    # Pin the multiprocessing start method for consistent behavior across Python versions
+    # (3.6-3.14). Must be done before any Process/Pool is created.
+    setMultiprocessingStartMethod()
+
     # ## PARSE INPUT ARGUMENTS ###
     # Init the command line arguments parser
     arg_parser = argparse.ArgumentParser(description=""" Generate a stack with aligned stars.

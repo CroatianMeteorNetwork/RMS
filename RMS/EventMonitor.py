@@ -32,7 +32,6 @@ import uuid
 import random
 import string
 
-
 from RMS.Astrometry.ApplyAstrometry import xyToRaDecPP, correctVignetting, extinctionCorrectionApparentToTrue
 from matplotlib import pyplot as plt
 from RMS.Routines.MaskImage import loadMask
@@ -65,7 +64,7 @@ from RMS.Formats.CALSTARS import readCALSTARS
 from RMS.Astrometry.Conversions import datetime2JD, geo2Cartesian, altAz2RADec, vectNorm, raDec2Vector, raDec2AltAz
 from RMS.Astrometry.Conversions import latLonAlt2ECEF, AER2LatLonAlt, AEH2Range, ECEF2AltAz, ecef2LatLonAlt, jd2Date
 from RMS.Astrometry.ApplyAstrometry import raDecToXYPP
-from RMS.Logger import getLogger
+from RMS.Logger import getLogger, getLoggingQueue, initChildProcess
 from RMS.Math import angularSeparationVect, angularSeparationDeg
 from RMS.Formats.FFfile import convertFRNameToFF
 from RMS.Formats.Platepar import Platepar
@@ -74,17 +73,20 @@ from Utils.StackFFs import stackFFs
 from Utils.FRbinViewer import view
 from Utils.BatchFFtoImage import batchFFtoImage
 from RMS.CaptureDuration import captureDuration
-from RMS.Misc import sanitise, RmsDateTime, getRmsRootDir, mkdirP
+from RMS.Misc import sanitise, RmsDateTime, getRmsRootDir, mkdirP, AtomicFlag, setParentDeathSignal, \
+    exitIfParentGone, startParentWatch
 from RMS.Formats.FFfile import read
 from matplotlib.dates import DateFormatter
 
 # Import Cython functions
 import pyximport
 pyximport.install(setup_args={'include_dirs':[np.get_include()]})
-from RMS.Astrometry.CyFunctions import cyTrueRaDec2ApparentAltAz
 
 log = getLogger("rmslogger")
 EM_RAISE = False
+
+# Seconds EventMonitor.stop() waits for the process to finish its current check before terminating it
+EVENT_MONITOR_STOP_TIMEOUT = 120
 
 """
 
@@ -766,12 +768,35 @@ class EventMonitor(multiprocessing.Process):
         self.db_conn = self.getConnectionToEventMonitorDB()
         self.upgradeDB(self.db_conn)
         self.check_interval = self.syscon.event_monitor_check_interval
-        self.exit = multiprocessing.Event()
+        self.exit = AtomicFlag()
+
+        # Grab the logging queue on the parent side so the child can re-attach logging
+        # under the 'forkserver'/'spawn' start methods (handlers are not inherited there)
+        self.logging_queue = getLoggingQueue()
+
+        # PID of the logical parent, recorded here because __init__ runs in the parent. The monitor stops when
+        #   the parent is gone (see run())
+        self.parent_pid = os.getpid()
 
         log.info("EventMonitor is starting")
         log.info("Monitoring {} ".format(self.syscon.event_monitor_webpage))
-        log.info("At {:3.2f} minute intervals".format(self.syscon.event_monitor_check_interval))
+        log.info("At {:05.1f} minute intervals".format(self.syscon.event_monitor_check_interval))
         log.info("Reporting data to {}/{}".format(self.syscon.hostname, self.syscon.event_monitor_remote_dir))
+
+    def __getstate__(self):
+        """ Return a picklable representation of the monitor.
+
+        Required under the 'forkserver'/'spawn' start methods (the default on Linux from
+        Python 3.14), where .start() pickles self and sends it to the child. A
+        sqlite3.Connection is not picklable (and must not be shared across processes
+        anyway), so the connections are dropped here; run() opens fresh connections on the
+        child side. Under 'fork' no pickling occurs, so this is never called and the child
+        inherits the connections as before.
+        """
+        state = self.__dict__.copy()
+        state['conn'] = None
+        state['db_conn'] = None
+        return state
 
     def createDB(self):
 
@@ -2456,10 +2481,28 @@ class EventMonitor(multiprocessing.Process):
     def stop(self):
         """ Stops the EventMonitor. """
 
-        self.db_conn.close()
+        # The parent may not hold a live connection (the child owns its own under
+        # 'forkserver'/'spawn'); guard the close accordingly.
+        if getattr(self, 'db_conn', None) is not None:
+            self.db_conn.close()
         time.sleep(2)
         self.exit.set()
-        self.join()
+
+        # Wait for the current check to finish, with a bound: a check stuck in network or file I/O must not
+        #   wedge the shutdown of StartCapture (which keeps the station lock while it hangs, so no restart can
+        #   run)
+        self.join(EVENT_MONITOR_STOP_TIMEOUT)
+
+        # Terminate a process which did not stop in time, and leave it behind if even that does not end it
+        if self.is_alive():
+            log.warning("EventMonitor did not stop within {:d} s, terminating it".format(
+                EVENT_MONITOR_STOP_TIMEOUT))
+            self.terminate()
+            self.join(5)
+            if self.is_alive():
+                log.warning("EventMonitor still alive after terminate, leaving it without joining")
+                return
+
         log.info("EventMonitor has stopped")
 
     def checkDBExists(self):
@@ -2513,10 +2556,29 @@ class EventMonitor(multiprocessing.Process):
 
         """
 
-        # Delay to allow capture to check existing folders - keep the logs tidy
+        # Die with the parent: an orphaned monitor would keep checking for events and uploading after
+        #   StartCapture was killed, next to the monitor of the restarted instance
+        death_signal = setParentDeathSignal()
+
+        # Re-establish logging and signal handling in the child (no-op under 'fork')
+        initChildProcess(self.logging_queue, self.config)
+
+        # Exit if the parent died before the death signal was armed, and keep watching the parent where the
+        #   death signal does not see it (forkserver)
+        exitIfParentGone(self.parent_pid, 'EventMonitor')
+        startParentWatch(self.parent_pid, 'EventMonitor', self.exit, death_signal=death_signal)
+
+        # Open a sqlite connection owned by this (child) process. Under 'forkserver'/'spawn'
+        # the connection from __init__ is not inherited (it was dropped during pickling);
+        # under 'fork' this replaces the inherited connection with a process-local one,
+        # avoiding a connection shared across the fork.
+        self.db_conn = self.getConnectionToEventMonitorDB()
+
+        # Delay to allow capture to check existing folders - keep the logs tidy. The wait is on the exit flag,
+        #   so a stop requested during the delay ends it at once
 
 
-        time.sleep(60)
+        self.exit.wait(60)
         last_check_start_time = RmsDateTime.utcnow()
         while not self.exit.is_set():
             check_start_time = RmsDateTime.utcnow()
@@ -2526,24 +2588,35 @@ class EventMonitor(multiprocessing.Process):
             self.getEventsAndCheck(last_check_start_time,next_check_start_time)
             last_check_start_time = check_start_time
 
-            start_time, duration = captureDuration(self.syscon.latitude, self.syscon.longitude, self.syscon.elevation)
+            start_time, duration = captureDuration(self.syscon.latitude,
+                                                   self.syscon.longitude,
+                                                   self.syscon.elevation,
+                                                   continuous_capture=self.syscon.continuous_capture)
 
             if not isinstance(start_time, bool):
 
                 time_left_before_start = (start_time - RmsDateTime.utcnow())
                 time_left_before_start = time_left_before_start - datetime.timedelta(microseconds=time_left_before_start.microseconds)
-                time_left_before_start_minutes = int(time_left_before_start.total_seconds()/60)
+                time_left_before_start_minutes = time_left_before_start.total_seconds()/60
                 next_check_start_time = (RmsDateTime.utcnow() + datetime.timedelta(minutes=self.check_interval))
                 next_check_start_time_str = next_check_start_time.replace(microsecond=0).strftime('%H:%M:%S')
-                log.info('Next EventMonitor run : {} UTC; {:3.1f} minutes from now'.format(next_check_start_time_str, int(self.check_interval)))
+                log.info('Next EventMonitor run     : {} UTC; {:05.1f} minutes from now'.format(next_check_start_time_str,
+                                                                                         self.check_interval))
                 if time_left_before_start_minutes < 120:
-                    log.debug('Next Capture start    : {} UTC; {:3.1f} minutes from now'.format(str(start_time.strftime('%H:%M:%S')),time_left_before_start_minutes))
+                    log.info('Next night capture start  : {} UTC; {:05.1f} minutes from now'.format(str(start_time.strftime('%H:%M:%S')),
+                                                                                             time_left_before_start_minutes))
                 else:
-                    log.debug('Next Capture start    : {} UTC'.format(str(start_time.strftime('%H:%M:%S'))))
+                    log.info('Next night capture start  : {} UTC'.format(str(start_time.strftime('%H:%M:%S'))))
             else:
                 next_check_start_time = (RmsDateTime.utcnow() + datetime.timedelta(minutes=self.check_interval))
                 next_check_start_time_str = next_check_start_time.replace(microsecond=0).strftime('%H:%M:%S')
-                log.info('Next EventMonitor run : {} UTC {:3.1f} minutes from now'.format(next_check_start_time_str, self.check_interval))
+                log.info('Next EventMonitor run         : {} UTC {:05.1f} minutes from now'.format(next_check_start_time_str,
+                                                                                           self.check_interval))
+                end_time = RmsDateTime.utcnow() + datetime.timedelta(seconds=duration)
+                time_left_before_end_minutes = duration / 60
+                if time_left_before_end_minutes < 120:
+                    log.info('Night capture end         : {} UTC; {:05.1f} minutes from now'.format(str(end_time.strftime('%H:%M:%S')),
+                                                                                             time_left_before_end_minutes))
             # Wait for the next check
             self.exit.wait(60*self.check_interval)
             # Increase the check interval
@@ -3318,9 +3391,11 @@ def calstarRaDecToDict(data_dir_path, config, pp, pp_recal_json, r_target, d_tar
         # Convert to arrays
         jd_arr, x_data, y_data, level_data = np.array(jd_list), np.array(x_list), np.array(y_list), np.array(intens_sum_list)
 
-        # Process data into RaDec and apply magnitude corrections
+        # Process data into RaDec and apply magnitude corrections. The CALSTARS entries are stars, so they go
+        #   through the star path (catalog directions, like the target they are compared with and the image
+        #   coordinates computed back from them below)
         jd, ra, dec, mag_arr = xyToRaDecPP(jd_arr, x_data, y_data, level_data, pp,
-                                       jd_time=True, extinction_correction=True, measurement=True)
+                                       jd_time=True, extinction_correction=True)
 
         for j, x, y, intens_sum, r, d, bg, amp, FWHM, mag, x_cs, y_cs, snr, NSatPX in zip(jd, x_list, y_list,
                                                                 intens_sum_list, ra, dec, bg_lvl_list,
@@ -4256,13 +4331,8 @@ def platepar2AltAz(rp):
 
     """
 
-    RA_d = np.radians(rp.RA_d)
-    dec_d = np.radians(rp.dec_d)
-    JD = rp.JD
-    lat = np.radians(rp.lat)
-    lon = np.radians(rp.lon)
-
-    return np.degrees(cyTrueRaDec2ApparentAltAz(RA_d, dec_d, JD, lat, lon))
+    # RA_d/dec_d are epoch-of-date coordinates, see Platepar.computeRefAltAz
+    return np.array(rp.computeRefAltAz())
 
 def angDif(a1, a2):
 
