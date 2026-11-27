@@ -3171,6 +3171,9 @@ class PlateTool(QtWidgets.QMainWindow):
         self.profile = cProfile.Profile()
         self.keys_pressed = []  # keeps track of all the keys pressed
 
+        # True while runInBackground is executing a long operation
+        self._background_busy = False
+
         ###################################################################################################
         # STATUS BAR ON BOTTOM
 
@@ -13115,11 +13118,54 @@ class PlateTool(QtWidgets.QMainWindow):
         return filtered_indices, filtered_catalog_stars
 
 
+    def _restorePlateparInPlace(self, platepar_obj, saved_platepar):
+        """ Put the values of a saved platepar copy back into the given platepar object and make it the
+            current platepar. Keeping the same object keeps external references (such as the Fit Parameters
+            stash and the distortion dialog) valid.
+
+        Arguments:
+            platepar_obj: [Platepar] The platepar object to restore into.
+            saved_platepar: [Platepar] Deep copy with the values to restore.
+        """
+
+        platepar_obj.__dict__.clear()
+        platepar_obj.__dict__.update(saved_platepar.__dict__)
+        self.platepar = platepar_obj
+
+
+    @staticmethod
+    def _plateparHasDistortion(platepar):
+        """ Check whether a platepar has any non-zero distortion terms beyond its centre/offset slots.
+
+        Arguments:
+            platepar: [Platepar] The platepar to inspect.
+
+        Return:
+            [bool] True if any fitted distortion term is non-zero.
+        """
+
+        if platepar.distortion_type.startswith("radial"):
+            coeffs = platepar.extractRadialCoeffs(platepar.x_poly_fwd)
+            if coeffs is None:
+                return False
+            return any(coeffs.get(k, 0.0) != 0.0 for k in (
+                'xy', 'a1', 'a2', 'k1', 'k2', 'k3', 'k4', 'p1', 'p2', 'p3', 'p4'
+            ))
+
+        return any(
+            np.any(np.asarray(getattr(platepar, name))[1:] != 0.0)
+            for name in ('x_poly_fwd', 'y_poly_fwd')
+        )
+
+
     def tryQuickAlignment(self, pointing_only=False):
         """ Try to align platepar using existing pointing as starting point.
 
         Uses alignPlatepar() to refine pointing, then checks if the fit is good enough
         by counting matched stars. If successful, performs NN-based astrometry fit.
+        If any step fails, the platepar, fit flags and catalog LM are restored to their
+        state before the call and False is returned so the caller can fall back to
+        astrometry.net.
 
         Arguments:
             pointing_only: [bool] If True, skip NN RANSAC distortion fitting and only refine
@@ -13127,6 +13173,40 @@ class PlateTool(QtWidgets.QMainWindow):
 
         Returns:
             success: [bool] True if quick alignment succeeded and we can skip astrometry.net
+        """
+
+        # Snapshot everything a failed attempt could change (the fit forces its own distortion model
+        #   and flags on the platepar before it knows whether it will succeed)
+        platepar_obj = self.platepar
+        saved_platepar = copy.deepcopy(self.platepar)
+        saved_fit_only_pointing = self.fit_only_pointing
+        saved_cat_lim_mag = self.cat_lim_mag
+
+        success = False
+        try:
+            success = self._runQuickAlignment(pointing_only=pointing_only)
+        finally:
+            # Put the user's platepar and settings back after a failure or error, into the same object
+            #   so references held by the Fit Parameters stash and distortion dialog stay valid
+            if not success:
+                self._restorePlateparInPlace(platepar_obj, saved_platepar)
+                self.fit_only_pointing = saved_fit_only_pointing
+
+                if self.cat_lim_mag != saved_cat_lim_mag:
+                    self.cat_lim_mag = saved_cat_lim_mag
+                    self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
+
+        return success
+
+
+    def _runQuickAlignment(self, pointing_only=False):
+        """ Run the quick alignment steps for tryQuickAlignment, which restores the state on failure.
+
+        Keyword arguments:
+            pointing_only: [bool] See tryQuickAlignment.
+
+        Return:
+            success: [bool] True if the quick alignment succeeded.
         """
         print()
         print("Trying quick alignment with existing platepar...")
@@ -13360,6 +13440,12 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale))
             except Exception as e:
                 print("  NN fit failed: {} - falling back to astrometry.net".format(str(e)))
+                return False
+
+            # fitAstrometry returns None when it rejects the NN fit (too few stars, no RANSAC fit, RMSD
+            #   too large); that is a failure, not a successful alignment with zero stars
+            if ransac_result is None:
+                print("  NN fit rejected - falling back to astrometry.net")
                 return False
 
             # Populate paired_stars directly from RANSAC matched pairs
@@ -13891,6 +13977,26 @@ class PlateTool(QtWidgets.QMainWindow):
         return solution
 
 
+    def _applyPointingToOriginalPlatepar(self, original_platepar, solution):
+        """ Put the platepar from before an auto fit back (distortion model, flags, scale) and apply the
+            astrometry.net pointing to it.
+
+            The solved scale is only used when the original platepar has no fitted distortion terms, as a
+            fitted distortion model is calibrated together with its own scale.
+
+        Arguments:
+            original_platepar: [Platepar] Copy of the platepar from before the auto fit.
+            solution: [tuple] The astrometry.net solution, as returned by _solveAstrometryNet.
+        """
+
+        self._restorePlateparInPlace(self.platepar, copy.deepcopy(original_platepar))
+
+        if not self._plateparHasDistortion(self.platepar):
+            self.platepar.F_scale = solution[3]
+
+        self._applyAstrometryNetPointing(solution)
+
+
     def _applyAstrometryNetPointing(self, solution):
         """ Apply astrometry.net pointing to existing platepar, preserving distortion.
 
@@ -13942,6 +14048,9 @@ class PlateTool(QtWidgets.QMainWindow):
             self.platepar.az_centre = azim_corr
             self.platepar.alt_centre = alt_corr
 
+        # Sync az_centre, alt_centre, and rotation_from_horiz with the final tangent point and pos_angle_ref
+        self.platepar.updateRefAltAz()
+
         # Log the result
         dist_cx, dist_cy = self.platepar.getDistortionCentre()
         dx = dist_cx - self.platepar.X_res/2.0
@@ -13968,46 +14077,51 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.param_manager.setQuickAlignButtonBusy(True)
         QtWidgets.QApplication.processEvents()
 
-        # Capture current catalog LM before fitting
+        # Capture current catalog LM before fitting, and the config LM which balancing sets for alignPlatepar
         user_cat_lim_mag = self.cat_lim_mag
+        config_cat_lim_mag = self.config.catalog_mag_limit
 
-        # Balance catalog magnitude before fitting
-        self.balanceCatalogMagnitude()
+        try:
+            # Balance catalog magnitude before fitting
+            self.balanceCatalogMagnitude()
 
-        # Try quick alignment with existing platepar (pointing only, no distortion fitting)
-        success = self.tryQuickAlignment(pointing_only=True)
+            # Try quick alignment with existing platepar (pointing only, no distortion fitting)
+            success = self.tryQuickAlignment(pointing_only=True)
 
-        if not success:
-            # NNalign failed — use astrometry.net to get correct pointing
-            solution = self._solveAstrometryNet(upload_image=False)
+            if not success:
+                # NNalign failed — use astrometry.net to get correct pointing
+                solution = self._solveAstrometryNet(upload_image=False)
 
-            if solution is not None:
-                # Apply pointing to existing platepar (preserve distortion)
-                self._applyAstrometryNetPointing(solution)
+                if solution is not None:
+                    # Apply pointing to existing platepar (preserve distortion)
+                    self._applyAstrometryNetPointing(solution)
 
-                # Try quick alignment again with corrected pointing
-                success = self.tryQuickAlignment(pointing_only=True)
+                    # Try quick alignment again with corrected pointing
+                    success = self.tryQuickAlignment(pointing_only=True)
 
-        # Report result
-        if success:
-            self.status_bar.showMessage("Auto pointing succeeded")
-        else:
-            self.status_bar.showMessage("Auto pointing failed — try Auto Fit for full recalibration")
+            # Report result
+            if success:
+                self.status_bar.showMessage("Auto pointing succeeded")
+            else:
+                self.status_bar.showMessage("Auto pointing failed — try Auto Fit for full recalibration")
+        finally:
+            # Restore the user's catalog LM
+            if self.cat_lim_mag != user_cat_lim_mag:
+                print(f"  Restoring user catalog LM: {user_cat_lim_mag:.1f}")
+                self.cat_lim_mag = user_cat_lim_mag
+                self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
 
-        # Restore the user's catalog LM
-        if self.cat_lim_mag != user_cat_lim_mag:
-            print(f"  Restoring user catalog LM: {user_cat_lim_mag:.1f}")
-            self.cat_lim_mag = user_cat_lim_mag
-            self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
+            # The balanced LM was only for this fit; keep the config's original LM
+            self.config.catalog_mag_limit = config_cat_lim_mag
 
-        # Update the GUI
-        self.updateDistortion()
-        self.updateLeftLabels()
-        self.updateStars()
-        self.tab.param_manager.updatePlatepar()
+            # Update the GUI
+            self.updateDistortion()
+            self.updateLeftLabels()
+            self.updateStars()
+            self.tab.param_manager.updatePlatepar()
 
-        # Restore button state
-        self.tab.param_manager.setQuickAlignButtonBusy(False)
+            # Restore button state
+            self.tab.param_manager.setQuickAlignButtonBusy(False)
 
 
     def autoFitAstrometryNet(self):
@@ -14030,44 +14144,50 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.param_manager.setAutoFitButtonBusy(True)
         QtWidgets.QApplication.processEvents()
 
-        # Capture current catalog LM before fitting (user may have set this via tune or manually)
+        # Capture current catalog LM before fitting (user may have set this via tune or manually), and the
+        #   config LM which balancing sets for alignPlatepar
         user_cat_lim_mag = self.cat_lim_mag
+        config_cat_lim_mag = self.config.catalog_mag_limit
 
-        # Balance catalog magnitude before any fitting (affects both quick and full paths)
-        self.balanceCatalogMagnitude()
+        try:
+            # Balance catalog magnitude before any fitting (affects both quick and full paths)
+            self.balanceCatalogMagnitude()
 
-        # First, try quick alignment with existing platepar (much faster than astrometry.net)
-        quick_fit_success = self.tryQuickAlignment()
-
-        if not quick_fit_success:
-            # Quick alignment failed — try astrometry.net to get correct pointing
-            solution = self._solveAstrometryNet(upload_image=False)
-
-            if solution is not None:
-                # Apply pointing to existing platepar (preserve distortion)
-                self._applyAstrometryNetPointing(solution)
-
-                # Try quick alignment again with corrected pointing
-                quick_fit_success = self.tryQuickAlignment()
+            # First, try quick alignment with existing platepar (much faster than astrometry.net)
+            quick_fit_success = self.tryQuickAlignment()
 
             if not quick_fit_success:
-                # Last resort: full recalibration with distortion reset
-                self.getInitialParamsAstrometryNet(upload_image=False)
+                # Quick alignment failed — try astrometry.net to get correct pointing
+                solution = self._solveAstrometryNet(upload_image=False)
 
-        # Restore the user's catalog LM (balancing may have changed it)
-        if self.cat_lim_mag != user_cat_lim_mag:
-            print(f"  Restoring user catalog LM: {user_cat_lim_mag:.1f}")
-            self.cat_lim_mag = user_cat_lim_mag
-            self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
+                if solution is not None:
+                    # Apply pointing to existing platepar (preserve distortion)
+                    self._applyAstrometryNetPointing(solution)
 
-        # Update the GUI
-        self.updateDistortion()
-        self.updateLeftLabels()
-        self.updateStars()
-        self.tab.param_manager.updatePlatepar()
+                    # Try quick alignment again with corrected pointing
+                    quick_fit_success = self.tryQuickAlignment()
 
-        # Restore button state
-        self.tab.param_manager.setAutoFitButtonBusy(False)
+                if not quick_fit_success:
+                    # Last resort: full recalibration with distortion reset
+                    self.getInitialParamsAstrometryNet(upload_image=False)
+        finally:
+            # Restore the user's catalog LM (balancing may have changed it)
+            if self.cat_lim_mag != user_cat_lim_mag:
+                print(f"  Restoring user catalog LM: {user_cat_lim_mag:.1f}")
+                self.cat_lim_mag = user_cat_lim_mag
+                self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
+
+            # The balanced LM was only for this fit; keep the config's original LM
+            self.config.catalog_mag_limit = config_cat_lim_mag
+
+            # Update the GUI
+            self.updateDistortion()
+            self.updateLeftLabels()
+            self.updateStars()
+            self.tab.param_manager.updatePlatepar()
+
+            # Restore button state
+            self.tab.param_manager.setAutoFitButtonBusy(False)
 
 
     def getInitialParamsAstrometryNet(self, upload_image=True, wide_fov_search=False):
@@ -14078,6 +14198,10 @@ class PlateTool(QtWidgets.QMainWindow):
             wide_fov_search: [bool] If True, use a wide FOV search range (2° to 200°) instead of
                 the config-based range. Used as fallback when the tight search fails.
         """
+
+        # Snapshot the platepar before recalibration so it can be restored if refinement is declined or fails
+        platepar_obj = self.platepar
+        original_platepar = copy.deepcopy(self.platepar)
 
         # Solve with astrometry.net
         solution = self._solveAstrometryNet(upload_image=upload_image, wide_fov_search=wide_fov_search)
@@ -14210,6 +14334,13 @@ class PlateTool(QtWidgets.QMainWindow):
                 QtWidgets.QMessageBox.StandardButton.Yes)
 
         if reply == QtWidgets.QMessageBox.StandardButton.No:
+
+            # Keep the user's distortion model and flags, applying only the astrometry.net pointing
+            self._applyPointingToOriginalPlatepar(original_platepar, solution)
+            self.fit_only_pointing = user_fit_only_pointing
+            self.updateStars()
+            self.updateLeftLabels()
+
             self.status_bar.showMessage("Astrometry.net solution applied (no refinement)")
             return self.platepar
 
@@ -14302,8 +14433,9 @@ class PlateTool(QtWidgets.QMainWindow):
                 # Restore original platepar so optimizer isn't corrupted
                 self.platepar = saved_pp
 
+            nn_result = None
             try:
-                self.platepar.fitAstrometry(
+                nn_result = self.platepar.fitAstrometry(
                     jd, img_stars_arr, catalog_stars_extended,  # Extended catalog for edge stars
                     first_platepar_fit=True,
                     use_nn_cost=True,
@@ -14311,17 +14443,33 @@ class PlateTool(QtWidgets.QMainWindow):
                     iteration_callback=iteration_callback,
                     fit_by='SkyFit2 auto'
                 )
-                print("  NN fit complete: RA={:.2f} Dec={:.2f} Scale={:.3f} arcmin/px".format(
-                    self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale))
             except Exception as e:
                 print("  NN fit failed: {}".format(str(e)))
 
-            # Populate paired_stars from NN matches for visualization
+            # A rejected or failed NN fit leaves nothing to fit: the platepar star_list still holds the
+            #   pairs of an earlier fit (possibly of another image), so it must not be used. Restore the
+            #   platepar from before recalibration in place
+            if nn_result is None:
+                print("  NN fit rejected - restoring the platepar from before the auto fit")
+                self._restorePlateparInPlace(platepar_obj, original_platepar)
+                self.fit_only_pointing = user_fit_only_pointing
+                self.updateStars()
+                self.status_bar.showMessage("Auto-fit failed: the NN refinement was rejected")
+                qmessagebox(title='Auto-fit failed',
+                            message='The NN refinement of the astrometry.net solution was rejected.\n\n'
+                                    'The platepar was restored to its state before the auto fit.',
+                            message_type="warning")
+                return None
+
+            print("  NN fit complete: RA={:.2f} Dec={:.2f} Scale={:.3f} arcmin/px".format(
+                self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale))
+
+            # Populate paired_stars from the NN matches returned by the fit
+            img_stars_matched, catalog_matched = nn_result
             self.paired_stars = PairedStars()
-            if self.platepar.star_list:
-                for entry in self.platepar.star_list:
-                    # star_list format: [jd, x, y, intensity, ra, dec, mag]
-                    _, x, y, intensity, ra, dec, mag = entry
+            if len(img_stars_matched) > 0:
+                for (x, y, intensity), cat_star in zip(img_stars_matched, catalog_matched):
+                    ra, dec, mag = cat_star[:3]
                     sky_obj = CatalogStar(ra, dec, mag)
 
                     # Look up SNR, FWHM, and saturation from calstars by finding nearest detected star
@@ -14336,7 +14484,7 @@ class PlateTool(QtWidgets.QMainWindow):
                             saturated = det_saturated[closest_idx] > 0
 
                     self.paired_stars.addPair(x, y, fwhm, intensity, sky_obj, snr=snr, saturated=saturated)
-                print("  Loaded {} matched pairs".format(len(self.platepar.star_list)))
+                print("  Loaded {} matched pairs".format(len(self.paired_stars)))
 
         # Finalize the fit with user's settings
         if len(self.paired_stars) >= 10:
@@ -14384,13 +14532,9 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateStars()
             self.status_bar.showMessage("Auto-fit complete: {:d} stars matched".format(len(self.paired_stars)))
         else:
-            # Restore user's settings even if fit failed
-            self.platepar.equal_aspect = user_equal_aspect
-            self.platepar.asymmetry_corr = user_asymmetry_corr
-            self.platepar.decentering_corr = user_decentering_corr
-            self.platepar.force_distortion_centre = user_force_distortion_centre
-            self.platepar.setDistortionType(user_distortion_type, reset_params=True)
-            self.platepar.refraction = user_refraction
+            # Too few pairs to fit: keep the user's distortion model and flags, with the astrometry.net
+            #   pointing applied
+            self._applyPointingToOriginalPlatepar(original_platepar, solution)
             self.fit_only_pointing = user_fit_only_pointing
 
             print("  Not enough matched stars for fitting (need >= 10)")
@@ -14653,19 +14797,35 @@ class PlateTool(QtWidgets.QMainWindow):
             *args, **kwargs: Arguments passed to the function.
 
         Returns:
-            The return value of func(*args, **kwargs).
+            The return value of func(*args, **kwargs), or None if another background operation is still
+            running (the request is refused rather than nested).
 
         Raises:
             Any exception raised by func.
         """
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(func, *args, **kwargs)
 
-            while not future.done():
-                QtWidgets.QApplication.processEvents()
-                time.sleep(0.05)
+        # The processEvents loop below lets the user trigger another long operation while the first is
+        #   running, which would nest a second loop inside this one. Refuse the second request instead
+        if getattr(self, '_background_busy', False):
+            msg = "Another operation is still running, please wait for it to finish"
+            print(msg)
+            self.status_bar.showMessage(msg)
+            return None
 
-            return future.result()
+        self._background_busy = True
+
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(func, *args, **kwargs)
+
+                while not future.done():
+                    QtWidgets.QApplication.processEvents()
+                    time.sleep(0.05)
+
+                return future.result()
+
+        finally:
+            self._background_busy = False
 
 
     def loadCatalogStars(self, lim_mag):
