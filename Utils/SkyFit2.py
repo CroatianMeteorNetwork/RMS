@@ -9377,6 +9377,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         dist_type = self.platepar.distortion_type_list[self.dist_type_index]
         self.platepar.setDistortionType(dist_type)
+        self.resetCoeffStash()
         self.updateDistortion()
 
         # Indicate that the platepar has been reset
@@ -9385,10 +9386,21 @@ class PlateTool(QtWidgets.QMainWindow):
         print("Distortion model changed to: {:s}".format(dist_type))
 
 
+    def resetCoeffStash(self):
+        """ Forget the coefficients stashed by the Fit Parameters tab. Called whenever the distortion is
+            reset or refitted from scratch, so old coefficients are not put back into the new model by a
+            later flag or distortion type change.
+        """
+
+        if hasattr(self, 'tab') and hasattr(self.tab, 'param_manager'):
+            self.tab.param_manager.resetCoeffStash()
+
+
     def resetDistortion(self):
         """ Reset distortion parameters to default values. """
 
         self.platepar.resetDistortionParameters()
+        self.resetCoeffStash()
         self.onFitParametersChanged()
         self.updateFitResiduals()
         self.tab.param_manager.updatePlatepar()
@@ -11172,6 +11184,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 if modifiers == (QtCore.Qt.KeyboardModifier.ControlModifier | QtCore.Qt.KeyboardModifier.ShiftModifier):
                     print("Resetting the distortion coeffs and refitting...")
                     self.platepar.resetDistortionParameters()
+                    self.resetCoeffStash()
                     self.first_platepar_fit = True
 
                 self.fitPickedStars()
@@ -15082,6 +15095,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # The model of the distortion from the config file, with the coefficients reset
         applyPlateparModel(self.platepar, plateparModel(self.config), reset_params=True)
+        self.resetCoeffStash()
         self.dist_type_index = self.platepar.distortion_type_list.index(self.platepar.distortion_type)
 
 
@@ -16012,6 +16026,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Get the Julian date of the image that's being fit
         jd = date2JD(*self.img_handle.currentTime())
+
+        # A fit from scratch replaces the whole distortion model, so stashed coefficients are stale
+        if self.first_platepar_fit:
+            self.resetCoeffStash()
 
         # Fit the platepar to paired stars, with the paired catalog stars and image coordinates separately
         img_stars, catalog_stars = self.fitPairs(jd)

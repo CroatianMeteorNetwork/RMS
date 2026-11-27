@@ -2256,11 +2256,9 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         QtWidgets.QWidget.__init__(self)
         self.gui = gui
 
-        # Stash for coefficients that get hidden when reducing coefficient count
-        # This allows restoring them when toggling flags back
-        self._coeff_stash = {
-            'x_fwd': {}, 'x_rev': {}, 'y_fwd': {}, 'y_rev': {}
-        }
+        # Stash for coefficients that get hidden when reducing coefficient count so they can be restored
+        #   when toggling flags back. It belongs to one platepar object only
+        self.resetCoeffStash()
 
         full_layout = QtWidgets.QVBoxLayout()
         full_layout.setContentsMargins(*self.scaledMargins(0.5, 0.25))
@@ -2613,12 +2611,32 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.updateRestoreDefaultsButton()
         self.sigRefractionToggled.emit()
 
+    def resetCoeffStash(self):
+        """ Forget the stashed coefficients and tie the stash to the current platepar.
+
+            Must be called whenever another platepar is loaded or the distortion is reset, otherwise the
+            zero coefficients of the new platepar would be filled with the old platepar's values.
+        """
+
+        self._coeff_stash = {
+            'x_fwd': {}, 'x_rev': {}, 'y_fwd': {}, 'y_rev': {}
+        }
+        self._coeff_stash_platepar = getattr(self.gui, 'platepar', None)
+
+    def _checkCoeffStashOwner(self):
+        """ Reset the stash if the GUI platepar is not the one the stash was filled from. """
+
+        if getattr(self, '_coeff_stash_platepar', None) is not getattr(self.gui, 'platepar', None):
+            self.resetCoeffStash()
+
     def _stashCurrentCoeffs(self):
         """Stash current coefficient values for later restoration.
 
         This saves non-zero coefficients to the stash so they can be restored
         when switching back to a distortion type/flags that need them.
         """
+        self._checkCoeffStashOwner()
+
         pp = self.gui.platepar
 
         # Only works for radial distortion types
@@ -2676,6 +2694,8 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
 
         This restores stashed coefficient values where current values are zero.
         """
+        self._checkCoeffStashOwner()
+
         pp = self.gui.platepar
 
         # Only works for radial distortion types
@@ -2702,6 +2722,10 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
             pp.x_poly_rev = pp.buildRadialCoeffs(x_coeffs_rev, pp.distortion_type)
             pp.y_poly_fwd = pp.buildRadialCoeffs(y_coeffs_fwd, pp.distortion_type)
             pp.y_poly_rev = pp.buildRadialCoeffs(y_coeffs_rev, pp.distortion_type)
+
+            # Never leave arrays of another length than the distortion type needs
+            pp.padDictParams()
+
             pp.x_poly = pp.x_poly_fwd
             pp.y_poly = pp.y_poly_fwd
 
@@ -2745,11 +2769,23 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         # Stash current coefficients before changing type (only for radial types)
         self._stashCurrentCoeffs()
 
+        # Switching between polynomial and radial, or between the all and odd radial powers, makes
+        #   setDistortionType reset the parameters: the k slots then mean other powers, so the stash must
+        #   not be put back
+        old_dist_type = pp.distortion_type
+        forced_reset = (new_dist_type[:4] != old_dist_type[:4])
+        if new_dist_type.startswith("radial") and (new_dist_type[-3:] != old_dist_type[-3:]):
+            forced_reset = True
+
         # Change the distortion type
         pp.setDistortionType(new_dist_type, reset_params=False)
 
+        if forced_reset:
+            self.resetCoeffStash()
+
         # Restore any zeros from stash (only for radial types)
-        self._restoreCoeffsFromStash()
+        else:
+            self._restoreCoeffsFromStash()
 
     def onEqualAspectToggled(self):
         new_value = self.eqAspect.isChecked()
@@ -3001,8 +3037,18 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         self.F_scale.setValue(60/self.gui.platepar.F_scale)
         # Update platepar reference in distortion dialog in case a new platepar was loaded
         self.distortion_dialog.updatePlatepar(self.gui.platepar)
+
+        # A different platepar was loaded, so any stashed coefficients do not belong to it
+        self._checkCoeffStashOwner()
+
+        # Only show the platepar's distortion type. Letting the combo box fire onIndexChanged here would
+        #   apply a distortion type change (and the stash) to the platepar that was just loaded
+        self.distortion_type.blockSignals(True)
         self.distortion_type.setCurrentIndex(
             self.gui.platepar.distortion_type_list.index(self.gui.platepar.distortion_type))
+        self.distortion_type.blockSignals(False)
+        self.fit_parameters.changeNumberShown(self.gui.platepar.poly_length)
+        self.fit_parameters.updateValues()
         self.extinction_scale.setValue(self.gui.platepar.extinction_scale)
         
         self.vignetting_coeff.setValue(self.gui.platepar.vignetting_coeff)
@@ -3131,8 +3177,12 @@ class PlateparParameterManager(QtWidgets.QWidget, ScaledSizeHelper):
         # Restore distortion type
         if pp.distortion_type != model['distortion_type']:
             self._changeDistortionTypeWithStash(model['distortion_type'])
-            self.distortion_type.setCurrentIndex(
-                pp.distortion_type_list.index(model['distortion_type']))
+            was_blocked = self.distortion_type.blockSignals(True)
+            try:
+                self.distortion_type.setCurrentIndex(
+                    pp.distortion_type_list.index(model['distortion_type']))
+            finally:
+                self.distortion_type.blockSignals(was_blocked)
             self.fit_parameters.changeNumberShown(pp.poly_length)
             self.fit_parameters.updateValues()
 
@@ -3429,20 +3479,34 @@ class DistortionDialog(QtWidgets.QDialog, ScaledSizeHelper):
 
     def resetToZero(self):
         """Reset distortion coefficients, preserving center/offset terms."""
-        # Determine how many leading indices to preserve (center coefficients)
-        # For radial distortion without force_distortion_centre, indices 0 and 1 are center x and y
-        # For polynomial distortion, index 0 is the offset
-        if self.platepar.distortion_type.startswith("radial") and not self.platepar.force_distortion_centre:
-            preserve_count = 2  # Preserve x_poly[0] and x_poly[1] for radial center
+        # Determine how many leading indices to preserve (center coefficients). For radial distortion
+        #   without force_distortion_centre, indices 0 and 1 are center x and y. With a forced centre
+        #   there is no centre in the array and index 0 is already a distortion term. For polynomial
+        #   distortion index 0 is the offset (in both X and Y)
+        is_radial = self.platepar.distortion_type.startswith("radial")
+        if is_radial:
+            preserve_count = 0 if self.platepar.force_distortion_centre else 2
         else:
-            preserve_count = 1  # Preserve index 0 only
+            preserve_count = 1
 
         for var in ['x_poly_rev', 'y_poly_rev', 'x_poly_fwd', 'y_poly_fwd']:
             poly = getattr(self.platepar, var)
+
             # For y_poly in radial, all values should be zero (no center there)
-            start_idx = preserve_count if var.startswith('x_') else 1
+            if var.startswith('x_'):
+                start_idx = preserve_count
+            else:
+                start_idx = 0 if is_radial else 1
+
             for i in range(start_idx, len(poly)):
                 poly[i] = 0.0
+
+        # The reset coefficients must not come back from the Fit Parameters stash on a later flag or
+        #   distortion type change
+        param_manager = getattr(getattr(self.parent_widget, 'tab', None), 'param_manager', None)
+        if param_manager is not None:
+            param_manager.resetCoeffStash()
+
         self.fit_parameters.updateValues()
         self.valueModified.emit()
 
