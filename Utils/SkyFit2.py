@@ -4265,13 +4265,15 @@ class PlateTool(QtWidgets.QMainWindow):
             # Put back the calibration state of the current station, which was reset for the new one
             self._restoreStationState(prev_station_state)
 
-            if handles_switched and (prev_img_handle is not None):
-                self.img.changeHandle(prev_img_handle)
-                self.img_zoom.changeHandle(prev_img_handle)
-
+            # Restore the saturation overlay before reloading the previous image handle, because
+            #   changeHandle() reloads the image immediately and indexes saturation_mask with its shape
             if hasattr(self, 'saturation_mask_img') and (self.saturation_mask_img is not None):
                 if getattr(self, 'saturation_mask', None) is not None:
                     self.saturation_mask.setImage(self.saturation_mask_img)
+
+            if handles_switched and (prev_img_handle is not None):
+                self.img.changeHandle(prev_img_handle)
+                self.img_zoom.changeHandle(prev_img_handle)
 
             if mask_cleared:
                 self.updateMaskOverlayImage()
@@ -4296,7 +4298,9 @@ class PlateTool(QtWidgets.QMainWindow):
         '_original_catalog_file', '_original_band_ratios', 'saturation_mask_img',
         'mask', 'mask_polygons', 'mask_current_polygon', 'mask_paint_layer',
         'mask_brush_stroke_history', 'startup_mask',
-        'catalog_stars', 'cat_lim_mag', 'calstars', 'platepar', 'paired_stars'
+        'catalog_stars', 'cat_lim_mag', 'calstars',
+        'platepar', 'platepar_file', 'platepar_fmt', 'platepar_modified',
+        'paired_stars', 'pick_list', 'residuals'
     )
 
 

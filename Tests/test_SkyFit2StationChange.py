@@ -35,6 +35,7 @@ def _makeStationTool(skyfit2, dir_a):
     status_states = []
     img_handles_seen = []
     zoom_handles_seen = []
+    rollback_events = []
 
     pt = _StubTool()
     pt.input_path = dir_a
@@ -54,6 +55,13 @@ def _makeStationTool(skyfit2, dir_a):
     pt.img_handle = SimpleNamespace(name="handle_a")
 
     # Station A calibration state that must not leak to station B
+    pt.platepar = SimpleNamespace(tag="pp_a")
+    pt.platepar_file = dir_a + "/platepar_a.cal"
+    pt.platepar_fmt = "json"
+    pt.platepar_modified = True
+    pt.pick_list = {"frame_a": [(1, 2)]}
+    pt.residuals = [0.25]
+    pt.saturation_mask_img = np.zeros((320, 180, 4), dtype=np.uint8)
     pt.catalog_lm_tuned = True
     pt.tuned_cat_lim_mag = 8.4
     pt.star_detection_override_enabled = True
@@ -72,24 +80,37 @@ def _makeStationTool(skyfit2, dir_a):
     pt.unsuitable_stars = skyfit2.PairedStars()
     pt.unsuitable_stars.addPair(10, 20, 2.0, 100, skyfit2.CatalogStar(1.0, 2.0, 3.0))
 
+    def _onImgChangeHandle(h):
+        img_handles_seen.append(h)
+        rollback_events.append(("img_handle", h.name, pt.saturation_mask.image.shape))
+
+    def _onZoomChangeHandle(h):
+        zoom_handles_seen.append(h)
+        rollback_events.append(("zoom_handle", h.name, pt.saturation_mask.image.shape))
+
+    def _onSatSetImage(img):
+        pt.saturation_mask.image = img
+        rollback_events.append(("sat_mask", img.shape))
+
     pt.img = SimpleNamespace(
         data=np.zeros((320, 180), dtype=np.uint8),
         flat_struct=pt.flat_struct, dark=pt.dark,
-        changeHandle=lambda h: img_handles_seen.append(h),
+        changeHandle=_onImgChangeHandle,
         setLevels=lambda lv: None, reloadImage=lambda: None,
     )
     pt.img_zoom = SimpleNamespace(
         flat_struct=pt.flat_struct, dark=pt.dark,
-        changeHandle=lambda h: zoom_handles_seen.append(h),
+        changeHandle=_onZoomChangeHandle,
         setLevels=lambda lv: None, reloadImage=lambda: None,
     )
     pt._img_handles_seen = img_handles_seen
     pt._zoom_handles_seen = zoom_handles_seen
+    pt._rollback_events = rollback_events
     pt.img_frame = SimpleNamespace(
         height=lambda: 180, width=lambda: 320,
         setLimits=lambda **kw: None, autoRange=lambda **kw: None,
     )
-    pt.saturation_mask = SimpleNamespace(setImage=lambda img: None)
+    pt.saturation_mask = SimpleNamespace(image=pt.saturation_mask_img, setImage=_onSatSetImage)
     pt.tab = SimpleNamespace(
         hist=SimpleNamespace(auto_levels=False, setLevels=lambda a, b: None, getLevels=lambda: (0, 255)),
         settings=SimpleNamespace(populateCatalogList=lambda: None),
@@ -202,15 +223,17 @@ def testChangeStationCancelKeepsCurrentStation(skyfit2, monkeypatch, tmp_path):
     assert pt.dark_source_path == "/a/dark.bmp"
 
 
-@pytest.mark.parametrize("fail_at", ["detectInputType", "loadCatalogStars"])
+@pytest.mark.parametrize("fail_at", ["detectInputType", "loadCatalogStars", "changeMode"])
 def testChangeStationFailureRestoresCurrentStationState(skyfit2, monkeypatch, tmp_path, fail_at):
-    """ A failure mid-switch must restore station A's config, paths, handle, and calibration state. """
+    """ A failure mid-switch must restore station A's config, paths, handle, saturation overlay, and platepar. """
 
     dir_a = str(tmp_path/'station_a')
     dir_b = str(tmp_path/'station_b')
     pt = _makeStationTool(skyfit2, dir_a)
     orig_flat = pt.flat_struct
     orig_dark = pt.dark
+    orig_pp = pt.platepar
+    orig_sat_shape = pt.saturation_mask_img.shape
 
     monkeypatch.setattr(skyfit2.cr, "loadConfigFromDirectory", lambda ov, d: _configB())
     monkeypatch.setattr(skyfit2, "qmessagebox", lambda **kw: None)
@@ -222,13 +245,22 @@ def testChangeStationFailureRestoresCurrentStationState(skyfit2, monkeypatch, tm
         pt.detectInputType = _failDetect
     else:
         def _okDetect(**kw):
+            # Different image dimensions from station A (320x180) to verify saturation overlay order
             pt.img_handle = SimpleNamespace(
                 name="handle_b",
-                loadChunk=lambda: SimpleNamespace(maxpixel=np.zeros((180, 320), dtype=np.uint8)),
+                loadChunk=lambda: SimpleNamespace(maxpixel=np.zeros((240, 400), dtype=np.uint8)),
             )
         pt.detectInputType = _okDetect
         pt.initMaskFromFile = lambda: setattr(pt, "mask_polygons", [])
-        pt.loadCatalogStars = lambda lm: (_ for _ in ()).throw(RuntimeError("catalog error"))
+        if fail_at == "loadCatalogStars":
+            pt.loadCatalogStars = lambda lm: (_ for _ in ()).throw(RuntimeError("catalog error"))
+        else:
+            def _fakeLoadPlatepar(**kw):
+                pt.platepar = SimpleNamespace(tag="pp_b")
+                pt.platepar_file = dir_b + "/platepar_b.cal"
+                pt.platepar_fmt = "txt"
+            pt.loadPlatepar = _fakeLoadPlatepar
+            pt.changeMode = lambda m: (_ for _ in ()).throw(RuntimeError("mode error"))
 
     assert pt.changeStation(dir_b) is False
 
@@ -238,9 +270,19 @@ def testChangeStationFailureRestoresCurrentStationState(skyfit2, monkeypatch, tm
     assert pt.frame_times_path == "/tmp/old_ft.json"
     assert pt.camera_fps == 25.0
     assert pt.img_handle.name == "handle_a"
-    if fail_at == "loadCatalogStars":
+    if fail_at in ("loadCatalogStars", "changeMode"):
         assert pt._img_handles_seen[-1].name == "handle_a"
         assert pt._zoom_handles_seen[-1].name == "handle_a"
+        # Saturation overlay must already have station A's shape when changeHandle reloads handle_a
+        restore_handles = [ev for ev in pt._rollback_events if ev[0] in ("img_handle", "zoom_handle") and ev[1] == "handle_a"]
+        assert len(restore_handles) == 2
+        assert all(ev[2] == orig_sat_shape for ev in restore_handles)
+    assert pt.platepar is orig_pp
+    assert pt.platepar_file == dir_a + "/platepar_a.cal"
+    assert pt.platepar_fmt == "json"
+    assert pt.platepar_modified is True
+    assert pt.pick_list == {"frame_a": [(1, 2)]}
+    assert pt.residuals == [0.25]
     assert pt.mask_source_path == "/a/mask.bmp"
     assert len(pt.mask_polygons) == 1
     assert pt.astrometry_solution_info == {"job": 123}
