@@ -2265,10 +2265,31 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
         pt = self.plate_tool
         results = []
 
+        # Generate the mask image once before saving to one or more target folders
+        mask_img = None
+        last_mask_dest = None
+        if ftype == "Mask":
+            try:
+                mask_img = pt.generateMaskImage()
+            except Exception as e:
+                results.append("Mask generation failed: {}".format(repr(e)))
+                target_dirs = []
+
         for target_dir in target_dirs:
             if ftype == "Platepar":
                 try:
-                    dest = os.path.join(target_dir, pt.config.platepar_name)
+                    # A platepar loaded from this folder is saved back into its own file (one picked from
+                    #   several .cal files must not overwrite the default one). Anything else (a new
+                    #   platepar, or one loaded from elsewhere, e.g. a backup) is saved under the config
+                    #   name, which is the one the night processing uses
+                    platepar_name = pt.config.platepar_name
+                    loaded_file = getattr(pt, 'platepar_file', None)
+                    loaded_base = os.path.basename(loaded_file) if loaded_file else ''
+                    if loaded_base and (os.path.realpath(os.path.dirname(loaded_file))
+                                        == os.path.realpath(target_dir)):
+                        platepar_name = loaded_base
+
+                    dest = os.path.join(target_dir, platepar_name)
                     pt.platepar.write(dest, fmt=pt.platepar_fmt, fov=computeFOVSize(pt.platepar))
                     pt.platepar_modified = False
                     results.append("Platepar saved to: " + dest)
@@ -2318,11 +2339,9 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
             elif ftype == "Mask":
                 try:
                     dest = os.path.join(target_dir, "mask.bmp")
-                    mask_img = pt.generateMaskImage()
-                    cv2.imwrite(dest, mask_img)
-                    pt.mask_source_path = dest
-                    if hasattr(pt, 'tab') and hasattr(pt.tab, 'mask'):
-                        pt.tab.mask.setUnsaved(False)
+                    if not cv2.imwrite(dest, mask_img):
+                        raise IOError("the image could not be written")
+                    last_mask_dest = dest
                     results.append("Mask saved to: " + dest)
                 except Exception as e:
                     results.append("Mask save to {} failed: {}".format(target_dir, repr(e)))
@@ -2354,6 +2373,15 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                         results.append("Dark save to {} failed: {}".format(target_dir, repr(e)))
                 else:
                     results.append("Dark: no source file to copy.")
+
+        # Once at least one mask file succeeded, update the active detection mask and catalog stars once
+        if last_mask_dest is not None:
+            pt.mask_source_path = last_mask_dest
+            pt.mask = MaskStructure(mask_img)
+            if hasattr(pt, 'updateStars'):
+                pt.updateStars(only_update_catalog=True)
+            if hasattr(pt, 'tab') and hasattr(pt.tab, 'mask'):
+                pt.tab.mask.setUnsaved(False)
 
         if results:
             msg = "\n".join(results)
