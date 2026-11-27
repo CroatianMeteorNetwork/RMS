@@ -85,6 +85,9 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 log = getLogger("rmslogger")
 EM_RAISE = False
 
+# Seconds EventMonitor.stop() waits for the process to finish its current check before terminating it
+EVENT_MONITOR_STOP_TIMEOUT = 120
+
 """
 
 # Reference event
@@ -2484,7 +2487,22 @@ class EventMonitor(multiprocessing.Process):
             self.db_conn.close()
         time.sleep(2)
         self.exit.set()
-        self.join()
+
+        # Wait for the current check to finish, with a bound: a check stuck in network or file I/O must not
+        #   wedge the shutdown of StartCapture (which keeps the station lock while it hangs, so no restart can
+        #   run)
+        self.join(EVENT_MONITOR_STOP_TIMEOUT)
+
+        # Terminate a process which did not stop in time, and leave it behind if even that does not end it
+        if self.is_alive():
+            log.warning("EventMonitor did not stop within {:d} s, terminating it".format(
+                EVENT_MONITOR_STOP_TIMEOUT))
+            self.terminate()
+            self.join(5)
+            if self.is_alive():
+                log.warning("EventMonitor still alive after terminate, leaving it without joining")
+                return
+
         log.info("EventMonitor has stopped")
 
     def checkDBExists(self):
@@ -2556,10 +2574,11 @@ class EventMonitor(multiprocessing.Process):
         # avoiding a connection shared across the fork.
         self.db_conn = self.getConnectionToEventMonitorDB()
 
-        # Delay to allow capture to check existing folders - keep the logs tidy
+        # Delay to allow capture to check existing folders - keep the logs tidy. The wait is on the exit flag,
+        #   so a stop requested during the delay ends it at once
 
 
-        time.sleep(60)
+        self.exit.wait(60)
         last_check_start_time = RmsDateTime.utcnow()
         while not self.exit.is_set():
             check_start_time = RmsDateTime.utcnow()
