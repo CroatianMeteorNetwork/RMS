@@ -2595,7 +2595,66 @@ class InputTypeImages(InputType):
         print("="*80 + "\n")
 
 
-    def _floatFitsToUint16(self, frame):
+    @staticmethod
+    def _computeFloatFitsMapping(frame):
+        """ Compute (offset, scale) for a float FITS image, or None if it has no finite nonzero range.
+
+        Arguments:
+            frame: [ndarray] Floating point image.
+
+        Return:
+            [tuple or None] (offset, scale) when the image has finite levels, else None.
+        """
+
+        finite_mask = np.isfinite(frame)
+        if not np.any(finite_mask):
+            return None
+
+        finite_vals = frame[finite_mask]
+        offset = float(np.min(finite_vals))
+        value_range = float(np.max(finite_vals)) - offset
+        if (not np.isfinite(value_range)) or (value_range <= 0):
+            return None
+
+        if (value_range <= 1) or (value_range > 65535):
+            scale = 65535.0/value_range
+        else:
+            scale = 1.0
+
+        if not np.isfinite(scale):
+            return None
+
+        return (offset, scale)
+
+
+    def _findFloatFitsMapping(self, current_img_file=None):
+        """ Look ahead through the directory's .fits files for the first float frame with finite levels.
+
+        Keyword arguments:
+            current_img_file: [str] File already inspected, skipped during the scan.
+
+        Return:
+            [tuple or None] (offset, scale) from the first non-constant float frame, or None.
+        """
+
+        for fname in getattr(self, "img_list", []):
+            if (fname == current_img_file) or (not fname.lower().endswith('.fits')):
+                continue
+            try:
+                with open(os.path.join(self.dir_path, fname), 'rb') as f:
+                    with fits.open(f) as fits_file:
+                        data = fits_file[0].data
+                        if (data is not None) and np.issubdtype(data.dtype, np.floating):
+                            mapping = self._computeFloatFitsMapping(data)
+                            if mapping is not None:
+                                return mapping
+            except Exception:
+                continue
+
+        return None
+
+
+    def _floatFitsToUint16(self, frame, current_img_file=None):
         """ Convert a floating point FITS image to uint16 with a mapping fixed for the sequence.
 
             The offset and scale are taken from the first float image of this directory with a
@@ -2603,12 +2662,15 @@ class InputTypeImages(InputType):
             frame - min(frame)) made the levels jump from image to image. The minimum is moved to 0
             (NaN-safe). The values are rescaled only when their range does not fit uint16 as it is:
             a range <= 1 (normalised [0, 1] images would otherwise collapse to 0 and 1) or > 65535.
-            Constant, all-NaN, or non-finite images carry no levels to fix the mapping on, so they
-            are mapped on their own (offset only) until a finite non-constant image is seen.
-            NaN pixels become 0.
+            If the first loaded image is constant or all-NaN, the remaining .fits files in the
+            directory are scanned to establish the sequence mapping up front so initial frames
+            and chunk statistics stay consistent with reloaded frames. NaN pixels become 0.
 
         Arguments:
             frame: [ndarray] Floating point image.
+
+        Keyword arguments:
+            current_img_file: [str] File name of the frame currently being loaded.
 
         Return:
             [ndarray] uint16 image.
@@ -2618,33 +2680,17 @@ class InputTypeImages(InputType):
 
         # Fix the mapping on the first float image of the sequence which has finite levels
         if mapping is None:
+            mapping = self._computeFloatFitsMapping(frame)
+            if (mapping is None) and (not getattr(self, "_float_fits_mapping_scanned", False)):
+                self._float_fits_mapping_scanned = True
+                mapping = self._findFloatFitsMapping(current_img_file=current_img_file)
 
-            finite_mask = np.isfinite(frame)
-            if not np.any(finite_mask):
-                offset, value_range = 0.0, 0.0
+            if mapping is not None:
+                self._float_fits_mapping = mapping
             else:
-                finite_vals = frame[finite_mask]
-                offset = float(np.min(finite_vals))
-                value_range = float(np.max(finite_vals)) - offset
-
-            # A constant or non-finite image cannot fix the mapping: map this image on its own
-            #   (offset only, if finite) and wait for one with a finite, nonzero range
-            if (not np.isfinite(value_range)) or (value_range <= 0):
+                finite_mask = np.isfinite(frame)
+                offset = float(np.min(frame[finite_mask])) if np.any(finite_mask) else 0.0
                 mapping = (offset if np.isfinite(offset) else 0.0, 1.0)
-
-            else:
-
-                # Rescale only if the range does not fit uint16 as it is
-                if (value_range <= 1) or (value_range > 65535):
-                    scale = 65535.0/value_range
-                else:
-                    scale = 1.0
-
-                if not np.isfinite(scale):
-                    mapping = (offset, 1.0)
-                else:
-                    mapping = (offset, scale)
-                    self._float_fits_mapping = mapping
 
         offset, scale = mapping
 
@@ -2758,7 +2804,7 @@ class InputTypeImages(InputType):
 
                 # If the fits image type is floating point, convert it to uint16
                 if np.issubdtype(frame.dtype, np.floating):
-                    frame = self._floatFitsToUint16(frame)
+                    frame = self._floatFitsToUint16(frame, current_img_file=current_img_file)
 
                 # # Flip image vertically
                 # frame = np.flipud(frame)

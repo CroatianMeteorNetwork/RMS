@@ -98,7 +98,9 @@ def testFloatFitsNormalizedWideRangeAndNaN(tmp_path):
 
 @pytest.mark.parametrize("first_kind", ["constant", "all_nan"])
 def testFloatFitsConstantOrAllNaNFirstFrameDoesNotFreezeScale(tmp_path, first_kind):
-    """ A constant or all-NaN first frame must not lock the sequence scale to 1.0 before a [0, 1] frame. """
+    """ A constant or all-NaN first frame must establish the sequence mapping from later frames
+        so frame 0 and reloaded frame 0 match and later [0, 1] frames keep full 16-bit range.
+    """
 
     if first_kind == "constant":
         first = np.full((4, 4), 0.25, dtype=np.float32)
@@ -112,8 +114,15 @@ def testFloatFitsConstantOrAllNaNFirstFrameDoesNotFreezeScale(tmp_path, first_ki
     handle = _makeImagesHandle(tmp_path, ["img_001.fits", "img_002.fits"])
     out1 = handle.loadFrame(fr_no=0)
     out2 = handle.loadFrame(fr_no=1)
+    out1_reloaded = handle.loadFrame(fr_no=0)
 
-    assert np.all(out1 == 0)
+    # First load and reload of frame 0 must agree identically
+    assert np.array_equal(out1, out1_reloaded)
+    if first_kind == "constant":
+        assert np.all(out1 == int(0.25*65535.0))
+    else:
+        assert np.all(out1 == 0)
+
     assert out2[0, 0] == 0
     assert out2[0, 2] == int(0.5*65535.0)
     assert out2[0, 3] == 65535
