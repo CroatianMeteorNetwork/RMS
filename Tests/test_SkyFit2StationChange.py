@@ -111,10 +111,15 @@ def _makeStationTool(skyfit2, dir_a):
         setLimits=lambda **kw: None, autoRange=lambda **kw: None,
     )
     pt.saturation_mask = SimpleNamespace(image=pt.saturation_mask_img, setImage=_onSatSetImage)
+    mask_tab = SimpleNamespace(unsaved=True)
+    mask_tab.setUnsaved = lambda v: setattr(mask_tab, "unsaved", v)
+    mask_tab.setUndoEnabled = lambda v: setattr(mask_tab, "undo_enabled", v)
+
     pt.tab = SimpleNamespace(
         hist=SimpleNamespace(auto_levels=False, setLevels=lambda a, b: None, getLevels=lambda: (0, 255)),
         settings=SimpleNamespace(populateCatalogList=lambda: None),
         debruijn=SimpleNamespace(updateTable=lambda: None),
+        mask=mask_tab,
         star_detection=SimpleNamespace(
             use_override_checkbox=SimpleNamespace(setChecked=lambda v: checkbox_states.append(v)),
             updateStatus=lambda v: status_states.append(v),
@@ -190,6 +195,7 @@ def testChangeStationResetsStationState(skyfit2, monkeypatch, tmp_path):
     assert pt.img_zoom.flat_struct is None and pt.img_zoom.dark is None
     assert pt.flat_image_data is None and pt.mask_use_flat_background is False
     assert pt.mask_source_path is None
+    assert pt.tab.mask.unsaved is False
     assert pt.astrometry_solution_info is None
     assert len(pt.unsuitable_stars) == 0
     assert pt._flat_setup_calls == [True]
@@ -284,6 +290,7 @@ def testChangeStationFailureRestoresCurrentStationState(skyfit2, monkeypatch, tm
     assert pt.pick_list == {"frame_a": [(1, 2)]}
     assert pt.residuals == [0.25]
     assert pt.mask_source_path == "/a/mask.bmp"
+    assert pt.tab.mask.unsaved is True
     assert len(pt.mask_polygons) == 1
     assert pt.astrometry_solution_info == {"job": 123}
     assert pt.catalog_lm_tuned is True

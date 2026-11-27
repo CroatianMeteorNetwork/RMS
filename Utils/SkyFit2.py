@@ -4321,6 +4321,9 @@ class PlateTool(QtWidgets.QMainWindow):
             if item is not None
         ]
 
+        if hasattr(self, 'tab') and hasattr(self.tab, 'mask'):
+            snapshot['_mask_unsaved'] = getattr(self.tab.mask, 'unsaved', False)
+
         return snapshot
 
 
@@ -4344,6 +4347,12 @@ class PlateTool(QtWidgets.QMainWindow):
         if hasattr(self, 'tab') and hasattr(self.tab, 'star_detection'):
             self.tab.star_detection.use_override_checkbox.setChecked(self.star_detection_override_enabled)
             self.tab.star_detection.updateStatus(self.star_detection_override_enabled)
+
+        if hasattr(self, 'tab') and hasattr(self.tab, 'mask'):
+            if '_mask_unsaved' in snapshot:
+                self.tab.mask.setUnsaved(snapshot['_mask_unsaved'])
+            if hasattr(self.tab.mask, 'setUndoEnabled'):
+                self.tab.mask.setUndoEnabled(bool(getattr(self, 'mask_brush_stroke_history', [])))
 
 
     def _resetStationState(self):
