@@ -274,14 +274,21 @@ def trackStack(dir_paths, config, border=5, background_compensation=True,
                                                                                    pp_ref, img_size, jd_middle, pp_stack, config,
                                                                                    avg_stack_sum_shared, avg_stack_count_shared, max_deaveraged_shared,
                                                                                    background_compensation, finished_count, num_ffs))
-    thead_pool.startPool()
-    # add jobs
-    for i, ff_name in enumerate(enumlist):
-        if shouldInclude(showers, ff_name, associations):
-            num_plotted += 1
-            thead_pool.addJob([ff_name])
-    printProgress(0, num_plotted)
-    thead_pool.closePool()
+    pool_closed = False
+    try:
+        thead_pool.startPool()
+        # add jobs
+        for i, ff_name in enumerate(enumlist):
+            if shouldInclude(showers, ff_name, associations):
+                num_plotted += 1
+                thead_pool.addJob([ff_name])
+        printProgress(0, num_plotted)
+        thead_pool.closePool()
+        pool_closed = True
+    finally:
+        if (not pool_closed) and (thead_pool.pool is not None):
+            thead_pool._shutdownPool()
+        thead_pool.shutdownManager()
 
     # End if the number of plotted FFs is zero
     if num_plotted == 0:
