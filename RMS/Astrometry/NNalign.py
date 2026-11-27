@@ -10,13 +10,12 @@ from __future__ import print_function, division, absolute_import
 import os
 import sys
 import copy
-import datetime
 import argparse
 
 import numpy as np
 
 from RMS.Astrometry import ApplyAstrometry
-from RMS.Astrometry.Conversions import date2JD
+from RMS.Astrometry.Conversions import date2JD, jd2YearsFromJ2000
 from RMS.Math import angularSeparationDeg
 import RMS.ConfigReader as cr
 from RMS.Formats import CALSTARS
@@ -68,18 +67,18 @@ def alignPlatepar(config, platepar, calstars_time, calstars_coords, scale_update
     # Create a copy of the config not to mess with the original config parameters
     config = copy.deepcopy(config)
 
-    year, month, day, hour, minute, second, millisecond = calstars_time
-    ts = datetime.datetime(year, month, day, hour, minute, second, int(round(millisecond * 1000)))
-    J2000 = datetime.datetime(2000, 1, 1, 12, 0, 0)
-
-    # Compute the number of years from J2000
-    years_from_J2000 = (ts - J2000).total_seconds() / (365.25 * 24 * 3600)
-
-    # Compute Julian date
+    # Compute Julian date and years from J2000 directly from the JD (avoids constructing a datetime with
+    #   int(round(ms*1000)), which raises ValueError when ms rounds up to 1000000 microseconds)
     jd = date2JD(*calstars_time)
+    years_from_J2000 = jd2YearsFromJ2000(jd)
 
     # Extract coordinates and optionally infer catalog LM from intensities
-    calstars_coords = np.array(calstars_coords)
+    calstars_coords = np.asarray(calstars_coords)
+    if (calstars_coords.ndim != 2) or (calstars_coords.shape[0] == 0) or (calstars_coords.shape[1] < 2):
+        log.warning("alignPlatepar: Empty or invalid calstars_coords shape {}, returning original platepar.".format(
+            calstars_coords.shape))
+        return platepar, config.catalog_mag_limit
+
     if calstars_coords.shape[1] >= 3:
         # Full CALSTARS format: (y, x, intensity, ...)
         det_x = calstars_coords[:, 1]
@@ -262,8 +261,9 @@ if __name__ == "__main__":
 
     # Find the CALSTARS file in the given folder
     calstars_file = None
-    for calstars_file in file_list:
-        if ('CALSTARS' in calstars_file) and ('.txt' in calstars_file):
+    for file_name in file_list:
+        if ('CALSTARS' in file_name) and ('.txt' in file_name):
+            calstars_file = file_name
             break
 
     if calstars_file is None:
