@@ -3008,6 +3008,13 @@ class Platepar(object):
         result = {'x0': 0.0, 'y0': 0.0, 'xy': 0.0, 'a1': 0.0, 'a2': 0.0,
                   'k1': 0.0, 'k2': 0.0, 'k3': 0.0, 'k4': 0.0, 'p1': 0.0, 'p2': 0.0, 'p3': 0.0, 'p4': 0.0}
 
+        # A forced distortion centre is placed half a pixel from the image centre (same as in
+        #   CyFunctions.pyx), so store the equivalent normalized offsets - freeing the centre then keeps the
+        #   projection unchanged
+        if self.force_distortion_centre and self.X_res and self.Y_res:
+            result['x0'] = 0.5/(self.X_res/2.0)
+            result['y0'] = 0.5/(self.Y_res/2.0)
+
         # Extract coefficients based on current flags
         idx = 0
 
