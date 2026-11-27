@@ -4098,12 +4098,38 @@ class PlateTool(QtWidgets.QMainWindow):
         if os.path.isfile(dir_path):
             dir_path = os.path.dirname(dir_path)
 
+        # Load the config of the new station without touching the current one yet - use the override if
+        #   provided, otherwise auto-detect it from the dir
+        try:
+            if config_override is not None:
+                new_config = cr.loadConfigFromDirectory(config_override, dir_path)
+            else:
+                new_config = cr.loadConfigFromDirectory('.', dir_path)
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            qmessagebox(title="Change Station Failed",
+                         message="Could not load the config from:\n{}\n\nError: {}".format(dir_path, repr(e)),
+                         message_type="error")
+            return False
+
+        # Ask for the platepar before anything is changed, so cancelling leaves the current station
+        #   fully loaded
+        platepar_path = self._findPlatepar(dir_path, platepar_name=new_config.platepar_name)
+
+        if platepar_path is None:
+            return False
+
         prev_input_path = self.input_path
         prev_dir_path = self.dir_path
         prev_config = self.config
         prev_img_handle = self.img_handle if self.hasData() else None
         prev_frame_times_path = getattr(self, 'frame_times_path', None)
         prev_camera_fps = getattr(self, 'camera_fps', None)
+        prev_station_state = self._stationStateSnapshot()
+        handles_switched = False
+        mask_cleared = False
 
         try:
             self.input_path = dir_path
@@ -4113,17 +4139,16 @@ class PlateTool(QtWidgets.QMainWindow):
             if prev_img_handle is not None:
                 self.frame_times_path = None
 
-            # Load config - use override if provided, otherwise auto-detect from dir
-            if config_override is not None:
-                self.config = cr.loadConfigFromDirectory(config_override, self.dir_path)
-            else:
-                self.config = cr.loadConfigFromDirectory('.', self.dir_path)
+            self.config = new_config
 
             # The frame rate of the camera of the new station
             self.camera_fps = self.config.fps
 
             # Force the CV2 backend
             self.config.media_backend = 'cv2'
+
+            # Forget the calibration state that belonged to the previous station
+            self._resetStationState()
 
             # Update original catalog file and band ratios for the new station
             self._original_catalog_file = self.config.star_catalog_file
@@ -4142,6 +4167,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Update ImageItems with new handle before loading platepar (which triggers drawing)
             self.img.changeHandle(self.img_handle)
             self.img_zoom.changeHandle(self.img_handle)
+            handles_switched = True
             if not self.tab.hist.auto_levels:
                 self.tab.hist.setLevels(0, 2**(8*self.img.data.itemsize) - 1)
 
@@ -4152,6 +4178,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Now that the new image dimensions are available, load this station's mask (or clear a
             #   previous station's mask if this one has none), then render the overlay
+            mask_cleared = True
             self.initMaskFromFile()
             self.updateMaskOverlayImage()
 
@@ -4159,11 +4186,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.cat_lim_mag = self.config.catalog_mag_limit
             self.loadCalstars()
 
-            # Search for platepar files in the new directory, prompt if ambiguous
-            platepar_path = self._findPlatepar()
-            if platepar_path is None:
-                # User cancelled — abort folder change
-                return False
+            # Load the chosen platepar, or a blank one
             if platepar_path:
                 self.loadPlatepar(update=True, platepar_file=platepar_path)
             else:
@@ -4203,6 +4226,9 @@ class PlateTool(QtWidgets.QMainWindow):
             # Populate menus with mode-specific actions (including F1 shortcut)
             self.changeMode(self.mode)
 
+            # Offer the new station's flat.bmp as the mask editing background
+            self.checkAndSetupFlatForMask()
+
             # Load UWO flat/dark if applicable
             if self.usingUWOData():
                 flat_file, self.flat_struct = self.loadFlat()
@@ -4238,10 +4264,144 @@ class PlateTool(QtWidgets.QMainWindow):
             self.camera_fps = prev_camera_fps
             if prev_img_handle is not None:
                 self.img_handle = prev_img_handle
+
+            # Put back the calibration state of the current station, which was reset for the new one
+            self._restoreStationState(prev_station_state)
+
+            # Restore the saturation overlay before reloading the previous image handle, because
+            #   changeHandle() reloads the image immediately and indexes saturation_mask with its shape
+            if hasattr(self, 'saturation_mask_img') and (self.saturation_mask_img is not None):
+                if getattr(self, 'saturation_mask', None) is not None:
+                    self.saturation_mask.setImage(self.saturation_mask_img)
+
+            if handles_switched and (prev_img_handle is not None):
+                self.img.changeHandle(prev_img_handle)
+                self.img_zoom.changeHandle(prev_img_handle)
+
+            if mask_cleared:
+                self.updateMaskOverlayImage()
+
             qmessagebox(title="Change Station Failed",
                          message="Could not load station from:\n{}\n\nError: {}".format(dir_path, repr(e)),
                          message_type="error")
             return False
+
+
+    # Attributes reset by _resetStationState, and restored by changeStation if the new station fails
+    STATION_STATE_ATTRIBUTES = (
+        'catalog_lm_tuned', 'tuned_cat_lim_mag', 'star_detection_override_enabled',
+        'star_detection_override_data', '_original_config_gamma', 'first_platepar_fit',
+        'flat_struct', 'flat_source_path', 'dark', 'dark_source_path',
+        'flat_image_data', 'mask_use_flat_background', 'mask_source_path',
+        'astrometry_solution_info', 'unsuitable_stars'
+    )
+
+    # Additional per-station attributes mutated later in changeStation and restored on failure
+    STATION_ROLLBACK_ATTRIBUTES = (
+        '_original_catalog_file', '_original_band_ratios', 'saturation_mask_img',
+        'mask', 'mask_polygons', 'mask_current_polygon', 'mask_paint_layer',
+        'mask_brush_stroke_history', 'startup_mask',
+        'catalog_stars', 'cat_lim_mag', 'calstars',
+        'platepar', 'platepar_file', 'platepar_fmt', 'platepar_modified',
+        'paired_stars', 'pick_list', 'residuals'
+    )
+
+
+    def _stationStateSnapshot(self):
+        """ Snapshot the per-station state that changeStation resets or replaces.
+
+        Return:
+            snapshot: [dict] Attribute values (missing attributes are omitted), and the flat and dark of
+                the image items.
+        """
+
+        all_attrs = self.STATION_STATE_ATTRIBUTES + self.STATION_ROLLBACK_ATTRIBUTES
+        snapshot = {k: getattr(self, k) for k in all_attrs if hasattr(self, k)}
+
+        snapshot['_image_items'] = [
+            (item, item.flat_struct, item.dark)
+            for item in (getattr(self, 'img', None), getattr(self, 'img_zoom', None))
+            if item is not None
+        ]
+
+        if hasattr(self, 'tab') and hasattr(self.tab, 'mask'):
+            snapshot['_mask_unsaved'] = getattr(self.tab.mask, 'unsaved', False)
+
+        return snapshot
+
+
+    def _restoreStationState(self, snapshot):
+        """ Restore the per-station state from a _stationStateSnapshot snapshot.
+
+        Arguments:
+            snapshot: [dict] The snapshot.
+        """
+
+        for k in self.STATION_STATE_ATTRIBUTES + self.STATION_ROLLBACK_ATTRIBUTES:
+            if k in snapshot:
+                setattr(self, k, snapshot[k])
+            elif hasattr(self, k):
+                delattr(self, k)
+
+        for item, flat_struct, dark in snapshot.get('_image_items', []):
+            item.flat_struct = flat_struct
+            item.dark = dark
+
+        if hasattr(self, 'tab') and hasattr(self.tab, 'star_detection'):
+            self.tab.star_detection.use_override_checkbox.setChecked(self.star_detection_override_enabled)
+            self.tab.star_detection.updateStatus(self.star_detection_override_enabled)
+
+        if hasattr(self, 'tab') and hasattr(self.tab, 'mask'):
+            if '_mask_unsaved' in snapshot:
+                self.tab.mask.setUnsaved(snapshot['_mask_unsaved'])
+            if hasattr(self.tab.mask, 'setUndoEnabled'):
+                self.tab.mask.setUndoEnabled(bool(getattr(self, 'mask_brush_stroke_history', [])))
+
+
+    def _resetStationState(self):
+        """ Reset the state that belongs to the loaded station before another station is loaded.
+
+            Covers the tuned catalog LM, star detection overrides and their gamma, the first-fit flag,
+            flat and dark with their sources, the mask editing flat and mask source path, cached
+            astrometry.net solution info, and unsuitable stars. Picks, pairs, mask, catalog, and platepar
+            are replaced by changeStation itself.
+        """
+
+        # Catalog LM found by the tuner of the previous station
+        self.catalog_lm_tuned = False
+        if hasattr(self, 'tuned_cat_lim_mag'):
+            del self.tuned_cat_lim_mag
+
+        # Star detection overrides (re-detected stars per FF file and the gamma they were made with)
+        self.star_detection_override_enabled = False
+        self.star_detection_override_data = {}
+        self._original_config_gamma = None
+        if hasattr(self, 'tab') and hasattr(self.tab, 'star_detection'):
+            self.tab.star_detection.use_override_checkbox.setChecked(False)
+            self.tab.star_detection.updateStatus(False)
+
+        # The first fit on the new station has to start from scratch
+        self.first_platepar_fit = True
+
+        # Flat and dark of the previous station
+        self.flat_struct = None
+        self.flat_source_path = None
+        self.dark = None
+        self.dark_source_path = None
+        for img_item in (getattr(self, 'img', None), getattr(self, 'img_zoom', None)):
+            if img_item is not None:
+                img_item.flat_struct = None
+                img_item.dark = None
+
+        # Flat used as the mask editing background and previous mask source path
+        self.flat_image_data = None
+        self.mask_use_flat_background = False
+        self.mask_source_path = None
+        if hasattr(self, 'tab') and hasattr(self.tab, 'mask'):
+            self.tab.mask.setUnsaved(False)
+
+        self.astrometry_solution_info = None
+        self.unsuitable_stars = PairedStars()
 
     def onRefractionChanged(self):
 
@@ -15009,15 +15169,16 @@ class PlateTool(QtWidgets.QMainWindow):
                 self._star_label_html_name[i] = f'<a href="https://simbad.cds.unistra.fr/simbad/sim-id?Ident={url_name}" style="color: #dddddd; text-decoration: none;">{display_name}</a>'
 
 
-    def _findPlatepar(self, dir_path=None):
+    def _findPlatepar(self, dir_path=None, platepar_name=None):
         """Search for a platepar file in the given directory.
 
         If the default platepar name exists and is the only .cal file, return its path directly.
         If the default name is missing or multiple .cal files exist, prompt the user to pick one
         or create a new blank platepar.
 
-        Arguments:
+        Keyword arguments:
             dir_path: [str] Directory to search. Defaults to self.dir_path.
+            platepar_name: [str] Default platepar file name. Defaults to self.config.platepar_name.
 
         Return:
             [str or None] Path to the selected platepar file, empty string if the user chose to
@@ -15028,7 +15189,10 @@ class PlateTool(QtWidgets.QMainWindow):
         if dir_path is None:
             dir_path = self.dir_path
 
-        default_path = os.path.join(dir_path, self.config.platepar_name)
+        if platepar_name is None:
+            platepar_name = self.config.platepar_name
+
+        default_path = os.path.join(dir_path, platepar_name)
         cal_files = sorted(glob.glob(os.path.join(dir_path, '*.cal')))
 
         # Default name exists and is the only .cal file — use it directly
