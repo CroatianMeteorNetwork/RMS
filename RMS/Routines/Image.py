@@ -110,7 +110,7 @@ class CoordinateFilter:
 
             valid_flags[valid_flags] &= mask_ok
 
-        filtered_coords = coords[valid_flags]
+        filtered_coords = coords_array[valid_flags]
 
         return filtered_coords, valid_flags
 

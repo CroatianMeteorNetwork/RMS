@@ -3530,8 +3530,10 @@ class Platepar(object):
                 # Local import to avoid circular dependency (ApplyAstrometry imports Platepar)
                 from RMS.Astrometry.ApplyAstrometry import computeFOVSize
                 self.fov_h, self.fov_v = computeFOVSize(self)
-            except Exception:
-                pass  # Keep existing values if computation fails (e.g. uncalibrated platepar)
+            except (ValueError, TypeError, AttributeError, ArithmeticError) as e:
+                # Keep existing values if computation fails (e.g. uncalibrated platepar)
+                import logging
+                logging.getLogger('rmslogger').debug("Platepar.write: computeFOVSize failed: %r", e)
 
         # Set JSON to be the default format
         if fmt is None:
