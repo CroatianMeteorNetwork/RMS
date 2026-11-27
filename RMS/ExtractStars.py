@@ -986,7 +986,8 @@ def extractStarsAndSave(config, ff_dir, show_candidates=False):
         # the workers once instead of being pickled into every queued job (the mask alone is ~0.9 MB per
         # FF file at 720p, a flat adds ~15 MB, and all jobs are queued before the pool starts)
         workpool = QueuedPool(extractStarsFF, cores=num_cores, backup_dir=ff_dir, input_queue_maxsize=None,
-            func_kwargs={'flat_struct': flat_struct, 'dark': dark, 'mask': mask, 'config': config})
+            func_kwargs={'flat_struct': flat_struct, 'dark': dark, 'mask': mask, 'config': config},
+            config=config)
 
 
         # Add jobs for the pool

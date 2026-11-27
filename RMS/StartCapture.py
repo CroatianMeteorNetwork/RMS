@@ -51,6 +51,7 @@ def _takeStationLock(station_id):
             Exits the process if the lock cannot be acquired.
     """
 
+    import errno
     import fcntl
     import tempfile
     from multiprocessing import util as mp_util
@@ -59,10 +60,26 @@ def _takeStationLock(station_id):
         'rms_startcapture_{:s}.lock'.format(station_id))
 
     try:
-        # 'a+' never truncates, so on refusal the holder's recorded PID survives for
-        # diagnostics; everything sits in the try so a stale lock file owned by another
-        # user (sticky /tmp) refuses cleanly instead of raising a raw PermissionError
-        lock_file = open(lock_path, 'a+')
+        # 'a+' never truncates, so on refusal the holder's recorded PID survives for diagnostics
+        try:
+            lock_file = open(lock_path, 'a+')
+
+        # A stale lock file left by another user (e.g. a run under another account) cannot be
+        #   opened for writing in the sticky /tmp, or with O_CREAT at all under
+        #   fs.protected_regular. flock() works on a read-only descriptor, so take the lock
+        #   through one instead of reporting a running instance forever. The holder PID in the
+        #   file cannot be updated then
+        except (IOError, OSError) as e:
+            if e.errno not in (errno.EACCES, errno.EPERM):
+                raise
+
+            try:
+                lock_file = open(lock_path, 'r')
+            except (IOError, OSError) as read_err:
+                if read_err.errno == errno.ENOENT:
+                    raise e
+                raise
+
         fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
     except (IOError, OSError) as e:
@@ -603,9 +620,10 @@ def startNightDetector(config, night_data_dir, duration, nodetect=False, detect_
         with open(capture_resume_file_path, 'w') as f:
             pass
 
-        # Initialize the detector
+        # Initialize the detector. Giving the config gives the workers the same RMS-only log filter
+        #   as the other children, so third-party DEBUG records stay out of the bounded queue
         detector = QueuedPool(detectStarsAndMeteors, cores=1, log=log, delay_start=delay_detection, \
-            backup_dir=night_data_dir, input_queue_maxsize=None)
+            backup_dir=night_data_dir, input_queue_maxsize=None, config=config)
         detector.startPool()
 
 
@@ -1633,6 +1651,11 @@ def setReprocessAttempts(config, captured_dir_path, attempts):
 
 
 
+# Processing status key marking a night reprocessed because reprocess_if_archive_missing found no archive
+REPROCESSED_FOR_MISSING_ARCHIVE = 'reprocessed_for_missing_archive'
+
+
+
 def processIncompleteCaptures(config, upload_manager):
     """ Reprocess broken capture folders.
     Arguments:
@@ -1666,6 +1689,7 @@ def processIncompleteCaptures(config, upload_manager):
     for captured_subdir in captured_dir_list:
 
         captured_dir_path = os.path.join(config.data_dir, config.captured_dir, captured_subdir)
+        archive_missing_reprocess = False
         log.debug("Checking folder: {:s}".format(captured_subdir))
 
         # Work out how far processing got on this night. The observation summary is the marker,
@@ -1695,6 +1719,14 @@ def processIncompleteCaptures(config, upload_manager):
                 log.debug("    ... fully processed!")
                 continue
 
+            # Reprocess such a night only once. Retention and quota management delete the new
+            #   archive again on a space-constrained station, and without this the night would be
+            #   reprocessed, re-archived and re-uploaded on every start, forever
+            if readProcessingStatus(config, captured_dir_path).get(REPROCESSED_FOR_MISSING_ARCHIVE):
+                log.debug("    ... processed, and already reprocessed once for its missing archive")
+                continue
+
+            archive_missing_reprocess = True
             log.warning("Folder {:s} looks processed but has no directory in {:s} - reprocessing "
                 "because reprocess_if_archive_missing is enabled"\
                 .format(captured_subdir, config.archived_dir))
@@ -1720,6 +1752,11 @@ def processIncompleteCaptures(config, upload_manager):
             # Reprocess the night
             night_archive_dir, archive_name, imgdata_archive_name, metadata_archive_name, detector = \
                                                         processNight(captured_dir_path, config)
+
+            # Record at once that the missing archive was recreated, so a failure in the steps
+            #   below cannot trigger another full reprocess
+            if archive_missing_reprocess:
+                updateProcessingStatus(config, captured_dir_path, **{REPROCESSED_FOR_MISSING_ARCHIVE: True})
 
             # Upload the archive, if upload is enabled
             if upload_manager is not None:
