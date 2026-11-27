@@ -2567,6 +2567,94 @@ class InputTypeImages(InputType):
             self.current_img_file = self.img_list[self.current_frame]
 
 
+    def _printFitsHeaderOnce(self, header, mode_label):
+        """ Print the FITS header of the first image loaded from this directory.
+
+            Loading every frame of a FITS image sequence used to dump the full header each time, which
+            flooded the console when stepping through images in SkyFit2. The header is the same for all
+            images of a sequence, so it is shown once per input directory.
+
+        Arguments:
+            header: [astropy Header] Header of the FITS file being loaded.
+            mode_label: [str] Short label of the FITS flavour detected (e.g. "FRIPON mode").
+        """
+
+        # Only the first image of the sequence is reported
+        if getattr(self, "_fits_header_printed", False):
+            return
+
+        self._fits_header_printed = True
+
+        print(mode_label)
+
+        # Print the header, one card per line
+        print("\nFITS Header:")
+        print("\n" + "="*80)
+        for key, value in header.items():
+            print(f"{key}: {value}")
+        print("="*80 + "\n")
+
+
+    def _floatFitsToUint16(self, frame):
+        """ Convert a floating point FITS image to uint16 with a mapping fixed for the sequence.
+
+            The offset and scale are taken from the first float image of this directory with a
+            finite, nonzero range, and reused for every later one: a per-image offset (the old
+            frame - min(frame)) made the levels jump from image to image. The minimum is moved to 0
+            (NaN-safe). The values are rescaled only when their range does not fit uint16 as it is:
+            a range <= 1 (normalised [0, 1] images would otherwise collapse to 0 and 1) or > 65535.
+            Constant, all-NaN, or non-finite images carry no levels to fix the mapping on, so they
+            are mapped on their own (offset only) until a finite non-constant image is seen.
+            NaN pixels become 0.
+
+        Arguments:
+            frame: [ndarray] Floating point image.
+
+        Return:
+            [ndarray] uint16 image.
+        """
+
+        mapping = getattr(self, "_float_fits_mapping", None)
+
+        # Fix the mapping on the first float image of the sequence which has finite levels
+        if mapping is None:
+
+            finite_mask = np.isfinite(frame)
+            if not np.any(finite_mask):
+                offset, value_range = 0.0, 0.0
+            else:
+                finite_vals = frame[finite_mask]
+                offset = float(np.min(finite_vals))
+                value_range = float(np.max(finite_vals)) - offset
+
+            # A constant or non-finite image cannot fix the mapping: map this image on its own
+            #   (offset only, if finite) and wait for one with a finite, nonzero range
+            if (not np.isfinite(value_range)) or (value_range <= 0):
+                mapping = (offset if np.isfinite(offset) else 0.0, 1.0)
+
+            else:
+
+                # Rescale only if the range does not fit uint16 as it is
+                if (value_range <= 1) or (value_range > 65535):
+                    scale = 65535.0/value_range
+                else:
+                    scale = 1.0
+
+                if not np.isfinite(scale):
+                    mapping = (offset, 1.0)
+                else:
+                    mapping = (offset, scale)
+                    self._float_fits_mapping = mapping
+
+        offset, scale = mapping
+
+        # Apply the mapping, zero NaN pixels and clip non-finite/out-of-range values to uint16
+        frame = (frame.astype(np.float64) - offset)*scale
+        frame = np.where(np.isnan(frame), 0.0, frame)
+        frame = np.clip(frame, 0.0, 65535.0)
+        return frame.astype(np.uint16)
+
+
     def loadFrame(self, avepixel=None, fr_no=None):
         """ Loads the current frame.
 
@@ -2651,7 +2739,7 @@ class InputTypeImages(InputType):
                 # Indicate that a FRIPON fit file is read
                 self.fripon_mode = True
 
-                print("FRIPON mode")
+                self._printFitsHeaderOnce(fits_file[0].header, "FRIPON mode")
 
 
         # Loads a non-FRIPON FITS image
@@ -2664,31 +2752,16 @@ class InputTypeImages(InputType):
                 fits_file = fits.open(f)
                 frame = fits_file[0].data
 
-                # Print nicely formatted FITS header
-                print("\nFITS Header:")
-                print("\n" + "="*80)
-                for key, value in fits_file[0].header.items():
-                    print(f"{key}: {value}")
-                print("="*80 + "\n")
+                # Show the FITS header of the first image loaded from this directory, so the
+                # calibration format is visible without flooding the output on every frame
+                self._printFitsHeaderOnce(fits_file[0].header, "FITS mode")
 
                 # If the fits image type is floating point, convert it to uint16
                 if np.issubdtype(frame.dtype, np.floating):
-                    
-                    # Rebalance the image so that the minimum is at 0
-                    frame = frame - np.min(frame)
-
-                    # Limit the maximum value to 65535
-                    frame = np.clip(frame, 0, 65535)
-
-                    # Cast to uint16
-                    frame = frame.astype(np.uint16)
-                    
-                
+                    frame = self._floatFitsToUint16(frame)
 
                 # # Flip image vertically
                 # frame = np.flipud(frame)
-
-                print("FITS mode")
 
         # Load a normal image
         else:
