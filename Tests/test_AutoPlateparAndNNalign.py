@@ -59,12 +59,19 @@ def testDirectoryReferenceJDFindsFirstFFFromCalstarsOrFiles(tmp_path):
     jd_disk = directoryReferenceJD(str(tmp_path), fps=25.0)
     assert jd_disk == pytest.approx(frameReferenceTime(ff_disk, 25.0, ff_frames=256)[1])
 
-    # When a CALSTARS file exists, its FF entry and ff_frames take precedence over files on disk
+    # When a CALSTARS file exists, its FF entry, chunk_frames, and header FPS take precedence over disk/config
     star_row = [[100.0, 200.0, 1000.0, 500.0, 2.5, 20.0, 15.0, 0.0]]
     CALSTARS.writeCALSTARS([[ff_cal, star_row]], str(tmp_path), "CALSTARS_XX0001_20261127.txt",
                            cam_code="XX0001", nrows=720, ncols=1280, chunk_frames=128)
     jd_cal = directoryReferenceJD(str(tmp_path), fps=25.0)
-    assert jd_cal == pytest.approx(frameReferenceTime(ff_cal, 25.0, ff_frames=128)[1])
+    assert jd_cal == pytest.approx(frameReferenceTime(ff_cal, 25.0, ff_frames=128)[1], abs=1e-9)
+
+    # Header FPS in CALSTARS overrides the caller's fallback fps
+    CALSTARS.writeCALSTARS([[ff_cal, star_row]], str(tmp_path), "CALSTARS_XX0001_20261127.txt",
+                           cam_code="XX0001", nrows=720, ncols=1280, chunk_frames=256, fps=100.0)
+    jd_hdr_fps = directoryReferenceJD(str(tmp_path), fps=25.0)
+    assert jd_hdr_fps == pytest.approx(frameReferenceTime(ff_cal, 100.0, ff_frames=256)[1], abs=1e-9)
+    assert abs(jd_hdr_fps - frameReferenceTime(ff_cal, 25.0, ff_frames=256)[1])*86400.0 == pytest.approx(3.84, abs=1e-2)
 
 
 def testSelectBestFrameDoesNotPenalizeSensitiveCamera():

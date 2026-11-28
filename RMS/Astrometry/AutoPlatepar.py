@@ -356,12 +356,15 @@ def directoryReferenceJD(dir_path, fps):
 
     # Prefer the FF files listed in the CALSTARS file, as the FF files themselves may not be present
     ff_frames = 256
+    ref_fps = fps
     ff_names = []
     for file_name in file_list:
         if ('CALSTARS' in file_name) and file_name.endswith('.txt'):
-            calstars_data = CALSTARS.readCALSTARS(dir_path, file_name)
+            calstars_data = CALSTARS.readCALSTARS(dir_path, file_name, return_fps=True)
             if calstars_data:
-                calstars_list, ff_frames = calstars_data
+                calstars_list, ff_frames, calstars_fps = calstars_data
+                if (calstars_fps is not None) and (calstars_fps > 0):
+                    ref_fps = calstars_fps
                 ff_names = sorted(entry[0] for entry in calstars_list)
             break
 
@@ -371,7 +374,7 @@ def directoryReferenceJD(dir_path, fps):
 
     for candidate in ff_names:
         try:
-            return frameReferenceTime(candidate, fps, ff_frames=ff_frames)[1]
+            return frameReferenceTime(candidate, ref_fps, ff_frames=ff_frames)[1]
         except (IndexError, ValueError):
             continue
 
@@ -552,6 +555,7 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
     # Find and load CALSTARS file
     calstars_file = None
     ff_frames = 256
+    calstars_fps = None
     for f in os.listdir(dir_path):
         if 'CALSTARS' in f and f.endswith('.txt'):
             calstars_file = f
@@ -574,7 +578,8 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
             return None, None, None
 
     else:
-        calstars_list, ff_frames = CALSTARS.readCALSTARS(dir_path, calstars_file)
+        calstars_list, ff_frames, calstars_fps = CALSTARS.readCALSTARS(
+            dir_path, calstars_file, return_fps=True)
     calstars = {ff_file: star_data for ff_file, star_data in calstars_list}
 
     if verbose:
@@ -653,8 +658,10 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
     # Initialize the vignetting coefficient: 0 for flat fielded images, otherwise the resolution-scaled default
     platepar.addVignettingCoeff(use_flat=use_flat)
 
-    # Get time of the middle of the FF file (the FF file name only gives the time of its first frame)
-    ff_dt, jd = frameReferenceTime(best_ff, config.fps, ff_frames=ff_frames)
+    # Get time of the middle of the FF file (the FF file name only gives the time of its first frame).
+    #   Prefer the FPS recorded in the CALSTARS header over config.fps when available
+    ref_fps = calstars_fps if (calstars_fps is not None) and (calstars_fps > 0) else config.fps
+    ff_dt, jd = frameReferenceTime(best_ff, ref_fps, ff_frames=ff_frames)
 
     platepar.JD = jd
     platepar.Ho = JD2HourAngle(jd)
