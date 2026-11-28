@@ -319,6 +319,22 @@ def datetime2JD(dt, UT_corr=0.0):
                    UT_corr=UT_corr)
 
 
+def jd2YearsFromJ2000(jd):
+    """ Compute the number of Julian years elapsed since the J2000.0 epoch.
+
+    Used for proper motion correction of star catalogs. Computed directly from the Julian date so the
+    fraction of a day is preserved (a datetime .days difference truncates to whole days).
+
+    Arguments:
+        jd: [float] Julian date.
+
+    Return:
+        years_from_J2000: [float] Julian years (365.25 days) since J2000.0 (JD 2451545.0).
+    """
+
+    return (jd - J2000_JD.days)/365.25
+
+
 def jd2Date(jd, UT_corr=0, dt_obj=False):
     """ Converts the given Julian date to (year, month, day, hour, minute, second, millisecond) tuple.
     Arguments:

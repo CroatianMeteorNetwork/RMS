@@ -19,12 +19,11 @@ in SkyFit2 on the selected image.
 
 from __future__ import print_function, division, absolute_import
 
-import datetime
 import os
 
 import numpy as np
 
-from RMS.Astrometry.Conversions import date2JD, jd2Date, JD2HourAngle, JD2LST
+from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, JD2LST, jd2YearsFromJ2000
 from RMS.Astrometry.CyFunctions import refractionScale
 from RMS.Astrometry.Conversions import trueRaDec2ApparentAltAz
 from RMS.Astrometry.ApplyAstrometry import rotationWrtStandardToPosAngle
@@ -36,7 +35,7 @@ from RMS.Astrometry.StarFilters import (filterPhotometricOutliers, filterBlended
 from RMS.Formats.Platepar import getCatalogStarsImagePositions
 from RMS.Formats import CALSTARS, StarCatalog
 from RMS.Formats.Platepar import Platepar
-from RMS.Formats.FFfile import filenameToDatetime
+from RMS.Formats.FFfile import getMiddleTimeFF, validFFName
 from RMS.ExtractStars import extractStarsAndSave
 from RMS.Routines.MaskImage import getMaskFile
 from RMS.Math import angularSeparation, RMSD
@@ -176,14 +175,17 @@ def scoreFrameDistribution(star_data, img_width, img_height, n_grid=4):
     return score, details
 
 
-def scoreFrameQuality(star_data, min_stars=10, max_stars=200):
+def scoreFrameQuality(star_data, min_stars=10, max_stars=200, penalty_stars=None):
     """
     Score a frame's star quality based on SNR, saturation, and count.
 
     Arguments:
         star_data: [ndarray] Star data array with columns [y, x, IntensSum, Ampltd, FWHM, BgLvl, SNR, NSatPx]
         min_stars: [int] Minimum number of stars for a valid frame
-        max_stars: [int] Maximum number of stars (more may indicate noise/clouds)
+        max_stars: [int] Star count at which count_score reaches 1.0
+
+    Keyword arguments:
+        penalty_stars: [int or None] Star count above which over-count penalty begins. Defaults to max_stars.
 
     Returns:
         score: [float] Quality score (0-1, higher is better)
@@ -202,7 +204,7 @@ def scoreFrameQuality(star_data, min_stars=10, max_stars=200):
     n_saturated_px = star_data[:, 7] if star_data.shape[1] > 7 else np.zeros(n_stars)
 
     non_saturated_count = np.sum(n_saturated_px == 0)
-    saturation_fraction = non_saturated_count / n_stars
+    saturation_fraction = non_saturated_count/n_stars
 
     non_sat_mask = n_saturated_px == 0
     if np.sum(non_sat_mask) > 0:
@@ -210,15 +212,27 @@ def scoreFrameQuality(star_data, min_stars=10, max_stars=200):
     else:
         mean_snr = np.mean(snr)
 
-    snr_score = min(mean_snr / 10.0, 1.0)
+    snr_score = min(mean_snr/10.0, 1.0)
+
+    if penalty_stars is None:
+        penalty_stars = max_stars
+    else:
+        penalty_stars = max(penalty_stars, max_stars)
 
     if n_stars <= max_stars:
-        count_score = (n_stars - min_stars) / (max_stars - min_stars)
+        if max_stars > min_stars:
+            count_score = (n_stars - min_stars)/(max_stars - min_stars)
+        else:
+            count_score = 1.0
         count_score = max(0, min(1, count_score))
+    elif n_stars <= penalty_stars:
+        count_score = 1.0
+    elif penalty_stars > 0:
+        count_score = max(0, 1.0 - (n_stars - penalty_stars)/penalty_stars)
     else:
-        count_score = max(0, 1.0 - (n_stars - max_stars) / max_stars)
+        count_score = 0.0
 
-    score = 0.4 * count_score + 0.4 * saturation_fraction + 0.2 * snr_score
+    score = 0.4*count_score + 0.4*saturation_fraction + 0.2*snr_score
 
     details = {
         'n_stars': n_stars,
@@ -242,7 +256,7 @@ def selectBestFrame(calstars, img_width, img_height, min_stars=10, max_stars=200
         img_width: [int] Image width in pixels
         img_height: [int] Image height in pixels
         min_stars: [int] Minimum number of stars for a valid frame
-        max_stars: [int] Maximum stars before penalizing
+        max_stars: [int] Star count at which count_score reaches 1.0
         verbose: [bool] Print detailed scoring info
 
     Returns:
@@ -252,11 +266,20 @@ def selectBestFrame(calstars, img_width, img_height, min_stars=10, max_stars=200
     """
     all_scores = {}
 
+    # Scale the over-count penalty threshold to the dataset so sensitive cameras
+    # with naturally dense star fields are not penalized
+    star_counts = [len(star_data) for star_data in calstars.values() if len(star_data) >= min_stars]
+    if len(star_counts) > 0:
+        penalty_stars = max(max_stars, int(2*np.median(star_counts)))
+    else:
+        penalty_stars = max_stars
+
     for ff_name, star_data in calstars.items():
         star_data = np.array(star_data)
 
         dist_score, dist_details = scoreFrameDistribution(star_data, img_width, img_height)
-        qual_score, qual_details = scoreFrameQuality(star_data, min_stars, max_stars)
+        qual_score, qual_details = scoreFrameQuality(
+            star_data, min_stars, max_stars, penalty_stars=penalty_stars)
 
         if qual_details.get('valid', False):
             combined_score = 0.5 * dist_score + 0.5 * qual_score
@@ -284,6 +307,78 @@ def selectBestFrame(calstars, img_width, img_height, min_stars=10, max_stars=200
             best_ff = ff_name
 
     return best_ff, best_score, all_scores
+
+
+def frameReferenceTime(ff_name, fps, ff_frames=256):
+    """ Compute the reference time of an FF file, i.e. the middle of the frames it contains.
+
+        The star positions in an FF file are averaged over all its frames, so the middle of the FF is
+        used as its time everywhere else in the pipeline (e.g. recalibration and SkyFit2).
+
+    Arguments:
+        ff_name: [str] FF file name.
+        fps: [float] Frames per second.
+
+    Keyword arguments:
+        ff_frames: [int] Number of frames in the FF file. 256 by default.
+
+    Return:
+        (ff_dt, jd): [tuple]
+            - ff_dt: [datetime] Time of the middle of the FF file.
+            - jd: [float] Julian date of the middle of the FF file.
+    """
+
+    if not ff_frames:
+        ff_frames = 256
+
+    ff_dt = getMiddleTimeFF(ff_name, fps, ff_frames=ff_frames, dt_obj=True)
+    jd = date2JD(ff_dt.year, ff_dt.month, ff_dt.day, ff_dt.hour, ff_dt.minute, ff_dt.second,
+                 ff_dt.microsecond/1000.0)
+
+    return ff_dt, jd
+
+
+def directoryReferenceJD(dir_path, fps):
+    """ Return the Julian date of the first FF file listed in the directory's CALSTARS file or directory.
+
+        Used to apply the star catalog proper motion for the night before the frame is chosen - the
+        change of the proper motion over one night is negligible.
+
+    Arguments:
+        dir_path: [str] Path to the directory with the FF and CALSTARS files.
+        fps: [float] Frames per second.
+
+    Return:
+        [float] Julian date, or None if no FF file name could be found.
+    """
+
+    file_list = sorted(os.listdir(dir_path))
+
+    # Prefer the FF files listed in the CALSTARS file, as the FF files themselves may not be present
+    ff_frames = 256
+    ref_fps = fps
+    ff_names = []
+    for file_name in file_list:
+        if ('CALSTARS' in file_name) and file_name.endswith('.txt'):
+            calstars_data = CALSTARS.readCALSTARS(dir_path, file_name, return_fps=True)
+            if calstars_data:
+                calstars_list, ff_frames, calstars_fps = calstars_data
+                if (calstars_fps is not None) and (calstars_fps > 0):
+                    ref_fps = calstars_fps
+                ff_names = sorted(entry[0] for entry in calstars_list)
+            break
+
+    # Fall back to the FF files in the directory
+    if not ff_names:
+        ff_names = [file_name for file_name in file_list if validFFName(file_name)]
+
+    for candidate in ff_names:
+        try:
+            return frameReferenceTime(candidate, ref_fps, ff_frames=ff_frames)[1]
+        except (IndexError, ValueError):
+            continue
+
+    return None
 
 
 def printFitResiduals(paired_stars, platepar, jd, ff_dt):
@@ -459,6 +554,8 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
 
     # Find and load CALSTARS file
     calstars_file = None
+    ff_frames = 256
+    calstars_fps = None
     for f in os.listdir(dir_path):
         if 'CALSTARS' in f and f.endswith('.txt'):
             calstars_file = f
@@ -481,7 +578,8 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
             return None, None, None
 
     else:
-        calstars_list, chunk_frames = CALSTARS.readCALSTARS(dir_path, calstars_file)
+        calstars_list, ff_frames, calstars_fps = CALSTARS.readCALSTARS(
+            dir_path, calstars_file, return_fps=True)
     calstars = {ff_file: star_data for ff_file, star_data in calstars_list}
 
     if verbose:
@@ -560,10 +658,10 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
     # Initialize the vignetting coefficient: 0 for flat fielded images, otherwise the resolution-scaled default
     platepar.addVignettingCoeff(use_flat=use_flat)
 
-    # Get time from FF filename
-    ff_dt = filenameToDatetime(best_ff)
-    jd = date2JD(ff_dt.year, ff_dt.month, ff_dt.day,
-                 ff_dt.hour, ff_dt.minute, ff_dt.second, ff_dt.microsecond/1000.0)
+    # Get time of the middle of the FF file (the FF file name only gives the time of its first frame).
+    #   Prefer the FPS recorded in the CALSTARS header over config.fps when available
+    ref_fps = calstars_fps if (calstars_fps is not None) and (calstars_fps > 0) else config.fps
+    ff_dt, jd = frameReferenceTime(best_ff, ref_fps, ff_frames=ff_frames)
 
     platepar.JD = jd
     platepar.Ho = JD2HourAngle(jd)
@@ -707,12 +805,13 @@ def autoFitPlatepar(dir_path, config, catalog_stars, platepar_template=None,
             _, img_x, img_y, intensity, cat_ra, cat_dec, cat_mag = entry
             sky_obj = CatalogStar(cat_ra, cat_dec, cat_mag)
 
-            # Find closest detected star to get FWHM, SNR, saturation
+            # Find closest finite detected star to get FWHM, SNR, saturation
             fwhm, snr, saturated = 2.5, 1.0, False
             if len(x_data) > 0:
                 distances = np.sqrt((x_data - img_x)**2 + (y_data - img_y)**2)
-                closest_idx = np.argmin(distances)
-                if distances[closest_idx] < 3.0:
+                finite_dist = np.where(np.isfinite(distances), distances, np.inf)
+                closest_idx = int(np.argmin(finite_dist))
+                if finite_dist[closest_idx] < 3.0:
                     fwhm = input_fwhm[closest_idx]
                     snr = input_snr[closest_idx]
                     saturated = input_saturated[closest_idx] > 0
@@ -809,8 +908,7 @@ def loadCatalogStars(config, lim_mag, jd=None):
         star_catalog_path = os.path.join(config.rms_root_dir, 'Catalogs')
 
     if jd is not None:
-        dt = jd2Date(jd, dt_obj=True)
-        years_from_J2000 = (dt - datetime.datetime(2000, 1, 1, 12, 0, 0)).days / 365.25
+        years_from_J2000 = jd2YearsFromJ2000(jd)
     else:
         years_from_J2000 = 0.0
 
@@ -866,8 +964,9 @@ if __name__ == "__main__":
     # Load config
     config = cr.loadConfigFromDirectory(args.config if args.config is not None else '.', args.dir_path)
 
-    # Load star catalog
-    catalog_stars = loadCatalogStars(config, config.catalog_mag_limit)
+    # Load star catalog with proper motion applied to the date of the data
+    catalog_stars = loadCatalogStars(config, config.catalog_mag_limit,
+                                     jd=directoryReferenceJD(args.dir_path, config.fps))
 
     if catalog_stars is None:
         print("ERROR: Could not load star catalog")
