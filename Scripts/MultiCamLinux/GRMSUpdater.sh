@@ -427,7 +427,7 @@ done
 log_message "GRMSUpdater.sh started with args: $*"
 
 # Use flock to prevent multiple instances from running simultaneously
-LOCKFILE="/tmp/rms_grms_updater.lock"
+LOCKFILE="${RMS_GRMS_UPDATER_LOCKFILE:-/tmp/rms_grms_updater.lock}"
 exec 200>"$LOCKFILE"
 if ! flock -n 200; then
     log_message "Another GRMSUpdater instance is already running. Exiting."
@@ -445,6 +445,13 @@ POSITIONAL_ARGS=()
 while [[ $# -gt 0 ]]; do
     case $1 in
         --term)
+            # Require a non-empty value; under set -u a missing $2 would abort with an unhelpful
+            # "unbound variable" instead of the usage text
+            if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == --* ]]; then
+                log_message "Error: --term requires a terminal name"
+                usage >&2
+                exit 1
+            fi
             PREFERRED_TERM="$2"
             shift 2
             ;;
@@ -452,6 +459,11 @@ while [[ $# -gt 0 ]]; do
             # gnome-terminal profile name (ignored by other terminals).
             # gnome-terminal warns and falls back to its default if the profile
             # doesn't exist, so passing this on a host without it is harmless.
+            if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == --* ]]; then
+                log_message "Error: --profile requires a profile name"
+                usage >&2
+                exit 1
+            fi
             GTERM_PROFILE="$2"
             shift 2
             ;;

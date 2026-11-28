@@ -78,7 +78,8 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
         roundness_threshold: [float] Minimum ratio of 2D Gaussian sigma X and sigma Y to be taken as a stars
             (hot pixels are narrow, while stars are round).
         max_feature_ratio: [float] Maximum ratio between 2 sigma of the star and the image segment area.
-        bit_depth: [int] Bit depth of the image. 8 bits by default.
+        bit_depth: [int] Bit depth of the image. 8 bits by default. For integer images it is capped at the
+            size of the data type (see Image.effectiveBitDepth).
         show_candidates: [bool] Show the raw star candidates before PSF fitting and the successfully fitted
             stars afterwards. False by default.
     
@@ -104,6 +105,10 @@ def extractStars(img, img_median=None, mask=None, gamma=1.0, max_star_candidates
     img_max = filters.maximum_filter(img_convolved, neighborhood_size)
     maxima = (img_convolved == img_max)
     img_min = filters.minimum_filter(img_convolved, neighborhood_size)
+
+    # Cap the bit depth at what the image data type can hold (e.g. 8-bit data with a larger config value)
+    bit_depth = Image.effectiveBitDepth(img, bit_depth)
+
     # Scale the threshold from the 8-bit reference range to the image bit depth
     intensity_threshold_scaled = intensity_threshold*(2**(bit_depth - 8))
     diff = ((img_max - img_min) > intensity_threshold_scaled)
@@ -232,9 +237,10 @@ def extractStarsAuto(img, mask=None,
     intensity = []
     fwhm = []
 
-    # Try different intensity thresholds until the greatest number of stars is found
-    # (the reference list is for 8-bit, scale it to the image bit depth)
-    intens_thresh_list = [t*(2**(bit_depth - 8)) for t in [70, 50, 40, 30, 20, 10, 5]]
+    # Try different intensity thresholds until the greatest number of stars is found. The thresholds are in
+    #   8-bit units: extractStars scales them to the bit depth of the image, so scaling them here as well
+    #   would apply the factor twice
+    intens_thresh_list = [70, 50, 40, 30, 20, 10, 5]
 
     # Repeat the process until the number of returned stars falls within the range
     min_stars_detect = 50
@@ -242,7 +248,7 @@ def extractStarsAuto(img, mask=None,
     for intens_thresh in intens_thresh_list:
 
         if verbose:
-            print("Detecting stars with intensity threshold: ", intens_thresh)
+            print("Detecting stars with intensity threshold (8-bit reference): ", intens_thresh)
 
         status = extractStars(img, img_median=img_median, mask=mask, 
                                 max_star_candidates=max_star_candidates, segment_radius=segment_radius, 
@@ -353,8 +359,11 @@ def extractStarsFF(
     # Calculate image mean and stddev
     img_median = np.median(ff.avepixel)
 
+    # Get the bit depth of the image data (capped at the data type size) before converting it to float
+    bit_depth = Image.effectiveBitDepth(ff.avepixel, config.bit_depth)
+
     # Check if the image is too bright and skip the image (scale the cutoff to the image bit depth)
-    if img_median > max_global_intensity*(2**(config.bit_depth - 8)):
+    if img_median > max_global_intensity*(2**(bit_depth - 8)):
         return error_return
 
     # Get the image data from the average pixel image
@@ -368,7 +377,7 @@ def extractStarsFF(
         max_star_candidates=config.max_stars, border=border,
         neighborhood_size=neighborhood_size, intensity_threshold=intensity_threshold,
         segment_radius=segment_radius, roundness_threshold=roundness_threshold,
-        max_feature_ratio=max_feature_ratio, bit_depth=config.bit_depth,
+        max_feature_ratio=max_feature_ratio, bit_depth=bit_depth,
         extra_info=extra_info, show_candidates=show_candidates
     )
 
@@ -470,8 +479,11 @@ def extractStarsImgHandle(img_handle,
         # Calculate image mean and stddev
         img_median = np.median(avepixel)
 
+        # Get the bit depth of the image data (capped at the data type size) before converting it to float
+        bit_depth = Image.effectiveBitDepth(avepixel, config.bit_depth)
+
         # Check if the image is too bright and skip the image (scale the cutoff to the image bit depth)
-        if img_median > max_global_intensity*(2**(config.bit_depth - 8)):
+        if img_median > max_global_intensity*(2**(bit_depth - 8)):
             return error_return
 
         # Get the image data from the average pixel image
@@ -484,7 +496,7 @@ def extractStarsImgHandle(img_handle,
             max_star_candidates=config.max_stars, border=border,
             neighborhood_size=neighborhood_size, intensity_threshold=intensity_threshold,
             segment_radius=segment_radius, roundness_threshold=roundness_threshold,
-            max_feature_ratio=max_feature_ratio, bit_depth=config.bit_depth
+            max_feature_ratio=max_feature_ratio, bit_depth=bit_depth
         )
 
         # If the star extraction failed, return an empty list
@@ -548,7 +560,8 @@ def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundne
         roundness_threshold: [float] Minimum ratio of 2D Gaussian sigma X and sigma Y to be taken as a stars
             (hot pixels are narrow, while stars are round).
         max_feature_ratio: [float] Maximum ratio between 2 sigma of the star and the image segment area.
-        bit_depth: [int] Bit depth of the image.
+        bit_depth: [int] Bit depth of the image. For integer images it is capped at the size of the data
+            type (see Image.effectiveBitDepth).
 
     """
 
@@ -569,6 +582,9 @@ def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundne
 
     # Get the image dimensions
     nrows, ncols = img.shape
+
+    # Cap the bit depth at what the image data type can hold
+    bit_depth = Image.effectiveBitDepth(img, bit_depth)
 
     # Threshold for the reported numbers of saturated pixels (98% of the dynamic range)
     saturation_threshold_report = int(round(0.98*(2**bit_depth - 1)))
@@ -819,6 +835,24 @@ def fitPSF(img, img_median, x_init, y_init, gamma=1.0, segment_radius=4, roundne
 
 
 
+def printStarTable(star_data):
+    """ Print the extracted stars of one FF file as a table.
+
+    Arguments:
+        star_data: [list] Star rows in the CALSTARS column order: Y (row), X (column), IntensSum, Ampltd,
+            FWHM, BgLvl, SNR, NSatPx.
+
+    Return:
+        None
+    """
+
+    # Print the header and one row per star, with the amplitude before the integrated intensity
+    print('  ROW     COL       amp  intens FWHM Bg SNR SatCount')
+    for y, x, intensity, amplitude, fwhm, background, snr, saturated_count in star_data:
+        print(' {:7.2f} {:7.2f} {:6d} {:6d} {:5.2f} {:6d} {:5.2f} {:6d}'.format(round(y, 2), round(x, 2),
+            int(amplitude), int(intensity), fwhm, int(background), snr, int(saturated_count)))
+
+
 def plotStars(img, x2, y2, bit_depth=None, title=None, x_fitted=None, y_fitted=None):
     """ Plots detected stars on the input image.
 
@@ -952,7 +986,8 @@ def extractStarsAndSave(config, ff_dir, show_candidates=False):
         # the workers once instead of being pickled into every queued job (the mask alone is ~0.9 MB per
         # FF file at 720p, a flat adds ~15 MB, and all jobs are queued before the pool starts)
         workpool = QueuedPool(extractStarsFF, cores=num_cores, backup_dir=ff_dir, input_queue_maxsize=None,
-            func_kwargs={'flat_struct': flat_struct, 'dark': dark, 'mask': mask, 'config': config})
+            func_kwargs={'flat_struct': flat_struct, 'dark': dark, 'mask': mask, 'config': config},
+            config=config)
 
 
         # Add jobs for the pool
@@ -1089,13 +1124,10 @@ if __name__ == "__main__":
 
         print()
         print(ff_name)
-        print('  ROW     COL       amp  intens FWHM Bg SNR SatCount')
-        for x, y, max_ampl, level, fwhm, background, snr, saturated_count in star_data:
-            print(' {:7.2f} {:7.2f} {:6d} {:6d} {:5.2f} {:6d} {:5.2f} {:6d}'.format(round(y, 2), round(x, 2), int(max_ampl), \
-                int(level), fwhm, int(background), snr, saturated_count))
+        printStarTable(star_data)
 
-
-        x2, y2, amplitude, intensity, fwhm_data, background, snr, saturated_count = np.array(star_data).T
+        # Unpack the CALSTARS columns: Y X IntensSum Ampltd FWHM BgLvl SNR NSatPx
+        y2, x2, intensity, amplitude, fwhm_data, background, snr, saturated_count = np.array(star_data).T
 
         # Store the star info to list        
         x_list += x2.tolist()

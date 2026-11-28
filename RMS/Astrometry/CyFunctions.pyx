@@ -1160,6 +1160,56 @@ cpdef (double, double) eqRefractionTrueToApparent(double ra, double dec, double 
 
 
 
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+def cyTargetRefraction(np.ndarray[FLOAT_TYPE_t, ndim=1] elev_arr, \
+    np.ndarray[FLOAT_TYPE_t, ndim=1] target_height_arr, double elev_obs, bool apparent_to_true=True):
+    """ Refraction of targets at finite heights, e.g. in the atmosphere. Their light is bent only by the air
+        between them and the observer, refractionTargetFraction() of the refraction of a star (0.38 of it for a
+        target at 10 km seen from sea level), at the refraction scale of the observer's height
+        (refractionScale()), on Bennett's formula. An infinite height gives the refraction of a star. Valid as
+        refractionTargetFraction() is: within 2% of a ray trace below 30 km at any elevation, while targets at
+        100 km and higher should not be taken much below 15 to 20 deg elevation.
+
+    Arguments:
+        elev_arr: [ndarray] Elevations (radians): apparent ones (the direction the light arrives from) with
+            apparent_to_true, else those of the straight lines to the targets.
+        target_height_arr: [ndarray] Heights of the targets above sea level (m), one per elevation.
+        elev_obs: [float] Height of the observer above sea level (m).
+
+    Keyword arguments:
+        apparent_to_true: [bool] True (default) takes the refraction out of apparent elevations, giving the
+            elevations of the straight lines to the targets; False puts it in.
+
+    Return:
+        [ndarray] Converted elevations (radians).
+
+    """
+
+    cdef int i
+    cdef double obs_scale, target_scale
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] out_arr = np.empty_like(elev_arr)
+
+    # Refraction at the observer's height, relative to sea level
+    obs_scale = refractionScale(elev_obs)
+
+    for i in range(elev_arr.shape[0]):
+
+        # Part of the refraction of a star the light of this target undergoes, evaluated when the height changes
+        if (i == 0) or (target_height_arr[i] != target_height_arr[i - 1]):
+            target_scale = obs_scale*refractionTargetFraction(elev_obs, target_height_arr[i])
+
+        # Out of the apparent elevation, or into the elevation of the straight line
+        if apparent_to_true:
+            out_arr[i] = refractionApparentToTrue(elev_arr[i], target_scale)
+        else:
+            out_arr[i] = refractionTrueToApparent(elev_arr[i], target_scale)
+
+    return out_arr
+
+
+
 cpdef (double, double) cyraDec2AltAz(double ra, double dec, double jd, double lat, double lon):
     """ Convert right ascension and declination to azimuth (+East of due North) and altitude. Same epoch is
         assumed, no correction for refraction is done.
@@ -2388,6 +2438,82 @@ cdef bint orientedAlongSegment(ForwardModel *m, double x_start, double y_start, 
 ### ###
 
 
+cdef struct CameraAxes:
+    # The projection about the reference pointing in the horizontal frame of a date: the east, north and up
+    #   components of the directions of the +x (a) and +y (b) standard coordinates at the pointing, and of the
+    #   pointing itself (c)
+    double ae
+    double an
+    double au
+    double be
+    double bn
+    double bu
+    double ce
+    double cn
+    double cu
+
+
+
+cdef (double, double, double) equatorialToHorizontal(DateFrame d, double lat, double x, double y, double z):
+    """ Rotate a J2000 unit vector to the local east, north and up axes of the observer at the date.
+
+    Arguments:
+        d: [DateFrame] From dateFrame() for the time and the observer's longitude.
+        lat: [float] Latitude of the observer (radians).
+        x, y, z: [float] Unit vector (J2000 equatorial axes).
+
+    Return:
+        (e, n, u): [tuple of floats] East, north and up components.
+
+    """
+
+    # Precession and nutation: J2000 -> true equator and equinox of date
+    x, y, z = frameRotateVector(d.to_date, x, y, z)
+
+    # The horizon of the observer at the local sidereal time
+    return (-sin(d.lst)*x + cos(d.lst)*y,
+        -sin(lat)*cos(d.lst)*x - sin(lat)*sin(d.lst)*y + cos(lat)*z,
+        cos(lat)*cos(d.lst)*x + cos(lat)*sin(d.lst)*y + sin(lat)*z)
+
+
+
+cdef CameraAxes cameraAxes(DateFrame d, double lat, double ra_c, double dec_c, double pos_angle):
+    """ The axes of the projection about the reference pointing in the horizontal frame of the date (see
+        CameraAxes): the image of a point at radius rho and standard coordinates (x, y) (deg) is
+        cos(rho)*c + sin(rho)/rho_deg*(x*a + y*b), the same as the projection in RA and Dec followed by the
+        conversion to alt/az, without the conversions of every point.
+
+    Arguments:
+        d: [DateFrame] From dateFrame() for the time and the observer's longitude.
+        lat: [float] Latitude of the observer (radians).
+        ra_c: [float] Right ascension of the pointing (J2000, radians), from pointingCorrection().
+        dec_c: [float] Declination of the pointing (J2000, radians).
+        pos_angle: [float] Position angle of the pointing (J2000, radians).
+
+    Return:
+        [CameraAxes] The axes.
+
+    """
+
+    cdef CameraAxes axes
+    cdef double nx, ny, nz, ex, ey
+
+    # North and east directions at the pointing (J2000)
+    nx, ny, nz = -sin(dec_c)*cos(ra_c), -sin(dec_c)*sin(ra_c), cos(dec_c)
+    ex, ey = -sin(ra_c), cos(ra_c)
+
+    # The standard coordinates are turned by the position angle from them
+    axes.ae, axes.an, axes.au = equatorialToHorizontal(d, lat, sin(pos_angle)*nx - cos(pos_angle)*ex,
+        sin(pos_angle)*ny - cos(pos_angle)*ey, sin(pos_angle)*nz)
+    axes.be, axes.bn, axes.bu = equatorialToHorizontal(d, lat, -cos(pos_angle)*nx - sin(pos_angle)*ex,
+        -cos(pos_angle)*ny - sin(pos_angle)*ey, -cos(pos_angle)*nz)
+    axes.ce, axes.cn, axes.cu = equatorialToHorizontal(d, lat, cos(dec_c)*cos(ra_c), cos(dec_c)*sin(ra_c),
+        sin(dec_c))
+
+    return axes
+
+
+
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
@@ -2398,7 +2524,7 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
     np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_rev, str dist_type, bool refraction=True, bool equal_aspect=False, 
     bool force_distortion_centre=False, bool asymmetry_corr=True, bool decentering_corr=False,
     bool invert_forward=False, np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data=None, double refraction_scale=1.0,
-    bool aberration=True):
+    bool aberration=True, bool horizontal=False):
     """ Convert RA, Dec to distortion corrected image coordinates. 
 
     Arguments:
@@ -2444,6 +2570,9 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
         jd_data: [ndarray] Julian date of every point. None by default, in which case all points are at jd. If
             given, jd is ignored and every point is converted at its own date (the camera is fixed in the
             horizontal frame, so the sky moves across the image), the same as one call per point.
+        horizontal: [bool] ra_data and dec_data are the azimuth (+east of due north) and the elevation (degrees)
+            at the date, as the light arrives: they are neither refracted nor aberrated (the reference pointing
+            is refracted as for RA and Dec). False by default.
     
     Return:
         (x, y): [tuple of ndarrays] Image X and Y coordinates.
@@ -2471,6 +2600,8 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
     cdef double p1 = 0, p2 = 0, p3 = 0, p4 = 0, u, v, r2, q1, q2
     cdef int index_offset
     cdef DateFrame date_frame
+    cdef CameraAxes axes
+    cdef double ve, vn, vu, va, vb, vab
 
     # Init output arrays
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] x_array = np.zeros_like(ra_data)
@@ -2483,6 +2614,10 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
     # Correct the pointing for precession (output in radians)
     ra_centre, dec_centre, pos_angle_ref = pointingCorrectionOfDate(date_frame, jd, radians(lat), radians(h0),
         radians(ra_ref), radians(dec_ref), radians(pos_angle_ref), refraction, refraction_scale)
+
+    # The projection in the horizontal frame of the date
+    if horizontal:
+        axes = cameraAxes(date_frame, radians(lat), ra_centre, dec_centre, pos_angle_ref)
 
     # # Compute the current RA of the FOV centre by adding the difference in between the current and the 
     # #   reference hour angle
@@ -2676,38 +2811,61 @@ def cyraDecToXY(np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data,
             if aberration:
                 vx, vy, vz = earthVelocityJ2000(jd)
 
+            if horizontal:
+                axes = cameraAxes(date_frame, radians(lat), ra_centre, dec_centre, pos_angle_ref)
+
         ra = radians(ra_data[i])
         dec = radians(dec_data[i])
 
-        # Annual aberration: catalog direction -> apparent direction seen from the moving Earth
-        if aberration:
-            ra, dec = shiftDirection(ra, dec, vx, vy, vz)
+        # A direction in the horizontal frame (azimuth, elevation): its standard coordinates from the components
+        #   along the axes of the projection
+        if horizontal:
 
-        ### Gnomonization of star coordinates to image coordinates ###
+            ve, vn, vu = cos(dec)*sin(ra), cos(dec)*cos(ra), sin(dec)
+            va = ve*axes.ae + vn*axes.an + vu*axes.au
+            vb = ve*axes.be + vn*axes.bn + vu*axes.bu
+            vab = sqrt(va*va + vb*vb)
 
-        # Apply refraction
-        if refraction:
-            ra, dec = eqRefraction(date_frame, ra, dec, radians(lat), True, refraction_scale)
+            # The distance from the FOV centre; at the centre itself the direction is undefined (x = y = 0)
+            radius = atan2(vab, ve*axes.ce + vn*axes.cn + vu*axes.cu)
+            if vab == 0:
+                x = 0
+                y = 0
+            else:
+                x = degrees(radius)*va/vab*pix_scale
+                y = degrees(radius)*vb/vab*pix_scale
 
-
-        # Compute the distance from the FOV centre to the sky coordinate
-        radius = radians(angularSeparation(degrees(ra), degrees(dec), degrees(ra_centre), \
-            degrees(dec_centre)))
-
-        # Compute theta - the direction angle between the FOV centre, sky coordinate, and the image vertical.
-        #   It is undefined (0/0) for the FOV centre itself, which projects to x = y = 0 at any angle.
-        if radius == 0:
-            theta = 0
         else:
-            sin_ang = cos(dec)*sin(ra - ra_centre)/sin(radius)
-            cos_ang = (sin(dec) - sin(dec_centre)*cos(radius))/(cos(dec_centre)*sin(radius))
-            theta   = -atan2(sin_ang, cos_ang) + pos_angle_ref - pi/2.0
 
-        # Calculate the standard coordinates
-        x = degrees(radius)*cos(theta)*pix_scale
-        y = degrees(radius)*sin(theta)*pix_scale
+            # Annual aberration: catalog direction -> apparent direction seen from the moving Earth
+            if aberration:
+                ra, dec = shiftDirection(ra, dec, vx, vy, vz)
 
-        ### ###
+            ### Gnomonization of star coordinates to image coordinates ###
+
+            # Apply refraction
+            if refraction:
+                ra, dec = eqRefraction(date_frame, ra, dec, radians(lat), True, refraction_scale)
+
+
+            # Compute the distance from the FOV centre to the sky coordinate
+            radius = radians(angularSeparation(degrees(ra), degrees(dec), degrees(ra_centre), \
+                degrees(dec_centre)))
+
+            # Compute theta - the direction angle between the FOV centre, sky coordinate, and the image vertical.
+            #   It is undefined (0/0) for the FOV centre itself, which projects to x = y = 0 at any angle.
+            if radius == 0:
+                theta = 0
+            else:
+                sin_ang = cos(dec)*sin(ra - ra_centre)/sin(radius)
+                cos_ang = (sin(dec) - sin(dec_centre)*cos(radius))/(cos(dec_centre)*sin(radius))
+                theta   = -atan2(sin_ang, cos_ang) + pos_angle_ref - pi/2.0
+
+            # Calculate the standard coordinates
+            x = degrees(radius)*cos(theta)*pix_scale
+            y = degrees(radius)*sin(theta)*pix_scale
+
+            ### ###
 
         # Invert the forward distortion: (x, y) are the corrected coordinates the forward distortion produces
         if invert_forward:
@@ -3061,7 +3219,7 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
     np.ndarray[FLOAT_TYPE_t, ndim=1] x_poly_fwd, np.ndarray[FLOAT_TYPE_t, ndim=1] y_poly_fwd, \
     str dist_type, bool refraction=True, bool equal_aspect=False, bool force_distortion_centre=False,\
     bool asymmetry_corr=True, bool precompute_pointing_corr=False, bool decentering_corr=False,
-    double refraction_scale=1.0, bool aberration=True):
+    double refraction_scale=1.0, bool aberration=True, bool horizontal=False):
     """
     Arguments:
         jd_data: [ndarray] Julian date of each data point.
@@ -3102,6 +3260,10 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         precompute_pointing_corr: [bool] Precompute the pointing correction. False by default. This is used
             to speed up the calculation when the input JD is the same for all data points, e.g. during
             plate solving.
+        horizontal: [bool] Return the azimuth (+east of due north, 0 to 360) and the elevation (degrees) at the
+            date of every point instead of RA and Dec: the direction the light arrives from, neither corrected
+            for refraction nor for aberration (the reference pointing is refracted as for RA and Dec). False by
+            default.
     
     Return:
         (ra_data, dec_data): [tuple of ndarrays]
@@ -3120,6 +3282,8 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
     cdef double ra_ref_now_corr, ra, dec, dec_ref_corr, pos_angle_ref_now_corr
     cdef double vx, vy, vz
     cdef DateFrame date_frame
+    cdef CameraAxes axes
+    cdef double radius_deg, scale_t, ve, vn, vu
 
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] ra_data = np.zeros_like(jd_data)
     cdef np.ndarray[FLOAT_TYPE_t, ndim=1] dec_data = np.zeros_like(jd_data)
@@ -3228,8 +3392,8 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         # What depends only on the time is evaluated when it changes, i.e. once per frame
         if (i == 0) or (jd != jd_data[i - 1]):
 
-            # Frame rotations and sidereal time for the pointing and the refraction
-            if refraction or (not precompute_pointing_corr):
+            # Frame rotations and sidereal time for the pointing, the refraction and the horizontal frame
+            if refraction or horizontal or (not precompute_pointing_corr):
                 date_frame = dateFrame(jd, radians(lon))
 
             if not precompute_pointing_corr:
@@ -3238,6 +3402,11 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
                 ra_ref_now_corr, dec_ref_corr, pos_angle_ref_now_corr = pointingCorrectionOfDate(date_frame,
                     jd, radians(lat), radians(h0), radians(ra_ref), radians(dec_ref), radians(pos_angle_ref),
                     refraction, refraction_scale)
+
+            # The projection in the horizontal frame of the date
+            if horizontal:
+                axes = cameraAxes(date_frame, radians(lat), ra_ref_now_corr, dec_ref_corr,
+                    pos_angle_ref_now_corr)
 
             # Earth velocity for the annual aberration
             if aberration:
@@ -3388,6 +3557,23 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
         ### ###
 
 
+        # The direction in the horizontal frame, from the axes of the projection (the centre itself at a zero
+        #   radius)
+        if horizontal:
+
+            radius_deg = sqrt(x_corr**2 + y_corr**2)
+            radius = radians(radius_deg)
+            scale_t = sin(radius)/radius_deg if radius_deg > 0 else 0.0
+
+            ve = cos(radius)*axes.ce + scale_t*(x_corr*axes.ae + y_corr*axes.be)
+            vn = cos(radius)*axes.cn + scale_t*(x_corr*axes.an + y_corr*axes.bn)
+            vu = cos(radius)*axes.cu + scale_t*(x_corr*axes.au + y_corr*axes.bu)
+
+            ra_data[i] = (degrees(atan2(ve, vn)) + 360)%360
+            dec_data[i] = degrees(atan2(vu, sqrt(ve*ve + vn*vn)))
+            continue
+
+
         ### Convert gnomonic X, Y to RA, Dec ###
 
         # Radius from FOV centre to sky coordinate
@@ -3429,3 +3615,425 @@ def cyXYToRADec(np.ndarray[FLOAT_TYPE_t, ndim=1] jd_data, np.ndarray[FLOAT_TYPE_
 
 
     return ra_data, dec_data
+
+
+
+### Geometry around an observer: WGS84 east, north, up coordinates ###
+
+# The WGS84 ellipsoid, as RMS.Astrometry.Conversions.EARTH: equatorial and polar radius (m), and the squares of the
+#   first and the second eccentricity
+cdef double WGS84_A = 6378137.0
+cdef double WGS84_B = 6356752.314245
+cdef double WGS84_E2 = 1.0 - WGS84_B**2/WGS84_A**2
+cdef double WGS84_EP2 = (WGS84_A**2 - WGS84_B**2)/WGS84_B**2
+
+
+cdef struct EnuFrame:
+    # A reference point in ECEF coordinates (m), and its local east, north and up unit vectors
+    double x
+    double y
+    double z
+    double ex
+    double ey
+    double ez
+    double nx
+    double ny
+    double nz
+    double ux
+    double uy
+    double uz
+
+
+
+@cython.cdivision(True)
+cdef inline (double, double, double) geodeticToECEF(double lat, double lon, double h):
+    """ ECEF coordinates of a point, as Conversions.latLonAlt2ECEF.
+
+    Arguments:
+        lat: [float] Latitude (radians).
+        lon: [float] Longitude (radians).
+        h: [float] Height above the WGS84 ellipsoid (m).
+
+    Return:
+        (x, y, z): [tuple of floats] ECEF coordinates (m).
+
+    """
+
+    cdef double sin_lat = sin(lat)
+    cdef double cos_lat = cos(lat)
+    cdef double n = WGS84_A/sqrt(1.0 - WGS84_E2*sin_lat*sin_lat)
+
+    return (n + h)*cos_lat*cos(lon), (n + h)*cos_lat*sin(lon), ((1.0 - WGS84_E2)*n + h)*sin_lat
+
+
+
+@cython.cdivision(True)
+cdef inline (double, double, double) ecefToGeodetic(double x, double y, double z):
+    """ Geodetic coordinates of ECEF coordinates by Bowring's formula, as Conversions.ecef2LatLonAlt.
+
+    Arguments:
+        x, y, z: [float] ECEF coordinates (m).
+
+    Return:
+        (lat, lon, h): [tuple of floats] Latitude and longitude (radians), height above the WGS84 ellipsoid (m).
+
+    """
+
+    cdef double p, theta, sin_t, cos_t, lat, sin_lat, n
+
+    p = sqrt(x*x + y*y)
+    theta = atan2(z*WGS84_A, p*WGS84_B)
+    sin_t = sin(theta)
+    cos_t = cos(theta)
+    lat = atan2(z + WGS84_EP2*WGS84_B*sin_t*sin_t*sin_t, p - WGS84_E2*WGS84_A*cos_t*cos_t*cos_t)
+    sin_lat = sin(lat)
+    n = WGS84_A/sqrt(1.0 - WGS84_E2*sin_lat*sin_lat)
+
+    # Near the exact poles cos(lat) vanishes, so the height is taken from the polar axis there
+    if (fabs(x) < 1000) and (fabs(y) < 1000):
+        return lat, atan2(y, x), fabs(z) - WGS84_B
+
+    return lat, atan2(y, x), p/cos(lat) - n
+
+
+
+cdef EnuFrame enuFrame(double lat, double lon, double h):
+    """ ECEF coordinates and local east, north and up unit vectors (geodetic vertical) of a reference point.
+
+    Arguments:
+        lat: [float] Latitude (radians).
+        lon: [float] Longitude (radians).
+        h: [float] Height above the WGS84 ellipsoid (m).
+
+    Return:
+        [EnuFrame] The reference point and its axes.
+
+    """
+
+    cdef EnuFrame f
+
+    f.x, f.y, f.z = geodeticToECEF(lat, lon, h)
+    f.ex, f.ey, f.ez = -sin(lon), cos(lon), 0.0
+    f.nx, f.ny, f.nz = -sin(lat)*cos(lon), -sin(lat)*sin(lon), cos(lat)
+    f.ux, f.uy, f.uz = cos(lat)*cos(lon), cos(lat)*sin(lon), sin(lat)
+
+    return f
+
+
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+def cyLatLonAlt2ENU(np.ndarray[FLOAT_TYPE_t, ndim=1] lat_arr, np.ndarray[FLOAT_TYPE_t, ndim=1] lon_arr, \
+    np.ndarray[FLOAT_TYPE_t, ndim=1] h_arr, double lat_ref, double lon_ref, double h_ref):
+    """ Geographical coordinates to east, north, up coordinates relative to a reference point, along its local
+        axes. See Conversions.latLonAlt2ENU.
+
+    Arguments:
+        lat_arr: [ndarray] Latitudes (degrees, +north).
+        lon_arr: [ndarray] Longitudes (degrees, +east).
+        h_arr: [ndarray] Heights above the WGS84 ellipsoid (m).
+        lat_ref: [float] Latitude of the reference point (degrees).
+        lon_ref: [float] Longitude of the reference point (degrees).
+        h_ref: [float] Height of the reference point above the WGS84 ellipsoid (m).
+
+    Return:
+        (e_arr, n_arr, u_arr): [tuple of ndarrays] East, north and up coordinates (m).
+
+    """
+
+    cdef int i
+    cdef double x, y, z
+    cdef EnuFrame f = enuFrame(radians(lat_ref), radians(lon_ref), h_ref)
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] e_arr = np.empty_like(lat_arr)
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] n_arr = np.empty_like(lat_arr)
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] u_arr = np.empty_like(lat_arr)
+
+    for i in range(lat_arr.shape[0]):
+
+        # The vector from the reference point along its axes
+        x, y, z = geodeticToECEF(radians(lat_arr[i]), radians(lon_arr[i]), h_arr[i])
+        x, y, z = x - f.x, y - f.y, z - f.z
+        e_arr[i] = f.ex*x + f.ey*y
+        n_arr[i] = f.nx*x + f.ny*y + f.nz*z
+        u_arr[i] = f.ux*x + f.uy*y + f.uz*z
+
+    return e_arr, n_arr, u_arr
+
+
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+def cyENU2LatLonAlt(np.ndarray[FLOAT_TYPE_t, ndim=1] e_arr, np.ndarray[FLOAT_TYPE_t, ndim=1] n_arr, \
+    np.ndarray[FLOAT_TYPE_t, ndim=1] u_arr, double lat_ref, double lon_ref, double h_ref):
+    """ East, north, up coordinates relative to a reference point to geographical coordinates. The inverse of
+        cyLatLonAlt2ENU.
+
+    Arguments:
+        e_arr: [ndarray] East coordinates (m).
+        n_arr: [ndarray] North coordinates (m).
+        u_arr: [ndarray] Up coordinates (m).
+        lat_ref: [float] Latitude of the reference point (degrees).
+        lon_ref: [float] Longitude of the reference point (degrees).
+        h_ref: [float] Height of the reference point above the WGS84 ellipsoid (m).
+
+    Return:
+        (lat_arr, lon_arr, h_arr): [tuple of ndarrays] Latitudes and longitudes (degrees), heights above the
+            WGS84 ellipsoid (m).
+
+    """
+
+    cdef int i
+    cdef double lat, lon, h
+    cdef EnuFrame f = enuFrame(radians(lat_ref), radians(lon_ref), h_ref)
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] lat_arr = np.empty_like(e_arr)
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] lon_arr = np.empty_like(e_arr)
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] h_arr = np.empty_like(e_arr)
+
+    for i in range(e_arr.shape[0]):
+
+        # ECEF coordinates of the point, then its geographical coordinates
+        lat, lon, h = ecefToGeodetic(f.x + f.ex*e_arr[i] + f.nx*n_arr[i] + f.ux*u_arr[i],
+            f.y + f.ey*e_arr[i] + f.ny*n_arr[i] + f.uy*u_arr[i], f.z + f.nz*n_arr[i] + f.uz*u_arr[i])
+        lat_arr[i] = degrees(lat)
+        lon_arr[i] = degrees(lon)
+        h_arr[i] = h
+
+    return lat_arr, lon_arr, h_arr
+
+
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+def cyENHeight2Up(np.ndarray[FLOAT_TYPE_t, ndim=1] e_arr, np.ndarray[FLOAT_TYPE_t, ndim=1] n_arr, \
+    np.ndarray[FLOAT_TYPE_t, ndim=1] h_arr, double lat_ref, double lon_ref, double h_ref, int max_iter=10, \
+    double height_tol=1.0e-3):
+    """ Up coordinate at which the points with the given east and north coordinates relative to a reference
+        point are at the given heights above the WGS84 ellipsoid. See Conversions.enHeight2Up.
+
+        The start is the height difference less the drop of a sphere of the Earth's radius over the horizontal
+        distance. Newton's method on the ellipsoid then refines it, using the component of the local vertical of
+        the point along the up direction of the reference point as the derivative.
+
+    Arguments:
+        e_arr: [ndarray] East coordinates (m).
+        n_arr: [ndarray] North coordinates (m).
+        h_arr: [ndarray] Heights above the WGS84 ellipsoid (m).
+        lat_ref: [float] Latitude of the reference point (degrees).
+        lon_ref: [float] Longitude of the reference point (degrees).
+        h_ref: [float] Height of the reference point above the WGS84 ellipsoid (m).
+
+    Keyword arguments:
+        max_iter: [int] Maximum number of Newton steps. 10 by default, two or three are typical.
+        height_tol: [float] Largest accepted miss of the requested height (m). 1 mm by default.
+
+    Return:
+        u_arr: [ndarray] Up coordinates (m), NaN where the solution did not converge to within height_tol.
+
+    """
+
+    cdef int i, j
+    cdef double x0, y0, z0, u, du, lat, lon, h
+    cdef EnuFrame f = enuFrame(radians(lat_ref), radians(lon_ref), h_ref)
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] u_arr = np.empty_like(e_arr)
+
+    for i in range(e_arr.shape[0]):
+
+        # The fixed part of the point, along the east and north axes
+        x0 = f.x + f.ex*e_arr[i] + f.nx*n_arr[i]
+        y0 = f.y + f.ey*e_arr[i] + f.ny*n_arr[i]
+        z0 = f.z + f.nz*n_arr[i]
+
+        # Start below the horizontal plane of the reference point, which rises above the surface of the Earth
+        #   with the square of the distance
+        u = h_arr[i] - h_ref - (e_arr[i]**2 + n_arr[i]**2)/(2*(WGS84_A + h_ref))
+
+        for j in range(max_iter):
+
+            # The height grows with u at the rate of the up axis along the local vertical of the point
+            lat, lon, h = ecefToGeodetic(x0 + f.ux*u, y0 + f.uy*u, z0 + f.uz*u)
+            du = (h_arr[i] - h)/(f.ux*cos(lat)*cos(lon) + f.uy*cos(lat)*sin(lon) + f.uz*sin(lat))
+            u += du
+
+            if fabs(du) < 1.0e-6:
+                break
+
+        # Only a point that lands on the requested height is accepted
+        lat, lon, h = ecefToGeodetic(x0 + f.ux*u, y0 + f.uy*u, z0 + f.uz*u)
+        if fabs(h - h_arr[i]) < height_tol:
+            u_arr[i] = u
+        else:
+            u_arr[i] = NAN_VALUE
+
+    return u_arr
+
+
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+def cyAltAzHeight2ENU(np.ndarray[FLOAT_TYPE_t, ndim=1] azim_arr, np.ndarray[FLOAT_TYPE_t, ndim=1] elev_arr, \
+    np.ndarray[FLOAT_TYPE_t, ndim=1] h_arr, double lat_ref, double lon_ref, double h_ref, int max_iter=20, \
+    double height_tol=1.0e-3):
+    """ East, north, up coordinates of the points where lines of sight from a reference point reach the given
+        heights above the WGS84 ellipsoid, solved as Conversions.rangeToHeightWGS84: from the sphere osculating the
+        ellipsoid at the reference point in the azimuth of the line of sight (the near crossing for a height below
+        the reference point, the far one above it), refined by Newton's method on the ellipsoid.
+
+    Arguments:
+        azim_arr: [ndarray] Azimuths (+east of due north) of the lines of sight (radians).
+        elev_arr: [ndarray] Elevations of the lines of sight (radians), from the local horizon of the reference
+            point.
+        h_arr: [ndarray] Heights above the WGS84 ellipsoid (m).
+        lat_ref: [float] Latitude of the reference point (degrees).
+        lon_ref: [float] Longitude of the reference point (degrees).
+        h_ref: [float] Height of the reference point above the WGS84 ellipsoid (m).
+
+    Keyword arguments:
+        max_iter: [int] Maximum number of Newton steps. 20 by default, two or three are typical.
+        height_tol: [float] Largest accepted miss of the requested height (m). 1 mm by default.
+
+    Return:
+        (e_arr, n_arr, u_arr): [tuple of ndarrays] East, north and up coordinates (m), NaN where the line of sight
+            never reaches the height or the solution did not converge to within height_tol.
+
+    """
+
+    cdef int i, j
+    cdef double sin2_lat, radius_n, radius_m, radius, rs, rm, b, disc, r, dr, slope
+    cdef double le, ln, lu, dx, dy, dz, lat, lon, h
+    cdef EnuFrame f = enuFrame(radians(lat_ref), radians(lon_ref), h_ref)
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] e_arr = np.empty_like(azim_arr)
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] n_arr = np.empty_like(azim_arr)
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] u_arr = np.empty_like(azim_arr)
+
+    # Meridional and prime vertical radii of curvature at the reference point
+    sin2_lat = sin(radians(lat_ref))**2
+    radius_n = WGS84_A/sqrt(1.0 - WGS84_E2*sin2_lat)
+    radius_m = WGS84_A*(1.0 - WGS84_E2)/(1.0 - WGS84_E2*sin2_lat)**1.5
+
+    for i in range(azim_arr.shape[0]):
+
+        # The line of sight along the local axes and in ECEF coordinates
+        le = cos(elev_arr[i])*sin(azim_arr[i])
+        ln = cos(elev_arr[i])*cos(azim_arr[i])
+        lu = sin(elev_arr[i])
+        dx = f.ex*le + f.nx*ln + f.ux*lu
+        dy = f.ey*le + f.ny*ln + f.uy*lu
+        dz = f.nz*ln + f.uz*lu
+
+        # The crossing with the osculating sphere in the azimuth of the line of sight (Euler's formula), the near
+        #   one for a height below the reference point; none if the line of sight never gets down to the height
+        radius = 1.0/(cos(azim_arr[i])**2/radius_m + sin(azim_arr[i])**2/radius_n)
+        rs = radius + h_ref
+        rm = radius + h_arr[i]
+        b = rs*lu
+        disc = b*b + rm*rm - rs*rs
+        if not (disc >= 0):
+            e_arr[i] = n_arr[i] = u_arr[i] = NAN_VALUE
+            continue
+
+        if rm >= rs:
+            r = -b + sqrt(disc)
+        else:
+            r = -b - sqrt(disc)
+
+        if not (r > 0):
+            e_arr[i] = n_arr[i] = u_arr[i] = NAN_VALUE
+            continue
+
+        # Newton's method on the ellipsoid: the height grows with the range at the rate of the line of sight along
+        #   the local vertical (a grazing line of sight is left where it is and checked below)
+        for j in range(max_iter):
+
+            lat, lon, h = ecefToGeodetic(f.x + r*dx, f.y + r*dy, f.z + r*dz)
+            slope = dx*cos(lat)*cos(lon) + dy*cos(lat)*sin(lon) + dz*sin(lat)
+            dr = (h_arr[i] - h)/slope if fabs(slope) > 1.0e-9 else 0.0
+            r += dr
+
+            if fabs(dr) < 1.0e-6:
+                break
+
+        # Only a range in front of the reference point that lands on the requested height is accepted
+        lat, lon, h = ecefToGeodetic(f.x + r*dx, f.y + r*dy, f.z + r*dz)
+        if (r > 0) and (fabs(h - h_arr[i]) < height_tol):
+            e_arr[i] = r*le
+            n_arr[i] = r*ln
+            u_arr[i] = r*lu
+        else:
+            e_arr[i] = n_arr[i] = u_arr[i] = NAN_VALUE
+
+    return e_arr, n_arr, u_arr
+
+
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+def cyTargetRefractionRange(np.ndarray[FLOAT_TYPE_t, ndim=1] azim_arr, np.ndarray[FLOAT_TYPE_t, ndim=1] elev_arr, \
+    np.ndarray[FLOAT_TYPE_t, ndim=1] range_arr, double lat_ref, double lon_ref, double h_ref, double elev_obs, \
+    bool apparent_to_true=True):
+    """ cyTargetRefraction for targets given by their range along the line of sight instead of their height. The
+        height of a target is that of the point at its range on the straight line to it, on the WGS84 ellipsoid,
+        taken above sea level with the geoid height of the observer. From an apparent elevation the straight line
+        is not known beforehand: the height and the refraction are solved for together, which takes a few steps.
+
+    Arguments:
+        azim_arr: [ndarray] Azimuths (+east of due north) of the lines of sight (radians).
+        elev_arr: [ndarray] Elevations (radians): apparent ones with apparent_to_true, else those of the straight
+            lines to the targets.
+        range_arr: [ndarray] Ranges of the targets from the observer (m).
+        lat_ref: [float] Latitude of the observer (degrees).
+        lon_ref: [float] Longitude of the observer (degrees).
+        h_ref: [float] Height of the observer above the WGS84 ellipsoid (m).
+        elev_obs: [float] Height of the observer above sea level (m).
+
+    Keyword arguments:
+        apparent_to_true: [bool] True (default) takes the refraction out of apparent elevations, giving the
+            elevations of the straight lines to the targets; False puts it in.
+
+    Return:
+        [ndarray] Converted elevations (radians).
+
+    """
+
+    cdef int i, j
+    cdef double obs_scale, geoid_height, elev, elev_prev, le, ln, lu, lat, lon, h, target_scale
+    cdef EnuFrame f = enuFrame(radians(lat_ref), radians(lon_ref), h_ref)
+    cdef np.ndarray[FLOAT_TYPE_t, ndim=1] out_arr = np.empty_like(elev_arr)
+
+    # Refraction at the observer's height, relative to sea level, and the geoid height that takes heights above
+    #   the ellipsoid to heights above sea level
+    obs_scale = refractionScale(elev_obs)
+    geoid_height = h_ref - elev_obs
+
+    for i in range(elev_arr.shape[0]):
+
+        # The straight line to the target, first taken as the given elevation
+        elev = elev_arr[i]
+
+        for j in range(10):
+
+            # Height of the target on the straight line, and its part of the refraction of a star
+            le = cos(elev)*sin(azim_arr[i])
+            ln = cos(elev)*cos(azim_arr[i])
+            lu = sin(elev)
+            lat, lon, h = ecefToGeodetic(f.x + range_arr[i]*(f.ex*le + f.nx*ln + f.ux*lu),
+                f.y + range_arr[i]*(f.ey*le + f.ny*ln + f.uy*lu), f.z + range_arr[i]*(f.nz*ln + f.uz*lu))
+            target_scale = obs_scale*refractionTargetFraction(elev_obs, h - geoid_height)
+
+            # The elevation of the straight line is given: refract it
+            if not apparent_to_true:
+                out_arr[i] = refractionTrueToApparent(elev_arr[i], target_scale)
+                break
+
+            # From the apparent elevation, the straight line moves with the refraction until both settle
+            elev_prev = elev
+            elev = refractionApparentToTrue(elev_arr[i], target_scale)
+            out_arr[i] = elev
+            if fabs(elev - elev_prev) < 1.0e-12:
+                break
+
+    return out_arr

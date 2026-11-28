@@ -14,7 +14,8 @@ import paramiko
 from paramiko.sftp import CMD_EXTENDED, CMD_STATUS
 
 from RMS.Logger import LoggingManager, getLogger, getLoggingQueue, initChildProcess
-from RMS.Misc import mkdirP, UTCFromTimestamp, runWithTimeout, AtomicFlag, BoundedLock
+from RMS.Misc import mkdirP, UTCFromTimestamp, runWithTimeout, AtomicFlag, BoundedLock, \
+    setParentDeathSignal, exitIfParentGone, startParentWatch
 
 # Suppress Paramiko internal errors before they appear in logs
 getLogger("paramiko.transport").setLevel(logging.CRITICAL)
@@ -902,6 +903,10 @@ class UploadManager(multiprocessing.Process):
         # under the 'forkserver'/'spawn' start methods (handlers are not inherited there)
         self.logging_queue = getLoggingQueue()
 
+        # PID of the logical parent, recorded here because __init__ runs in the parent. The upload manager
+        #   stops when the parent is gone (see run())
+        self.parent_pid = os.getpid()
+
 
     def __getstate__(self):
         """ Return a picklable representation of the manager.
@@ -948,14 +953,24 @@ class UploadManager(multiprocessing.Process):
         if self.is_alive():
             log.error(
                 "UploadManager still alive after terminate() & %d more seconds. "
-                "It may be stuck in a non-interruptible blocking call.",
+                "It may be stuck in a non-interruptible blocking call, sending SIGKILL.",
                 short_wait
             )
+
+            # Kill the process which did not react to the terminate
+            self.kill()
+
         else:
             log.info("UploadManager terminated (after forced terminate).")
 
-        # Always join to reap zombie (returns instantly if already dead)
-        self.join()
+        # Reap the zombie (returns at once if it is already dead). Bounded: a process stuck in uninterruptible
+        #   I/O (an NFS share, a wedged USB disk) survives even SIGKILL, and an unbounded join would wedge the
+        #   shutdown of StartCapture on it, so the process is left behind instead
+        self.join(short_wait)
+        if self.is_alive():
+            log.warning("UploadManager survived SIGKILL (stuck in uninterruptible I/O?), leaving it without "
+                "joining")
+
         self._shutdownManager()
 
 
@@ -1239,8 +1254,17 @@ class UploadManager(multiprocessing.Process):
     def run(self):
         """ Try uploading the files every 15 minutes. """
 
+        # Die with the parent: an orphaned upload manager would keep working on the upload queue file after
+        #   StartCapture was killed, next to the upload manager of the restarted instance
+        death_signal = setParentDeathSignal()
+
         # Re-establish logging and signal handling in the child (no-op under 'fork')
         initChildProcess(self.logging_queue, self.config)
+
+        # Exit if the parent died before the death signal was armed, and keep watching the parent where the
+        #   death signal does not see it (forkserver)
+        exitIfParentGone(self.parent_pid, 'UploadManager')
+        startParentWatch(self.parent_pid, 'UploadManager', self.exit, death_signal=death_signal)
 
         # Load the file queue from disk
         self.loadQueue()
@@ -1250,21 +1274,25 @@ class UploadManager(multiprocessing.Process):
 
         while not self.exit.is_set():
 
+            # The waits below sleep after the lock is released: sleeping while holding it kept the lock taken
+            #   nearly all the time, so addFiles() and delayNextUpload() in the parent timed out on it and
+            #   logged that a process had died holding it
+
+            # Check if the upload should be run (if 15 minutes are up)
             with self.last_runtime_lock:
+                wait = (self.last_runtime.value > 0) and ((time.time() - self.last_runtime.value) < 15*60)
 
-                # Check if the upload should be run (if 15 minutes are up)
-                if self.last_runtime.value > 0:
-                    if (time.time() - self.last_runtime.value) < 15*60:
-                        time.sleep(1)
-                        continue
+            if wait:
+                time.sleep(1)
+                continue
 
+            # Check if the upload delay is up
             with self.next_runtime_lock:
+                wait = (self.next_runtime.value > 0) and (time.time() < self.next_runtime.value)
 
-                # Check if the upload delay is up
-                if self.next_runtime.value > 0:
-                    if time.time() < self.next_runtime.value:
-                        time.sleep(1)
-                        continue
+            if wait:
+                time.sleep(1)
+                continue
 
             with self.last_runtime_lock:
                 self.last_runtime.value = time.time()

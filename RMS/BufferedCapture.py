@@ -44,7 +44,8 @@ from RMS.Misc import obfuscatePassword
 from RMS.Routines.GstreamerCapture import GstVideoFile, getStructureValue
 from RMS.Formats.ObservationSummary import addObsParam, getObservationSummaryDict
 from RMS.RawFrameSave import RawFrameSaver
-from RMS.Misc import RmsDateTime, mkdirP, UTCFromTimestamp, frameBufferShape, runWithTimeout, AtomicFlag
+from RMS.Misc import RmsDateTime, mkdirP, UTCFromTimestamp, frameBufferShape, runWithTimeout, AtomicFlag, \
+    setParentDeathSignal, exitIfParentGone, startParentWatch
 from RMS.Formats import FTfile, FTStruct
 from RMS.Logger import LoggingManager, getLogger, gstDebugLogger, getLoggingQueue, initChildProcess
 from RMS.CaptureModeSwitcher import switchCameraMode
@@ -235,6 +236,10 @@ class BufferedCapture(Process):
         # under the 'forkserver'/'spawn' start methods (handlers are not inherited there)
         self.logging_queue = getLoggingQueue()
 
+        # PID of the logical parent, recorded here because __init__ runs in the parent. The capture stops when
+        #   the parent is gone (see run())
+        self.parent_pid = os.getpid()
+
 
     def startCapture(self, cameraID=0):
         """ Start capture using specified camera.
@@ -300,8 +305,13 @@ class BufferedCapture(Process):
             except Exception as e:
                 log.error("Error during termination: {}".format(e))
             
-            # Always join to reap zombie (returns instantly if already dead)
-            self.join()
+            # Reap the zombie (returns at once if it is already dead). Bounded: a capture process stuck in
+            #   uninterruptible (D-state) V4L2 or USB I/O survives even SIGKILL, and an unbounded join would
+            #   wedge the end-of-night stop on it, so the process is left behind instead
+            self.join(5)
+            if self.is_alive():
+                log.warning("Capture process {} still alive after SIGKILL (stuck in uninterruptible I/O?), "
+                    "leaving it without joining".format(self.pid))
             
             # Note: RTSP connections are cleaned up by releaseResources() in the child process
             
@@ -1822,8 +1832,17 @@ class BufferedCapture(Process):
         """ Main process function - initializes all process-specific resources and runs capture loop.
         """
         try:
+            # Die with the parent: an orphaned capture would keep the camera streaming after StartCapture was
+            #   killed, next to the capture of the restarted instance
+            death_signal = setParentDeathSignal()
+
             # Re-establish logging and signal handling in the child (no-op under 'fork')
             initChildProcess(self.logging_queue, self.config)
+
+            # Exit if the parent died before the death signal was armed, and keep watching the parent
+            #   where the death signal does not see it (forkserver)
+            exitIfParentGone(self.parent_pid, 'BufferedCapture')
+            startParentWatch(self.parent_pid, 'BufferedCapture', self.exit, death_signal=death_signal)
 
             # Rebuild numpy views over the shared frame buffers in this process. Under
             # forkserver/spawn the views cannot be inherited, so build them here from the

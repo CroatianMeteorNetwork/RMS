@@ -89,6 +89,18 @@ OBSERVATIONS_TABLE_NAME = "observations"
 OBSERVATION_DB_FILE_NAME = "observation.db"
 NIGHT_DATA_DIR_COL = "night_data_dir"
 
+# Keys recorded only while the night is captured: by startObservationSummaryReport (session start,
+#   station, hardware, commit, storage, camera) and by the capture itself (media_backend in
+#   BufferedCapture, dropped_frames in StartCapture). A reprocess cannot recreate them, so they are the
+#   only keys carried over from the final summary when the working one has to be recreated. Every other
+#   key is recomputed by the reprocess, and carrying it over could leave a stale value from the earlier
+#   run behind (e.g. photometry_good, which is only written when the photometric fit is attempted)
+OBSERVATION_SUMMARY_SESSION_KEYS = (
+    'start_time', 'duration_from_start_of_observation', 'stationID', 'hardware_version',
+    'commit_date', 'commit_hash', 'storage_total_gb', 'storage_used_gb', 'storage_free_gb',
+    'captured_directories', 'camera_information', 'camera_firmware_version',
+    'camera_firmware_build_date', 'media_backend', 'dropped_frames')
+
 def pingOnce(host):
     """Quickly detect if a host is pingable
 
@@ -776,15 +788,18 @@ def timestampFromNTP(addr='time.cloudflare.com'):
         addr: [str] optional, address of ntp server to use.
 
     Return:
-        adjusted_time: [float] time in seconds since epoch.
-        estimated_network_delay: [float] estimated network delay (average of outgoing and return legs).
+        adjusted_time: [float] Estimate of the remote clock's time (seconds since epoch) at the moment
+            the reply was received, or None on failure.
+        estimated_network_delay: [float] Estimated network delay (average of outgoing and return legs),
+            or None on failure.
+        addr: [str] The NTP server address that was queried.
     """
 
 
     REF_TIME_1970 = 2208988800  # Reference time
     client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     client.settimeout(5)
-    data = b'\x1b' + 47 * b'\0'
+    data = b'\x1b' + 47*b'\0'
     try:
         local_clock_transmit_timestamp = time.time()
         client.sendto(data, (addr, 123))
@@ -792,10 +807,12 @@ def timestampFromNTP(addr='time.cloudflare.com'):
         local_clock_receive_timestamp = time.time()
     except socket.timeout:
         print("NTP request timed out")
-        return None, None
+        return None, None, addr
     except Exception as e:
         print("NTP request failed: {}".format(e))
-        return None, None
+        return None, None, addr
+    finally:
+        client.close()
     if data:
 
         # For NTP the fractional seconds is a 32 bit counter
@@ -821,11 +838,14 @@ def timestampFromNTP(addr='time.cloudflare.com'):
         if estimated_network_delay < 0:
             return None, None, addr
 
-        # Now calculate estimated clock offsets
+        # Now calculate estimated clock offsets. The offset is remote minus local (standard NTP
+        #   theta = ((T2 - T1) + (T3 - T4))/2), so the remote clock's time at the moment the reply
+        #   arrived is the local receive time plus the offset. Adding the offset to the remote
+        #   transmit time instead counted it twice
         clock_offset_out_leg = remote_clock_time_receive_timestamp - local_clock_transmit_timestamp
         clock_offset_return_leg = remote_clock_time_transmit_timestamp - local_clock_receive_timestamp
         estimated_offset = (clock_offset_out_leg + clock_offset_return_leg)/2
-        adjusted_time = remote_clock_time_transmit_timestamp + estimated_offset
+        adjusted_time = local_clock_receive_timestamp + estimated_offset
         return adjusted_time, estimated_network_delay, addr
     else:
         return None, None, addr
@@ -1842,8 +1862,34 @@ def getObservationSummaryDict(data_dir, final=False, config=None):
 
             return d
 
-    log.info("Creating a new observation summary dictionary")
-    d = {'night_data_dir': data_dir}
+    # No working file. finalizeObservationSummary removes it once the final JSON is written, so a
+    # night reprocessed after that (e.g. archiving failed after the summary was finalized) must
+    # take the capture-time values from the final summary. Starting empty would overwrite the final
+    # summary without them, as only the capture records them (OBSERVATION_SUMMARY_SESSION_KEYS).
+    # Only those keys are carried over; the reprocess recomputes the rest
+    d = {}
+    final_json_path = getRMSStyleFileName(data_dir, OBSERVATION_SUMMARY_NAME_JSON)
+    if (not final) and os.path.isfile(final_json_path):
+        try:
+            with open(final_json_path, "r") as f:
+                final_d = json.load(f)
+
+            if isinstance(final_d, dict):
+                d = dict((key, final_d[key]) for key in OBSERVATION_SUMMARY_SESSION_KEYS
+                    if key in final_d)
+
+            if d:
+                log.info("Seeding the observation summary from {}".format(os.path.basename(final_json_path)))
+
+        except Exception as e:
+            log.warning("Could not read {} to seed the observation summary: {}".format(
+                os.path.basename(final_json_path), repr(e)))
+            d = {}
+
+    if not d:
+        log.info("Creating a new observation summary dictionary")
+
+    d['night_data_dir'] = data_dir
     saveObservationSummaryDict(d, data_dir)
 
     return d

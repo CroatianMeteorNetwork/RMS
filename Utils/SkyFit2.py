@@ -464,7 +464,7 @@ from RMS.Astrometry.StarClasses import CatalogStar, GeoPoint, PlanetPoint, Paire
 from RMS.Astrometry.StarFilters import filterPhotometricOutliers, filterBlendedStars
 from RMS.Astrometry.Conversions import date2JD, JD2HourAngle, trueRaDec2ApparentAltAz, \
     trueOfDateRaDec2ApparentAltAz, apparentAltAz2TrueOfDateRaDec, \
-    jd2Date, datetime2JD, JD2LST, geo2Cartesian, vector2RaDec, raDec2Vector
+    jd2Date, datetime2JD, JD2LST, geo2Cartesian, vector2RaDec, raDec2Vector, raDec2AltAz
 from RMS.Astrometry.AstrometryNet import astrometryNetSolve
 from RMS.Astrometry.ApplyRecalibrate import recalibrateFF
 from RMS.Astrometry.AutoPlatepar import selectBestFrame, autoFitPlatepar, plateparModel, applyPlateparModel
@@ -473,9 +473,12 @@ import RMS.ConfigReader as cr
 from RMS.ExtractStars import extractStarsAndSave, extractStarsFF
 import RMS.Formats.CALSTARS as CALSTARS
 from RMS.Formats.Platepar import Platepar, getCatalogStarsImagePositions
-from RMS.Formats.FFfile import convertFRNameToFF, constructFFName, ffStructFromImage
-from RMS.Formats.FrameInterface import detectInputTypeFolder, detectInputTypeFile
-from RMS.Formats.FTPdetectinfo import writeFTPdetectinfo
+from RMS.Formats.FFfile import convertFRNameToFF, constructFFName, ffStructFromImage, filenameToDatetime, \
+    validFFName
+from RMS.Formats.FRbin import validFRName
+from RMS.Formats.FrameInterface import detectInputTypeFolder, detectInputTypeFile, messagebox
+from RMS.Formats.FrameTimes import findCaptureTimeSources, parseCaptureVideoName, readCaptureTimes
+from RMS.Formats.FTPdetectinfo import writeFTPdetectinfo, timesToFrames, writtenFPS
 from RMS.Formats import StarCatalog
 from RMS.Pickling import loadPickle, savePickle
 from RMS.Math import angularSeparation, RMSD, vectNorm
@@ -2005,8 +2008,10 @@ class CalibrationFilesDialog(QtWidgets.QDialog):
                 path = os.path.join(path, "mask.bmp")
             if os.path.isfile(path):
                 try:
-                    pt.loadMaskFromFile(path)
-                    result = "Mask loaded from: " + path
+                    if pt.loadMaskFromFile(path):
+                        result = "Mask loaded from: " + path
+                    else:
+                        result = "Mask load failed: could not read " + path
                 except Exception as e:
                     result = "Mask load failed: " + repr(e)
             else:
@@ -2625,7 +2630,8 @@ class GeoPoints(object):
 class PlateTool(QtWidgets.QMainWindow):
     def __init__(self, input_path=None, config=None, beginning_time=None, fps=None, gamma=None,
         use_fr_files=False, geo_points_input=None, startUI=True, mask=None, nobg=False, peribg=False,
-        flipud=False, flatbiassub=False, exposure_ratio=1.0, show_sattracks=False, tle_file=None):
+        flipud=False, flatbiassub=False, exposure_ratio=1.0, show_sattracks=False, tle_file=None,
+        frame_times=None):
         """ SkyFit interactive window.
 
         Arguments:
@@ -2637,6 +2643,9 @@ class PlateTool(QtWidgets.QMainWindow):
             beginning_time: [datetime] Datetime of the video beginning. Optional, only can be given for
                 video input formats.
             fps: [float] Frames per second, used only when images in a folder are used.
+            frame_times: [str] Path to a file with the time of every frame of a video or an image folder (a JSON
+                file, an FT file, a folder of FT files or an FT archive, see RMS.Formats.FrameTimes). None by
+                default (the frametimes file next to a timelapse is still used).
             gamma: [float] Camera gamma. None by default, then it will be used from the platepar file or
                 config.
             use_fr_files: [bool] Include FR files together with FF files. False by default.
@@ -2695,6 +2704,9 @@ class PlateTool(QtWidgets.QMainWindow):
         # Store forced time of first frame
         self.beginning_time = beginning_time
 
+        # Store the path to the file with the times of the frames (kept in the state file)
+        self.frame_times_path = os.path.abspath(frame_times) if frame_times is not None else None
+
         # Store the background subtraction flag
         self.no_background_subtraction = nobg
 
@@ -2717,6 +2729,10 @@ class PlateTool(QtWidgets.QMainWindow):
         # If camera gamma was given, change the value in config
         if gamma is not None:
             config.gamma = gamma
+
+        # The frame rate of the camera, before a given FPS replaces it (the rolling shutter delay of a pick on a
+        #   frame of a timelapse is within one frame period of the camera, see pickTime)
+        self.camera_fps = config.fps
 
         # If the FPS was given, change the FPS in the config file
         self.fps = fps
@@ -3056,7 +3072,13 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Force FPS for videos if needed
         if (self.fps is not None) and (self.img_handle is not None):
-            if self.img_handle.input_type == "video":
+
+            # The frames are timed from the times of the frames, the given FPS would not change their times
+            if self.perFrameTimes():
+                print("The frames are timed from {:s}, the given FPS is not used"\
+                    .format(self.img_handle.frame_times_source))
+
+            elif self.img_handle.input_type == "video":
                 self.img_handle.fps = self.fps
                 print("Forcing video FPS to:", self.fps)
 
@@ -3150,6 +3172,9 @@ class PlateTool(QtWidgets.QMainWindow):
         self.frames = np.zeros(self.n)
         self.profile = cProfile.Profile()
         self.keys_pressed = []  # keeps track of all the keys pressed
+
+        # True while runInBackground is executing a long operation
+        self._background_busy = False
 
         ###################################################################################################
         # STATUS BAR ON BOTTOM
@@ -4075,23 +4100,57 @@ class PlateTool(QtWidgets.QMainWindow):
         if os.path.isfile(dir_path):
             dir_path = os.path.dirname(dir_path)
 
+        # Load the config of the new station without touching the current one yet - use the override if
+        #   provided, otherwise auto-detect it from the dir
+        try:
+            if config_override is not None:
+                new_config = cr.loadConfigFromDirectory(config_override, dir_path)
+            else:
+                new_config = cr.loadConfigFromDirectory('.', dir_path)
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            qmessagebox(title="Change Station Failed",
+                         message="Could not load the config from:\n{}\n\nError: {}".format(dir_path, repr(e)),
+                         message_type="error")
+            return False
+
+        # Ask for the platepar before anything is changed, so cancelling leaves the current station
+        #   fully loaded
+        platepar_path = self._findPlatepar(dir_path, platepar_name=new_config.platepar_name)
+
+        if platepar_path is None:
+            return False
+
         prev_input_path = self.input_path
         prev_dir_path = self.dir_path
         prev_config = self.config
         prev_img_handle = self.img_handle if self.hasData() else None
+        prev_frame_times_path = getattr(self, 'frame_times_path', None)
+        prev_camera_fps = getattr(self, 'camera_fps', None)
+        prev_station_state = self._stationStateSnapshot()
+        handles_switched = False
+        mask_cleared = False
 
         try:
             self.input_path = dir_path
             self.dir_path = dir_path
 
-            # Load config - use override if provided, otherwise auto-detect from dir
-            if config_override is not None:
-                self.config = cr.loadConfigFromDirectory(config_override, self.dir_path)
-            else:
-                self.config = cr.loadConfigFromDirectory('.', self.dir_path)
+            # A file with the times of the frames belongs to the previous input (if there was one)
+            if prev_img_handle is not None:
+                self.frame_times_path = None
+
+            self.config = new_config
+
+            # The frame rate of the camera of the new station
+            self.camera_fps = self.config.fps
 
             # Force the CV2 backend
             self.config.media_backend = 'cv2'
+
+            # Forget the calibration state that belonged to the previous station
+            self._resetStationState()
 
             # Update original catalog file and band ratios for the new station
             self._original_catalog_file = self.config.star_catalog_file
@@ -4110,6 +4169,7 @@ class PlateTool(QtWidgets.QMainWindow):
             # Update ImageItems with new handle before loading platepar (which triggers drawing)
             self.img.changeHandle(self.img_handle)
             self.img_zoom.changeHandle(self.img_handle)
+            handles_switched = True
             if not self.tab.hist.auto_levels:
                 self.tab.hist.setLevels(0, 2**(8*self.img.data.itemsize) - 1)
 
@@ -4120,6 +4180,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Now that the new image dimensions are available, load this station's mask (or clear a
             #   previous station's mask if this one has none), then render the overlay
+            mask_cleared = True
             self.initMaskFromFile()
             self.updateMaskOverlayImage()
 
@@ -4127,11 +4188,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.cat_lim_mag = self.config.catalog_mag_limit
             self.loadCalstars()
 
-            # Search for platepar files in the new directory, prompt if ambiguous
-            platepar_path = self._findPlatepar()
-            if platepar_path is None:
-                # User cancelled — abort folder change
-                return False
+            # Load the chosen platepar, or a blank one
             if platepar_path:
                 self.loadPlatepar(update=True, platepar_file=platepar_path)
             else:
@@ -4171,6 +4228,9 @@ class PlateTool(QtWidgets.QMainWindow):
             # Populate menus with mode-specific actions (including F1 shortcut)
             self.changeMode(self.mode)
 
+            # Offer the new station's flat.bmp as the mask editing background
+            self.checkAndSetupFlatForMask()
+
             # Load UWO flat/dark if applicable
             if self.usingUWOData():
                 flat_file, self.flat_struct = self.loadFlat()
@@ -4202,12 +4262,148 @@ class PlateTool(QtWidgets.QMainWindow):
             self.input_path = prev_input_path
             self.dir_path = prev_dir_path
             self.config = prev_config
+            self.frame_times_path = prev_frame_times_path
+            self.camera_fps = prev_camera_fps
             if prev_img_handle is not None:
                 self.img_handle = prev_img_handle
+
+            # Put back the calibration state of the current station, which was reset for the new one
+            self._restoreStationState(prev_station_state)
+
+            # Restore the saturation overlay before reloading the previous image handle, because
+            #   changeHandle() reloads the image immediately and indexes saturation_mask with its shape
+            if hasattr(self, 'saturation_mask_img') and (self.saturation_mask_img is not None):
+                if getattr(self, 'saturation_mask', None) is not None:
+                    self.saturation_mask.setImage(self.saturation_mask_img)
+
+            if handles_switched and (prev_img_handle is not None):
+                self.img.changeHandle(prev_img_handle)
+                self.img_zoom.changeHandle(prev_img_handle)
+
+            if mask_cleared:
+                self.updateMaskOverlayImage()
+
             qmessagebox(title="Change Station Failed",
                          message="Could not load station from:\n{}\n\nError: {}".format(dir_path, repr(e)),
                          message_type="error")
             return False
+
+
+    # Attributes reset by _resetStationState, and restored by changeStation if the new station fails
+    STATION_STATE_ATTRIBUTES = (
+        'catalog_lm_tuned', 'tuned_cat_lim_mag', 'star_detection_override_enabled',
+        'star_detection_override_data', '_original_config_gamma', 'first_platepar_fit',
+        'flat_struct', 'flat_source_path', 'dark', 'dark_source_path',
+        'flat_image_data', 'mask_use_flat_background', 'mask_source_path',
+        'astrometry_solution_info', 'unsuitable_stars'
+    )
+
+    # Additional per-station attributes mutated later in changeStation and restored on failure
+    STATION_ROLLBACK_ATTRIBUTES = (
+        '_original_catalog_file', '_original_band_ratios', 'saturation_mask_img',
+        'mask', 'mask_polygons', 'mask_current_polygon', 'mask_paint_layer',
+        'mask_brush_stroke_history', 'startup_mask',
+        'catalog_stars', 'cat_lim_mag', 'calstars',
+        'platepar', 'platepar_file', 'platepar_fmt', 'platepar_modified',
+        'paired_stars', 'pick_list', 'residuals'
+    )
+
+
+    def _stationStateSnapshot(self):
+        """ Snapshot the per-station state that changeStation resets or replaces.
+
+        Return:
+            snapshot: [dict] Attribute values (missing attributes are omitted), and the flat and dark of
+                the image items.
+        """
+
+        all_attrs = self.STATION_STATE_ATTRIBUTES + self.STATION_ROLLBACK_ATTRIBUTES
+        snapshot = {k: getattr(self, k) for k in all_attrs if hasattr(self, k)}
+
+        snapshot['_image_items'] = [
+            (item, item.flat_struct, item.dark)
+            for item in (getattr(self, 'img', None), getattr(self, 'img_zoom', None))
+            if item is not None
+        ]
+
+        if hasattr(self, 'tab') and hasattr(self.tab, 'mask'):
+            snapshot['_mask_unsaved'] = getattr(self.tab.mask, 'unsaved', False)
+
+        return snapshot
+
+
+    def _restoreStationState(self, snapshot):
+        """ Restore the per-station state from a _stationStateSnapshot snapshot.
+
+        Arguments:
+            snapshot: [dict] The snapshot.
+        """
+
+        for k in self.STATION_STATE_ATTRIBUTES + self.STATION_ROLLBACK_ATTRIBUTES:
+            if k in snapshot:
+                setattr(self, k, snapshot[k])
+            elif hasattr(self, k):
+                delattr(self, k)
+
+        for item, flat_struct, dark in snapshot.get('_image_items', []):
+            item.flat_struct = flat_struct
+            item.dark = dark
+
+        if hasattr(self, 'tab') and hasattr(self.tab, 'star_detection'):
+            self.tab.star_detection.use_override_checkbox.setChecked(self.star_detection_override_enabled)
+            self.tab.star_detection.updateStatus(self.star_detection_override_enabled)
+
+        if hasattr(self, 'tab') and hasattr(self.tab, 'mask'):
+            if '_mask_unsaved' in snapshot:
+                self.tab.mask.setUnsaved(snapshot['_mask_unsaved'])
+            if hasattr(self.tab.mask, 'setUndoEnabled'):
+                self.tab.mask.setUndoEnabled(bool(getattr(self, 'mask_brush_stroke_history', [])))
+
+
+    def _resetStationState(self):
+        """ Reset the state that belongs to the loaded station before another station is loaded.
+
+            Covers the tuned catalog LM, star detection overrides and their gamma, the first-fit flag,
+            flat and dark with their sources, the mask editing flat and mask source path, cached
+            astrometry.net solution info, and unsuitable stars. Picks, pairs, mask, catalog, and platepar
+            are replaced by changeStation itself.
+        """
+
+        # Catalog LM found by the tuner of the previous station
+        self.catalog_lm_tuned = False
+        if hasattr(self, 'tuned_cat_lim_mag'):
+            del self.tuned_cat_lim_mag
+
+        # Star detection overrides (re-detected stars per FF file and the gamma they were made with)
+        self.star_detection_override_enabled = False
+        self.star_detection_override_data = {}
+        self._original_config_gamma = None
+        if hasattr(self, 'tab') and hasattr(self.tab, 'star_detection'):
+            self.tab.star_detection.use_override_checkbox.setChecked(False)
+            self.tab.star_detection.updateStatus(False)
+
+        # The first fit on the new station has to start from scratch
+        self.first_platepar_fit = True
+
+        # Flat and dark of the previous station
+        self.flat_struct = None
+        self.flat_source_path = None
+        self.dark = None
+        self.dark_source_path = None
+        for img_item in (getattr(self, 'img', None), getattr(self, 'img_zoom', None)):
+            if img_item is not None:
+                img_item.flat_struct = None
+                img_item.dark = None
+
+        # Flat used as the mask editing background and previous mask source path
+        self.flat_image_data = None
+        self.mask_use_flat_background = False
+        self.mask_source_path = None
+        if hasattr(self, 'tab') and hasattr(self.tab, 'mask'):
+            self.tab.mask.setUnsaved(False)
+
+        self.astrometry_solution_info = None
+        self.unsuitable_stars = PairedStars()
 
     def onRefractionChanged(self):
 
@@ -4989,6 +5185,14 @@ class PlateTool(QtWidgets.QMainWindow):
             if ang_sep > fov_radius:
                 continue
 
+            # Skip bodies below the horizon, with the same -5 deg limit subsetCatalog uses for the stars.
+            #   On an all-sky camera the image corners lie off the sky, so the selection radius comes out
+            #   close to 180 deg and the gate above lets everything through - the Sun at night would then
+            #   be folded into the image by the extrapolated distortion
+            _, elev = raDec2AltAz(ra_deg, dec_deg, ff_jd, self.platepar.lat, self.platepar.lon)
+            if elev < -5:
+                continue
+
             # Convert RA/Dec to image coordinates
             body_radec = np.array([[ra_deg, dec_deg, mag]])
             x_arr, y_arr, _ = getCatalogStarsImagePositions(body_radec, ff_jd, self.platepar)
@@ -5120,8 +5324,9 @@ class PlateTool(QtWidgets.QMainWindow):
         if hasattr(self.config, 'roundness_threshold'):
             self.override_roundness_threshold = self.config.roundness_threshold
 
-        # Update UI sliders
+        # Update UI sliders (without emitting their change signals)
         self.tab.star_detection.loadFromConfig(self.config)
+        self._updateConfigSaveButtonState()
 
 
     def updateIntensityThreshold(self, value):
@@ -6655,16 +6860,14 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.mask.setUndoEnabled(False)
 
         mask_path = os.path.join(self.dir_path, "mask.bmp")
-        if os.path.exists(mask_path):
-            self.loadMaskFromFile(mask_path)
-
-        # No mask.bmp in the data directory, but a mask of the image size was given at startup - edit that one
-        elif self.maskFitsImage(startup_mask):
-            self.loadMaskImage(np.array(startup_mask.img, dtype=np.uint8))
-
-        else:
-            # No mask for this station - clear any leftover overlay/outlines from the previous one
-            self.updateMaskDisplay()
+        mask_loaded = os.path.exists(mask_path) and self.loadMaskFromFile(mask_path)
+        if not mask_loaded:
+            # No valid mask.bmp in the data directory, but a mask of the image size was given at startup
+            if self.maskFitsImage(startup_mask):
+                self.loadMaskImage(np.array(startup_mask.img, dtype=np.uint8))
+            else:
+                # No mask for this station - clear any leftover overlay/outlines from the previous one
+                self.updateMaskDisplay()
 
         # Sync the detection mask to the loaded-or-cleared state so it doesn't leak across stations
         if self.img.data is not None:
@@ -6726,6 +6929,18 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.mask.setBrushMode(False)
         self.updatePanningEnabled()
 
+    def isMaskTabCurrent(self):
+        """ Check whether the Mask tab is the currently open tab.
+
+        Return:
+            [bool] True if the Mask tab exists and is open.
+        """
+
+        if not (hasattr(self, 'tab') and hasattr(self.tab, 'mask')):
+            return False
+
+        return self.tab.currentIndex() == self.tab.indexOf(self.tab.mask)
+
     def updatePanningEnabled(self):
         """ Enable or disable panning the image frame with a mouse drag.
 
@@ -6740,9 +6955,8 @@ class PlateTool(QtWidgets.QMainWindow):
         block_panning = False
 
         # Block panning while the mask tab is open, as drags are used for polygon and brush editing
-        if hasattr(self, 'tab') and hasattr(self.tab, 'mask'):
-            if self.tab.currentIndex() == self.tab.indexOf(self.tab.mask):
-                block_panning = True
+        if self.isMaskTabCurrent():
+            block_panning = True
 
         # Block panning while the mask brush is active
         if getattr(self, 'mask_brush_mode', False):
@@ -7450,19 +7664,26 @@ class PlateTool(QtWidgets.QMainWindow):
 
         Arguments:
             mask_path: [str] Path to the mask image (0 = masked, 255 = unmasked).
+
+        Return:
+            [bool] True if the mask was read and loaded, False if the file is missing or unreadable (the
+                current mask is then kept).
         """
         if not os.path.exists(mask_path):
             print(f"Mask file not found: {mask_path}")
-            return
-
-        self.mask_source_path = mask_path
+            return False
 
         mask_img = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
         if mask_img is None:
             print(f"Failed to load mask: {mask_path}")
-            return
+            return False
+
+        # Only a mask that was actually read becomes the source of the loaded mask
+        self.mask_source_path = mask_path
 
         self.loadMaskImage(mask_img)
+
+        return True
 
 
     def maskFitsImage(self, mask):
@@ -7528,9 +7749,10 @@ class PlateTool(QtWidgets.QMainWindow):
         # Pixels unmasked in file but inside a polygon → erase (value=2)
         paint_layer[(mask_img == 255) & (polygon_mask == 0)] = 2
 
+        # The undo history belongs to the previous mask, so it is always cleared on load
+        self.mask_brush_stroke_history = []
         if np.any(paint_layer != 0):
             self.mask_paint_layer = paint_layer
-            self.mask_brush_stroke_history = []
             print(f"Loaded {len(self.mask_polygons)} polygon(s) + raster residuals from mask")
         else:
             self.mask_paint_layer = None
@@ -9337,6 +9559,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         dist_type = self.platepar.distortion_type_list[self.dist_type_index]
         self.platepar.setDistortionType(dist_type)
+        self.resetCoeffStash()
         self.updateDistortion()
 
         # Indicate that the platepar has been reset
@@ -9345,10 +9568,21 @@ class PlateTool(QtWidgets.QMainWindow):
         print("Distortion model changed to: {:s}".format(dist_type))
 
 
+    def resetCoeffStash(self):
+        """ Forget the coefficients stashed by the Fit Parameters tab. Called whenever the distortion is
+            reset or refitted from scratch, so old coefficients are not put back into the new model by a
+            later flag or distortion type change.
+        """
+
+        if hasattr(self, 'tab') and hasattr(self.tab, 'param_manager'):
+            self.tab.param_manager.resetCoeffStash()
+
+
     def resetDistortion(self):
         """ Reset distortion parameters to default values. """
 
         self.platepar.resetDistortionParameters()
+        self.resetCoeffStash()
         self.onFitParametersChanged()
         self.updateFitResiduals()
         self.tab.param_manager.updatePlatepar()
@@ -9867,7 +10101,7 @@ class PlateTool(QtWidgets.QMainWindow):
             self.loadState(os.path.dirname(file_), os.path.basename(file_))
 
 
-    def loadState(self, dir_path, state_name, beginning_time=None, mask=None):
+    def loadState(self, dir_path, state_name, beginning_time=None, mask=None, frame_times=None):
         """ Loads state with path to file dir_path and file name state_name. Works mid-program and at the start of
         the program (if done properly).
 
@@ -9882,6 +10116,9 @@ class PlateTool(QtWidgets.QMainWindow):
         Keyword arguments:
             beginning_time: [datetime] Datetime of the video beginning. Optional, only can be given for
                 video input formats.
+            mask: [MaskStructure] The mask, if the state has none. None by default.
+            frame_times: [str] Path to a file with the times of the frames, used instead of the one in the state.
+                None by default.
 
         """
 
@@ -10104,6 +10341,14 @@ class PlateTool(QtWidgets.QMainWindow):
         # If the previous beginning time is None and the new one is not, update the beginning time
         if (self.beginning_time is None) and (beginning_time is not None):
             self.beginning_time = beginning_time
+
+        # The file with the times of the frames: the given one, or the one in the state (states saved before it
+        #   was introduced have none)
+        if frame_times is not None:
+            self.frame_times_path = os.path.abspath(frame_times)
+
+        elif not hasattr(self, "frame_times_path"):
+            self.frame_times_path = None
 
 
         if not hasattr(self, "pick_list"):
@@ -10745,6 +10990,11 @@ class PlateTool(QtWidgets.QMainWindow):
         self.press_button = event.button()
         self.press_modifiers = modifiers
 
+        # The mask is only edited on the Mask tab; elsewhere a click near a mask vertex is meant for
+        #   another action (e.g. a right click to unpair a star near the horizon)
+        if not self.isMaskTabCurrent():
+            return
+
         # Handle brush painting
         if self.mask_brush_mode:
             pos = event.scenePos()
@@ -10816,8 +11066,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Handle brush undo - Ctrl+Z when on mask tab
         if event.key() == QtCore.Qt.Key.Key_Z and (modifiers == QtCore.Qt.KeyboardModifier.ControlModifier):
-            mask_tab_index = self.tab.indexOf(self.tab.mask)
-            if self.tab.currentIndex() == mask_tab_index and self.mask_brush_stroke_history:
+            if self.isMaskTabCurrent() and self.mask_brush_stroke_history:
                 self.undoBrushStroke()
                 return
 
@@ -11121,6 +11370,7 @@ class PlateTool(QtWidgets.QMainWindow):
                 if modifiers == (QtCore.Qt.KeyboardModifier.ControlModifier | QtCore.Qt.KeyboardModifier.ShiftModifier):
                     print("Resetting the distortion coeffs and refitting...")
                     self.platepar.resetDistortionParameters()
+                    self.resetCoeffStash()
                     self.first_platepar_fit = True
 
                 self.fitPickedStars()
@@ -13051,11 +13301,54 @@ class PlateTool(QtWidgets.QMainWindow):
         return filtered_indices, filtered_catalog_stars
 
 
+    def _restorePlateparInPlace(self, platepar_obj, saved_platepar):
+        """ Put the values of a saved platepar copy back into the given platepar object and make it the
+            current platepar. Keeping the same object keeps external references (such as the Fit Parameters
+            stash and the distortion dialog) valid.
+
+        Arguments:
+            platepar_obj: [Platepar] The platepar object to restore into.
+            saved_platepar: [Platepar] Deep copy with the values to restore.
+        """
+
+        platepar_obj.__dict__.clear()
+        platepar_obj.__dict__.update(saved_platepar.__dict__)
+        self.platepar = platepar_obj
+
+
+    @staticmethod
+    def _plateparHasDistortion(platepar):
+        """ Check whether a platepar has any non-zero distortion terms beyond its centre/offset slots.
+
+        Arguments:
+            platepar: [Platepar] The platepar to inspect.
+
+        Return:
+            [bool] True if any fitted distortion term is non-zero.
+        """
+
+        if platepar.distortion_type.startswith("radial"):
+            coeffs = platepar.extractRadialCoeffs(platepar.x_poly_fwd)
+            if coeffs is None:
+                return False
+            return any(coeffs.get(k, 0.0) != 0.0 for k in (
+                'xy', 'a1', 'a2', 'k1', 'k2', 'k3', 'k4', 'p1', 'p2', 'p3', 'p4'
+            ))
+
+        return any(
+            np.any(np.asarray(getattr(platepar, name))[1:] != 0.0)
+            for name in ('x_poly_fwd', 'y_poly_fwd')
+        )
+
+
     def tryQuickAlignment(self, pointing_only=False):
         """ Try to align platepar using existing pointing as starting point.
 
         Uses alignPlatepar() to refine pointing, then checks if the fit is good enough
         by counting matched stars. If successful, performs NN-based astrometry fit.
+        If any step fails, the platepar, fit flags and catalog LM are restored to their
+        state before the call and False is returned so the caller can fall back to
+        astrometry.net.
 
         Arguments:
             pointing_only: [bool] If True, skip NN RANSAC distortion fitting and only refine
@@ -13063,6 +13356,40 @@ class PlateTool(QtWidgets.QMainWindow):
 
         Returns:
             success: [bool] True if quick alignment succeeded and we can skip astrometry.net
+        """
+
+        # Snapshot everything a failed attempt could change (the fit forces its own distortion model
+        #   and flags on the platepar before it knows whether it will succeed)
+        platepar_obj = self.platepar
+        saved_platepar = copy.deepcopy(self.platepar)
+        saved_fit_only_pointing = self.fit_only_pointing
+        saved_cat_lim_mag = self.cat_lim_mag
+
+        success = False
+        try:
+            success = self._runQuickAlignment(pointing_only=pointing_only)
+        finally:
+            # Put the user's platepar and settings back after a failure or error, into the same object
+            #   so references held by the Fit Parameters stash and distortion dialog stay valid
+            if not success:
+                self._restorePlateparInPlace(platepar_obj, saved_platepar)
+                self.fit_only_pointing = saved_fit_only_pointing
+
+                if self.cat_lim_mag != saved_cat_lim_mag:
+                    self.cat_lim_mag = saved_cat_lim_mag
+                    self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
+
+        return success
+
+
+    def _runQuickAlignment(self, pointing_only=False):
+        """ Run the quick alignment steps for tryQuickAlignment, which restores the state on failure.
+
+        Keyword arguments:
+            pointing_only: [bool] See tryQuickAlignment.
+
+        Return:
+            success: [bool] True if the quick alignment succeeded.
         """
         print()
         print("Trying quick alignment with existing platepar...")
@@ -13296,6 +13623,12 @@ class PlateTool(QtWidgets.QMainWindow):
                     self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale))
             except Exception as e:
                 print("  NN fit failed: {} - falling back to astrometry.net".format(str(e)))
+                return False
+
+            # fitAstrometry returns None when it rejects the NN fit (too few stars, no RANSAC fit, RMSD
+            #   too large); that is a failure, not a successful alignment with zero stars
+            if ransac_result is None:
+                print("  NN fit rejected - falling back to astrometry.net")
                 return False
 
             # Populate paired_stars directly from RANSAC matched pairs
@@ -13827,6 +14160,26 @@ class PlateTool(QtWidgets.QMainWindow):
         return solution
 
 
+    def _applyPointingToOriginalPlatepar(self, original_platepar, solution):
+        """ Put the platepar from before an auto fit back (distortion model, flags, scale) and apply the
+            astrometry.net pointing to it.
+
+            The solved scale is only used when the original platepar has no fitted distortion terms, as a
+            fitted distortion model is calibrated together with its own scale.
+
+        Arguments:
+            original_platepar: [Platepar] Copy of the platepar from before the auto fit.
+            solution: [tuple] The astrometry.net solution, as returned by _solveAstrometryNet.
+        """
+
+        self._restorePlateparInPlace(self.platepar, copy.deepcopy(original_platepar))
+
+        if not self._plateparHasDistortion(self.platepar):
+            self.platepar.F_scale = solution[3]
+
+        self._applyAstrometryNetPointing(solution)
+
+
     def _applyAstrometryNetPointing(self, solution):
         """ Apply astrometry.net pointing to existing platepar, preserving distortion.
 
@@ -13878,6 +14231,9 @@ class PlateTool(QtWidgets.QMainWindow):
             self.platepar.az_centre = azim_corr
             self.platepar.alt_centre = alt_corr
 
+        # Sync az_centre, alt_centre, and rotation_from_horiz with the final tangent point and pos_angle_ref
+        self.platepar.updateRefAltAz()
+
         # Log the result
         dist_cx, dist_cy = self.platepar.getDistortionCentre()
         dx = dist_cx - self.platepar.X_res/2.0
@@ -13904,46 +14260,51 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.param_manager.setQuickAlignButtonBusy(True)
         QtWidgets.QApplication.processEvents()
 
-        # Capture current catalog LM before fitting
+        # Capture current catalog LM before fitting, and the config LM which balancing sets for alignPlatepar
         user_cat_lim_mag = self.cat_lim_mag
+        config_cat_lim_mag = self.config.catalog_mag_limit
 
-        # Balance catalog magnitude before fitting
-        self.balanceCatalogMagnitude()
+        try:
+            # Balance catalog magnitude before fitting
+            self.balanceCatalogMagnitude()
 
-        # Try quick alignment with existing platepar (pointing only, no distortion fitting)
-        success = self.tryQuickAlignment(pointing_only=True)
+            # Try quick alignment with existing platepar (pointing only, no distortion fitting)
+            success = self.tryQuickAlignment(pointing_only=True)
 
-        if not success:
-            # NNalign failed — use astrometry.net to get correct pointing
-            solution = self._solveAstrometryNet(upload_image=False)
+            if not success:
+                # NNalign failed — use astrometry.net to get correct pointing
+                solution = self._solveAstrometryNet(upload_image=False)
 
-            if solution is not None:
-                # Apply pointing to existing platepar (preserve distortion)
-                self._applyAstrometryNetPointing(solution)
+                if solution is not None:
+                    # Apply pointing to existing platepar (preserve distortion)
+                    self._applyAstrometryNetPointing(solution)
 
-                # Try quick alignment again with corrected pointing
-                success = self.tryQuickAlignment(pointing_only=True)
+                    # Try quick alignment again with corrected pointing
+                    success = self.tryQuickAlignment(pointing_only=True)
 
-        # Report result
-        if success:
-            self.status_bar.showMessage("Auto pointing succeeded")
-        else:
-            self.status_bar.showMessage("Auto pointing failed — try Auto Fit for full recalibration")
+            # Report result
+            if success:
+                self.status_bar.showMessage("Auto pointing succeeded")
+            else:
+                self.status_bar.showMessage("Auto pointing failed — try Auto Fit for full recalibration")
+        finally:
+            # Restore the user's catalog LM
+            if self.cat_lim_mag != user_cat_lim_mag:
+                print(f"  Restoring user catalog LM: {user_cat_lim_mag:.1f}")
+                self.cat_lim_mag = user_cat_lim_mag
+                self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
 
-        # Restore the user's catalog LM
-        if self.cat_lim_mag != user_cat_lim_mag:
-            print(f"  Restoring user catalog LM: {user_cat_lim_mag:.1f}")
-            self.cat_lim_mag = user_cat_lim_mag
-            self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
+            # The balanced LM was only for this fit; keep the config's original LM
+            self.config.catalog_mag_limit = config_cat_lim_mag
 
-        # Update the GUI
-        self.updateDistortion()
-        self.updateLeftLabels()
-        self.updateStars()
-        self.tab.param_manager.updatePlatepar()
+            # Update the GUI
+            self.updateDistortion()
+            self.updateLeftLabels()
+            self.updateStars()
+            self.tab.param_manager.updatePlatepar()
 
-        # Restore button state
-        self.tab.param_manager.setQuickAlignButtonBusy(False)
+            # Restore button state
+            self.tab.param_manager.setQuickAlignButtonBusy(False)
 
 
     def autoFitAstrometryNet(self):
@@ -13966,44 +14327,50 @@ class PlateTool(QtWidgets.QMainWindow):
         self.tab.param_manager.setAutoFitButtonBusy(True)
         QtWidgets.QApplication.processEvents()
 
-        # Capture current catalog LM before fitting (user may have set this via tune or manually)
+        # Capture current catalog LM before fitting (user may have set this via tune or manually), and the
+        #   config LM which balancing sets for alignPlatepar
         user_cat_lim_mag = self.cat_lim_mag
+        config_cat_lim_mag = self.config.catalog_mag_limit
 
-        # Balance catalog magnitude before any fitting (affects both quick and full paths)
-        self.balanceCatalogMagnitude()
+        try:
+            # Balance catalog magnitude before any fitting (affects both quick and full paths)
+            self.balanceCatalogMagnitude()
 
-        # First, try quick alignment with existing platepar (much faster than astrometry.net)
-        quick_fit_success = self.tryQuickAlignment()
-
-        if not quick_fit_success:
-            # Quick alignment failed — try astrometry.net to get correct pointing
-            solution = self._solveAstrometryNet(upload_image=False)
-
-            if solution is not None:
-                # Apply pointing to existing platepar (preserve distortion)
-                self._applyAstrometryNetPointing(solution)
-
-                # Try quick alignment again with corrected pointing
-                quick_fit_success = self.tryQuickAlignment()
+            # First, try quick alignment with existing platepar (much faster than astrometry.net)
+            quick_fit_success = self.tryQuickAlignment()
 
             if not quick_fit_success:
-                # Last resort: full recalibration with distortion reset
-                self.getInitialParamsAstrometryNet(upload_image=False)
+                # Quick alignment failed — try astrometry.net to get correct pointing
+                solution = self._solveAstrometryNet(upload_image=False)
 
-        # Restore the user's catalog LM (balancing may have changed it)
-        if self.cat_lim_mag != user_cat_lim_mag:
-            print(f"  Restoring user catalog LM: {user_cat_lim_mag:.1f}")
-            self.cat_lim_mag = user_cat_lim_mag
-            self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
+                if solution is not None:
+                    # Apply pointing to existing platepar (preserve distortion)
+                    self._applyAstrometryNetPointing(solution)
 
-        # Update the GUI
-        self.updateDistortion()
-        self.updateLeftLabels()
-        self.updateStars()
-        self.tab.param_manager.updatePlatepar()
+                    # Try quick alignment again with corrected pointing
+                    quick_fit_success = self.tryQuickAlignment()
 
-        # Restore button state
-        self.tab.param_manager.setAutoFitButtonBusy(False)
+                if not quick_fit_success:
+                    # Last resort: full recalibration with distortion reset
+                    self.getInitialParamsAstrometryNet(upload_image=False)
+        finally:
+            # Restore the user's catalog LM (balancing may have changed it)
+            if self.cat_lim_mag != user_cat_lim_mag:
+                print(f"  Restoring user catalog LM: {user_cat_lim_mag:.1f}")
+                self.cat_lim_mag = user_cat_lim_mag
+                self.catalog_stars = self.loadCatalogStars(self.cat_lim_mag)
+
+            # The balanced LM was only for this fit; keep the config's original LM
+            self.config.catalog_mag_limit = config_cat_lim_mag
+
+            # Update the GUI
+            self.updateDistortion()
+            self.updateLeftLabels()
+            self.updateStars()
+            self.tab.param_manager.updatePlatepar()
+
+            # Restore button state
+            self.tab.param_manager.setAutoFitButtonBusy(False)
 
 
     def getInitialParamsAstrometryNet(self, upload_image=True, wide_fov_search=False):
@@ -14014,6 +14381,10 @@ class PlateTool(QtWidgets.QMainWindow):
             wide_fov_search: [bool] If True, use a wide FOV search range (2° to 200°) instead of
                 the config-based range. Used as fallback when the tight search fails.
         """
+
+        # Snapshot the platepar before recalibration so it can be restored if refinement is declined or fails
+        platepar_obj = self.platepar
+        original_platepar = copy.deepcopy(self.platepar)
 
         # Solve with astrometry.net
         solution = self._solveAstrometryNet(upload_image=upload_image, wide_fov_search=wide_fov_search)
@@ -14146,6 +14517,13 @@ class PlateTool(QtWidgets.QMainWindow):
                 QtWidgets.QMessageBox.StandardButton.Yes)
 
         if reply == QtWidgets.QMessageBox.StandardButton.No:
+
+            # Keep the user's distortion model and flags, applying only the astrometry.net pointing
+            self._applyPointingToOriginalPlatepar(original_platepar, solution)
+            self.fit_only_pointing = user_fit_only_pointing
+            self.updateStars()
+            self.updateLeftLabels()
+
             self.status_bar.showMessage("Astrometry.net solution applied (no refinement)")
             return self.platepar
 
@@ -14238,8 +14616,9 @@ class PlateTool(QtWidgets.QMainWindow):
                 # Restore original platepar so optimizer isn't corrupted
                 self.platepar = saved_pp
 
+            nn_result = None
             try:
-                self.platepar.fitAstrometry(
+                nn_result = self.platepar.fitAstrometry(
                     jd, img_stars_arr, catalog_stars_extended,  # Extended catalog for edge stars
                     first_platepar_fit=True,
                     use_nn_cost=True,
@@ -14247,17 +14626,33 @@ class PlateTool(QtWidgets.QMainWindow):
                     iteration_callback=iteration_callback,
                     fit_by='SkyFit2 auto'
                 )
-                print("  NN fit complete: RA={:.2f} Dec={:.2f} Scale={:.3f} arcmin/px".format(
-                    self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale))
             except Exception as e:
                 print("  NN fit failed: {}".format(str(e)))
 
-            # Populate paired_stars from NN matches for visualization
+            # A rejected or failed NN fit leaves nothing to fit: the platepar star_list still holds the
+            #   pairs of an earlier fit (possibly of another image), so it must not be used. Restore the
+            #   platepar from before recalibration in place
+            if nn_result is None:
+                print("  NN fit rejected - restoring the platepar from before the auto fit")
+                self._restorePlateparInPlace(platepar_obj, original_platepar)
+                self.fit_only_pointing = user_fit_only_pointing
+                self.updateStars()
+                self.status_bar.showMessage("Auto-fit failed: the NN refinement was rejected")
+                qmessagebox(title='Auto-fit failed',
+                            message='The NN refinement of the astrometry.net solution was rejected.\n\n'
+                                    'The platepar was restored to its state before the auto fit.',
+                            message_type="warning")
+                return None
+
+            print("  NN fit complete: RA={:.2f} Dec={:.2f} Scale={:.3f} arcmin/px".format(
+                self.platepar.RA_d, self.platepar.dec_d, 60/self.platepar.F_scale))
+
+            # Populate paired_stars from the NN matches returned by the fit
+            img_stars_matched, catalog_matched = nn_result
             self.paired_stars = PairedStars()
-            if self.platepar.star_list:
-                for entry in self.platepar.star_list:
-                    # star_list format: [jd, x, y, intensity, ra, dec, mag]
-                    _, x, y, intensity, ra, dec, mag = entry
+            if len(img_stars_matched) > 0:
+                for (x, y, intensity), cat_star in zip(img_stars_matched, catalog_matched):
+                    ra, dec, mag = cat_star[:3]
                     sky_obj = CatalogStar(ra, dec, mag)
 
                     # Look up SNR, FWHM, and saturation from calstars by finding nearest detected star
@@ -14272,7 +14667,7 @@ class PlateTool(QtWidgets.QMainWindow):
                             saturated = det_saturated[closest_idx] > 0
 
                     self.paired_stars.addPair(x, y, fwhm, intensity, sky_obj, snr=snr, saturated=saturated)
-                print("  Loaded {} matched pairs".format(len(self.platepar.star_list)))
+                print("  Loaded {} matched pairs".format(len(self.paired_stars)))
 
         # Finalize the fit with user's settings
         if len(self.paired_stars) >= 10:
@@ -14320,13 +14715,9 @@ class PlateTool(QtWidgets.QMainWindow):
             self.updateStars()
             self.status_bar.showMessage("Auto-fit complete: {:d} stars matched".format(len(self.paired_stars)))
         else:
-            # Restore user's settings even if fit failed
-            self.platepar.equal_aspect = user_equal_aspect
-            self.platepar.asymmetry_corr = user_asymmetry_corr
-            self.platepar.decentering_corr = user_decentering_corr
-            self.platepar.force_distortion_centre = user_force_distortion_centre
-            self.platepar.setDistortionType(user_distortion_type, reset_params=True)
-            self.platepar.refraction = user_refraction
+            # Too few pairs to fit: keep the user's distortion model and flags, with the astrometry.net
+            #   pointing applied
+            self._applyPointingToOriginalPlatepar(original_platepar, solution)
             self.fit_only_pointing = user_fit_only_pointing
 
             print("  Not enough matched stars for fitting (need >= 10)")
@@ -14410,17 +14801,22 @@ class PlateTool(QtWidgets.QMainWindow):
 
         img_handle = None
 
+        # The file with the times of the frames, if given, or the capture times from the FT files of the input
+        frame_times = getattr(self, 'frame_times_path', None)
+        if frame_times is None:
+            frame_times = self.findCaptureTimes()
+
         # Load a state file
         if os.path.isfile(self.input_path):
             img_handle = detectInputTypeFile(self.input_path, self.config, beginning_time=beginning_time, 
-                                             flipud=self.flipud)
+                                             flipud=self.flipud, frame_times=frame_times)
         
         # Load given data from a folder
         elif os.path.isdir(self.input_path):
 
             # Detect input file type and load appropriate input plugin
             img_handle = detectInputTypeFolder(self.dir_path, self.config, beginning_time=beginning_time, \
-                use_fr_files=self.use_fr_files, flipud=self.flipud)
+                use_fr_files=self.use_fr_files, flipud=self.flipud, frame_times=frame_times)
 
             # If the data was not being able to load from the folder, choose a file to load
             if img_handle is None:
@@ -14438,9 +14834,61 @@ class PlateTool(QtWidgets.QMainWindow):
         # If no previous ways of opening data was successful, open a file
         if img_handle is None:
             img_handle = detectInputTypeFile(self.input_path, self.config, beginning_time=beginning_time, 
-                                             flipud=self.flipud)
+                                             flipud=self.flipud, frame_times=frame_times)
 
         self.img_handle = img_handle
+
+        # Tell the user when a timelapse has no frame times (its frames are timed at the nominal spacing)
+        if getattr(img_handle, 'timelapse_without_times', False):
+            messagebox(title="Timelapse without frame times", message=img_handle.timelapseWithoutTimesMessage())
+
+    def findCaptureTimes(self):
+        """ The capture times of the frames of a video of the capture or of FF files, from the FT files in the
+            folder of the input (also in their daily archives, *_FT.tar.bz2) and in the FT folders of the station
+            (see RMS.Formats.FrameTimes.findCaptureTimeSources).
+
+        Return:
+            [ndarray] The capture times (Unix seconds) of the span of the input, None without FT files.
+        """
+
+        input_path = self.input_path
+        if (input_path is None) or (not os.path.exists(input_path)):
+            return None
+
+        # The span of the frames of the input: a video of the capture (shorter than an hour), an FF or FR file, or
+        #   a folder of FF files
+        names = [os.path.basename(input_path)] if os.path.isfile(input_path) else sorted(os.listdir(input_path))
+        video_time = parseCaptureVideoName(names[0]) if os.path.isfile(input_path) else None
+        if video_time is not None:
+            t_start, t_end = video_time, video_time + datetime.timedelta(hours=1)
+
+        else:
+            ff_times = [filenameToDatetime(name) for name in names if validFFName(name) or validFRName(name)]
+            if not ff_times:
+                return None
+
+            t_start, t_end = min(ff_times), max(ff_times) + datetime.timedelta(seconds=256/self.config.fps)
+
+        # The FT files and archives of the span
+        sources = findCaptureTimeSources(input_path, t_start, t_end,
+            data_dirs=(self.config.video_dir, self.config.captured_dir, self.config.archived_dir),
+            times_dir=self.config.times_dir)
+        if not sources:
+            return None
+
+        # Read the capture times of the span (an archive is read once, see FrameTimes.readArchiveCaptureTimes)
+        try:
+            margin = datetime.timedelta(seconds=60)
+            capture_times = readCaptureTimes(sources, t_start=t_start - margin, t_end=t_end + margin)
+
+        except (IOError, OSError, ValueError) as e:
+            print("The FT files of the input cannot be used: {:s}".format(str(e)))
+            return None
+
+        print("Capture times of {:d} frames read from {:s}".format(len(capture_times),
+            ", ".join(os.path.basename(path) for path in sources[:3]) + (", ..." if len(sources) > 3 else "")))
+
+        return capture_times
 
 
     def loadCalstars(self):
@@ -14532,19 +14980,35 @@ class PlateTool(QtWidgets.QMainWindow):
             *args, **kwargs: Arguments passed to the function.
 
         Returns:
-            The return value of func(*args, **kwargs).
+            The return value of func(*args, **kwargs), or None if another background operation is still
+            running (the request is refused rather than nested).
 
         Raises:
             Any exception raised by func.
         """
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(func, *args, **kwargs)
 
-            while not future.done():
-                QtWidgets.QApplication.processEvents()
-                time.sleep(0.05)
+        # The processEvents loop below lets the user trigger another long operation while the first is
+        #   running, which would nest a second loop inside this one. Refuse the second request instead
+        if getattr(self, '_background_busy', False):
+            msg = "Another operation is still running, please wait for it to finish"
+            print(msg)
+            self.status_bar.showMessage(msg)
+            return None
 
-            return future.result()
+        self._background_busy = True
+
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(func, *args, **kwargs)
+
+                while not future.done():
+                    QtWidgets.QApplication.processEvents()
+                    time.sleep(0.05)
+
+                return future.result()
+
+        finally:
+            self._background_busy = False
 
 
     def loadCatalogStars(self, lim_mag):
@@ -14728,15 +15192,16 @@ class PlateTool(QtWidgets.QMainWindow):
                 self._star_label_html_name[i] = f'<a href="https://simbad.cds.unistra.fr/simbad/sim-id?Ident={url_name}" style="color: #dddddd; text-decoration: none;">{display_name}</a>'
 
 
-    def _findPlatepar(self, dir_path=None):
+    def _findPlatepar(self, dir_path=None, platepar_name=None):
         """Search for a platepar file in the given directory.
 
         If the default platepar name exists and is the only .cal file, return its path directly.
         If the default name is missing or multiple .cal files exist, prompt the user to pick one
         or create a new blank platepar.
 
-        Arguments:
+        Keyword arguments:
             dir_path: [str] Directory to search. Defaults to self.dir_path.
+            platepar_name: [str] Default platepar file name. Defaults to self.config.platepar_name.
 
         Return:
             [str or None] Path to the selected platepar file, empty string if the user chose to
@@ -14747,7 +15212,10 @@ class PlateTool(QtWidgets.QMainWindow):
         if dir_path is None:
             dir_path = self.dir_path
 
-        default_path = os.path.join(dir_path, self.config.platepar_name)
+        if platepar_name is None:
+            platepar_name = self.config.platepar_name
+
+        default_path = os.path.join(dir_path, platepar_name)
         cal_files = sorted(glob.glob(os.path.join(dir_path, '*.cal')))
 
         # Default name exists and is the only .cal file — use it directly
@@ -14974,6 +15442,7 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # The model of the distortion from the config file, with the coefficients reset
         applyPlateparModel(self.platepar, plateparModel(self.config), reset_params=True)
+        self.resetCoeffStash()
         self.dist_type_index = self.platepar.distortion_type_list.index(self.platepar.distortion_type)
 
 
@@ -15554,8 +16023,7 @@ class PlateTool(QtWidgets.QMainWindow):
             if self.platepar is not None:
 
                 # Compute time data
-                time_data = [jd2Date(datetime2JD(self.img_handle.beginning_datetime \
-                    + datetime.timedelta(seconds=frame/self.img_handle.fps))) for frame in frames]
+                time_data = [self.img_handle.currentFrameTime(frame_no=frame) for frame in frames]
 
                 # Compute measured RA/Dec from image coordinates
                 _, ra_data, dec_data, _ = xyToRaDecPP(time_data, x_data, \
@@ -15905,6 +16373,10 @@ class PlateTool(QtWidgets.QMainWindow):
 
         # Get the Julian date of the image that's being fit
         jd = date2JD(*self.img_handle.currentTime())
+
+        # A fit from scratch replaces the whole distortion model, so stashed coefficients are stale
+        if self.first_platepar_fit:
+            self.resetCoeffStash()
 
         # Fit the platepar to paired stars, with the paired catalog stars and image coordinates separately
         img_stars, catalog_stars = self.fitPairs(jd)
@@ -17135,6 +17607,12 @@ class PlateTool(QtWidgets.QMainWindow):
 
         print(self.img_handle.beginning_datetime.strftime("%Y%m%d_%H%M%S_"))
 
+        # The frame rate in the file: with the times of the frames, the frame numbers are computed from the times
+        #   of the picks with the frame rate as written (see FTPdetectinfo.timesToFrames)
+        ftp_fps = self.img_handle.fps
+        if self.perFrameTimes():
+            ftp_fps = writtenFPS(ftp_fps)
+
         # Create the list of picks for saving
         centroids = []
         for frame, pick in sorted(self.pick_list.items(), key=lambda x: x[0]):
@@ -17147,18 +17625,24 @@ class PlateTool(QtWidgets.QMainWindow):
             if pick['mode'] == 0:
                 continue
 
-            # Normalize the frame number to the actual time
-            frame_dt = self.img_handle.currentFrameTime(frame_no=frame, dt_obj=True)
-            frame_no = (frame_dt - self.img_handle.beginning_datetime).total_seconds()*self.img_handle.fps
+            # With the times of the frames, the frame number which gives the time of the pick when read back with
+            #   the FF name and the frame rate of the file (not rounded, the frames are not evenly spaced)
+            if self.perFrameTimes():
+                frame_no = timesToFrames([self.pickTime(frame, pick)], ff_name_ftp, ftp_fps)[0]
 
+            else:
 
-            # Get the rolling shutter corrected (or not, depending on the config) frame number
-            if self.config.deinterlace_order == -1:
-                frame_no = self.getRollingShutterCorrectedFrameNo(frame_no, pick)
+                # Normalize the frame number to the actual time
+                frame_dt = self.img_handle.currentFrameTime(frame_no=frame, dt_obj=True)
+                frame_no = (frame_dt - self.img_handle.beginning_datetime).total_seconds()*self.img_handle.fps
 
-            # If the global shutter is used, the frame number can only be an integer
-            if self.config.deinterlace_order == -2:
-                frame_no = round(frame_no, 0)
+                # Get the rolling shutter corrected (or not, depending on the config) frame number
+                if self.config.deinterlace_order == -1:
+                    frame_no = self.getRollingShutterCorrectedFrameNo(frame_no, pick)
+
+                # If the global shutter is used, the frame number can only be an integer
+                if self.config.deinterlace_order == -2:
+                    frame_no = round(frame_no, 0)
 
             # If the intensity sum is masked, assume it's 1
             if np.ma.is_masked(pick['intensity_sum']):
@@ -17209,7 +17693,7 @@ class PlateTool(QtWidgets.QMainWindow):
         station_id = ff_name_ftp.split('_')[1]
 
         # Write the FTPdetect info
-        writeFTPdetectinfo(meteor_list, dir_path, ftpdetectinfo_name, '', station_id, self.img_handle.fps)
+        writeFTPdetectinfo(meteor_list, dir_path, ftpdetectinfo_name, '', station_id, ftp_fps)
 
         print('FTPdetecinfo written to:', os.path.join(dir_path, ftpdetectinfo_name))
 
@@ -17249,8 +17733,15 @@ class PlateTool(QtWidgets.QMainWindow):
         t_end = None
         
         try:
+            # With the times of the frames, from the first to the last frame
+            if hasattr(self, 'img_handle') and (self.img_handle is not None) and self.perFrameTimes():
+                t_start = self.img_handle.currentFrameTime(frame_no=0, dt_obj=True)\
+                    .replace(tzinfo=datetime.timezone.utc)
+                t_end = self.img_handle.currentFrameTime(frame_no=self.img_handle.total_frames - 1, dt_obj=True)\
+                    .replace(tzinfo=datetime.timezone.utc)
+
             # Use manually provided start time if available
-            if hasattr(self, 'beginning_time') and self.beginning_time is not None:
+            elif hasattr(self, 'beginning_time') and self.beginning_time is not None:
                 t_start = self.beginning_time
                 if t_start.tzinfo is None:
                     t_start = t_start.replace(tzinfo=datetime.timezone.utc)
@@ -17880,6 +18371,10 @@ class PlateTool(QtWidgets.QMainWindow):
             # For UWO .vid files DFN data, don't normalize the time to the FPS, as the time is GPS-synced
             if save_raw_times:
                 frame_time = frame_dt
+
+            # With the times of the frames, the time of the frame of the pick (and its row)
+            elif self.perFrameTimes():
+                frame_time = self.pickTime(frame, pick)
             
             else:
                 
@@ -17917,9 +18412,45 @@ class PlateTool(QtWidgets.QMainWindow):
 
 
 
-    def getRollingShutterCorrectedFrameNo(self, frame, pick):
+    def perFrameTimes(self):
+        """ Whether the frames are timed from a file with the time of every frame (e.g. the frametimes file of a
+            timelapse, see RMS.Formats.FrameTimes), and not from a beginning and a frame rate.
+        """
+
+        return getattr(self.img_handle, 'frame_time_table', None) is not None
+
+    def pickTime(self, frame, pick):
+        """ The time of a pick on an input with the time of every frame: the time of its frame, plus the rolling
+            shutter delay of its row within one frame period of the camera (camera_fps). The frames are not evenly
+            spaced (e.g. a timelapse, single frames of the camera seconds apart), so the delay is not a fraction of
+            the spacing of the frames, and the time is not rounded to a frame.
+
+        Arguments:
+            frame: [int] Frame of the pick.
+            pick: [dict] The pick (its row is y_centroid).
+
+        Return:
+            [datetime] The time of the pick.
+        """
+
+        frame_dt = self.img_handle.currentFrameTime(frame_no=frame, dt_obj=True)
+
+        # The delay of the row of the pick in frames of the camera, as a time (the frame rate of the camera, not a
+        #   given FPS, see __init__)
+        if self.config.deinterlace_order == -1:
+            camera_fps = getattr(self, 'camera_fps', None) or self.config.fps
+            delay = self.getRollingShutterCorrectedFrameNo(0.0, pick, fps=camera_fps)/camera_fps
+            frame_dt += datetime.timedelta(seconds=float(delay))
+
+        return frame_dt
+
+    def getRollingShutterCorrectedFrameNo(self, frame, pick, fps=None):
         """ Given a pick object, return rolling shutter corrected (or not, depending on the config) frame
             number.
+
+        Keyword arguments:
+            fps: [float] The frame rate of the frames (the readout time in frames depends on it). None by default
+                (the frame rate of the input).
         """
 
         # Correct the rolling shutter effect
@@ -17934,7 +18465,8 @@ class PlateTool(QtWidgets.QMainWindow):
 
             # Compute the corrected frame time, with the readout time of the rows of the sensor and the crop of
             #   the capture for the inputs from the RMS capture (see RMS.Routines.RollingShutterCorrection)
-            fps = getattr(self.img_handle, 'fps', None) if self.img_handle is not None else None
+            if fps is None:
+                fps = getattr(self.img_handle, 'fps', None) if self.img_handle is not None else None
             cropped = (self.img_handle is None) or RollingShutterCorrection.croppedInput(self.img_handle.input_type)
             frame_no = RollingShutterCorrection.correctFrameTime(frame, pick['y_centroid'], img_h, self.config,
                                                                  fps=fps, cropped=cropped)
@@ -18174,6 +18706,16 @@ if __name__ == '__main__':
     arg_parser.add_argument('-f', '--fps', metavar='FPS', type=float,
                             help="Frames per second when images are used. If not given, it will be read from the config file.")
 
+    arg_parser.add_argument('--frametimes', metavar='FRAME_TIMES_PATH', type=str,
+                            help="File with the time of every frame of a video or an image folder, for frames which "
+                            "are not evenly spaced. A JSON file with {frame index: time} or a list of times, the "
+                            "times as YYYYMMDD_HHMMSS_mmm, ISO 8601 (YYYY-MM-DDTHH:MM:SS.ffffff, UTC) or Unix "
+                            "seconds (e.g. the *_frametimes.json of a timelapse, which is used without this "
+                            "option when it is next to the video); or the FT files of the capture for a video of "
+                            "the capture or FF files: an FT_*.bin file, a folder of them or an *_FT.tar.bz2 "
+                            "archive (without this option, they are looked for in the folder of the input and in "
+                            "the TimeFiles folder of the station).")
+
     arg_parser.add_argument('-g', '--gamma', metavar='CAMERA_GAMMA', type=float,
                             help="Camera gamma value. Science grade cameras have 1.0, consumer grade cameras have 0.45. "
                                  "Adjusting this is essential for good photometry, and doing star photometry through SkyFit"
@@ -18280,7 +18822,8 @@ if __name__ == '__main__':
                 mask.width, mask.height, config.width, config.height))
             mask = None
 
-        plate_tool.loadState(dir_path, state_name, beginning_time=beginning_time, mask=mask)
+        plate_tool.loadState(dir_path, state_name, beginning_time=beginning_time, mask=mask,
+                             frame_times=cml_args.frametimes)
 
         # Initialize satellite track related attributes for loaded state
         plate_tool.show_sattracks = cml_args.sattracks
@@ -18332,7 +18875,7 @@ if __name__ == '__main__':
             gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints, \
             mask=mask, nobg=cml_args.nobg, peribg=cml_args.peribg, flipud=cml_args.flipud, \
             flatbiassub=cml_args.flatbiassub, exposure_ratio=cml_args.expratio, show_sattracks=cml_args.sattracks, \
-            tle_file=cml_args.tle_file)
+            tle_file=cml_args.tle_file, frame_times=cml_args.frametimes)
 
     else:
 
@@ -18341,7 +18884,7 @@ if __name__ == '__main__':
             gamma=cml_args.gamma, use_fr_files=cml_args.fr, geo_points_input=cml_args.geopoints,
             nobg=cml_args.nobg, peribg=cml_args.peribg, flipud=cml_args.flipud,
             flatbiassub=cml_args.flatbiassub, exposure_ratio=cml_args.expratio,
-            show_sattracks=cml_args.sattracks, tle_file=cml_args.tle_file)
+            show_sattracks=cml_args.sattracks, tle_file=cml_args.tle_file, frame_times=cml_args.frametimes)
 
 
 

@@ -33,7 +33,8 @@ from RMS.Formats import FFfile, FFStruct
 from RMS.Formats import FieldIntensities
 from RMS.Logger import getLogger, getLoggingQueue, initChildProcess, flushChildLogging, \
     LOG_CHILD_EXIT_FLUSH_TIMEOUT
-from RMS.Misc import UTCFromTimestamp, frameBufferShape, AtomicFlag, stableDoubleRead
+from RMS.Misc import UTCFromTimestamp, frameBufferShape, AtomicFlag, stableDoubleRead, setParentDeathSignal, \
+    exitIfParentGone, startParentWatch
 from RMS.Routines.Image import saveImage
 
 # Import Cython functions
@@ -172,6 +173,10 @@ class Compressor(multiprocessing.Process):
         # under the 'forkserver'/'spawn' start methods (handlers are not inherited there)
         self.logging_queue = getLoggingQueue()
 
+        # PID of the logical parent, recorded here because __init__ runs in the parent. The compression stops
+        #   when the parent is gone (see run())
+        self.parent_pid = os.getpid()
+
 
     def compress(self, frames):
         """ Compress frames to the FTP-compatible array and extract sums of intensities per every field.
@@ -299,6 +304,12 @@ class Compressor(multiprocessing.Process):
 
         log.debug('Compression joined!')
 
+        # A compressor which has not finished within the wait gets a few more seconds before it is terminated,
+        #   and if it finishes in them, it still gets the time for its log flush below. There is no interrupt
+        #   step: the compressor ignores SIGINT (initChildProcess), so an interrupt would only delay the stop
+        if (not self.run_exited.is_set()) and self.is_alive():
+            self.join(5)
+
         # A compressor which finished its work may still be writing out its last log records. Killing it in the
         #   middle of a write would leave the logging queue's shared write lock taken for good and wedge the logging
         #   of every other process, so it gets as long as its flush may take (the flush gives up by itself once the
@@ -306,28 +317,16 @@ class Compressor(multiprocessing.Process):
         if self.run_exited.is_set() and self.is_alive():
             self.join(LOG_CHILD_EXIT_FLUSH_TIMEOUT + 5)
 
-        # If process didn't exit cleanly, send graceful interrupt
+        # If the process still did not exit, terminate it
         if self.is_alive():
-            log.info("Compression process still alive, sending interrupt signal...")
+            log.warning("Compression process still alive, forcing termination")
             try:
-                if self.pid:
-                    os.kill(self.pid, signal.SIGINT)
-                
-                # Wait for graceful shutdown
-                self.join(5)
-                
-                if self.is_alive():
-                    log.warning("Compression process still alive after interrupt, forcing termination")
-                    self.terminate()
-                else:
-                    log.info("Compression process exited gracefully after interrupt")
+                self.terminate()
 
             except ProcessLookupError:
                 log.info("Compression process already terminated")
             except Exception as e:
-                log.error("Error during graceful compression shutdown: {}".format(e))
-                log.info("Falling back to terminate()")
-                self.terminate()
+                log.error("Terminating the compression process failed: {}".format(e))
 
             # A bare join() would hang forever on a process that ignores SIGTERM -
             # bound the wait and escalate to SIGKILL (review finding)
@@ -340,8 +339,17 @@ class Compressor(multiprocessing.Process):
                 except (OSError, AttributeError):
                     pass
 
-            # Always join to reap zombie (returns instantly if already dead)
-            self.join()
+            # Reap the zombie (returns at once if it is already dead). Bounded: a process stuck in
+            #   uninterruptible I/O survives even SIGKILL until the I/O completes, and an unbounded join would
+            #   wedge the capture shutdown on it, so the process is left behind instead
+            self.join(5)
+            if self.is_alive():
+                log.warning("Compression process survived SIGKILL (stuck in uninterruptible I/O?), "
+                    "leaving it without joining")
+
+        # A compressor which was never started has nothing to reap (join() would raise)
+        elif self.pid is None:
+            log.debug("Compression process was never started, nothing to reap")
 
         else:
             # Process is not alive but may not have been joined yet - reap it
@@ -365,8 +373,18 @@ class Compressor(multiprocessing.Process):
         """ Retrieve frames from list, convert, compress and save them.
         """
 
+        # Die with the parent: an orphaned compressor would keep running after StartCapture was killed,
+        #   next to the compressor of the restarted instance
+        death_signal = setParentDeathSignal()
+
         # Re-establish logging and signal handling in the child (no-op under 'fork')
         initChildProcess(self.logging_queue, self.config)
+
+        # Exit if the parent died before the death signal was armed, and keep watching the parent where the
+        #   death signal does not see it (forkserver). The block in hand is compressed and saved before the
+        #   normal exit, so the grace is longer
+        exitIfParentGone(self.parent_pid, 'Compressor')
+        startParentWatch(self.parent_pid, 'Compressor', self.exit, death_signal=death_signal, grace=45.0)
 
         # Rebuild numpy views over the shared frame buffers in this process. Under forkserver/spawn
         # the views cannot be inherited, so build them here from the shared multiprocessing.Array

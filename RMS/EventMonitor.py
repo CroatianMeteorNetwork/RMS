@@ -74,7 +74,8 @@ from Utils.StackFFs import stackFFs
 from Utils.FRbinViewer import view
 from Utils.BatchFFtoImage import batchFFtoImage
 from RMS.CaptureDuration import captureDuration
-from RMS.Misc import sanitise, RmsDateTime, getRmsRootDir, mkdirP, AtomicFlag
+from RMS.Misc import sanitise, RmsDateTime, getRmsRootDir, mkdirP, AtomicFlag, setParentDeathSignal, \
+    exitIfParentGone, startParentWatch
 from RMS.Formats.FFfile import read
 from matplotlib.dates import DateFormatter
 
@@ -84,6 +85,9 @@ pyximport.install(setup_args={'include_dirs':[np.get_include()]})
 
 log = getLogger("rmslogger")
 EM_RAISE = False
+
+# Seconds EventMonitor.stop() waits for the process to finish its current check before terminating it
+EVENT_MONITOR_STOP_TIMEOUT = 120
 
 """
 
@@ -770,6 +774,10 @@ class EventMonitor(multiprocessing.Process):
         # Grab the logging queue on the parent side so the child can re-attach logging
         # under the 'forkserver'/'spawn' start methods (handlers are not inherited there)
         self.logging_queue = getLoggingQueue()
+
+        # PID of the logical parent, recorded here because __init__ runs in the parent. The monitor stops when
+        #   the parent is gone (see run())
+        self.parent_pid = os.getpid()
 
         log.info("EventMonitor is starting")
         log.info("Monitoring {} ".format(self.syscon.event_monitor_webpage))
@@ -2480,7 +2488,22 @@ class EventMonitor(multiprocessing.Process):
             self.db_conn.close()
         time.sleep(2)
         self.exit.set()
-        self.join()
+
+        # Wait for the current check to finish, with a bound: a check stuck in network or file I/O must not
+        #   wedge the shutdown of StartCapture (which keeps the station lock while it hangs, so no restart can
+        #   run)
+        self.join(EVENT_MONITOR_STOP_TIMEOUT)
+
+        # Terminate a process which did not stop in time, and leave it behind if even that does not end it
+        if self.is_alive():
+            log.warning("EventMonitor did not stop within {:d} s, terminating it".format(
+                EVENT_MONITOR_STOP_TIMEOUT))
+            self.terminate()
+            self.join(5)
+            if self.is_alive():
+                log.warning("EventMonitor still alive after terminate, leaving it without joining")
+                return
+
         log.info("EventMonitor has stopped")
 
     def checkDBExists(self):
@@ -2534,8 +2557,17 @@ class EventMonitor(multiprocessing.Process):
 
         """
 
+        # Die with the parent: an orphaned monitor would keep checking for events and uploading after
+        #   StartCapture was killed, next to the monitor of the restarted instance
+        death_signal = setParentDeathSignal()
+
         # Re-establish logging and signal handling in the child (no-op under 'fork')
         initChildProcess(self.logging_queue, self.config)
+
+        # Exit if the parent died before the death signal was armed, and keep watching the parent where the
+        #   death signal does not see it (forkserver)
+        exitIfParentGone(self.parent_pid, 'EventMonitor')
+        startParentWatch(self.parent_pid, 'EventMonitor', self.exit, death_signal=death_signal)
 
         # Open a sqlite connection owned by this (child) process. Under 'forkserver'/'spawn'
         # the connection from __init__ is not inherited (it was dropped during pickling);
@@ -2543,10 +2575,11 @@ class EventMonitor(multiprocessing.Process):
         # avoiding a connection shared across the fork.
         self.db_conn = self.getConnectionToEventMonitorDB()
 
-        # Delay to allow capture to check existing folders - keep the logs tidy
+        # Delay to allow capture to check existing folders - keep the logs tidy. The wait is on the exit flag,
+        #   so a stop requested during the delay ends it at once
 
 
-        time.sleep(60)
+        self.exit.wait(60)
         last_check_start_time = RmsDateTime.utcnow()
         while not self.exit.is_set():
             check_start_time = RmsDateTime.utcnow()

@@ -277,7 +277,7 @@ class Config:
         self.deinterlace_order = -2
 
         # Rolling shutter (deinterlace_order -1): the measured time in which the sensor reads all its rows (s), 0
-        #   for no correction (see RMS.Routines.RollingShutterCorrection)
+        #   for the whole frame period (see RMS.Routines.RollingShutterCorrection)
         self.rolling_shutter_readout = 0.0
 
         # Correction of the timestamps of the frames (s), added when the frames of a recording are read for
@@ -792,6 +792,27 @@ def removeInlineComments(cfgparser, delimiter):
 
 
 
+def hasNonEmptyOption(parser, section, option):
+    """ Return True when the option exists in the section and its value is non-blank.
+
+    Arguments:
+        parser: [RawConfigParser] Loaded configuration parser.
+        section: [str] Section name.
+        option: [str] Option name.
+
+    Return:
+        [bool] True if the option exists and its value is not blank.
+    """
+
+    if not parser.has_option(section, option):
+        return False
+
+    value = parser.get(section, option)
+
+    return (value is not None) and (value.strip() != '')
+
+
+
 def parse(path, strict=True):
     """ Parses config file at the given path and returns the corresponding Config object.
 
@@ -1096,11 +1117,12 @@ def parseCapture(config, parser):
         config.height_device = config.height
 
 
-    # for scaling and or cropping source raw video for further processing
-    if parser.has_option(section, "video_scale_width"):
+    # Optional scaling and/or cropping of the source raw video for further processing. An empty value
+    #   keeps the default (no scaling) instead of failing the whole config
+    if hasNonEmptyOption(parser, section, "video_scale_width"):
         config.video_scale_width = parser.getint(section, "video_scale_width")
 
-    if parser.has_option(section, "video_scale_height"):
+    if hasNonEmptyOption(parser, section, "video_scale_height"):
         config.video_scale_height = parser.getint(section, "video_scale_height")
 
     if parser.has_option(section, "video_crop"):
@@ -1180,7 +1202,8 @@ def parseCapture(config, parser):
     if parser.has_option(section, "protocol"):
         config.protocol = parser.get(section, "protocol").strip().lower()
 
-    if parser.has_option(section, "udp_buffer_size"):
+    # UDP receive buffer for the GStreamer rtspsrc element (an empty value keeps the default)
+    if hasNonEmptyOption(parser, section, "udp_buffer_size"):
         config.udp_buffer_size = parser.getint(section, "udp_buffer_size")
 
     if parser.has_option(section, "media_backend"):
@@ -1345,8 +1368,8 @@ def parseCapture(config, parser):
     if parser.has_option(section, "auto_reprocess"):
         config.auto_reprocess = parser.getboolean(section, "auto_reprocess")
 
-    # Load the cap on failed auto-reprocess attempts per capture directory
-    if parser.has_option(section, "auto_reprocess_max_attempts"):
+    # Load the cap on failed auto-reprocess attempts per capture directory (an empty value keeps the default)
+    if hasNonEmptyOption(parser, section, "auto_reprocess_max_attempts"):
         config.auto_reprocess_max_attempts = int(parser.get(section, "auto_reprocess_max_attempts"))
 
         if config.auto_reprocess_max_attempts < 0:
@@ -1710,8 +1733,10 @@ def parseMeteorDetection(config, parser):
     if parser.has_option(section, "min_patch_intensity_multiplier"):
         config.min_patch_intensity_multiplier = parser.getfloat(section, "min_patch_intensity_multiplier")
 
-    if parser.has_option(section, "ml_model_file"):
-        config.ml_model_file = parser.get(section, "ml_model_file")
+    # Name of the ML model file in the share directory (an empty value keeps the default model rather than
+    #   pointing the path at the share directory itself)
+    if hasNonEmptyOption(parser, section, "ml_model_file"):
+        config.ml_model_file = parser.get(section, "ml_model_file").strip()
         config.ml_model_path = os.path.join(config.rms_root_dir, "share", config.ml_model_file)
 
     if parser.has_option(section, "ml_filter"):

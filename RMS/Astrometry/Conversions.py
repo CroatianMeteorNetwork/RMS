@@ -34,6 +34,7 @@ Includes:
 from __future__ import print_function, division, absolute_import, unicode_literals
 
 import math
+import re
 from datetime import datetime, timedelta, MINYEAR
 
 import numpy as np
@@ -50,6 +51,7 @@ from RMS.Astrometry.CyFunctions import cyaltAz2RADec, cyraDec2AltAz, cyApparentA
     trueOfDateFromJ2000, j2000FromTrueOfDate, pyRefractionTrueToApparent, pyRefractionApparentToTrue
 from RMS.Astrometry.CyFunctions import cyaltAz2RADec_vect as cyaltAz2RADecArrays, \
     cyraDec2AltAz_vect as cyraDec2AltAzArrays
+from RMS.Astrometry.CyFunctions import cyENHeight2Up, cyENU2LatLonAlt, cyLatLonAlt2ENU
 
 
 def broadcastVect(cy_vect):
@@ -183,6 +185,74 @@ def datetime2UnixTime(dt):
     unix_timestamp = (dt - datetime(1970, 1, 1)).total_seconds()
 
     return unix_timestamp
+
+
+# The time in the names of the saved frames of the capture (e.g. 20261122_224725_002_n: the date, the time, the
+#   milliseconds, and an optional _d or _n for the day and the night mode)
+RMS_TIME_STAMP_PATTERN = re.compile(r"^(?P<stamp>\d{8}_\d{6}_\d{3})(?:_[dn])?$", re.IGNORECASE)
+
+
+def timeStringToDatetime(value):
+    """ Read a time given as a string or a number: the time stamp in the names of the saved frames
+        (YYYYMMDD_HHMMSS_mmm with an optional _d or _n), ISO 8601 (YYYY-MM-DDTHH:MM:SS[.ffffff], optionally with Z
+        or a UTC offset, a space instead of the T) or Unix seconds (a number or a string of a number).
+
+    Arguments:
+        value: [str, int or float] The time.
+
+    Return:
+        [datetime] The time, naive UTC.
+
+    Raises:
+        ValueError: The time cannot be read.
+    """
+
+    # Unix seconds
+    if isinstance(value, bool):
+        raise ValueError("not a time: {}".format(value))
+
+    if isinstance(value, (int, float)):
+        return UTCFromTimestamp.utcfromtimestamp(float(value))
+
+    if not isinstance(value, str):
+        raise ValueError("not a time: {}".format(value))
+
+    value = value.strip()
+
+    # The time stamp of a saved frame
+    match = RMS_TIME_STAMP_PATTERN.match(value)
+    if match is not None:
+        return datetime.strptime(match.group("stamp"), "%Y%m%d_%H%M%S_%f")
+
+    # Unix seconds in a string
+    try:
+        unix_time = float(value)
+
+    except ValueError:
+        unix_time = None
+
+    if unix_time is not None:
+        return UTCFromTimestamp.utcfromtimestamp(unix_time)
+
+    # ISO 8601, with an optional UTC offset (Z is UTC)
+    iso = value.replace(' ', 'T')
+    if iso.endswith('Z'):
+        iso = iso[:-1] + '+00:00'
+
+    for fmt in ("%Y-%m-%dT%H:%M:%S.%f%z", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            dt = datetime.strptime(iso, fmt)
+
+        except ValueError:
+            continue
+
+        # A time with a UTC offset as naive UTC
+        if dt.tzinfo is not None:
+            dt = (dt - dt.utcoffset()).replace(tzinfo=None)
+
+        return dt
+
+    raise ValueError("not a time: {}".format(value))
 
 
 def date2UnixTime(year, month, day, hour, minute, second, millisecond=0, UT_corr=0.0):
@@ -1016,6 +1086,99 @@ def AEGeoidH2LatLonAlt(azim, elev, h, lat, lon, alt):
         return float(target_lat[0]), float(target_lon[0])
 
     return target_lat, target_lon
+
+
+def enuPoints(cy_func, a, b, c, lat_ref, lon_ref, h_ref):
+    """ Apply a CyFunctions conversion of points relative to a reference point (cyLatLonAlt2ENU,
+        cyENU2LatLonAlt, cyENHeight2Up) to scalars or arrays that broadcast together.
+
+    Arguments:
+        cy_func: [function] The conversion, of three 1D arrays of the same length and the reference point.
+        a, b, c: [float or ndarray] The three coordinates of the points.
+        lat_ref: [float] Latitude of the reference point in degrees (+north).
+        lon_ref: [float] Longitude of the reference point in degrees (+east).
+        h_ref: [float] Height of the reference point above the WGS84 ellipsoid (meters).
+
+    Return:
+        [tuple] The outputs of the conversion in the broadcast shape, floats if all coordinates are scalars.
+
+    """
+
+    # Broadcast the coordinates to one shape and give the Cython loop flat contiguous arrays
+    args = np.broadcast_arrays(*[np.asarray(v, dtype=np.float64) for v in (a, b, c)])
+    out = cy_func(*[np.ascontiguousarray(v).ravel() for v in args], float(lat_ref), float(lon_ref), \
+        float(h_ref))
+    if not isinstance(out, tuple):
+        out = (out,)
+
+    # Scalars in, floats out; otherwise the broadcast shape
+    if args[0].ndim == 0:
+        return tuple(float(v[0]) for v in out)
+
+    return tuple(v.reshape(args[0].shape) for v in out)
+
+
+def latLonAlt2ENU(lat, lon, h, lat_ref, lon_ref, h_ref):
+    """ Convert geographical coordinates to east, north, up coordinates relative to a reference point (e.g. a
+        station), along its local east, north and up directions (geodetic vertical).
+
+    Arguments:
+        lat: [float or ndarray] Latitude in degrees (+north).
+        lon: [float or ndarray] Longitude in degrees (+east).
+        h: [float or ndarray] Height above the WGS84 ellipsoid (meters).
+        lat_ref: [float] Latitude of the reference point in degrees (+north).
+        lon_ref: [float] Longitude of the reference point in degrees (+east).
+        h_ref: [float] Height of the reference point above the WGS84 ellipsoid (meters).
+
+    Return:
+        (e, n, u): [tuple of floats or ndarrays] East, north and up coordinates (meters).
+
+    """
+
+    return enuPoints(cyLatLonAlt2ENU, lat, lon, h, lat_ref, lon_ref, h_ref)
+
+
+def enu2LatLonAlt(e, n, u, lat_ref, lon_ref, h_ref):
+    """ Convert east, north, up coordinates relative to a reference point to geographical coordinates. The
+        inverse of latLonAlt2ENU.
+
+    Arguments:
+        e: [float or ndarray] East coordinate (meters).
+        n: [float or ndarray] North coordinate (meters).
+        u: [float or ndarray] Up coordinate (meters).
+        lat_ref: [float] Latitude of the reference point in degrees (+north).
+        lon_ref: [float] Longitude of the reference point in degrees (+east).
+        h_ref: [float] Height of the reference point above the WGS84 ellipsoid (meters).
+
+    Return:
+        (lat, lon, h): [tuple of floats or ndarrays] Latitude and longitude in degrees, height above the
+            WGS84 ellipsoid in meters.
+
+    """
+
+    return enuPoints(cyENU2LatLonAlt, e, n, u, lat_ref, lon_ref, h_ref)
+
+
+def enHeight2Up(e, n, h, lat_ref, lon_ref, h_ref):
+    """ Up coordinate at which the points with the given east and north coordinates relative to a reference
+        point are at the given height above the WGS84 ellipsoid, solved on the ellipsoid (see
+        CyFunctions.cyENHeight2Up).
+
+    Arguments:
+        e: [float or ndarray] East coordinate (meters).
+        n: [float or ndarray] North coordinate (meters).
+        h: [float or ndarray] Height above the WGS84 ellipsoid (meters).
+        lat_ref: [float] Latitude of the reference point in degrees (+north).
+        lon_ref: [float] Longitude of the reference point in degrees (+east).
+        h_ref: [float] Height of the reference point above the WGS84 ellipsoid (meters).
+
+    Return:
+        u: [float or ndarray] Up coordinate (meters), NaN where the solution did not converge to within 1 mm of
+            the height.
+
+    """
+
+    return enuPoints(cyENHeight2Up, e, n, h, lat_ref, lon_ref, h_ref)[0]
 
 
 def cartesian2Geo(julian_date, x, y, z):

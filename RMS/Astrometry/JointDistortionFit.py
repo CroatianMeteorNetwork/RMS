@@ -56,7 +56,7 @@ from RMS.Astrometry.Conversions import date2JD, jd2Date, JD2LST
 from RMS.Astrometry.CyFunctions import subsetCatalog
 from RMS.Formats import CALSTARS
 from RMS.Formats.FFfile import getMiddleTimeFF
-from RMS.Formats.Platepar import Platepar, normalFitRecord
+from RMS.Formats.Platepar import Platepar, PointingOffsets, normalFitRecord
 from RMS.Logger import getLogger
 from RMS.Math import angularSeparation
 
@@ -239,30 +239,30 @@ def transferPointing(platepar, pointing_platepar, n_grid=TRANSFER_GRID, margin=T
     ra, dec = np.array(ra), np.array(dec)
     x_pointing, y_pointing = raDecToXYPP(ra, dec, jd, pointing_platepar)
 
-    keys = ('RA_d', 'dec_d', 'pos_angle_ref', 'F_scale')
+    # The pointing and the scale are fitted as offsets (px) from those of the pointing platepar (see
+    #   PointingOffsets), which move the stars by the same amount in the same direction on the image wherever
+    #   the camera points
+    pointing = PointingOffsets(transferred)
 
-    def _residuals(params):
+    def _residuals(offsets):
         """ Distances (px) between the image positions of the sky positions with the two platepars.
 
         Arguments:
-            params: [list] Reference RA, Dec, position angle (deg) and scale (px/deg) of the platepar.
+            offsets: [list] Offsets (dx, dy, droll, dscale) of the pointing and the scale of the platepar (px).
 
         Return:
             [ndarray] Differences along x, then along y (px).
         """
 
-        for key, value in zip(keys, params):
-            setattr(transferred, key, value)
+        pointing.apply(transferred, offsets)
         x, y = raDecToXYPP(ra, dec, jd, transferred)
 
         return np.concatenate([x - x_pointing, y - y_pointing])
 
-    # Fit the pointing, with steps of a similar size in all parameters and the scale kept positive
-    p0 = [getattr(transferred, key) for key in keys]
-    lower = [-np.inf, -np.inf, -np.inf, 0.5*p0[3]]
-    upper = [np.inf, np.inf, np.inf, 2.0*p0[3]]
-    fit = scipy.optimize.least_squares(_residuals, p0, x_scale=[1e-3, 1e-3, 1e-3, 1e-3*transferred.F_scale],
-                                       bounds=(lower, upper))
+    # Fit the pointing, with steps of about a pixel in all offsets and the scale kept within a factor of 2
+    lower = [-np.inf, -np.inf, -np.inf, pointing.fromScale(0.5*transferred.F_scale)]
+    upper = [np.inf, np.inf, np.inf, pointing.fromScale(2.0*transferred.F_scale)]
+    fit = scipy.optimize.least_squares(_residuals, np.zeros(4), bounds=(lower, upper))
     residuals = _residuals(fit.x)
     rms = float(np.sqrt(np.mean(residuals**2)))
 
